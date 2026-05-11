@@ -1,2 +1,1 @@
-# Gestionale
-Sistema gestionale Cablotec
+[# Gestionale] (https://cablotec.github.io/Gestionale/)
