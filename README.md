@@ -1,1 +1,1 @@
-[# Gestionale] (https://cablotec.github.io/Gestionale/)
+[# Gestionale](https://cablotec.github.io/Gestionale/)
