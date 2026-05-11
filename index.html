@@ -1,0 +1,3395 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f0e">
+<title>Cablotec — Sistema Gestionale</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
+
+:root{
+  --bg:#0f0f0e; --sur:#1a1a18; --sur2:#222220; --brd:#2e2e2a;
+  --acc:#d4ff4e; --or:#ff6b35; --txt:#e8e8e2; --mut:#6b6b64;
+  --grn:#4effa3; --red:#ff4e6b; --yel:#ffcc4e; --blu:#4eb8ff; --vio:#b84eff;
+  --hover:rgba(255,255,255,.02); --hover2:rgba(255,255,255,.04); --hover3:rgba(255,255,255,.1);
+  --weekend:rgba(255,255,255,.015); --shadow:rgba(0,0,0,.75);
+}
+:root[data-theme="light"]{
+  --bg:#f5f5f1; --sur:#ffffff; --sur2:#f0f0ec; --brd:#dcdcd6;
+  --acc:#5a8000; --or:#cc4a16; --txt:#1a1a18; --mut:#7a7a72;
+  --grn:#0d8f4c; --red:#c92648; --yel:#a87600; --blu:#1872c4; --vio:#7a2bc7;
+  --hover:rgba(0,0,0,.025); --hover2:rgba(0,0,0,.05); --hover3:rgba(0,0,0,.08);
+  --weekend:rgba(0,0,0,.02); --shadow:rgba(0,0,0,.4);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--txt);font-family:'Syne',sans-serif;min-height:100vh;padding:22px 18px 40px;}
+
+/* Header */
+header.topbar{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;padding-bottom:14px;border-bottom:1px solid var(--brd);gap:12px;flex-wrap:wrap;}
+h1{font-size:clamp(20px,4vw,34px);font-weight:800;line-height:1;letter-spacing:-.02em;}
+h1 span{color:var(--acc);}
+.sub{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);margin-top:4px;}
+.user-info{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.user-info b{color:var(--txt);font-weight:500;}
+.kiosk-jump{background:var(--sur);border:1px solid var(--brd);color:var(--mut);font-family:'DM Mono',monospace;font-size:10px;padding:5px 8px;border-radius:3px;cursor:pointer;letter-spacing:.05em;text-transform:uppercase;outline:none;}
+.kiosk-jump:hover{color:var(--txt);border-color:var(--mut);}
+
+/* Toggle tema */
+.theme-toggle{background:transparent;border:1px solid var(--brd);color:var(--mut);width:30px;height:30px;border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;transition:all .15s;}
+.theme-toggle:hover{border-color:var(--txt);color:var(--txt);}
+
+/* Nav */
+.nav{display:flex;gap:0;border-bottom:2px solid var(--brd);margin-bottom:22px;overflow-x:auto;}
+.navtab{padding:9px 18px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;color:var(--mut);border-bottom:2px solid transparent;margin-bottom:-2px;background:none;border:none;white-space:nowrap;transition:all .15s;}
+.navtab:hover{color:var(--txt);}
+.navtab.active{color:var(--acc);border-bottom-color:var(--acc);}
+#tabs-macro{margin-bottom:0;}
+.nav-sub{border-bottom:1px solid var(--brd);margin-bottom:22px;padding-left:6px;}
+.nav-sub .navtab{font-size:10px;padding:7px 14px;color:var(--mut);}
+.nav-sub .navtab.active{color:var(--txt);border-bottom-color:var(--txt);}
+.nav-sub:empty{display:none;}
+
+/* Buttons */
+.btnp{padding:9px 14px;background:var(--acc);color:var(--bg);font-family:'Syne',sans-serif;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border:none;border-radius:4px;cursor:pointer;transition:all .2s;}
+.btnp:hover{filter:brightness(.92);}
+.btnp:disabled{opacity:.4;cursor:not-allowed;}
+.btng{padding:7px 11px;background:transparent;border:1px solid var(--brd);color:var(--mut);font-family:'Syne',sans-serif;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px;transition:all .2s;letter-spacing:.04em;text-transform:uppercase;}
+.btng:hover{border-color:var(--txt);color:var(--txt);}
+.btnd{padding:4px 8px;background:transparent;border:1px solid var(--brd);color:var(--mut);font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;border-radius:3px;transition:all .15s;}
+.btnd:hover{color:var(--red);border-color:var(--red);}
+.btnsm{padding:4px 9px;background:transparent;border:1px solid var(--brd);color:var(--mut);font-family:'Syne',sans-serif;font-size:10px;font-weight:600;cursor:pointer;border-radius:3px;letter-spacing:.04em;text-transform:uppercase;}
+.btnsm:hover{border-color:var(--txt);color:var(--txt);}
+.btnsm:disabled{opacity:.35;cursor:not-allowed;}
+
+/* Tables */
+.tw{overflow-x:auto;}
+table.rt{width:100%;border-collapse:collapse;font-size:12px;}
+table.rt th{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--acc);padding:7px 10px;text-align:left;border-bottom:2px solid var(--acc);white-space:nowrap;background:var(--bg);}
+table.rt th.tc{text-align:center;}
+table.rt td{padding:8px 10px;border-bottom:1px solid var(--brd);vertical-align:middle;}
+table.rt tbody tr:hover td{background:var(--hover);}
+.mono{font-family:'DM Mono',monospace;}
+.cod-cell{font-family:'DM Mono',monospace;font-size:11px;color:var(--or);}
+
+/* Badges */
+.badge{display:inline-block;padding:2px 7px;border-radius:2px;font-family:'DM Mono',monospace;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.04em;}
+.bok{background:rgba(78,255,163,.12);color:var(--grn);}
+.berr{background:rgba(255,78,107,.12);color:var(--red);}
+.byel{background:rgba(255,204,78,.12);color:var(--yel);}
+.bor{background:rgba(255,107,53,.12);color:var(--or);}
+.bblu{background:rgba(78,184,255,.12);color:var(--blu);}
+.bvio{background:rgba(184,78,255,.12);color:var(--vio);}
+.bgry{background:rgba(107,107,100,.18);color:var(--mut);}
+
+/* Toolbar */
+.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+.toolbar h2{font-size:15px;font-weight:700;flex:1;}
+
+.empty{padding:40px;text-align:center;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
+
+/* Modal */
+#modal-root .modal-bg{position:fixed;inset:0;background:var(--shadow);z-index:400;display:flex;align-items:center;justify-content:center;padding:12px;overscroll-behavior:contain;}
+.modal{background:var(--sur);border:1px solid var(--brd);border-radius:6px;width:100%;max-width:560px;max-height:calc(100vh - 24px);display:flex;flex-direction:column;overflow:hidden;}
+.mhd{padding:14px 17px 11px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.mhd h2{font-size:14px;font-weight:700;}
+.mclose{background:none;border:none;color:var(--mut);font-size:16px;cursor:pointer;padding:2px 8px;border-radius:3px;}
+.mclose:hover{color:var(--txt);}
+.mbody{padding:16px 18px;overflow-y:auto;flex:1;}
+.mfoot{padding:11px 18px;border-top:1px solid var(--brd);display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;flex-wrap:wrap;}
+
+/* Form fields */
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
+.field label{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);}
+.field input,.field select{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);padding:7px 10px;border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;outline:none;width:100%;}
+.field textarea{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);padding:7px 10px;border-radius:4px;font-family:'Syne',sans-serif;font-size:12px;outline:none;width:100%;resize:vertical;}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--acc);}
+.field input[type=color]{padding:2px;height:34px;cursor:pointer;}
+.field select option{background:var(--sur2);}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+/* Auth */
+#auth-screen{position:fixed;inset:0;background:var(--bg);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px;}
+.auth-box{background:var(--sur);border:1px solid var(--brd);border-radius:8px;padding:32px 28px;width:100%;max-width:380px;}
+.auth-box h2{font-size:22px;font-weight:800;margin-bottom:4px;letter-spacing:-.02em;}
+.auth-box h2 span{color:var(--acc);}
+.auth-box .auth-sub{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);margin-bottom:24px;}
+.auth-tabs{display:flex;gap:0;margin-bottom:18px;}
+.auth-tabs button{flex:1;padding:8px;border:1px solid var(--brd);background:var(--sur2);color:var(--mut);font-family:'Syne',sans-serif;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;}
+.auth-tabs button:first-child{border-radius:4px 0 0 4px;}
+.auth-tabs button:last-child{border-radius:0 4px 4px 0;border-left:none;}
+.auth-tabs button.active{background:var(--acc);border-color:var(--acc);color:var(--bg);}
+.auth-msg{font-family:'DM Mono',monospace;font-size:11px;min-height:18px;margin-top:8px;}
+.auth-msg.err{color:var(--red);}
+.auth-msg.ok{color:var(--grn);}
+
+/* Calendar */
+.cal-head{display:flex;align-items:center;gap:8px;padding:10px 0 14px;flex-wrap:wrap;}
+.cal-head h2{font-size:18px;font-weight:700;text-transform:capitalize;letter-spacing:-.01em;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);border-top:1px solid var(--brd);border-left:1px solid var(--brd);}
+.cal-dow{padding:6px 8px;font-family:'DM Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--acc);background:var(--sur);border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);}
+.cal-cell{min-height:110px;padding:4px;background:var(--sur);border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);cursor:pointer;position:relative;overflow:hidden;transition:background .12s;}
+.cal-cell:hover{background:var(--sur2);}
+.cal-cell.other{background:var(--bg);opacity:.55;}
+.cal-cell.weekend{background:var(--weekend);}
+.cal-cell.today .cal-day-num{background:var(--acc);color:var(--bg);border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;}
+.cal-day-num{font-family:'DM Mono',monospace;font-size:11px;font-weight:600;padding:2px 4px;color:var(--mut);}
+.cal-cell.today .cal-day-num{color:var(--bg);}
+.cal-events{display:flex;flex-direction:column;gap:2px;margin-top:2px;}
+.cal-evt{font-family:'DM Mono',monospace;font-size:10px;line-height:1.2;padding:3px 5px;border-radius:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid;background:var(--hover2);color:var(--txt);}
+.cal-evt:hover{background:var(--hover3);}
+.cal-uso{border-left-style:dashed;}
+.cal-uso-aperto{background:rgba(255,107,53,.12);border-left-color:var(--or);color:var(--or);font-weight:500;}
+.cal-uso-aperto:hover{background:rgba(255,107,53,.2);}
+.cal-uso-chiuso{background:rgba(107,107,100,.12);border-left-color:var(--mut);color:var(--mut);}
+.cal-uso-chiuso:hover{background:rgba(107,107,100,.2);}
+.swatch-uso-aperto{background:rgba(255,107,53,.5);border-color:var(--or);}
+.swatch-uso-chiuso{background:rgba(107,107,100,.5);border-color:var(--mut);}
+.cal-more{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);padding:3px 5px;cursor:pointer;border-radius:2px;background:var(--hover2);text-align:center;letter-spacing:.05em;}
+.cal-more:hover{background:var(--hover3);color:var(--txt);}
+.day-row{padding:10px 12px;margin-bottom:6px;background:var(--sur2);border:1px solid var(--brd);border-left:4px solid var(--mut);border-radius:4px;cursor:pointer;transition:background .12s;}
+.day-row:hover{background:var(--hover2);}
+.day-row-uso-aperto{border-left-color:var(--or);background:rgba(255,107,53,.06);}
+.day-row-uso-chiuso{border-left-color:var(--mut);}
+.day-row-title{font-size:14px;font-weight:600;margin-bottom:4px;}
+.day-row-sub{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
+
+/* Placeholder per moduli in arrivo */
+.placeholder-card{background:var(--sur);border:1px dashed var(--brd);border-radius:8px;padding:50px 30px;text-align:center;margin-top:20px;}
+.placeholder-icon{font-size:46px;opacity:.6;margin-bottom:14px;}
+.placeholder-title{font-size:18px;font-weight:700;margin-bottom:8px;}
+.placeholder-sub{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);max-width:480px;margin:0 auto 16px;line-height:1.6;}
+.placeholder-meta{display:inline-block;font-family:'DM Mono',monospace;font-size:10px;color:var(--acc);background:rgba(212,255,78,.08);border:1px solid var(--acc);border-radius:3px;padding:4px 10px;letter-spacing:.08em;text-transform:uppercase;}
+
+/* Chips per filtri stato */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0;}
+.chip{display:inline-flex;align-items:center;padding:6px 12px;background:var(--sur2);border:1px solid var(--brd);color:var(--mut);font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;border-radius:3px;transition:all .15s;user-select:none;}
+.chip:hover{color:var(--txt);border-color:var(--mut);}
+.chip.act{background:rgba(212,255,78,.08);border-color:var(--acc);color:var(--acc);}
+.cal-more{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);padding:2px 5px;}
+
+/* Legenda */
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;padding-bottom:10px;}
+.legend span.lg{display:flex;align-items:center;gap:5px;}
+.swatch{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:middle;border:1px solid var(--brd);}
+
+/* KPIs */
+.kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;}
+.kpi{background:var(--sur);border:1px solid var(--brd);border-radius:4px;padding:12px 15px;flex:1;min-width:120px;}
+.kl{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);margin-bottom:4px;}
+.kv{font-family:'DM Mono',monospace;font-size:22px;font-weight:500;color:var(--txt);}
+.ka{color:var(--acc);} .kg{color:var(--grn);} .kb{color:var(--blu);}
+
+/* Toast */
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--sur);border:1px solid var(--acc);color:var(--txt);padding:10px 14px;border-radius:4px;font-family:'DM Mono',monospace;font-size:11px;z-index:9999;animation:tin .2s ease-out;}
+.toast.err{border-color:var(--red);}
+@keyframes tin{from{opacity:0;transform:translate(-50%,8px);}to{opacity:1;transform:translate(-50%,0);}}
+
+/* Setup screen */
+.setup{max-width:560px;margin:80px auto;padding:24px;background:var(--sur);border:1px solid var(--or);border-radius:6px;}
+.setup h1{font-size:18px;color:var(--or);margin-bottom:10px;}
+.setup p, .setup li{font-family:'DM Mono',monospace;font-size:12px;line-height:1.6;}
+.setup code{background:var(--sur2);padding:2px 6px;border-radius:3px;color:var(--acc);}
+
+/* Lista consegne */
+.consegne-list{display:flex;flex-direction:column;gap:6px;}
+.consegna-row{display:grid;grid-template-columns:24px 1fr 1fr auto;gap:6px;align-items:center;}
+.consegna-row .num{background:var(--sur2);border:1px solid var(--brd);border-radius:3px;text-align:center;padding:5px 0;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
+.consegna-row input{padding:5px 8px !important;font-size:11px !important;}
+
+/* Multi-select operatori */
+/* Multi-select operatori con ricerca */
+.util-selected{display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px 4px 0 0;border-bottom:none;min-height:42px;align-items:center;}
+.util-empty{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);font-style:italic;}
+.util-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 4px 4px 9px;background:rgba(212,255,78,.1);border:1px solid var(--acc);border-radius:3px;font-family:'Syne',sans-serif;font-size:12px;color:var(--txt);}
+.util-pill-badge{font-family:'DM Mono',monospace;font-size:10px;color:var(--or);background:rgba(255,107,53,.1);padding:1px 5px;border-radius:2px;}
+.util-pill-x{background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:11px;padding:2px 4px;line-height:1;border-radius:2px;transition:all .12s;}
+.util-pill-x:hover{color:var(--red);background:rgba(255,78,107,.1);}
+.util-dropwrap{display:flex;flex-direction:column;border:1px solid var(--brd);border-top:none;border-radius:0 0 4px 4px;background:var(--sur2);overflow:hidden;}
+.util-search{background:var(--sur2);border:none;border-bottom:1px solid var(--brd);color:var(--txt);padding:8px 10px;font-family:'DM Mono',monospace;font-size:11px;outline:none;width:100%;}
+.util-search:focus{background:var(--bg);}
+.util-droplist{max-height:180px;overflow-y:auto;}
+.util-row{display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;font-family:'Syne',sans-serif;font-size:12px;border-bottom:1px solid var(--brd);user-select:none;transition:background .12s;}
+.util-row:last-child{border-bottom:none;}
+.util-row:hover{background:var(--hover2);}
+.util-row.selected{background:rgba(212,255,78,.06);}
+.util-row-chk{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:1px solid var(--brd);border-radius:2px;font-size:11px;color:var(--bg);background:transparent;font-weight:700;flex-shrink:0;}
+.util-row.selected .util-row-chk{background:var(--acc);border-color:var(--acc);color:var(--bg);}
+.util-row-name{flex:1;}
+.util-row-badge{font-family:'DM Mono',monospace;font-size:10px;color:var(--or);background:rgba(255,107,53,.1);padding:1px 5px;border-radius:2px;}
+.util-noresult{padding:12px 10px;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);text-align:center;font-style:italic;}
+
+/* Mobile */
+@media(max-width:640px){
+  body{padding:14px 10px 40px;}
+  .frow{grid-template-columns:1fr;}
+  .kpis{flex-direction:column;}
+  .cal-cell{min-height:78px;padding:2px;}
+  .cal-day-num{font-size:10px;}
+  .cal-evt{font-size:9px;padding:2px 3px;}
+  .cal-dow{font-size:9px;padding:5px 4px;}
+  .navtab{padding:9px 12px;font-size:10px;}
+  table.rt th, table.rt td{padding:6px 6px;font-size:11px;}
+}
+/* ═══════════════════════════════════════════════════════════ */
+/* KIOSK MODE                                                   */
+/* ═══════════════════════════════════════════════════════════ */
+#kiosk-screen{position:fixed;inset:0;background:var(--bg);z-index:9000;display:flex;flex-direction:column;padding:24px 32px;overflow:hidden;}
+.kiosk-header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:1px solid var(--brd);margin-bottom:24px;}
+.kiosk-title{font-size:32px;font-weight:800;letter-spacing:-.02em;line-height:1;}
+.kiosk-title span{color:var(--acc);}
+.kiosk-sede{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);margin-top:6px;letter-spacing:.1em;text-transform:uppercase;}
+.kiosk-clock{font-family:'DM Mono',monospace;font-size:34px;color:var(--acc);font-weight:500;letter-spacing:-.01em;}
+.kiosk-header-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px;}
+.kiosk-exit{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);text-decoration:none;letter-spacing:.1em;text-transform:uppercase;padding:4px 10px;border:1px solid var(--brd);border-radius:3px;transition:all .15s;}
+.kiosk-exit:hover{color:var(--txt);border-color:var(--mut);}
+.kiosk-step{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.kiosk-prompt{text-align:center;margin:20px 0 28px;}
+.kiosk-prompt-big{font-size:30px;font-weight:700;letter-spacing:-.01em;}
+.kiosk-prompt-sub{font-family:'DM Mono',monospace;font-size:13px;color:var(--mut);margin-top:8px;letter-spacing:.08em;}
+.kiosk-hidden-input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;}
+.kiosk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;overflow-y:auto;padding:4px;flex:1;align-content:start;}
+.kiosk-tile{background:var(--sur);border:2px solid var(--brd);border-radius:8px;padding:18px 14px;cursor:pointer;text-align:center;transition:all .15s;user-select:none;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:90px;}
+.kiosk-tile:hover,.kiosk-tile:active{border-color:var(--acc);background:rgba(212,255,78,.05);transform:scale(.98);}
+.kiosk-tile-name{font-size:16px;font-weight:600;line-height:1.25;}
+.kiosk-tile-sub{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);margin-top:6px;letter-spacing:.06em;}
+.kiosk-tile.mezzo{border-left-width:6px;}
+.kiosk-tile.mezzo-prenotato{background:rgba(212,255,78,.08);border-color:var(--acc);}
+.kiosk-tile.mezzo-prenotato .kiosk-tile-prenotato{font-family:'DM Mono',monospace;font-size:10px;color:var(--acc);margin-top:6px;letter-spacing:.06em;font-weight:600;}
+.kiosk-tile-targa{font-family:'DM Mono',monospace;font-size:11px;color:var(--or);margin-top:4px;}
+.kiosk-fuori{margin-top:auto;padding:14px 16px;background:var(--sur);border:1px solid var(--brd);border-radius:6px;max-height:130px;overflow-y:auto;}
+.kiosk-fuori-title{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px;}
+.kiosk-fuori-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-family:'DM Mono',monospace;font-size:12px;border-bottom:1px solid var(--brd);}
+.kiosk-fuori-row:last-child{border-bottom:none;}
+.kiosk-fuori-empty{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);font-style:italic;text-align:center;padding:6px;}
+.kiosk-greet{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
+.kiosk-greet-name{font-size:28px;font-weight:700;}
+.kiosk-cancel{padding:10px 20px;background:transparent;border:1px solid var(--brd);color:var(--mut);font-family:'Syne',sans-serif;font-size:14px;font-weight:600;cursor:pointer;border-radius:4px;text-transform:uppercase;letter-spacing:.05em;}
+.kiosk-cancel:hover,.kiosk-cancel:active{border-color:var(--red);color:var(--red);}
+.kiosk-rientro-box{background:var(--sur);border:2px solid var(--blu);border-radius:8px;padding:24px;margin-bottom:18px;}
+.kiosk-rientro-title{font-family:'DM Mono',monospace;font-size:11px;color:var(--blu);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;}
+.kiosk-rientro-mezzo{font-size:24px;font-weight:700;margin-bottom:14px;}
+.kiosk-rientro-info{font-family:'DM Mono',monospace;font-size:13px;color:var(--mut);margin-bottom:18px;}
+.kiosk-rientro-btn{width:100%;padding:22px;background:var(--blu);color:#fff;font-family:'Syne',sans-serif;font-size:18px;font-weight:700;border:none;border-radius:6px;cursor:pointer;text-transform:uppercase;letter-spacing:.06em;transition:all .15s;}
+.kiosk-rientro-btn:hover,.kiosk-rientro-btn:active{filter:brightness(1.15);transform:scale(.99);}
+.kiosk-section-title{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin:8px 0 12px;}
+.kiosk-empty{text-align:center;padding:40px;font-family:'DM Mono',monospace;color:var(--mut);font-size:13px;}
+.kiosk-done{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;}
+.kiosk-done-card{background:var(--sur);border:2px solid var(--grn);border-radius:10px;padding:50px 60px;}
+.kiosk-done-card.err{border-color:var(--red);}
+.kiosk-done-icon{font-size:64px;margin-bottom:20px;line-height:1;}
+.kiosk-done-msg{font-size:30px;font-weight:700;margin-bottom:14px;}
+.kiosk-done-detail{font-family:'DM Mono',monospace;font-size:14px;color:var(--mut);line-height:1.7;}
+.kiosk-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;padding:14px 24px;border-radius:6px;font-family:'Syne',sans-serif;font-size:15px;font-weight:600;z-index:10000;box-shadow:0 4px 20px rgba(0,0,0,.4);}
+@media (max-width:700px){
+  .kiosk-title{font-size:22px;}
+  .kiosk-clock{font-size:24px;}
+  .kiosk-prompt-big{font-size:22px;}
+  .kiosk-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));}
+}
+
+</style>
+</head>
+<body>
+
+<script>
+  const SUPABASE_URL      = "https://cuiakdyatsuhioyubpne.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1aWFrZHlhdHN1aGlveXVicG5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjQ0NDYsImV4cCI6MjA5MzA0MDQ0Nn0.kaC1n1ABHxxcUAOIcxQlUxQva25KBKWOTJbPSo9C-l8";
+</script>
+
+<div id="auth-screen" style="display:none"></div>
+
+<div id="app-screen" style="display:none">
+  <header class="topbar">
+    <div>
+      <h1>Cabl<span>otec</span></h1>
+      <div class="sub">Sistema Gestionale — v2.0</div>
+    </div>
+    <div class="user-info">
+      <span id="user-name">…</span>
+      <span id="role-pill"></span>
+      <select class="kiosk-jump" id="kiosk-jump" title="Apri schermata kiosk" style="display:none">
+        <option value="">⌐ Kiosk…</option>
+        <option value="sede1">Sede 1</option>
+        <option value="sede2">Sede 2</option>
+      </select>
+      <button class="theme-toggle" id="btn-theme" title="Cambia tema">🌙</button>
+      <button class="btnsm" id="btn-logout">Esci</button>
+    </div>
+  </header>
+
+  <nav class="nav" id="tabs-macro">
+    <button class="navtab active" data-area="mezzi">Mezzi</button>
+    <button class="navtab" data-area="lavoro">Lavoro</button>
+    <button class="navtab" data-area="anagrafiche" id="area-anagrafiche" style="display:none">Anagrafiche</button>
+    <button class="navtab" data-area="sistema" id="area-sistema" style="display:none">Sistema</button>
+  </nav>
+  <nav class="nav nav-sub" id="tabs"></nav>
+
+  <div id="tab-content"></div>
+</div>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- KIOSK MODE — schermata dedicata per mini-PC delle sedi         -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="kiosk-screen" style="display:none">
+  <div class="kiosk-header">
+    <div>
+      <div class="kiosk-title">Check-out <span>Mezzi</span></div>
+      <div class="kiosk-sede" id="kiosk-sede-lbl"></div>
+    </div>
+    <div class="kiosk-header-right">
+      <div class="kiosk-clock" id="kiosk-clock">--:--:--</div>
+      <a class="kiosk-exit" href="./" title="Vai all'app principale">⚙ Admin</a>
+    </div>
+  </div>
+
+  <!-- Schermata 1: identificazione -->
+  <div id="kiosk-step-id" class="kiosk-step">
+    <div class="kiosk-prompt">
+      <div class="kiosk-prompt-big">Avvicina il tuo badge</div>
+      <div class="kiosk-prompt-sub">oppure tocca il tuo nome qui sotto</div>
+    </div>
+    <input type="text" id="kiosk-rfid-input" class="kiosk-hidden-input" autocomplete="off">
+    <div class="kiosk-grid" id="kiosk-utili-grid"></div>
+    <div class="kiosk-fuori" id="kiosk-fuori-list"></div>
+  </div>
+
+  <!-- Schermata 2: scelta mezzo / rientro -->
+  <div id="kiosk-step-action" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name" id="kiosk-greet-name">Ciao</div>
+      <button class="kiosk-cancel" onclick="kioskGoToId()">Annulla</button>
+    </div>
+    <div id="kiosk-action-content"></div>
+  </div>
+
+  <!-- Schermata 3: conferma -->
+  <div id="kiosk-step-done" class="kiosk-step" style="display:none">
+    <div class="kiosk-done" id="kiosk-done-msg"></div>
+  </div>
+</div>
+
+<script>
+let sb = null;
+const state = {
+  session: null, profile: null, profiliById: {}, mezzi: [],
+  operatori: [], operatoriById: {},
+  prenotazioni: [],
+  consegne: [],            // tutte le consegne in memoria
+  prenOp: [],            // pivot prenotazione_id ↔ operatore_id
+  usiMezzo: [],            // tutti gli usi mezzo (aperti e chiusi)
+  clienti: [],             // anagrafica clienti
+  cliFilter: 'attivi',     // 'all' | 'attivi' | 'disattivi'
+  cliSearch: '',
+  articoli: [],            // anagrafica articoli/codici prodotto
+  artFilter: 'attivi',     // 'all' | 'attivi' | 'disattivi'
+  artSearch: '',
+  tipiLav: [],             // anagrafica tipi di lavorazione
+  calCursor: new Date(), currentTab: 'calendario', currentArea: 'mezzi',
+  loaded: false,
+};
+
+/* Tema chiaro/scuro */
+function applyTheme(theme) {
+  if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  const btn = document.getElementById('btn-theme');
+  if (btn) btn.textContent = theme === 'light' ? '☀️' : '🌙';
+}
+function toggleTheme() {
+  const cur = localStorage.getItem('theme') || 'dark';
+  const next = cur === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('theme', next);
+  applyTheme(next);
+}
+applyTheme(localStorage.getItem('theme') || 'dark');
+
+const TIPI = [
+  { id:'trasferta',    label:'Trasferta',    color:'#4effa3' },
+  { id:'consegna',     label:'Consegna',     color:'#ff4e6b' },
+  { id:'manutenzione', label:'Manutenzione', color:'#ff6b35' },
+  { id:'altro',        label:'Altro',        color:'#b84eff' },
+];
+const TIPO_COLOR = Object.fromEntries(TIPI.map(t=>[t.id,t.color]));
+const TIPO_BADGE = { trasferta:'bok', consegna:'berr', manutenzione:'bor', altro:'bvio' };
+
+const $ = s => document.querySelector(s);
+const el = (tag, attrs={}, ...children) => {
+  const e = document.createElement(tag);
+  for (const k in attrs) {
+    if (k === 'class') e.className = attrs[k];
+    else if (k === 'style') e.style.cssText = attrs[k];
+    else if (k === 'html') e.innerHTML = attrs[k];
+    else if (k.startsWith('on') && typeof attrs[k] === 'function')
+      e.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
+    else if (attrs[k] !== false && attrs[k] !== null && attrs[k] !== undefined)
+      e.setAttribute(k, attrs[k]);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  }
+  return e;
+};
+const z = n => String(n).padStart(2,'0');
+const toLocalISO = d => `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+const parseISODate = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d); };
+const monthName = d => d.toLocaleDateString('it-IT', { month:'long', year:'numeric' });
+const fmtIT = iso => { const d = parseISODate(iso); return `${z(d.getDate())}/${z(d.getMonth()+1)}/${d.getFullYear()}`; };
+
+function toast(msg, kind='ok') {
+  const t = el('div', { class:'toast'+(kind==='err'?' err':'') }, msg);
+  $('#toast-root').appendChild(t);
+  setTimeout(()=>t.remove(), 2800);
+}
+
+// Rileva modalità kiosk dall'URL: ?kiosk=sede1 oppure ?kiosk=sede2
+const KIOSK_SEDI_VALIDE = ['sede1', 'sede2'];
+const KIOSK_PARAM = new URLSearchParams(location.search).get('kiosk');
+const IS_KIOSK = KIOSK_PARAM && KIOSK_SEDI_VALIDE.includes(KIOSK_PARAM);
+const KIOSK_PARAM_INVALIDO = KIOSK_PARAM && !IS_KIOSK;
+
+// Credenziali account kiosk condiviso (creato a mano su Supabase, vedi istruzioni)
+const KIOSK_EMAIL = 'kiosk@cablotec.local';
+const KIOSK_PASSWORD = 'kiosk-cablotec-2026';
+
+// True se questo operatore o profilo è l'account tecnico kiosk
+function isKioskRecord(rec) {
+  if (!rec) return false;
+  return (rec.email || '').toLowerCase() === KIOSK_EMAIL.toLowerCase();
+}
+
+async function init() {
+  if (SUPABASE_URL.includes('XXXX') || SUPABASE_ANON_KEY.includes('INSERISCI')) {
+    document.body.innerHTML = `
+      <div class="setup">
+        <h1>⚠ Configurazione mancante</h1>
+        <p>Apri questo file con un editor e in cima imposta:</p>
+        <ul style="margin:10px 0 10px 20px;">
+          <li><code>SUPABASE_URL</code></li>
+          <li><code>SUPABASE_ANON_KEY</code></li>
+        </ul>
+        <p>Le trovi nella dashboard Supabase → <em>Project Settings → API</em>.</p>
+      </div>`;
+    return;
+  }
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+
+  // ─── PARAMETRO KIOSK NON VALIDO ───
+  if (KIOSK_PARAM_INVALIDO) {
+    document.body.innerHTML = `
+      <div class="setup">
+        <h1>⚠ Postazione kiosk non valida</h1>
+        <p>Il valore <code>?kiosk=${KIOSK_PARAM.replace(/[<>"&]/g,'')}</code> non corrisponde a nessuna postazione configurata.</p>
+        <p>Postazioni valide: ${KIOSK_SEDI_VALIDE.map(s=>'<code>'+s+'</code>').join(', ')}</p>
+        <p style="margin-top:14px;"><a href="/" style="color:var(--acc);">← Torna all'app normale</a></p>
+      </div>`;
+    return;
+  }
+
+  // ─── MODALITÀ KIOSK ───
+  if (IS_KIOSK) {
+    await kioskInit();
+    return;
+  }
+
+  // ─── MODALITÀ NORMALE ───
+  const { data: { session } } = await sb.auth.getSession();
+  state.session = session;
+  if (session) await afterLogin();
+  else renderAuth();
+  sb.auth.onAuthStateChange(async (_e, sess) => {
+    state.session = sess;
+    if (sess) await afterLogin();
+    else { state.profile = null; renderAuth(); }
+  });
+}
+
+function renderAuth() {
+  $('#app-screen').style.display = 'none';
+  const root = $('#auth-screen');
+  root.style.display = 'flex';
+  let mode = 'login';
+  const draw = () => {
+    root.innerHTML = '';
+    const box = el('div', { class:'auth-box' });
+    box.append(
+      el('h2', { html:'Cabl<span>otec</span>' }),
+      el('div', { class:'auth-sub' }, mode==='login' ? 'Sistema gestionale — accedi' : 'Sistema gestionale — registrati'),
+      el('div', { class:'auth-tabs' },
+        el('button', { class: mode==='login'?'active':'', onclick:()=>{mode='login';draw();} }, 'Accedi'),
+        el('button', { class: mode==='signup'?'active':'', onclick:()=>{mode='signup';draw();} }, 'Registrati'),
+      ),
+    );
+    const form = el('form');
+    if (mode === 'signup') {
+      form.append(el('div', { class:'field' },
+        el('label', {}, 'Nome'),
+        el('input', { type:'text', name:'nome', required:'true', placeholder:'Mario Rossi' }),
+      ));
+    }
+    form.append(
+      el('div', { class:'field' }, el('label', {}, 'Email'),
+        el('input', { type:'email', name:'email', required:'true', autocomplete:'email' })),
+      el('div', { class:'field' }, el('label', {}, 'Password'),
+        el('input', { type:'password', name:'password', required:'true', minlength:'6',
+                      autocomplete: mode==='login'?'current-password':'new-password' })),
+      el('button', { type:'submit', class:'btnp', style:'width:100%;padding:11px;margin-top:6px;' },
+        mode==='login' ? 'Accedi' : 'Registrati'),
+    );
+    const msg = el('div', { class:'auth-msg' });
+    form.append(msg);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.className = 'auth-msg';
+      msg.textContent = 'Attendere…';
+      const fd = new FormData(form);
+      try {
+        if (mode === 'login') {
+          const { error } = await sb.auth.signInWithPassword({
+            email: fd.get('email'), password: fd.get('password'),
+          });
+          if (error) throw error;
+        } else {
+          const { error } = await sb.auth.signUp({
+            email: fd.get('email'), password: fd.get('password'),
+            options: { data: { nome: fd.get('nome') } },
+          });
+          if (error) throw error;
+          msg.className = 'auth-msg ok';
+          msg.textContent = 'Registrazione ok. Se richiesta conferma email, controlla la posta — poi accedi.';
+        }
+      } catch (err) {
+        msg.className = 'auth-msg err';
+        msg.textContent = err.message || 'Errore di accesso';
+      }
+    });
+    box.append(form);
+    root.append(box);
+  };
+  draw();
+}
+
+async function afterLogin() {
+  const uid = state.session.user.id;
+  const { data: prof } = await sb.from('profili').select('*').eq('id', uid).maybeSingle();
+  state.profile = prof || { id:uid, email:state.session.user.email, nome:state.session.user.email, ruolo:'user' };
+
+  $('#auth-screen').style.display = 'none';
+  $('#app-screen').style.display = 'block';
+  $('#user-name').innerHTML = '<b>'+(state.profile.nome || state.profile.email)+'</b>';
+  $('#role-pill').innerHTML = state.profile.ruolo === 'admin'
+    ? '<span class="badge bvio">admin</span>' : '<span class="badge bgry">user</span>';
+  $('#area-anagrafiche').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
+  $('#area-sistema').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
+  $('#kiosk-jump').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
+  applyTheme(localStorage.getItem('theme') || 'dark');
+
+  bindTabs();
+
+  // Carico tutto una volta sola, in parallelo
+  const root = $('#tab-content');
+  root.innerHTML = '<div class="empty">Caricamento…</div>';
+  try {
+    await loadAllData();
+    state.loaded = true;
+    startRealtime();
+    renderTab(state.currentTab);
+  } catch (e) {
+    console.error('Errore caricamento dati:', e);
+    root.innerHTML = '';
+    root.append(el('div', { class:'empty', style:'color:var(--red);' },
+      el('div', { style:'margin-bottom:10px;' }, '⚠ Errore caricamento: '+(e.message||'sconosciuto')),
+      el('button', { class:'btnp', onclick:()=>afterLogin() }, 'Riprova'),
+    ));
+  }
+}
+
+document.addEventListener('click', async (e) => {
+  if (e.target.id === 'btn-logout') await sb.auth.signOut();
+  if (e.target.id === 'btn-theme') toggleTheme();
+});
+
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'kiosk-jump' && e.target.value) {
+    location.href = './?kiosk=' + e.target.value;
+  }
+});
+
+// Quando la scheda torna visibile dopo un'assenza prolungata, ricarico i dati
+let lastVisibilityCheck = Date.now();
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!sb || !state.profile) return;
+  const elapsed = Date.now() - lastVisibilityCheck;
+  lastVisibilityCheck = Date.now();
+  if (elapsed < 30000) return;
+  try {
+    await sb.auth.refreshSession();
+    await loadAllData();
+    renderTab(state.currentTab);
+  } catch (e) {
+    console.warn('Riconnessione fallita:', e);
+  }
+});
+
+// Anche quando la connessione torna online
+window.addEventListener('online', async () => {
+  if (!state.profile) return;
+  try {
+    await loadAllData();
+    renderTab(state.currentTab);
+  } catch (e) { console.warn('Reload online fallito:', e); }
+});
+
+async function loadAllData() {
+  const [profili, mezzi, operatori, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav] = await Promise.all([
+    sb.from('profili').select('*').order('nome'),
+    sb.from('mezzi').select('*').order('nome'),
+    sb.from('operatori').select('*').order('nome'),
+    sb.from('prenotazioni').select('*').order('data_inizio'),
+    sb.from('consegne').select('*').order('ordine'),
+    sb.from('prenotazioni_operatori').select('*'),
+    sb.from('usi_mezzo').select('*').order('data_uscita'),
+    sb.from('clienti').select('*').order('nome'),
+    sb.from('articoli').select('*').order('codice'),
+    sb.from('tipi_lavorazione').select('*').order('ordine'),
+  ]);
+  if (profili.error) throw profili.error;
+  if (mezzi.error) throw mezzi.error;
+  if (operatori.error) throw operatori.error;
+  if (prenotazioni.error) throw prenotazioni.error;
+  if (consegne.error) throw consegne.error;
+  if (prenOp.error) throw prenOp.error;
+  if (usiMezzo.error) throw usiMezzo.error;
+  if (clienti.error) throw clienti.error;
+  if (articoli.error) throw articoli.error;
+  if (tipiLav.error) throw tipiLav.error;
+
+  state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
+  state.mezzi = mezzi.data || [];
+  state.operatori = operatori.data || [];
+  state.operatoriById = Object.fromEntries(state.operatori.map(u=>[u.id,u]));
+  state.prenotazioni = prenotazioni.data || [];
+  state.consegne = consegne.data || [];
+  state.prenOp = prenOp.data || [];
+  state.usiMezzo = usiMezzo.data || [];
+  state.clienti = clienti.data || [];
+  state.articoli = articoli.data || [];
+  state.tipiLav = tipiLav.data || [];
+}
+
+// Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
+let realtimeChannel = null;
+function startRealtime() {
+  if (realtimeChannel) return; // già attivo
+  realtimeChannel = sb.channel('app-changes')
+    .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni' },
+        (p) => applyChange('prenotazioni', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'mezzi' },
+        (p) => applyChange('mezzi', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'operatori' },
+        (p) => applyChange('operatori', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'profili' },
+        (p) => applyChange('profili', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'consegne' },
+        (p) => applyChange('consegne', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni_operatori' },
+        (p) => applyChange('prenotazioni_operatori', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'usi_mezzo' },
+        (p) => applyChange('usi_mezzo', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'clienti' },
+        (p) => applyChange('clienti', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'articoli' },
+        (p) => applyChange('articoli', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'tipi_lavorazione' },
+        (p) => applyChange('tipi_lavorazione', p))
+    .subscribe();
+}
+
+function applyChange(tabella, payload) {
+  const ev = payload.eventType;
+  const row = payload.new;
+  const oldRow = payload.old;
+
+  if (tabella === 'prenotazioni') {
+    if (ev === 'INSERT') {
+      if (!state.prenotazioni.find(x => x.id === row.id)) state.prenotazioni.push(row);
+    } else if (ev === 'UPDATE') state.prenotazioni = state.prenotazioni.map(x => x.id === row.id ? row : x);
+    else if (ev === 'DELETE') state.prenotazioni = state.prenotazioni.filter(x => x.id !== oldRow.id);
+  } else if (tabella === 'mezzi') {
+    if (ev === 'INSERT') {
+      if (!state.mezzi.find(x => x.id === row.id)) state.mezzi.push(row);
+    } else if (ev === 'UPDATE') state.mezzi = state.mezzi.map(x => x.id === row.id ? row : x);
+    else if (ev === 'DELETE') state.mezzi = state.mezzi.filter(x => x.id !== oldRow.id);
+  } else if (tabella === 'operatori') {
+    if (ev === 'INSERT') {
+      if (!state.operatori.find(x => x.id === row.id)) state.operatori.push(row);
+      state.operatoriById[row.id] = row;
+    } else if (ev === 'UPDATE') {
+      state.operatori = state.operatori.map(x => x.id === row.id ? row : x);
+      state.operatoriById[row.id] = row;
+    } else if (ev === 'DELETE') {
+      state.operatori = state.operatori.filter(x => x.id !== oldRow.id);
+      delete state.operatoriById[oldRow.id];
+    }
+  } else if (tabella === 'profili') {
+    if (ev === 'INSERT' || ev === 'UPDATE') state.profiliById[row.id] = row;
+    else if (ev === 'DELETE') delete state.profiliById[oldRow.id];
+  } else if (tabella === 'consegne') {
+    if (ev === 'INSERT') {
+      if (!state.consegne.find(x => x.id === row.id)) state.consegne.push(row);
+    } else if (ev === 'UPDATE') state.consegne = state.consegne.map(x => x.id === row.id ? row : x);
+    else if (ev === 'DELETE') state.consegne = state.consegne.filter(x => x.id !== oldRow.id);
+  } else if (tabella === 'prenotazioni_operatori') {
+    if (ev === 'INSERT') {
+      const dup = state.prenOp.find(x =>
+        x.prenotazione_id === row.prenotazione_id && x.operatore_id === row.operatore_id);
+      if (!dup) state.prenOp.push(row);
+    } else if (ev === 'DELETE') state.prenOp = state.prenOp.filter(x =>
+      !(x.prenotazione_id === oldRow.prenotazione_id && x.operatore_id === oldRow.operatore_id));
+  } else if (tabella === 'usi_mezzo') {
+    if (ev === 'INSERT') {
+      if (!state.usiMezzo.find(x => x.id === row.id)) state.usiMezzo.push(row);
+    } else if (ev === 'UPDATE') {
+      state.usiMezzo = state.usiMezzo.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.usiMezzo = state.usiMezzo.filter(x => x.id !== oldRow.id);
+    }
+  } else if (tabella === 'clienti') {
+    if (ev === 'INSERT') {
+      if (!state.clienti.find(x => x.id === row.id)) state.clienti.push(row);
+    } else if (ev === 'UPDATE') {
+      state.clienti = state.clienti.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.clienti = state.clienti.filter(x => x.id !== oldRow.id);
+    }
+  } else if (tabella === 'articoli') {
+    if (ev === 'INSERT') {
+      if (!state.articoli.find(x => x.id === row.id)) state.articoli.push(row);
+    } else if (ev === 'UPDATE') {
+      state.articoli = state.articoli.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.articoli = state.articoli.filter(x => x.id !== oldRow.id);
+    }
+  } else if (tabella === 'tipi_lavorazione') {
+    if (ev === 'INSERT') {
+      if (!state.tipiLav.find(x => x.id === row.id)) state.tipiLav.push(row);
+    } else if (ev === 'UPDATE') {
+      state.tipiLav = state.tipiLav.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.tipiLav = state.tipiLav.filter(x => x.id !== oldRow.id);
+    }
+  }
+
+  // Re-render solo la tab attiva
+  if (state.loaded) renderTab(state.currentTab);
+}
+
+function loadPrenotazioneOperatori(prenId) {
+  // Legge dalla cache in memoria (sync)
+  return state.prenOp.filter(r => r.prenotazione_id === prenId).map(r => r.operatore_id);
+}
+
+// Verifica sovrapposizioni dalla cache in memoria (no fetch)
+function checkSovrapposizioni(mezzoId, dataInizio, dataFine, escludiId) {
+  return state.prenotazioni.filter(p => {
+    if (p.mezzo_id !== mezzoId) return false;
+    if (escludiId && p.id === escludiId) return false;
+    return p.data_inizio <= dataFine && p.data_fine >= dataInizio;
+  });
+}
+
+// Definizione macro-aree e sotto-tab
+const TAB_STRUCTURE = {
+  mezzi: {
+    label: 'Mezzi',
+    adminOnly: false,
+    tabs: [
+      { id: 'calendario',  label: 'Calendario',  adminOnly: false },
+      { id: 'elenco',      label: 'Prenotazioni', adminOnly: false },
+      { id: 'mezzi',       label: 'Anagrafica mezzi', adminOnly: false },
+    ],
+  },
+  lavoro: {
+    label: 'Lavoro',
+    adminOnly: false,
+    tabs: [
+      { id: 'pianificazione', label: 'Pianificazione', adminOnly: false, placeholder: true },
+      { id: 'storico',        label: 'Storico',        adminOnly: false, placeholder: true },
+      { id: 'gantt',          label: 'Gantt',          adminOnly: true,  placeholder: true },
+    ],
+  },
+  anagrafiche: {
+    label: 'Anagrafiche',
+    adminOnly: true,
+    tabs: [
+      { id: 'clienti',        label: 'Clienti',       adminOnly: true },
+      { id: 'articoli',       label: 'Articoli',      adminOnly: true },
+      { id: 'tipi_lav',       label: 'Tipi lavorazione', adminOnly: true },
+      { id: 'operatori',      label: 'Operatori',     adminOnly: true },
+    ],
+  },
+  sistema: {
+    label: 'Sistema',
+    adminOnly: true,
+    tabs: [
+      { id: 'chiusure',       label: 'Chiusure aziendali', adminOnly: true, placeholder: true },
+    ],
+  },
+};
+
+function bindTabs() {
+  // Click sulla macro-area: mostra le sotto-tab e attiva la prima accessibile
+  $('#tabs-macro').querySelectorAll('button').forEach(b => {
+    b.onclick = () => {
+      selectArea(b.dataset.area);
+    };
+  });
+  // All'avvio, seleziono la macro-area "Mezzi"
+  selectArea('mezzi');
+}
+
+function selectArea(areaId) {
+  state.currentArea = areaId;
+  // Aggiorna stato visivo macro-area
+  $('#tabs-macro').querySelectorAll('button').forEach(b => {
+    b.classList.toggle('active', b.dataset.area === areaId);
+  });
+  // Genera le sotto-tab
+  const area = TAB_STRUCTURE[areaId];
+  if (!area) return;
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const sub = $('#tabs');
+  sub.innerHTML = '';
+  area.tabs.forEach(t => {
+    if (t.adminOnly && !isAdmin) return;
+    const btn = el('button', {
+      class: 'navtab',
+      'data-tab': t.id,
+      onclick: () => selectTab(t.id),
+    }, t.label);
+    sub.appendChild(btn);
+  });
+  // Attiva la prima sotto-tab disponibile
+  const firstBtn = sub.querySelector('button');
+  if (firstBtn) selectTab(firstBtn.dataset.tab);
+}
+
+function selectTab(tabId) {
+  $('#tabs').querySelectorAll('button').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tabId);
+  });
+  renderTab(tabId);
+}
+
+// renderTab ora è SINCRONO: legge solo dalla cache in memoria
+function renderTab(name) {
+  state.currentTab = name;
+  const root = $('#tab-content');
+  if (!state.loaded) { root.innerHTML = '<div class="empty">Caricamento…</div>'; return; }
+  try {
+    if (name === 'calendario')        renderCalendar(root);
+    else if (name === 'elenco')       renderElenco(root);
+    else if (name === 'mezzi')        renderMezzi(root);
+    else if (name === 'clienti')      renderClienti(root);
+    else if (name === 'articoli')     renderArticoli(root);
+    else if (name === 'tipi_lav')     renderTipiLavorazione(root);
+    else if (name === 'operatori')    renderOperatori(root);
+    else if (name === 'pianificazione') renderPlaceholder(root, 'Pianificazione',
+      'Gestione operazioni: OP, ordine, codice, descrizione, cliente, quantità, scadenza, data inizio.',
+      'Step 2.7');
+    else if (name === 'storico') renderPlaceholder(root, 'Storico',
+      'Operazioni consegnate, con KPI: % puntualità, ritardi, NC post-consegna.',
+      'Step 2.8');
+    else if (name === 'gantt') renderPlaceholder(root, 'Gantt occupazione',
+      'Vista live: chi sta facendo cosa adesso. Vista storico: timeline settimana/mese.',
+      'Step 4-5');
+    else if (name === 'chiusure') renderPlaceholder(root, 'Chiusure aziendali',
+      'Festività aziendali e ponti, usate per calcolare le date inizio operazioni.',
+      'Step 2.6');
+  } catch (e) {
+    console.error('Errore rendering tab '+name+':', e);
+    root.innerHTML = '';
+    root.append(el('div', { class:'empty', style:'color:var(--red);' },
+      el('div', { style:'margin-bottom:10px;' }, '⚠ Errore: '+(e.message||'sconosciuto')),
+      el('button', { class:'btnp', onclick:()=>renderTab(name) }, 'Riprova'),
+    ));
+  }
+}
+
+function renderCalendar(root) {
+  const cur = state.calCursor;
+  const first = new Date(cur.getFullYear(), cur.getMonth(), 1);
+  const last  = new Date(cur.getFullYear(), cur.getMonth()+1, 0);
+  const startGrid = new Date(first);
+  startGrid.setDate(first.getDate() - ((first.getDay()+6)%7));
+  const endGrid = new Date(last);
+  endGrid.setDate(last.getDate() + (6 - ((last.getDay()+6)%7)));
+
+  const startISO = toLocalISO(startGrid);
+  const endISO = toLocalISO(endGrid);
+  const todayISO = toLocalISO(new Date());
+
+  // Filtro le prenotazioni della cache che intersecano la griglia
+  const prenInRange = state.prenotazioni.filter(p =>
+    p.data_inizio <= endISO && p.data_fine >= startISO
+  );
+  // Filtro gli usi mezzo che intersecano la griglia
+  // - aperti (data_rientro = null): visualizzati da data_uscita fino ad oggi
+  // - chiusi: visualizzati da data_uscita a data_rientro
+  const usiInRange = state.usiMezzo.filter(u => {
+    const usoStart = u.data_uscita.substring(0, 10);
+    const usoEnd = u.data_rientro ? u.data_rientro.substring(0, 10) : todayISO;
+    return usoStart <= endISO && usoEnd >= startISO;
+  });
+  const mezziById = Object.fromEntries(state.mezzi.map(m=>[m.id,m]));
+
+  // Costruisco indice giorno → array di entries
+  // entry = { kind:'pren', data:p } oppure { kind:'uso', data:u, aperto:bool }
+  const byDay = {};
+  for (const p of prenInRange) {
+    const a = parseISODate(p.data_inizio), b = parseISODate(p.data_fine);
+    for (let d = new Date(a); d <= b; d.setDate(d.getDate()+1)) {
+      const k = toLocalISO(d);
+      (byDay[k] = byDay[k] || []).push({ kind:'pren', data:p });
+    }
+  }
+  for (const u of usiInRange) {
+    const a = parseISODate(u.data_uscita.substring(0, 10));
+    const b = u.data_rientro
+      ? parseISODate(u.data_rientro.substring(0, 10))
+      : parseISODate(todayISO);
+    for (let d = new Date(a); d <= b; d.setDate(d.getDate()+1)) {
+      const k = toLocalISO(d);
+      (byDay[k] = byDay[k] || []).push({ kind:'uso', data:u, aperto: !u.data_rientro });
+    }
+  }
+
+  root.innerHTML = '';
+  root.append(el('div', { class:'cal-head' },
+    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()-1,1); renderTab('calendario'); }}, '← Prec'),
+    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(); renderTab('calendario'); }}, 'Oggi'),
+    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()+1,1); renderTab('calendario'); }}, 'Succ →'),
+    el('h2', { style:'flex:1' }, monthName(cur)),
+    el('button', { class:'btnp', onclick:()=>openPrenotazioneModal() }, '+ Nuova Prenotazione'),
+  ));
+
+  const legend = el('div', { class:'legend' });
+  TIPI.forEach(t => legend.append(el('span', { class:'lg' },
+    el('span', { class:'swatch', style:`background:${t.color}` }), t.label
+  )));
+  // Legenda usi mezzo
+  legend.append(el('span', { class:'lg' },
+    el('span', { class:'swatch swatch-uso-aperto' }), 'Uso in corso'));
+  legend.append(el('span', { class:'lg' },
+    el('span', { class:'swatch swatch-uso-chiuso' }), 'Uso chiuso'));
+  root.append(legend);
+
+  const grid = el('div', { class:'cal-grid' });
+  ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].forEach(d => grid.append(el('div', { class:'cal-dow' }, d)));
+
+  for (let d = new Date(startGrid); d <= endGrid; d.setDate(d.getDate()+1)) {
+    const iso = toLocalISO(d);
+    const inMonth = d.getMonth() === cur.getMonth();
+    const dow = (d.getDay()+6)%7;
+    const isWeekend = dow >= 5;
+    const cls = ['cal-cell'];
+    if (!inMonth) cls.push('other');
+    if (iso === todayISO) cls.push('today');
+    if (isWeekend) cls.push('weekend');
+    const cell = el('div', {
+      class: cls.join(' '),
+      onclick: (e) => {
+        if (e.target.closest('.cal-evt')) return;
+        openPrenotazioneModal({ data_inizio: iso, data_fine: iso });
+      }
+    });
+    cell.append(el('div', { class:'cal-day-num' }, String(d.getDate())));
+    const evs = byDay[iso] || [];
+    const max = window.innerWidth < 640 ? 2 : 3;
+    const box = el('div', { class:'cal-events' });
+    evs.slice(0, max).forEach(entry => {
+      if (entry.kind === 'pren') {
+        const p = entry.data;
+        const m = mezziById[p.mezzo_id];
+        const u = state.profiliById[p.utente_id];
+        const autore = u?.nome || u?.email || '?';
+        const color = TIPO_COLOR[p.tipo] || '#6b6b64';
+        const utilNomi = state.prenOp
+          .filter(r => r.prenotazione_id === p.id)
+          .map(r => state.operatoriById[r.operatore_id]?.nome)
+          .filter(Boolean);
+        const utilLbl = utilNomi.length ? utilNomi.join(', ') : '—';
+        box.append(el('div', {
+          class: 'cal-evt',
+          style: `border-left-color:${color}`,
+          title: `Mezzo: ${m?.nome || '—'}\nOperatori: ${utilLbl}\nTipo: ${p.tipo}\nCreata da: ${autore}`,
+          onclick: (e) => { e.stopPropagation(); openPrenotazioneModal(p); }
+        }, `${m?.nome || '?'} · ${utilLbl}`));
+      } else {
+        // entry.kind === 'uso'
+        const u = entry.data;
+        const m = mezziById[u.mezzo_id];
+        const utz = state.operatoriById[u.operatore_id];
+        const oraUscita = new Date(u.data_uscita);
+        const oraRientro = u.data_rientro ? new Date(u.data_rientro) : null;
+        const titleParts = [
+          `Mezzo: ${m?.nome || '—'}${m?.targa ? ' · '+m.targa : ''}`,
+          `Operatore: ${utz?.nome || '—'}`,
+          `Uscita: ${fmtIT(oraUscita.toISOString().substring(0,10))} ${z(oraUscita.getHours())}:${z(oraUscita.getMinutes())}`,
+        ];
+        if (oraRientro) titleParts.push(
+          `Rientro: ${fmtIT(oraRientro.toISOString().substring(0,10))} ${z(oraRientro.getHours())}:${z(oraRientro.getMinutes())}`);
+        else titleParts.push('Rientro: in corso');
+        if (u.sede) titleParts.push(`Sede: ${u.sede}`);
+        const evtCls = 'cal-evt cal-uso' + (entry.aperto ? ' cal-uso-aperto' : ' cal-uso-chiuso');
+        const lbl = (m?.nome || '?') + ' · ' + (utz?.nome || '?') + (entry.aperto ? ' ⏱' : '');
+        box.append(el('div', {
+          class: evtCls,
+          title: titleParts.join('\n'),
+          onclick: (e) => { e.stopPropagation(); openUsoMezzoModal(u); }
+        }, lbl));
+      }
+    });
+    if (evs.length > max) {
+      box.append(el('div', {
+        class:'cal-more',
+        onclick: (e) => { e.stopPropagation(); openDayDetailModal(iso, evs); },
+      }, `+${evs.length - max} altri`));
+    }
+    cell.append(box);
+    grid.append(cell);
+  }
+  root.append(grid);
+}
+
+// Popup col dettaglio completo dei eventi/usi di un giorno
+function openDayDetailModal(iso, evs) {
+  const mezziById = Object.fromEntries(state.mezzi.map(m=>[m.id,m]));
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, fmtIT(iso)),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+  body.append(el('div', { class:'sub', style:'margin-bottom:10px;' },
+    `${evs.length} elementi in questa giornata`));
+
+  evs.forEach(entry => {
+    if (entry.kind === 'pren') {
+      const p = entry.data;
+      const m = mezziById[p.mezzo_id];
+      const utilNomi = state.prenOp
+        .filter(r => r.prenotazione_id === p.id)
+        .map(r => state.operatoriById[r.operatore_id]?.nome)
+        .filter(Boolean);
+      const color = TIPO_COLOR[p.tipo] || '#6b6b64';
+      body.append(el('div', {
+        class:'day-row',
+        style:`border-left-color:${color};`,
+        onclick: () => { closeModal(); openPrenotazioneModal(p); },
+      },
+        el('div', { class:'day-row-title' },
+          (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '')),
+        el('div', { class:'day-row-sub' },
+          el('span', { class:'badge '+TIPO_BADGE[p.tipo] }, p.tipo),
+          ' ',
+          utilNomi.length ? utilNomi.join(', ') : '—'),
+      ));
+    } else {
+      const u = entry.data;
+      const m = mezziById[u.mezzo_id];
+      const utz = state.operatoriById[u.operatore_id];
+      const oraUscita = new Date(u.data_uscita);
+      const oraRientro = u.data_rientro ? new Date(u.data_rientro) : null;
+      const cls = entry.aperto ? 'day-row day-row-uso-aperto' : 'day-row day-row-uso-chiuso';
+      body.append(el('div', {
+        class:cls,
+        onclick: () => { closeModal(); openUsoMezzoModal(u); },
+      },
+        el('div', { class:'day-row-title' },
+          (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '') +
+          (entry.aperto ? ' ⏱' : '')),
+        el('div', { class:'day-row-sub' },
+          el('span', { class:'badge '+(entry.aperto ? 'bor' : 'bgry') },
+            entry.aperto ? 'in corso' : 'chiuso'),
+          ' ', utz?.nome || '—',
+          ' · uscita ', z(oraUscita.getHours())+':'+z(oraUscita.getMinutes()),
+          oraRientro ? ' · rientro '+z(oraRientro.getHours())+':'+z(oraRientro.getMinutes()) : ''),
+      ));
+    }
+  });
+
+  modal.append(body);
+  modal.append(el('div', { class:'mfoot' },
+    el('button', { class:'btng', onclick:closeModal }, 'Chiudi')));
+  openModal(modal);
+}
+
+function renderElenco(root) {
+  const oggi = new Date();
+  const da = toLocalISO(oggi);
+  const a  = toLocalISO(new Date(oggi.getFullYear(), oggi.getMonth()+2, oggi.getDate()));
+  // Filtro prenotazioni dei prossimi 60 giorni dalla cache
+  const prenotazioni = state.prenotazioni
+    .filter(p => p.data_inizio <= a && p.data_fine >= da)
+    .sort((x,y) => x.data_inizio.localeCompare(y.data_inizio));
+  const mezziById = Object.fromEntries(state.mezzi.map(m=>[m.id,m]));
+
+  const kpis = el('div', { class:'kpis' });
+  const totFut = prenotazioni.length;
+  const totMese = prenotazioni.filter(p => p.data_inizio.startsWith(toLocalISO(oggi).slice(0,7))).length;
+  kpis.append(
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Totale prossime'), el('div', { class:'kv ka' }, String(totFut))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Questo mese'), el('div', { class:'kv kb' }, String(totMese))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Mezzi attivi'), el('div', { class:'kv kg' }, String(state.mezzi.filter(m=>m.attivo).length))),
+  );
+
+  root.innerHTML = '';
+  root.append(kpis);
+  root.append(el('div', { class:'toolbar' },
+    el('h2', {}, 'Prenotazioni dei prossimi 60 giorni'),
+    el('button', { class:'btnp', onclick:()=>openPrenotazioneModal() }, '+ Nuova'),
+  ));
+
+  if (prenotazioni.length === 0) {
+    root.append(el('div', { class:'empty' }, 'Nessuna prenotazione nei prossimi 60 giorni'));
+    return;
+  }
+
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Periodo'), el('th', {}, 'Mezzo'), el('th', {}, 'Tipo'),
+    el('th', {}, 'Operatori'), el('th', {}, 'Prenotato da'), el('th', { class:'tc' }, 'Azioni'),
+  )));
+  const tb = el('tbody');
+  prenotazioni.forEach(p => {
+    const m = mezziById[p.mezzo_id];
+    const u = state.profiliById[p.utente_id];
+    const periodo = p.data_inizio === p.data_fine ? fmtIT(p.data_inizio) : `${fmtIT(p.data_inizio)} → ${fmtIT(p.data_fine)}`;
+    const utilNomi = state.prenOp
+      .filter(r => r.prenotazione_id === p.id)
+      .map(r => state.operatoriById[r.operatore_id]?.nome)
+      .filter(Boolean);
+    tb.append(el('tr', {},
+      el('td', { class:'mono' }, periodo),
+      el('td', {}, el('span', { class:'cod-cell' }, m ? m.nome : '—')),
+      el('td', {}, el('span', { class:'badge '+TIPO_BADGE[p.tipo] }, p.tipo)),
+      el('td', {}, utilNomi.length ? utilNomi.join(', ') : '—'),
+      el('td', { class:'mono' }, u?.nome || u?.email || '—'),
+      el('td', { class:'tc' }, el('button', { class:'btnsm', onclick:()=>openPrenotazioneModal(p) }, 'Apri')),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+}
+
+function renderMezzi(root) {
+  const isAdmin = state.profile.ruolo === 'admin';
+
+  // Statistiche operatori ultimi 6 mesi dalla cache
+  const oggi = new Date();
+  const seiMesiFa = toLocalISO(new Date(oggi.getFullYear(), oggi.getMonth()-6, oggi.getDate()));
+  const prenList = state.prenotazioni.filter(p => p.data_fine >= seiMesiFa);
+
+  // Indice pivot per pren_id → array di operatore_id (dalla cache)
+  const pivotByPren = {};
+  state.prenOp.forEach(r => {
+    (pivotByPren[r.prenotazione_id] = pivotByPren[r.prenotazione_id] || []).push(r.operatore_id);
+  });
+
+  // Per ogni mezzo: operatori distinti + conteggio
+  const statsByMezzo = {};
+  prenList.forEach(p => {
+    if (!statsByMezzo[p.mezzo_id]) statsByMezzo[p.mezzo_id] = { operatori: {}, totale: 0 };
+    const s = statsByMezzo[p.mezzo_id];
+    s.totale++;
+    const utils = pivotByPren[p.id] || [];
+    utils.forEach(uid => {
+      s.operatori[uid] = (s.operatori[uid] || 0) + 1;
+    });
+  });
+
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' },
+    el('h2', {}, 'Mezzi aziendali'),
+    isAdmin ? el('button', { class:'btnp', onclick:()=>openMezzoModal() }, '+ Nuovo Mezzo') : null,
+  ));
+  if (state.mezzi.length === 0) {
+    root.append(el('div', { class:'empty' }, isAdmin ? 'Nessun mezzo. Aggiungi il primo!' : 'Nessun mezzo configurato.'));
+    return;
+  }
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, ''), el('th', {}, 'Nome'), el('th', {}, 'Targa'), el('th', {}, 'Tipo'),
+    el('th', {}, 'Stato'),
+    el('th', {}, 'Operatori (ultimi 6 mesi)'),
+    el('th', { class:'tc' }, 'Pren.'),
+    isAdmin ? el('th', { class:'tc' }, 'Azioni') : null,
+  )));
+  const tb = el('tbody');
+  state.mezzi.forEach(m => {
+    const stats = statsByMezzo[m.id] || { operatori:{}, totale:0 };
+    const utentiOrdinati = Object.entries(stats.operatori)
+      .sort((a,b) => b[1] - a[1])
+      .map(([uid, count]) => {
+        const u = state.operatoriById[uid];
+        const nome = u?.nome || '?';
+        return `${nome} (${count})`;
+      });
+    const utentiCell = utentiOrdinati.length === 0
+      ? el('span', { class:'sub' }, '—')
+      : el('div', { style:'display:flex;flex-wrap:wrap;gap:4px;' },
+          ...utentiOrdinati.map(u => el('span', { class:'badge bgry', style:'font-size:10px;' }, u))
+        );
+
+    tb.append(el('tr', {},
+      el('td', {}, el('span', { class:'swatch', style:`background:${m.colore||'#4eb8ff'}` })),
+      el('td', {}, el('span', { class:'cod-cell' }, m.nome)),
+      el('td', { class:'mono' }, m.targa || '—'),
+      el('td', { class:'mono' }, m.tipo || '—'),
+      el('td', {}, m.attivo ? el('span', { class:'badge bok' }, 'attivo') : el('span', { class:'badge bgry' }, 'disattivo')),
+      el('td', {}, utentiCell),
+      el('td', { class:'tc mono' }, String(stats.totale)),
+      isAdmin ? el('td', { class:'tc' },
+        el('button', { class:'btnsm', onclick:()=>openMezzoModal(m) }, 'Modifica'),
+        ' ',
+        el('button', { class:'btnd', onclick:()=>deleteMezzo(m) }, 'Elimina'),
+      ) : null,
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+}
+
+async function deleteMezzo(m) {
+  if (!confirm(`Eliminare il mezzo "${m.nome}"?\nTutte le sue prenotazioni saranno cancellate.`)) return;
+  const { error } = await sb.from('mezzi').delete().eq('id', m.id);
+  if (error) return toast(error.message, 'err');
+  // Aggiorna subito la cache locale
+  state.mezzi = state.mezzi.filter(x => x.id !== m.id);
+  // Le prenotazioni del mezzo vengono cancellate a cascata dal DB
+  const prenIdsRimosse = state.prenotazioni.filter(p => p.mezzo_id === m.id).map(p => p.id);
+  state.prenotazioni = state.prenotazioni.filter(p => p.mezzo_id !== m.id);
+  state.consegne = state.consegne.filter(c => !prenIdsRimosse.includes(c.prenotazione_id));
+  state.prenOp = state.prenOp.filter(r => !prenIdsRimosse.includes(r.prenotazione_id));
+  toast('Mezzo eliminato'); renderTab('mezzi');
+}
+
+function renderOperatori(root) {
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' },
+    el('h2', {}, 'Operatori dei mezzi'),
+    el('button', { class:'btnp', onclick:()=>openOperatoreModal() }, '+ Nuovo Operatore'),
+  ));
+
+  // Tab interna: Operatori vs Account login
+  root.append(el('div', { class:'sub', style:'margin-bottom:12px;' },
+    'Anagrafica delle persone che usano i mezzi (può non avere un account login).'));
+
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Nome'),
+    el('th', {}, 'Badge NFC'),
+    el('th', {}, 'Email'),
+    el('th', {}, 'Tipo'),
+    el('th', {}, 'Account login'),
+    el('th', {}, 'Stato'),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+  const tb = el('tbody');
+  state.operatori.filter(u => !isKioskRecord(u)).forEach(u => {
+    const account = u.account_id ? state.profiliById[u.account_id] : null;
+    const accountCell = account
+      ? el('span', { class:'badge bok', title:account.email }, '✓ '+(account.ruolo||'user'))
+      : el('span', { class:'badge bgry' }, '—');
+    tb.append(el('tr', {},
+      el('td', {}, u.nome),
+      el('td', { class:'mono' }, u.numero_badge || '—'),
+      el('td', { class:'mono', style:'font-size:11px;' }, u.email || '—'),
+      el('td', {}, u.esterno
+        ? el('span', { class:'badge byel' }, 'esterno')
+        : el('span', { class:'badge bblu' }, 'interno')),
+      el('td', {}, accountCell),
+      el('td', {}, u.attivo ? el('span', { class:'badge bok' }, 'attivo') : el('span', { class:'badge bgry' }, 'disatt.')),
+      el('td', { class:'tc' },
+        el('button', { class:'btnsm', onclick:()=>openOperatoreModal(u) }, 'Modifica'),
+        ' ',
+        account ? el('button', { class:'btnsm', onclick:()=>toggleRuolo(account),
+                                  title:'Cambia ruolo dell\'account collegato' },
+                       account.ruolo==='admin' ? 'Rendi user' : 'Rendi admin') : null,
+        ' ',
+        el('button', { class:'btnd', onclick:()=>deleteOperatore(u) }, 'Elimina'),
+      ),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+
+  // Sezione: account loggati senza operatore (caso raro, ma utile per debug)
+  const profili = Object.values(state.profiliById).filter(p => !isKioskRecord(p));
+  const orfani = profili.filter(p => !state.operatori.find(u => u.account_id === p.id));
+  if (orfani.length > 0) {
+    root.append(el('div', { style:'margin-top:24px;padding:12px;background:var(--sur);border:1px solid var(--yel);border-radius:4px;' },
+      el('div', { class:'kl', style:'color:var(--yel);margin-bottom:8px;' }, '⚠ Account senza operatore collegato'),
+      el('div', { class:'sub' }, 'Questi account login non hanno una scheda operatore. Crea un operatore e collegaci l\'account, oppure aspetta che si auto-colleghi.'),
+      ...orfani.map(p => el('div', { class:'mono', style:'font-size:11px;margin-top:4px;' }, `• ${p.nome} — ${p.email}`)),
+    ));
+  }
+}
+
+function openOperatoreModal(u) {
+  const isNew = !u;
+  u = u || { nome:'', numero_badge:'', email:'', account_id:null, attivo:true, esterno:false, note:'' };
+  const accountsLiberi = Object.values(state.profiliById)
+    .filter(p => !isKioskRecord(p))
+    .filter(p => !state.operatori.find(x => x.account_id === p.id && x.id !== u.id));
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuovo Operatore' : 'Modifica Operatore'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  const selAccount = el('select', { name:'account_id' },
+    el('option', { value:'' }, '— nessuno —'),
+    ...accountsLiberi.map(p => el('option', { value:p.id }, `${p.nome} (${p.email})`)),
+  );
+  if (u.account_id) selAccount.value = u.account_id;
+
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Nome *'),
+      el('input', { type:'text', name:'nome', required:'true', value:u.nome })),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Numero Badge NFC'),
+        el('input', { type:'text', name:'numero_badge', value:u.numero_badge||'',
+                      placeholder:'es. 0001234567' })),
+      el('div', { class:'field' }, el('label', {}, 'Email (opz.)'),
+        el('input', { type:'email', name:'email', value:u.email||'',
+                      placeholder:'mario@azienda.it' })),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Account login collegato (opz.)'),
+      selAccount,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Collega questo operatore a un account login, se ne ha uno.')),
+    el('div', { class:'field' }, el('label', {}, 'Note (opz.)'),
+      el('textarea', { name:'note', rows:'2' }, u.note||'')),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Tipo'), (() => {
+        const s = el('select', { name:'esterno' },
+          el('option', { value:'false' }, 'Interno (Cablotec)'),
+          el('option', { value:'true' }, 'Esterno (collaboratore)'));
+        s.value = String(!!u.esterno); return s;
+      })()),
+      el('div', { class:'field' }, el('label', {}, 'Stato'), (() => {
+        const s = el('select', { name:'attivo' },
+          el('option', { value:'true' }, 'Attivo'),
+          el('option', { value:'false' }, 'Disattivato'));
+        s.value = String(!!u.attivo); return s;
+      })()),
+    ),
+  );
+  body.append(form);
+  modal.append(body);
+  modal.append(el('div', { class:'mfoot' },
+    el('button', { class:'btng', onclick:closeModal }, 'Annulla'),
+    el('button', { class:'btnp', onclick: async () => {
+      const fd = new FormData(form);
+      const payload = {
+        nome: (fd.get('nome')||'').trim(),
+        numero_badge: (fd.get('numero_badge')||'').trim() || null,
+        email: (fd.get('email')||'').trim() || null,
+        account_id: fd.get('account_id') || null,
+        note: (fd.get('note')||'').trim() || null,
+        attivo: fd.get('attivo') === 'true',
+        esterno: fd.get('esterno') === 'true',
+      };
+      if (!payload.nome) return toast('Nome obbligatorio', 'err');
+      const q = isNew
+        ? sb.from('operatori').insert(payload).select().single()
+        : sb.from('operatori').update(payload).eq('id', u.id).select().single();
+      const { data, error } = await q;
+      if (error) {
+        if (error.message.includes('operatori_badge_uniq')) return toast('Numero badge già in uso', 'err');
+        if (error.message.includes('operatori_email_uniq')) return toast('Email già in uso', 'err');
+        if (error.message.includes('operatori_account_uniq')) return toast('Account già collegato a un altro operatore', 'err');
+        return toast(error.message, 'err');
+      }
+      // Aggiorna cache locale
+      if (isNew) state.operatori.push(data);
+      else state.operatori = state.operatori.map(x => x.id === u.id ? data : x);
+      state.operatoriById[data.id] = data;
+      toast(isNew ? 'Operatore creato' : 'Operatore aggiornato');
+      closeModal(); renderTab('operatori');
+    }}, 'Salva'),
+  ));
+  openModal(modal);
+}
+
+// ═══════════════════════════════════════════════════════════
+// CLIENTI — anagrafica, CRUD, import Excel
+// ═══════════════════════════════════════════════════════════
+
+function renderClienti(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const search = (state.cliSearch || '').toLowerCase();
+  const filter = state.cliFilter || 'attivi';
+
+  let list = state.clienti;
+  if (filter === 'attivi')    list = list.filter(c => c.attivo);
+  else if (filter === 'disattivi') list = list.filter(c => !c.attivo);
+  if (search) {
+    list = list.filter(c =>
+      (c.nome||'').toLowerCase().includes(search) ||
+      (c.ragione_sociale||'').toLowerCase().includes(search) ||
+      (c.referente||'').toLowerCase().includes(search) ||
+      (c.p_iva||'').toLowerCase().includes(search)
+    );
+  }
+  list = list.slice().sort((a,b) => (a.nome||'').localeCompare(b.nome||''));
+
+  // KPI
+  const tot = state.clienti.length;
+  const attivi = state.clienti.filter(c => c.attivo).length;
+  const disattivi = tot - attivi;
+
+  root.innerHTML = '';
+  root.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Totale'), el('div', { class:'kv ka' }, String(tot))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Attivi'), el('div', { class:'kv kg' }, String(attivi))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Disattivati'), el('div', { class:'kv' }, String(disattivi))),
+  ));
+
+  // Chips filtro
+  const chips = el('div', { class:'chips' });
+  [
+    { id:'all',       label:'Tutti' },
+    { id:'attivi',    label:'Attivi' },
+    { id:'disattivi', label:'Disattivati' },
+  ].forEach(opt => {
+    chips.append(el('div', {
+      class: 'chip' + (filter === opt.id ? ' act' : ''),
+      onclick: () => { state.cliFilter = opt.id; renderTab('clienti'); }
+    }, opt.label));
+  });
+  root.append(chips);
+
+  // Toolbar
+  const toolbar = el('div', { class:'toolbar' },
+    el('h2', {}, 'Clienti'),
+    el('input', {
+      type:'text', class:'search',
+      placeholder:'Cerca per nome, ragione sociale, P.IVA, referente…',
+      value: state.cliSearch || '',
+      oninput: (e) => { state.cliSearch = e.target.value; renderTab('clienti'); }
+    }),
+  );
+  if (isAdmin) {
+    toolbar.append(
+      el('label', { class:'btng', style:'position:relative;cursor:pointer;' },
+        '⬆ Importa Excel',
+        el('input', {
+          type:'file', accept:'.xlsx,.xls',
+          style:'position:absolute;inset:0;opacity:0;cursor:pointer;',
+          onchange: (e) => clientiImportExcel(e.target.files[0]),
+        }),
+      ),
+      el('button', { class:'btng', onclick:clientiExportExcel }, '⬇ Esporta Excel'),
+      el('button', { class:'btnp', onclick:()=>openClienteModal() }, '+ Nuovo Cliente'),
+    );
+  }
+  root.append(toolbar);
+
+  if (list.length === 0) {
+    root.append(el('div', { class:'empty' },
+      state.clienti.length === 0
+        ? 'Nessun cliente. Importa un Excel o creane uno nuovo.'
+        : 'Nessun cliente corrisponde ai filtri.'
+    ));
+    return;
+  }
+
+  // Tabella
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Nome'),
+    el('th', {}, 'Ragione sociale'),
+    el('th', {}, 'P. IVA'),
+    el('th', {}, 'Referente'),
+    el('th', {}, 'Telefono'),
+    el('th', { class:'tc' }, 'Stato'),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+  const tb = el('tbody');
+  list.forEach(c => {
+    tb.append(el('tr', {},
+      el('td', {}, c.nome || '—'),
+      el('td', { style:'color:var(--mut);font-size:11px;' }, c.ragione_sociale || ''),
+      el('td', { class:'mono', style:'font-size:11px;' }, c.p_iva || ''),
+      el('td', {}, c.referente || ''),
+      el('td', { class:'mono', style:'font-size:11px;' }, c.telefono || ''),
+      el('td', { class:'tc' }, c.attivo
+        ? el('span', { class:'badge bok' }, 'attivo')
+        : el('span', { class:'badge bgry' }, 'disatt.')),
+      el('td', { class:'tc' },
+        isAdmin
+          ? el('span', {},
+              el('button', { class:'btnsm', onclick:()=>openClienteModal(c) }, 'Modifica'),
+              ' ',
+              el('button', { class:'btnd', onclick:()=>deleteCliente(c) }, 'Elimina'),
+            )
+          : el('button', { class:'btnsm', onclick:()=>openClienteModal(c) }, 'Vedi')
+      ),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+}
+
+function openClienteModal(c) {
+  const isNew = !c;
+  const isAdmin = state.profile?.ruolo === 'admin';
+  c = c || { nome:'', ragione_sociale:'', indirizzo:'', p_iva:'', referente:'', email:'', telefono:'', note:'', attivo:true };
+  const readonly = !isAdmin;
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuovo Cliente' : (readonly ? 'Cliente' : 'Modifica Cliente')),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  const inNome = el('input', { type:'text', name:'nome', value:c.nome||'', required:'true' });
+  const inRagSoc = el('input', { type:'text', name:'ragione_sociale', value:c.ragione_sociale||'' });
+  const inIndirizzo = el('input', { type:'text', name:'indirizzo', value:c.indirizzo||'' });
+  const inPIva = el('input', { type:'text', name:'p_iva', value:c.p_iva||'' });
+  const inReferente = el('input', { type:'text', name:'referente', value:c.referente||'' });
+  const inEmail = el('input', { type:'email', name:'email', value:c.email||'' });
+  const inTelefono = el('input', { type:'text', name:'telefono', value:c.telefono||'' });
+  const inNote = el('textarea', { name:'note', rows:'2' }, c.note || '');
+  const selAttivo = el('select', { name:'attivo' },
+    el('option', { value:'true' }, 'Attivo'),
+    el('option', { value:'false' }, 'Disattivato'));
+  selAttivo.value = String(!!c.attivo);
+
+  if (readonly) {
+    [inNome, inRagSoc, inIndirizzo, inPIva, inReferente, inEmail, inTelefono, inNote, selAttivo]
+      .forEach(i => i.disabled = true);
+  }
+
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Nome breve *'), inNome,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Es. "TEMA SINERGIE" — usato come identificativo veloce nelle operazioni.')),
+    el('div', { class:'field' }, el('label', {}, 'Ragione sociale completa'), inRagSoc),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'P. IVA / C.F.'), inPIva),
+      el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Indirizzo'), inIndirizzo),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Referente'), inReferente),
+      el('div', { class:'field' }, el('label', {}, 'Telefono'), inTelefono),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Email'), inEmail),
+    el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
+  );
+
+  body.append(form);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  if (isAdmin) {
+    const btnSave = el('button', { class:'btnp' }, 'Salva');
+    btnSave.onclick = async () => {
+      const fd = new FormData(form);
+      const payload = {
+        nome: (fd.get('nome')||'').trim(),
+        ragione_sociale: (fd.get('ragione_sociale')||'').trim() || null,
+        indirizzo: (fd.get('indirizzo')||'').trim() || null,
+        p_iva: (fd.get('p_iva')||'').trim() || null,
+        referente: (fd.get('referente')||'').trim() || null,
+        email: (fd.get('email')||'').trim() || null,
+        telefono: (fd.get('telefono')||'').trim() || null,
+        note: (fd.get('note')||'').trim() || null,
+        attivo: fd.get('attivo') === 'true',
+      };
+      if (!payload.nome) return toast('Nome obbligatorio', 'err');
+      btnSave.disabled = true;
+      btnSave.textContent = 'Salvataggio…';
+      try {
+        const q = isNew
+          ? sb.from('clienti').insert(payload).select().single()
+          : sb.from('clienti').update(payload).eq('id', c.id).select().single();
+        const { data, error } = await q;
+        if (error) {
+          btnSave.disabled = false;
+          btnSave.textContent = 'Salva';
+          if (error.code === '23505') return toast('Nome cliente già esistente', 'err');
+          return toast(error.message, 'err');
+        }
+        if (isNew) {
+          if (!state.clienti.find(x => x.id === data.id)) state.clienti.push(data);
+        } else {
+          state.clienti = state.clienti.map(x => x.id === c.id ? data : x);
+        }
+        toast(isNew ? 'Cliente creato' : 'Cliente aggiornato');
+        closeModal(); renderTab('clienti');
+      } catch (e) {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Salva';
+        toast('Errore di rete: '+(e.message||e), 'err');
+      }
+    };
+    foot.append(btnSave);
+  }
+  modal.append(foot);
+  openModal(modal);
+}
+
+async function deleteCliente(c) {
+  if (!confirm(`Eliminare il cliente "${c.nome}"?\nNon sarà possibile se ha operazioni associate.`)) return;
+  const { data, error } = await sb.from('clienti').delete().eq('id', c.id).select();
+  if (error) {
+    if (error.code === '23503') return toast('Impossibile: ci sono operazioni legate a questo cliente', 'err');
+    return toast(error.message, 'err');
+  }
+  if (!data || data.length === 0) {
+    return toast('Eliminazione bloccata: verifica le policy DELETE su clienti', 'err');
+  }
+  state.clienti = state.clienti.filter(x => x.id !== c.id);
+  toast('Cliente eliminato'); renderTab('clienti');
+}
+
+// ─── Import Excel ───
+async function clientiImportExcel(file) {
+  if (!file) return;
+  if (typeof XLSX === 'undefined') {
+    toast('Libreria Excel non caricata, ricarica la pagina', 'err');
+    return;
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval:'', raw:false });
+    if (!rows.length) { toast('File vuoto', 'err'); return; }
+    openClientiImportPreviewModal(rows);
+  } catch (e) {
+    toast('Errore lettura file: '+(e.message||e), 'err');
+  }
+}
+
+function openClientiImportPreviewModal(rows) {
+  const headers = Object.keys(rows[0]);
+  const findCol = (...candidati) => {
+    for (const c of candidati) {
+      const found = headers.find(h => h.toLowerCase().trim() === c.toLowerCase());
+      if (found) return found;
+    }
+    return null;
+  };
+  const colNome = findCol('nome','cliente','name','customer');
+  const colRagSoc = findCol('ragione sociale','ragione_sociale','rag_soc','denominazione');
+  const colIndir = findCol('indirizzo','address','via');
+  const colPIva = findCol('p.iva','p_iva','partita iva','partita_iva','piva','vat','codice fiscale','cf');
+  const colReferente = findCol('referente','contatto','contact');
+  const colEmail = findCol('email','e-mail','mail');
+  const colTel = findCol('telefono','tel','phone');
+  const colNote = findCol('note','notes','annotazioni');
+
+  const parsed = rows.map((r, idx) => ({
+    _row: idx + 2,
+    nome: (colNome ? r[colNome] : '').toString().trim(),
+    ragione_sociale: colRagSoc ? (r[colRagSoc]||'').toString().trim() || null : null,
+    indirizzo: colIndir ? (r[colIndir]||'').toString().trim() || null : null,
+    p_iva: colPIva ? (r[colPIva]||'').toString().trim() || null : null,
+    referente: colReferente ? (r[colReferente]||'').toString().trim() || null : null,
+    email: colEmail ? (r[colEmail]||'').toString().trim() || null : null,
+    telefono: colTel ? (r[colTel]||'').toString().trim() || null : null,
+    note: colNote ? (r[colNote]||'').toString().trim() || null : null,
+  }));
+
+  const errors = [];
+  const nomiVisti = new Set();
+  parsed.forEach(p => {
+    if (!p.nome) errors.push(`Riga ${p._row}: nome mancante`);
+    else if (nomiVisti.has(p.nome.toLowerCase()))
+      errors.push(`Riga ${p._row}: nome "${p.nome}" duplicato nel file`);
+    else nomiVisti.add(p.nome.toLowerCase());
+  });
+  const validi = parsed.filter(p => p.nome);
+
+  const nomiInDB = new Set(state.clienti.map(c => (c.nome||'').toLowerCase()));
+  const nuovi = validi.filter(p => !nomiInDB.has(p.nome.toLowerCase()));
+  const aggiornamenti = validi.filter(p => nomiInDB.has(p.nome.toLowerCase()));
+
+  const modal = el('div', { class:'modal', style:'max-width:680px' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Anteprima import clienti'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+
+  body.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Righe lette'), el('div', { class:'kv' }, String(rows.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Nuovi'), el('div', { class:'kv kg' }, String(nuovi.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Da aggiornare'), el('div', { class:'kv ky' }, String(aggiornamenti.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Errori'), el('div', { class:'kv kr' }, String(errors.length))),
+  ));
+
+  body.append(el('div', { class:'sub', style:'margin:16px 0 8px;' }, 'Mappatura colonne riconosciute:'));
+  const mapBox = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;font-family:monospace;font-size:11px;line-height:1.8;' });
+  [
+    ['nome', colNome],
+    ['ragione_sociale', colRagSoc],
+    ['indirizzo', colIndir],
+    ['p_iva', colPIva],
+    ['referente', colReferente],
+    ['email', colEmail],
+    ['telefono', colTel],
+    ['note', colNote],
+  ].forEach(([campo, col]) => {
+    mapBox.append(el('div', {},
+      el('span', { style:'color:var(--mut)' }, campo+': '),
+      el('span', { style: col ? 'color:var(--grn)' : 'color:var(--mut)' },
+        col ? `"${col}"` : '— non trovato —'),
+    ));
+  });
+  body.append(mapBox);
+
+  if (errors.length) {
+    body.append(el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--red);' }, 'Errori:'));
+    const errBox = el('div', { style:'max-height:120px;overflow:auto;background:rgba(255,78,107,.08);border:1px solid var(--red);border-radius:4px;padding:10px;font-family:monospace;font-size:11px;' });
+    errors.slice(0,20).forEach(e => errBox.append(el('div', {}, e)));
+    if (errors.length > 20) errBox.append(el('div', { style:'color:var(--mut);margin-top:4px;' }, `... e altri ${errors.length-20}`));
+    body.append(errBox);
+  }
+
+  if (validi.length) {
+    body.append(el('div', { class:'sub', style:'margin:14px 0 6px;' }, `Anteprima (prime ${Math.min(5, validi.length)} righe valide):`));
+    const tbl = el('table', { class:'rt', style:'font-size:11px;' });
+    tbl.append(el('thead', {}, el('tr', {},
+      el('th', {}, 'Nome'), el('th', {}, 'Rag. soc.'), el('th', {}, 'P.IVA'), el('th', {}, 'Referente'),
+    )));
+    const tb = el('tbody');
+    validi.slice(0,5).forEach(p => tb.append(el('tr', {},
+      el('td', {}, p.nome),
+      el('td', {}, p.ragione_sociale || ''),
+      el('td', { class:'mono' }, p.p_iva || ''),
+      el('td', {}, p.referente || ''),
+    )));
+    tbl.append(tb);
+    body.append(tbl);
+  }
+
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
+  if (validi.length) {
+    foot.append(el('button', {
+      class:'btnp',
+      onclick: () => clientiImportEsegui(nuovi, aggiornamenti),
+    }, `Importa ${validi.length} clienti`));
+  }
+  modal.append(foot);
+  openModal(modal);
+}
+
+async function clientiImportEsegui(nuovi, aggiornamenti) {
+  closeModal();
+  let okIns = 0, errIns = 0, okUpd = 0, errUpd = 0;
+
+  if (nuovi.length) {
+    const batch = nuovi.map(p => ({
+      nome: p.nome, ragione_sociale: p.ragione_sociale, indirizzo: p.indirizzo,
+      p_iva: p.p_iva, referente: p.referente, email: p.email,
+      telefono: p.telefono, note: p.note,
+    }));
+    const { data, error } = await sb.from('clienti').insert(batch).select();
+    if (error) {
+      errIns = nuovi.length;
+      toast('Errore insert: '+error.message, 'err');
+    } else {
+      okIns = data.length;
+      data.forEach(d => {
+        if (!state.clienti.find(x => x.id === d.id)) state.clienti.push(d);
+      });
+    }
+  }
+
+  for (const p of aggiornamenti) {
+    const existing = state.clienti.find(c => (c.nome||'').toLowerCase() === p.nome.toLowerCase());
+    if (!existing) { errUpd++; continue; }
+    const { data, error } = await sb.from('clienti').update({
+      ragione_sociale: p.ragione_sociale, indirizzo: p.indirizzo,
+      p_iva: p.p_iva, referente: p.referente,
+      email: p.email, telefono: p.telefono, note: p.note,
+    }).eq('id', existing.id).select().single();
+    if (error) errUpd++;
+    else {
+      okUpd++;
+      state.clienti = state.clienti.map(x => x.id === existing.id ? data : x);
+    }
+  }
+
+  toast(`Import completato: ${okIns} nuovi, ${okUpd} aggiornati${errIns||errUpd ? `, ${errIns+errUpd} errori` : ''}`,
+        (errIns||errUpd) ? 'err' : 'ok');
+  renderTab('clienti');
+}
+
+function clientiExportExcel() {
+  if (typeof XLSX === 'undefined') {
+    toast('Libreria Excel non caricata', 'err');
+    return;
+  }
+  const rows = state.clienti.map(c => ({
+    nome: c.nome,
+    ragione_sociale: c.ragione_sociale || '',
+    indirizzo: c.indirizzo || '',
+    p_iva: c.p_iva || '',
+    referente: c.referente || '',
+    email: c.email || '',
+    telefono: c.telefono || '',
+    note: c.note || '',
+    attivo: c.attivo ? 'sì' : 'no',
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:24},{wch:32},{wch:30},{wch:14},{wch:20},{wch:24},{wch:14},{wch:30},{wch:8}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Clienti');
+  XLSX.writeFile(wb, 'clienti_'+new Date().toISOString().substring(0,10)+'.xlsx');
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// ARTICOLI — anagrafica codici prodotto, CRUD, import Excel
+// ═══════════════════════════════════════════════════════════
+function renderArticoli(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const search = (state.artSearch || '').toLowerCase();
+  const filter = state.artFilter || 'attivi';
+
+  let list = state.articoli;
+  if (filter === 'attivi')    list = list.filter(a => a.attivo);
+  else if (filter === 'disattivi') list = list.filter(a => !a.attivo);
+  if (search) {
+    list = list.filter(a =>
+      (a.codice||'').toLowerCase().includes(search) ||
+      (a.descrizione||'').toLowerCase().includes(search) ||
+      (a.categoria||'').toLowerCase().includes(search)
+    );
+  }
+  list = list.slice().sort((a,b) => (a.codice||'').localeCompare(b.codice||''));
+
+  const tot = state.articoli.length;
+  const attivi = state.articoli.filter(a => a.attivo).length;
+
+  root.innerHTML = '';
+  root.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Totale'), el('div', { class:'kv ka' }, String(tot))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Attivi'), el('div', { class:'kv kg' }, String(attivi))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Disattivati'), el('div', { class:'kv' }, String(tot - attivi))),
+  ));
+
+  const chips = el('div', { class:'chips' });
+  [
+    { id:'all',       label:'Tutti' },
+    { id:'attivi',    label:'Attivi' },
+    { id:'disattivi', label:'Disattivati' },
+  ].forEach(opt => {
+    chips.append(el('div', {
+      class: 'chip' + (filter === opt.id ? ' act' : ''),
+      onclick: () => { state.artFilter = opt.id; renderTab('articoli'); }
+    }, opt.label));
+  });
+  root.append(chips);
+
+  const toolbar = el('div', { class:'toolbar' },
+    el('h2', {}, 'Articoli'),
+    el('input', {
+      type:'text', class:'search',
+      placeholder:'Cerca per codice, descrizione, categoria…',
+      value: state.artSearch || '',
+      oninput: (e) => { state.artSearch = e.target.value; renderTab('articoli'); }
+    }),
+  );
+  if (isAdmin) {
+    toolbar.append(
+      el('label', { class:'btng', style:'position:relative;cursor:pointer;' },
+        '⬆ Importa Excel',
+        el('input', {
+          type:'file', accept:'.xlsx,.xls',
+          style:'position:absolute;inset:0;opacity:0;cursor:pointer;',
+          onchange: (e) => articoliImportExcel(e.target.files[0]),
+        }),
+      ),
+      el('button', { class:'btng', onclick:articoliExportExcel }, '⬇ Esporta Excel'),
+      el('button', { class:'btnp', onclick:()=>openArticoloModal() }, '+ Nuovo Articolo'),
+    );
+  }
+  root.append(toolbar);
+
+  if (list.length === 0) {
+    root.append(el('div', { class:'empty' },
+      state.articoli.length === 0
+        ? 'Nessun articolo. Importa un Excel o creane uno nuovo.'
+        : 'Nessun articolo corrisponde ai filtri.'
+    ));
+    return;
+  }
+
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Codice'),
+    el('th', {}, 'Descrizione'),
+    el('th', {}, 'Categoria'),
+    el('th', {}, 'Note'),
+    el('th', { class:'tc' }, 'Stato'),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+  const tb = el('tbody');
+  list.forEach(a => {
+    tb.append(el('tr', {},
+      el('td', { class:'cod-cell' }, a.codice || '—'),
+      el('td', {}, a.descrizione || ''),
+      el('td', { style:'color:var(--mut);font-size:11px;' }, a.categoria || ''),
+      el('td', { style:'max-width:280px;font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, a.note || ''),
+      el('td', { class:'tc' }, a.attivo
+        ? el('span', { class:'badge bok' }, 'attivo')
+        : el('span', { class:'badge bgry' }, 'disatt.')),
+      el('td', { class:'tc' },
+        isAdmin
+          ? el('span', {},
+              el('button', { class:'btnsm', onclick:()=>openArticoloModal(a) }, 'Modifica'),
+              ' ',
+              el('button', { class:'btnd', onclick:()=>deleteArticolo(a) }, 'Elimina'),
+            )
+          : el('button', { class:'btnsm', onclick:()=>openArticoloModal(a) }, 'Vedi')
+      ),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+}
+
+function openArticoloModal(a) {
+  const isNew = !a;
+  const isAdmin = state.profile?.ruolo === 'admin';
+  a = a || { codice:'', descrizione:'', categoria:'', note:'', attivo:true };
+  const readonly = !isAdmin;
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuovo Articolo' : (readonly ? 'Articolo' : 'Modifica Articolo')),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  const inCodice = el('input', { type:'text', name:'codice', value:a.codice||'', required:'true' });
+  const inDesc = el('input', { type:'text', name:'descrizione', value:a.descrizione||'' });
+  const inCategoria = el('input', { type:'text', name:'categoria', value:a.categoria||'' });
+  const inNote = el('textarea', { name:'note', rows:'2' }, a.note || '');
+  const selAttivo = el('select', { name:'attivo' },
+    el('option', { value:'true' }, 'Attivo'),
+    el('option', { value:'false' }, 'Disattivato'));
+  selAttivo.value = String(!!a.attivo);
+
+  if (readonly) {
+    [inCodice, inDesc, inCategoria, inNote, selAttivo].forEach(i => i.disabled = true);
+  }
+
+  form.append(
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Codice *'), inCodice),
+      el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Descrizione'), inDesc),
+    el('div', { class:'field' }, el('label', {}, 'Categoria'), inCategoria,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Es. "Elettronica", "Meccanica", "Cablaggi" — utile per raggruppamenti futuri.')),
+    el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
+  );
+
+  body.append(form);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  if (isAdmin) {
+    const btnSave = el('button', { class:'btnp' }, 'Salva');
+    btnSave.onclick = async () => {
+      const fd = new FormData(form);
+      const payload = {
+        codice: (fd.get('codice')||'').trim(),
+        descrizione: (fd.get('descrizione')||'').trim() || null,
+        categoria: (fd.get('categoria')||'').trim() || null,
+        note: (fd.get('note')||'').trim() || null,
+        attivo: fd.get('attivo') === 'true',
+      };
+      if (!payload.codice) return toast('Codice obbligatorio', 'err');
+      btnSave.disabled = true;
+      btnSave.textContent = 'Salvataggio…';
+      try {
+        const q = isNew
+          ? sb.from('articoli').insert(payload).select().single()
+          : sb.from('articoli').update(payload).eq('id', a.id).select().single();
+        const { data, error } = await q;
+        if (error) {
+          btnSave.disabled = false;
+          btnSave.textContent = 'Salva';
+          if (error.code === '23505') return toast('Codice già esistente', 'err');
+          return toast(error.message, 'err');
+        }
+        if (isNew) {
+          if (!state.articoli.find(x => x.id === data.id)) state.articoli.push(data);
+        } else {
+          state.articoli = state.articoli.map(x => x.id === a.id ? data : x);
+        }
+        toast(isNew ? 'Articolo creato' : 'Articolo aggiornato');
+        closeModal(); renderTab('articoli');
+      } catch (e) {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Salva';
+        toast('Errore di rete: '+(e.message||e), 'err');
+      }
+    };
+    foot.append(btnSave);
+  }
+  modal.append(foot);
+  openModal(modal);
+}
+
+async function deleteArticolo(a) {
+  if (!confirm(`Eliminare l'articolo "${a.codice}"?\nNon sarà possibile se ha operazioni associate.`)) return;
+  const { data, error } = await sb.from('articoli').delete().eq('id', a.id).select();
+  if (error) {
+    if (error.code === '23503') return toast('Impossibile: ci sono operazioni legate a questo articolo', 'err');
+    return toast(error.message, 'err');
+  }
+  if (!data || data.length === 0) {
+    return toast('Eliminazione bloccata: verifica le policy DELETE su articoli', 'err');
+  }
+  state.articoli = state.articoli.filter(x => x.id !== a.id);
+  toast('Articolo eliminato'); renderTab('articoli');
+}
+
+// ─── Import Excel ───
+async function articoliImportExcel(file) {
+  if (!file) return;
+  if (typeof XLSX === 'undefined') {
+    toast('Libreria Excel non caricata, ricarica la pagina', 'err');
+    return;
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval:'', raw:false });
+    if (!rows.length) { toast('File vuoto', 'err'); return; }
+    openArticoliImportPreviewModal(rows);
+  } catch (e) {
+    toast('Errore lettura file: '+(e.message||e), 'err');
+  }
+}
+
+function openArticoliImportPreviewModal(rows) {
+  const headers = Object.keys(rows[0]);
+  const findCol = (...candidati) => {
+    for (const c of candidati) {
+      const found = headers.find(h => h.toLowerCase().trim() === c.toLowerCase());
+      if (found) return found;
+    }
+    return null;
+  };
+  const colCodice = findCol('codice','code','articolo','art','sku','part number','pn');
+  const colDesc = findCol('descrizione','descr','description','desc');
+  const colCategoria = findCol('categoria','category','tipo','famiglia');
+  const colNote = findCol('note','notes','annotazioni');
+
+  const parsed = rows.map((r, idx) => ({
+    _row: idx + 2,
+    codice: (colCodice ? r[colCodice] : '').toString().trim(),
+    descrizione: colDesc ? (r[colDesc]||'').toString().trim() || null : null,
+    categoria: colCategoria ? (r[colCategoria]||'').toString().trim() || null : null,
+    note: colNote ? (r[colNote]||'').toString().trim() || null : null,
+  }));
+
+  const errors = [];
+  const codiciVisti = new Set();
+  parsed.forEach(p => {
+    if (!p.codice) errors.push(`Riga ${p._row}: codice mancante`);
+    else if (codiciVisti.has(p.codice.toLowerCase()))
+      errors.push(`Riga ${p._row}: codice "${p.codice}" duplicato nel file`);
+    else codiciVisti.add(p.codice.toLowerCase());
+  });
+  const validi = parsed.filter(p => p.codice);
+
+  const codiciInDB = new Set(state.articoli.map(a => (a.codice||'').toLowerCase()));
+  const nuovi = validi.filter(p => !codiciInDB.has(p.codice.toLowerCase()));
+  const aggiornamenti = validi.filter(p => codiciInDB.has(p.codice.toLowerCase()));
+
+  const modal = el('div', { class:'modal', style:'max-width:680px' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Anteprima import articoli'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+
+  body.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Righe lette'), el('div', { class:'kv' }, String(rows.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Nuovi'), el('div', { class:'kv kg' }, String(nuovi.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Da aggiornare'), el('div', { class:'kv ky' }, String(aggiornamenti.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Errori'), el('div', { class:'kv kr' }, String(errors.length))),
+  ));
+
+  body.append(el('div', { class:'sub', style:'margin:16px 0 8px;' }, 'Mappatura colonne riconosciute:'));
+  const mapBox = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;font-family:monospace;font-size:11px;line-height:1.8;' });
+  [
+    ['codice', colCodice],
+    ['descrizione', colDesc],
+    ['categoria', colCategoria],
+    ['note', colNote],
+  ].forEach(([campo, col]) => {
+    mapBox.append(el('div', {},
+      el('span', { style:'color:var(--mut)' }, campo+': '),
+      el('span', { style: col ? 'color:var(--grn)' : 'color:var(--mut)' },
+        col ? `"${col}"` : '— non trovato —'),
+    ));
+  });
+  body.append(mapBox);
+
+  if (errors.length) {
+    body.append(el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--red);' }, 'Errori:'));
+    const errBox = el('div', { style:'max-height:120px;overflow:auto;background:rgba(255,78,107,.08);border:1px solid var(--red);border-radius:4px;padding:10px;font-family:monospace;font-size:11px;' });
+    errors.slice(0,20).forEach(e => errBox.append(el('div', {}, e)));
+    if (errors.length > 20) errBox.append(el('div', { style:'color:var(--mut);margin-top:4px;' }, `... e altri ${errors.length-20}`));
+    body.append(errBox);
+  }
+
+  if (validi.length) {
+    body.append(el('div', { class:'sub', style:'margin:14px 0 6px;' }, `Anteprima (prime ${Math.min(5, validi.length)} righe valide):`));
+    const tbl = el('table', { class:'rt', style:'font-size:11px;' });
+    tbl.append(el('thead', {}, el('tr', {},
+      el('th', {}, 'Codice'), el('th', {}, 'Descrizione'), el('th', {}, 'Categoria'),
+    )));
+    const tb = el('tbody');
+    validi.slice(0,5).forEach(p => tb.append(el('tr', {},
+      el('td', { class:'cod-cell' }, p.codice),
+      el('td', {}, p.descrizione || ''),
+      el('td', {}, p.categoria || ''),
+    )));
+    tbl.append(tb);
+    body.append(tbl);
+  }
+
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
+  if (validi.length) {
+    foot.append(el('button', {
+      class:'btnp',
+      onclick: () => articoliImportEsegui(nuovi, aggiornamenti),
+    }, `Importa ${validi.length} articoli`));
+  }
+  modal.append(foot);
+  openModal(modal);
+}
+
+async function articoliImportEsegui(nuovi, aggiornamenti) {
+  closeModal();
+  let okIns = 0, errIns = 0, okUpd = 0, errUpd = 0;
+
+  // Insert in batch da 500 per evitare payload eccessivi (gli articoli possono essere molti)
+  const batchSize = 500;
+  for (let i = 0; i < nuovi.length; i += batchSize) {
+    const batch = nuovi.slice(i, i + batchSize).map(p => ({
+      codice: p.codice, descrizione: p.descrizione,
+      categoria: p.categoria, note: p.note,
+    }));
+    const { data, error } = await sb.from('articoli').insert(batch).select();
+    if (error) {
+      errIns += batch.length;
+      toast('Errore insert: '+error.message, 'err');
+    } else {
+      okIns += data.length;
+      data.forEach(d => {
+        if (!state.articoli.find(x => x.id === d.id)) state.articoli.push(d);
+      });
+    }
+  }
+
+  for (const p of aggiornamenti) {
+    const existing = state.articoli.find(a => (a.codice||'').toLowerCase() === p.codice.toLowerCase());
+    if (!existing) { errUpd++; continue; }
+    const { data, error } = await sb.from('articoli').update({
+      descrizione: p.descrizione, categoria: p.categoria, note: p.note,
+    }).eq('id', existing.id).select().single();
+    if (error) errUpd++;
+    else {
+      okUpd++;
+      state.articoli = state.articoli.map(x => x.id === existing.id ? data : x);
+    }
+  }
+
+  toast(`Import completato: ${okIns} nuovi, ${okUpd} aggiornati${errIns||errUpd ? `, ${errIns+errUpd} errori` : ''}`,
+        (errIns||errUpd) ? 'err' : 'ok');
+  renderTab('articoli');
+}
+
+function articoliExportExcel() {
+  if (typeof XLSX === 'undefined') {
+    toast('Libreria Excel non caricata', 'err');
+    return;
+  }
+  const rows = state.articoli.map(a => ({
+    codice: a.codice,
+    descrizione: a.descrizione || '',
+    categoria: a.categoria || '',
+    note: a.note || '',
+    attivo: a.attivo ? 'sì' : 'no',
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:24},{wch:40},{wch:18},{wch:30},{wch:8}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Articoli');
+  XLSX.writeFile(wb, 'articoli_'+new Date().toISOString().substring(0,10)+'.xlsx');
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// PLACEHOLDER generico per tab non ancora implementate
+// ═══════════════════════════════════════════════════════════
+function renderPlaceholder(root, titolo, descrizione, stepLabel) {
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, titolo)));
+  root.append(el('div', { class:'placeholder-card' },
+    el('div', { class:'placeholder-icon' }, '🛠'),
+    el('div', { class:'placeholder-title' }, titolo + ' in arrivo'),
+    el('div', { class:'placeholder-sub' }, descrizione),
+    el('div', { class:'placeholder-meta' }, stepLabel + ' del piano di sviluppo'),
+  ));
+}
+
+// ═══════════════════════════════════════════════════════════
+// TIPI LAVORAZIONE — anagrafica piccola, lista chiusa
+// ═══════════════════════════════════════════════════════════
+const TIPI_LAV_COLORI = [
+  '#4eb8ff', '#ffcc4e', '#4effa3', '#ff6b35',
+  '#d4ff4e', '#ff4e6b', '#b88fff', '#6b6b64',
+];
+
+function renderTipiLavorazione(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const list = state.tipiLav.slice().sort((a,b) => (a.ordine||0) - (b.ordine||0));
+
+  root.innerHTML = '';
+  const toolbar = el('div', { class:'toolbar' },
+    el('h2', {}, 'Tipi di lavorazione'),
+  );
+  if (isAdmin) {
+    toolbar.append(el('button', { class:'btnp', onclick:()=>openTipoLavModal() }, '+ Nuovo Tipo'));
+  }
+  root.append(toolbar);
+  root.append(el('div', { class:'sub', style:'margin-bottom:14px;' },
+    'Categorie di lavoro selezionabili dagli operatori al kiosk. L\'ordine determina come appaiono in lista.'));
+
+  if (list.length === 0) {
+    root.append(el('div', { class:'empty' }, 'Nessun tipo definito. Aggiungi il primo.'));
+    return;
+  }
+
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', { class:'tc', style:'width:60px;' }, 'Ord.'),
+    el('th', {}, 'Nome'),
+    el('th', { class:'tc' }, 'Colore'),
+    el('th', { class:'tc' }, 'Stato'),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+  const tb = el('tbody');
+  list.forEach(t => {
+    tb.append(el('tr', {},
+      el('td', { class:'tc mono' }, String(t.ordine || 0)),
+      el('td', {}, t.nome),
+      el('td', { class:'tc' }, el('span', {
+        style: `display:inline-block;width:24px;height:14px;border-radius:2px;background:${t.colore||'#6b6b64'};vertical-align:middle;border:1px solid var(--brd);`,
+      })),
+      el('td', { class:'tc' }, t.attivo
+        ? el('span', { class:'badge bok' }, 'attivo')
+        : el('span', { class:'badge bgry' }, 'disatt.')),
+      el('td', { class:'tc' },
+        isAdmin
+          ? el('span', {},
+              el('button', { class:'btnsm', onclick:()=>openTipoLavModal(t) }, 'Modifica'),
+              ' ',
+              el('button', { class:'btnd', onclick:()=>deleteTipoLav(t) }, 'Elimina'),
+            )
+          : '—'
+      ),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+}
+
+function openTipoLavModal(t) {
+  const isNew = !t;
+  // Calcola prossimo ordine se è nuovo
+  const nextOrdine = isNew
+    ? (Math.max(0, ...state.tipiLav.map(x => x.ordine||0)) + 1)
+    : t.ordine;
+  t = t || { nome:'', ordine: nextOrdine, colore: TIPI_LAV_COLORI[state.tipiLav.length % TIPI_LAV_COLORI.length], attivo:true };
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuovo Tipo di Lavorazione' : 'Modifica Tipo di Lavorazione'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  const inNome = el('input', { type:'text', name:'nome', value:t.nome||'', required:'true' });
+  const inOrdine = el('input', { type:'number', name:'ordine', value:String(t.ordine||0), min:'0' });
+  const selAttivo = el('select', { name:'attivo' },
+    el('option', { value:'true' }, 'Attivo'),
+    el('option', { value:'false' }, 'Disattivato'));
+  selAttivo.value = String(!!t.attivo);
+
+  // Selettore colori a palette
+  let coloreScelto = t.colore || TIPI_LAV_COLORI[0];
+  const palette = el('div', { style:'display:flex;flex-wrap:wrap;gap:6px;padding:6px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;' });
+  const refreshPalette = () => {
+    palette.innerHTML = '';
+    TIPI_LAV_COLORI.forEach(col => {
+      const sel = col === coloreScelto;
+      palette.append(el('button', {
+        type:'button',
+        style: `width:34px;height:28px;border-radius:3px;background:${col};border:2px solid ${sel?'var(--acc)':'transparent'};cursor:pointer;outline:none;`,
+        onclick: () => { coloreScelto = col; refreshPalette(); },
+      }));
+    });
+  };
+  refreshPalette();
+
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Nome *'), inNome,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Es. "Cablaggio", "Lavorazione meccanica", "Collaudo".')),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Ordine'), inOrdine,
+        el('div', { class:'sub', style:'margin-top:4px;' }, 'Posizione nella lista.')),
+      el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Colore'), palette),
+  );
+
+  body.append(form);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  const btnSave = el('button', { class:'btnp' }, 'Salva');
+  btnSave.onclick = async () => {
+    const fd = new FormData(form);
+    const payload = {
+      nome: (fd.get('nome')||'').trim(),
+      ordine: parseInt(fd.get('ordine')) || 0,
+      colore: coloreScelto,
+      attivo: fd.get('attivo') === 'true',
+    };
+    if (!payload.nome) return toast('Nome obbligatorio', 'err');
+    btnSave.disabled = true;
+    btnSave.textContent = 'Salvataggio…';
+    try {
+      const q = isNew
+        ? sb.from('tipi_lavorazione').insert(payload).select().single()
+        : sb.from('tipi_lavorazione').update(payload).eq('id', t.id).select().single();
+      const { data, error } = await q;
+      if (error) {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Salva';
+        if (error.code === '23505') return toast('Nome già esistente', 'err');
+        return toast(error.message, 'err');
+      }
+      if (isNew) {
+        if (!state.tipiLav.find(x => x.id === data.id)) state.tipiLav.push(data);
+      } else {
+        state.tipiLav = state.tipiLav.map(x => x.id === t.id ? data : x);
+      }
+      toast(isNew ? 'Tipo creato' : 'Tipo aggiornato');
+      closeModal(); renderTab('tipi_lav');
+    } catch (e) {
+      btnSave.disabled = false;
+      btnSave.textContent = 'Salva';
+      toast('Errore di rete: '+(e.message||e), 'err');
+    }
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+}
+
+async function deleteTipoLav(t) {
+  if (!confirm(`Eliminare il tipo "${t.nome}"?\nNon sarà possibile se ci sono sessioni di lavoro associate.`)) return;
+  const { data, error } = await sb.from('tipi_lavorazione').delete().eq('id', t.id).select();
+  if (error) {
+    if (error.code === '23503') return toast('Impossibile: ci sono sessioni di lavoro su questo tipo', 'err');
+    return toast(error.message, 'err');
+  }
+  if (!data || data.length === 0) {
+    return toast('Eliminazione bloccata: verifica le policy DELETE su tipi_lavorazione', 'err');
+  }
+  state.tipiLav = state.tipiLav.filter(x => x.id !== t.id);
+  toast('Tipo eliminato'); renderTab('tipi_lav');
+}
+
+async function deleteOperatore(u) {
+  // Verifico se è usato in qualche prenotazione (dalla cache, no fetch)
+  const count = state.prenOp.filter(r => r.operatore_id === u.id).length;
+  if (count > 0) return toast(`Impossibile: ${u.nome} è associato a ${count} prenotazioni`, 'err');
+  if (!confirm(`Eliminare l'operatore "${u.nome}"?`)) return;
+  const { error } = await sb.from('operatori').delete().eq('id', u.id);
+  if (error) return toast(error.message, 'err');
+  // Aggiorna subito la cache locale
+  state.operatori = state.operatori.filter(x => x.id !== u.id);
+  delete state.operatoriById[u.id];
+  toast('Operatore eliminato'); renderTab('operatori');
+}
+
+async function toggleRuolo(u) {
+  const nuovo = u.ruolo === 'admin' ? 'user' : 'admin';
+  const { error } = await sb.from('profili').update({ ruolo: nuovo }).eq('id', u.id);
+  if (error) return toast(error.message, 'err');
+  toast(`${u.nome || u.email} → ${nuovo}`);
+  renderTab('utenti');
+}
+
+function openModal(content) {
+  closeModal();
+  const bg = el('div', { class:'modal-bg', onclick:(e)=>{ if(e.target===bg) closeModal(); } });
+  bg.append(content);
+  $('#modal-root').append(bg);
+}
+function closeModal() { $('#modal-root').innerHTML = ''; }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+function openMezzoModal(m) {
+  const isNew = !m;
+  m = m || { nome:'', targa:'', tipo:'', colore:'#4eb8ff', attivo:true };
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuovo Mezzo' : 'Modifica Mezzo'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Nome'),
+      el('input', { type:'text', name:'nome', required:'true', value:m.nome })),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Targa'),
+        el('input', { type:'text', name:'targa', value:m.targa||'' })),
+      el('div', { class:'field' }, el('label', {}, 'Tipo'),
+        el('input', { type:'text', name:'tipo', value:m.tipo||'', placeholder:'Furgone, Auto, Camion…' })),
+    ),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Colore'),
+        el('input', { type:'color', name:'colore', value:m.colore||'#4eb8ff' })),
+      el('div', { class:'field' }, el('label', {}, 'Stato'), (() => {
+        const s = el('select', { name:'attivo' },
+          el('option', { value:'true' }, 'Attivo'),
+          el('option', { value:'false' }, 'Disattivato'));
+        s.value = String(!!m.attivo); return s;
+      })()),
+    ),
+  );
+  body.append(form);
+  modal.append(body);
+  modal.append(el('div', { class:'mfoot' },
+    el('button', { class:'btng', onclick:closeModal }, 'Annulla'),
+    el('button', { class:'btnp', onclick: async () => {
+      const fd = new FormData(form);
+      const payload = {
+        nome: fd.get('nome'), targa: fd.get('targa') || null,
+        tipo: fd.get('tipo') || null, colore: fd.get('colore'),
+        attivo: fd.get('attivo') === 'true',
+      };
+      if (!payload.nome) return toast('Nome obbligatorio', 'err');
+      const q = isNew
+        ? sb.from('mezzi').insert(payload).select().single()
+        : sb.from('mezzi').update(payload).eq('id', m.id).select().single();
+      const { data, error } = await q;
+      if (error) return toast(error.message, 'err');
+      // Aggiorna cache locale
+      if (isNew) state.mezzi.push(data);
+      else state.mezzi = state.mezzi.map(x => x.id === m.id ? data : x);
+      toast(isNew ? 'Mezzo creato' : 'Mezzo aggiornato');
+      closeModal(); renderTab('mezzi');
+    }}, 'Salva'),
+  ));
+  openModal(modal);
+}
+
+async function openPrenotazioneModal(p) {
+  const isNew = !p?.id;
+  p = p || {};
+  const today = toLocalISO(new Date());
+  const mezziAttivi = state.mezzi.filter(x=>x.attivo);
+  if (mezziAttivi.length === 0) return toast('Nessun mezzo attivo. Chiedi a un admin di aggiungerne uno.', 'err');
+  if (state.operatori.filter(u=>u.attivo).length === 0)
+    return toast('Nessun operatore configurato. Chiedi a un admin di aggiungerne almeno uno.', 'err');
+
+  let consegne = [];
+  let operatoriSel = [];  // ID degli operatori associati
+  if (!isNew) {
+    // Copio dalle consegne in cache (clone per non mutare la sorgente prima del salvataggio)
+    consegne = state.consegne.filter(c => c.prenotazione_id === p.id)
+      .sort((a,b) => (a.ordine||0) - (b.ordine||0))
+      .map(c => ({ ...c }));
+    operatoriSel = loadPrenotazioneOperatori(p.id);
+  } else {
+    // Se sto creando: pre-seleziono l'operatore collegato all'account corrente (se c'è)
+    const mioUtil = state.operatori.find(u => u.account_id === state.profile.id);
+    if (mioUtil) operatoriSel = [mioUtil.id];
+  }
+  const canEdit = isNew || p.utente_id === state.profile.id || state.profile.ruolo === 'admin';
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuova Prenotazione' : (canEdit ? 'Modifica Prenotazione' : 'Prenotazione')),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  const selMezzo = el('select', { name:'mezzo_id', required:'true' },
+    ...mezziAttivi.map(m => el('option', { value:m.id }, `${m.nome}${m.targa ? ' · '+m.targa : ''}`)));
+  if (p.mezzo_id) selMezzo.value = p.mezzo_id;
+  const selTipo = el('select', { name:'tipo', required:'true' },
+    ...TIPI.map(t => el('option', { value:t.id }, t.label)));
+  selTipo.value = p.tipo || 'trasferta';
+
+  form.append(
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Mezzo'), selMezzo),
+      el('div', { class:'field' }, el('label', {}, 'Tipo'), selTipo),
+    ),
+  );
+
+  // Multi-select operatori (obbligatorio) — dropdown searchable
+  const operatoriAttivi = state.operatori.filter(u => u.attivo && !isKioskRecord(u));
+
+  const selectedWrap = el('div', { class:'util-selected' });
+  const searchInput = el('input', {
+    type:'text', class:'util-search', placeholder:'Cerca per nome o badge…',
+    autocomplete:'off',
+  });
+  const dropList = el('div', { class:'util-droplist' });
+  const dropWrap = el('div', { class:'util-dropwrap' }, searchInput, dropList);
+
+  const renderSelected = () => {
+    selectedWrap.innerHTML = '';
+    if (operatoriSel.length === 0) {
+      selectedWrap.append(el('span', { class:'util-empty' }, 'Nessun operatore selezionato'));
+      return;
+    }
+    operatoriSel.forEach(uid => {
+      const u = state.operatoriById[uid];
+      if (!u) return;
+      selectedWrap.append(el('span', { class:'util-pill' },
+        el('span', {}, u.nome),
+        u.numero_badge ? el('span', { class:'util-pill-badge' }, '#'+u.numero_badge) : null,
+        canEdit ? el('button', {
+          type:'button', class:'util-pill-x',
+          onclick: () => {
+            operatoriSel = operatoriSel.filter(x => x !== uid);
+            renderSelected(); renderDropList();
+          },
+        }, '✕') : null,
+      ));
+    });
+  };
+
+  const renderDropList = () => {
+    const q = searchInput.value.trim().toLowerCase();
+    const filtered = operatoriAttivi.filter(u => {
+      if (!q) return true;
+      return (u.nome || '').toLowerCase().includes(q)
+          || (u.numero_badge || '').toLowerCase().includes(q);
+    });
+    dropList.innerHTML = '';
+    if (filtered.length === 0) {
+      dropList.append(el('div', { class:'util-noresult' }, 'Nessun operatore trovato'));
+      return;
+    }
+    filtered.forEach(u => {
+      const isSel = operatoriSel.includes(u.id);
+      dropList.append(el('div', {
+        class: 'util-row' + (isSel ? ' selected' : ''),
+        onclick: () => {
+          if (!canEdit) return;
+          if (isSel) operatoriSel = operatoriSel.filter(x => x !== u.id);
+          else operatoriSel.push(u.id);
+          renderSelected(); renderDropList();
+        },
+      },
+        el('span', { class:'util-row-chk' }, isSel ? '✓' : ''),
+        el('span', { class:'util-row-name' }, u.nome),
+        u.numero_badge ? el('span', { class:'util-row-badge' }, '#'+u.numero_badge) : null,
+      ));
+    });
+  };
+
+  searchInput.oninput = renderDropList;
+  renderSelected();
+  renderDropList();
+
+  form.append(
+    el('div', { class:'field' },
+      el('label', {}, 'Chi userà il mezzo *'),
+      selectedWrap,
+      dropWrap,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Cerca e clicca per selezionare. Almeno 1 obbligatorio.'),
+    ),
+  );
+
+  form.append(
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Data inizio'),
+        el('input', { type:'date', name:'data_inizio', required:'true', value:p.data_inizio||today })),
+      el('div', { class:'field' }, el('label', {}, 'Data fine'),
+        el('input', { type:'date', name:'data_fine', required:'true', value:p.data_fine||p.data_inizio||today })),
+    ),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Ora inizio (opz.)'),
+        el('input', { type:'time', name:'ora_inizio', value:p.ora_inizio||'' })),
+      el('div', { class:'field' }, el('label', {}, 'Ora fine (opz.)'),
+        el('input', { type:'time', name:'ora_fine', value:p.ora_fine||'' })),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Note (opz.)'),
+      el('textarea', { name:'note', rows:'2' }, p.note||'')),
+  );
+
+  const listaWrap = el('div', { class:'consegne-list' });
+  const renderConsegne = () => {
+    listaWrap.innerHTML = '';
+    if (consegne.length === 0) {
+      listaWrap.append(el('div', { class:'sub' }, 'Nessuna consegna. Aggiungine una se serve elencare destinazioni.'));
+    }
+    consegne.forEach((c, i) => {
+      listaWrap.append(el('div', { class:'consegna-row' },
+        el('div', { class:'num' }, String(i+1)),
+        el('input', { type:'text', placeholder:'Indirizzo / luogo', value:c.indirizzo||'',
+                      oninput: e => c.indirizzo = e.target.value }),
+        el('input', { type:'text', placeholder:'Cosa consegnare', value:c.descrizione||'',
+                      oninput: e => c.descrizione = e.target.value }),
+        el('button', { type:'button', class:'btnd', onclick: () => { consegne.splice(i,1); renderConsegne(); } }, '✕'),
+      ));
+    });
+  };
+  renderConsegne();
+
+  form.append(
+    el('div', { class:'field', style:'margin-top:8px' },
+      el('label', {}, 'Lista consegne / fermate'),
+      listaWrap,
+      el('button', { type:'button', class:'btnsm', style:'margin-top:8px;align-self:flex-start;',
+        onclick: () => { consegne.push({ indirizzo:'', descrizione:'', ordine:consegne.length, _new:true }); renderConsegne(); }
+      }, '+ Aggiungi consegna'),
+    ),
+  );
+
+  if (!canEdit) form.querySelectorAll('input,select,textarea,button').forEach(x=>x.disabled=true);
+
+  body.append(form);
+  if (!isNew) {
+    const u = state.profiliById[p.utente_id];
+    body.append(el('div', { class:'sub', style:'margin-top:10px' },
+      `Prenotato da ${u?.nome || u?.email || 'utente sconosciuto'}`));
+  }
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  if (!isNew && canEdit) {
+    foot.append(el('button', { class:'btnd', onclick: async () => {
+      if (!confirm('Eliminare questa prenotazione?')) return;
+      const { error } = await sb.from('prenotazioni').delete().eq('id', p.id);
+      if (error) return toast(error.message, 'err');
+      // Aggiorna subito la cache locale (non aspettiamo il realtime)
+      state.prenotazioni = state.prenotazioni.filter(x => x.id !== p.id);
+      state.consegne = state.consegne.filter(c => c.prenotazione_id !== p.id);
+      state.prenOp = state.prenOp.filter(r => r.prenotazione_id !== p.id);
+      toast('Prenotazione eliminata'); closeModal(); renderTab(state.currentTab);
+    }}, 'Elimina'));
+  }
+  if (canEdit) foot.append(el('button', { class:'btnp', onclick:save }, 'Salva'));
+  modal.append(foot);
+
+  async function save() {
+    const fd = new FormData(form);
+    const payload = {
+      mezzo_id: fd.get('mezzo_id'), tipo: fd.get('tipo'),
+      data_inizio: fd.get('data_inizio'), data_fine: fd.get('data_fine'),
+      ora_inizio: fd.get('ora_inizio') || null, ora_fine: fd.get('ora_fine') || null,
+      note: fd.get('note') || null,
+    };
+    if (!payload.mezzo_id || !payload.data_inizio || !payload.data_fine)
+      return toast('Compila i campi obbligatori', 'err');
+    if (payload.data_fine < payload.data_inizio)
+      return toast('Data fine non può essere prima dell\'inizio', 'err');
+    if (operatoriSel.length === 0)
+      return toast('Seleziona almeno un operatore del mezzo', 'err');
+
+    // CHECK SOVRAPPOSIZIONI prima di salvare
+    const conflitti = checkSovrapposizioni(
+      payload.mezzo_id, payload.data_inizio, payload.data_fine, isNew ? null : p.id
+    );
+    if (conflitti.length > 0) {
+      const m = state.mezzi.find(x => x.id === payload.mezzo_id);
+      const dettagli = conflitti.map(c => {
+        const u = state.profiliById[c.utente_id];
+        const periodo = c.data_inizio === c.data_fine
+          ? fmtIT(c.data_inizio)
+          : `${fmtIT(c.data_inizio)} → ${fmtIT(c.data_fine)}`;
+        return `• ${periodo} (${u?.nome || u?.email || 'utente'})`;
+      }).join('\n');
+      alert(`⚠ Mezzo "${m?.nome || ''}" già prenotato in quel periodo:\n\n${dettagli}\n\nScegli un altro periodo o un altro mezzo.`);
+      return;
+    }
+
+    let prenId = p.id;
+    let prenRow = null;
+    if (isNew) {
+      payload.utente_id = state.profile.id;
+      const { data, error } = await sb.from('prenotazioni').insert(payload).select().single();
+      if (error) {
+        if (error.message && error.message.includes('exclusion')) {
+          return toast('Mezzo già prenotato in quel periodo', 'err');
+        }
+        return toast(error.message, 'err');
+      }
+      prenId = data.id;
+      prenRow = data;
+    } else {
+      const { data, error } = await sb.from('prenotazioni').update(payload).eq('id', p.id).select().single();
+      if (error) {
+        if (error.message && error.message.includes('exclusion')) {
+          return toast('Mezzo già prenotato in quel periodo', 'err');
+        }
+        return toast(error.message, 'err');
+      }
+      prenRow = data;
+    }
+
+    // Aggiorno operatori associati: cancello tutti e reinserisco
+    await sb.from('prenotazioni_operatori').delete().eq('prenotazione_id', prenId);
+    let nuoviPrenUtil = [];
+    if (operatoriSel.length > 0) {
+      const rows = operatoriSel.map(uid => ({ prenotazione_id: prenId, operatore_id: uid }));
+      const { data, error } = await sb.from('prenotazioni_operatori').insert(rows).select();
+      if (error) return toast('Errore associazione operatori: '+error.message, 'err');
+      nuoviPrenUtil = data || rows;
+    }
+
+    await sb.from('consegne').delete().eq('prenotazione_id', prenId);
+    const validi = consegne.filter(c => (c.indirizzo||'').trim() || (c.descrizione||'').trim());
+    let nuoveConsegne = [];
+    if (validi.length) {
+      const rows = validi.map((c, i) => ({
+        prenotazione_id: prenId, ordine: i,
+        indirizzo: c.indirizzo || '', descrizione: c.descrizione || null,
+      }));
+      const { data, error } = await sb.from('consegne').insert(rows).select();
+      if (error) return toast('Salvato ma errore nelle consegne: '+error.message, 'err');
+      nuoveConsegne = data || [];
+    }
+
+    // Aggiorno la cache locale subito (non aspettiamo il realtime)
+    if (isNew) {
+      if (!state.prenotazioni.find(x => x.id === prenRow.id)) state.prenotazioni.push(prenRow);
+    } else {
+      state.prenotazioni = state.prenotazioni.map(x => x.id === prenId ? prenRow : x);
+    }
+    // Per pivot e consegne: rimuovo le righe duplicate (potrebbero arrivare dal realtime in parallelo)
+    const idsPrenUtil = new Set(nuoviPrenUtil.map(r => r.prenotazione_id+'|'+r.operatore_id));
+    state.prenOp = state.prenOp.filter(r => r.prenotazione_id !== prenId).concat(nuoviPrenUtil);
+    const idsConsegne = new Set(nuoveConsegne.map(r => r.id));
+    state.consegne = state.consegne.filter(c => c.prenotazione_id !== prenId).concat(nuoveConsegne);
+
+    toast(isNew ? 'Prenotazione creata' : 'Prenotazione aggiornata');
+    closeModal(); renderTab(state.currentTab);
+  }
+
+  openModal(modal);
+}
+
+// ═══════════════════════════════════════════════════════════
+// USO MEZZO — visualizzazione e modifica (admin) di un uso
+// ═══════════════════════════════════════════════════════════
+function openUsoMezzoModal(uso) {
+  const m = state.mezzi.find(x => x.id === uso.mezzo_id);
+  const utz = state.operatoriById[uso.operatore_id];
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const aperto = !uso.data_rientro;
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, aperto ? 'Uso mezzo in corso' : 'Uso mezzo'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+
+  // Stato corrente (lettura)
+  const oraUscita = new Date(uso.data_uscita);
+  const oraRientro = uso.data_rientro ? new Date(uso.data_rientro) : null;
+  const durataMs = (oraRientro || new Date()).getTime() - oraUscita.getTime();
+  const durata = (() => {
+    const min = Math.round(durataMs / 60000);
+    if (min < 60) return min + ' min';
+    const h = Math.floor(min / 60);
+    const r = min % 60;
+    return h + 'h' + (r ? ' '+r+'min' : '');
+  })();
+
+  body.append(el('div', { class:'field' },
+    el('label', {}, 'Mezzo'),
+    el('div', { class:'mono', style:'font-size:14px;padding:8px 0;' },
+      (m?.nome || '—') + (m?.targa ? ' · '+m.targa : '')),
+  ));
+  body.append(el('div', { class:'field' },
+    el('label', {}, 'Operatore'),
+    el('div', { class:'mono', style:'font-size:14px;padding:8px 0;' }, utz?.nome || '—'),
+  ));
+
+  // Form per admin: modifica orari
+  let inUscita, inRientro;
+  if (isAdmin) {
+    const isoLocal = (d) => {
+      // converte una Date in formato datetime-local "YYYY-MM-DDTHH:MM"
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    inUscita = el('input', { type:'datetime-local', value: isoLocal(oraUscita) });
+    inRientro = el('input', { type:'datetime-local', value: oraRientro ? isoLocal(oraRientro) : '' });
+    body.append(el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Data/ora uscita'), inUscita),
+      el('div', { class:'field' }, el('label', {}, 'Data/ora rientro'+(aperto ? ' (vuoto = aperto)' : '')), inRientro),
+    ));
+  } else {
+    body.append(el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Uscita'),
+        el('div', { class:'mono', style:'padding:8px 0;' },
+          fmtIT(toLocalISO(oraUscita))+' '+z(oraUscita.getHours())+':'+z(oraUscita.getMinutes()))),
+      el('div', { class:'field' }, el('label', {}, 'Rientro'),
+        el('div', { class:'mono', style:'padding:8px 0;' },
+          oraRientro
+            ? fmtIT(toLocalISO(oraRientro))+' '+z(oraRientro.getHours())+':'+z(oraRientro.getMinutes())
+            : el('span', { class:'badge byel' }, 'in corso'))),
+    ));
+  }
+
+  body.append(el('div', { class:'field' },
+    el('label', {}, 'Durata'),
+    el('div', { class:'mono', style:'padding:8px 0;' }, durata + (aperto ? ' (ancora in corso)' : '')),
+  ));
+  if (uso.sede) body.append(el('div', { class:'field' },
+    el('label', {}, 'Postazione check-out'),
+    el('div', { class:'mono', style:'padding:8px 0;' }, uso.sede),
+  ));
+  if (uso.note) body.append(el('div', { class:'field' },
+    el('label', {}, 'Note'),
+    el('div', { style:'padding:8px 0;' }, uso.note),
+  ));
+
+  modal.append(body);
+
+  // Footer
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+
+  if (isAdmin) {
+    if (aperto) {
+      foot.append(el('button', { class:'btnp', onclick: async () => {
+        if (!confirm('Chiudere questo uso adesso?')) return;
+        const now = new Date().toISOString();
+        const { data, error } = await sb.from('usi_mezzo')
+          .update({ data_rientro: now }).eq('id', uso.id).select().single();
+        if (error) return toast(error.message, 'err');
+        state.usiMezzo = state.usiMezzo.map(x => x.id === uso.id ? data : x);
+        toast('Uso chiuso'); closeModal(); renderTab(state.currentTab);
+      }}, 'Chiudi adesso'));
+    }
+    foot.append(el('button', { class:'btnp', onclick: async () => {
+      // Salva modifiche orari
+      const dUsc = inUscita.value;
+      const dRie = inRientro.value;
+      if (!dUsc) return toast('Data uscita obbligatoria', 'err');
+      const payload = {
+        data_uscita: new Date(dUsc).toISOString(),
+        data_rientro: dRie ? new Date(dRie).toISOString() : null,
+      };
+      if (payload.data_rientro && payload.data_rientro < payload.data_uscita)
+        return toast('Rientro non può essere prima di uscita', 'err');
+      const { data, error } = await sb.from('usi_mezzo')
+        .update(payload).eq('id', uso.id).select().single();
+      if (error) return toast(error.message, 'err');
+      state.usiMezzo = state.usiMezzo.map(x => x.id === uso.id ? data : x);
+      toast('Uso aggiornato'); closeModal(); renderTab(state.currentTab);
+    }}, 'Salva'));
+    foot.append(el('button', { class:'btnd', onclick: async () => {
+      if (!confirm('Eliminare questo uso? Operazione non reversibile.')) return;
+      const { data, error } = await sb.from('usi_mezzo').delete().eq('id', uso.id).select();
+      if (error) return toast(error.message, 'err');
+      if (!data || data.length === 0) {
+        return toast('Eliminazione bloccata: verifica le policy DELETE su usi_mezzo', 'err');
+      }
+      state.usiMezzo = state.usiMezzo.filter(x => x.id !== uso.id);
+      toast('Uso eliminato'); closeModal(); renderTab(state.currentTab);
+    }}, 'Elimina'));
+  }
+  modal.append(foot);
+  openModal(modal);
+}
+
+// ═══════════════════════════════════════════════════════════
+// KIOSK MODE — terminale check-out mezzi per mini-PC sede
+// ═══════════════════════════════════════════════════════════
+const kioskState = {
+  utenteSelezionato: null,    // { id, nome, numero_badge }
+  mezziInUso: [],              // usi_mezzo aperti (data_rientro IS NULL)
+  prenotazioniOggi: [],        // prenotazioni che coprono oggi
+  inactivityTimer: null,
+  doneTimer: null,
+  rfidBuffer: '',
+  rfidBufferTimer: null,
+};
+
+const KIOSK_INACTIVITY_MS = 15000;     // torna alla schermata 1 dopo 15s
+const KIOSK_DONE_MS = 2000;             // schermata conferma resta 2s
+
+async function kioskInit() {
+  // Login automatico con account dedicato
+  try {
+    const { error } = await sb.auth.signInWithPassword({
+      email: KIOSK_EMAIL, password: KIOSK_PASSWORD,
+    });
+    if (error) throw error;
+  } catch (e) {
+    document.body.innerHTML = `<div class="setup">
+      <h1>⚠ Errore login kiosk</h1>
+      <p>${e.message || e}</p>
+      <p>Verifica che l'utente <code>${KIOSK_EMAIL}</code> esista su Supabase.</p>
+    </div>`;
+    return;
+  }
+
+  // Nascondi tutto eccetto schermo kiosk
+  $('#auth-screen').style.display = 'none';
+  $('#app-screen').style.display = 'none';
+  $('#kiosk-screen').style.display = 'flex';
+  $('#kiosk-sede-lbl').textContent = 'Postazione: ' + KIOSK_PARAM;
+  applyTheme(localStorage.getItem('theme') || 'dark');
+
+  // Carica dati iniziali
+  await kioskLoadAll();
+  kioskStartRealtime();
+
+  // Orologio
+  setInterval(kioskUpdateClock, 1000);
+  kioskUpdateClock();
+
+  // Cattura input RFID globale
+  document.addEventListener('keydown', kioskRfidListener);
+  // Riassicura focus sull'input nascosto
+  setInterval(() => {
+    if ($('#kiosk-screen').style.display !== 'none' &&
+        document.activeElement?.id !== 'kiosk-rfid-input') {
+      $('#kiosk-rfid-input').focus();
+    }
+  }, 1000);
+
+  kioskGoToId();
+}
+
+function kioskUpdateClock() {
+  const d = new Date();
+  $('#kiosk-clock').textContent =
+    z(d.getHours())+':'+z(d.getMinutes())+':'+z(d.getSeconds());
+}
+
+async function kioskLoadAll() {
+  // Carica mezzi, operatori, usi aperti, prenotazioni di oggi
+  const oggi = toLocalISO(new Date());
+  const [mezzi, util, usi, pren] = await Promise.all([
+    sb.from('mezzi').select('*').eq('attivo', true).order('nome'),
+    sb.from('operatori').select('*').eq('attivo', true).order('nome'),
+    sb.from('usi_mezzo').select('*').is('data_rientro', null),
+    sb.from('prenotazioni').select('*').lte('data_inizio', oggi).gte('data_fine', oggi),
+  ]);
+  state.mezzi = mezzi.data || [];
+  state.operatori = util.data || [];
+  state.operatoriById = Object.fromEntries(state.operatori.map(u => [u.id, u]));
+  kioskState.mezziInUso = usi.data || [];
+  kioskState.prenotazioniOggi = pren.data || [];
+}
+
+function kioskStartRealtime() {
+  sb.channel('kiosk-changes')
+    .on('postgres_changes', { event:'*', schema:'public', table:'usi_mezzo' }, (p) => {
+      const ev = p.eventType;
+      const row = p.new, oldRow = p.old;
+      if (ev === 'INSERT') {
+        if (!row.data_rientro && !kioskState.mezziInUso.find(x => x.id === row.id))
+          kioskState.mezziInUso.push(row);
+      } else if (ev === 'UPDATE') {
+        kioskState.mezziInUso = kioskState.mezziInUso.filter(x => x.id !== row.id);
+        if (!row.data_rientro) kioskState.mezziInUso.push(row);
+      } else if (ev === 'DELETE') {
+        kioskState.mezziInUso = kioskState.mezziInUso.filter(x => x.id !== oldRow.id);
+      }
+      kioskRefreshActive();
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'mezzi' }, () => {
+      kioskLoadAll().then(kioskRefreshActive);
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'operatori' }, () => {
+      kioskLoadAll().then(kioskRefreshActive);
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni' }, () => {
+      kioskLoadAll().then(kioskRefreshActive);
+    })
+    .subscribe();
+}
+
+function kioskRefreshActive() {
+  // Re-render della schermata corrente
+  if ($('#kiosk-step-id').style.display !== 'none') kioskRenderId();
+  else if ($('#kiosk-step-action').style.display !== 'none') kioskRenderAction();
+}
+
+// ─── Listener RFID: cattura sequenze di cifre seguite da Invio ───
+function kioskRfidListener(e) {
+  // Ignora se siamo nella schermata di conferma
+  if ($('#kiosk-step-done').style.display !== 'none') return;
+  // Ignora se l'evento viene da un input attivo (ma il nostro è hidden)
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' && e.target.id !== 'kiosk-rfid-input') return;
+
+  if (e.key === 'Enter') {
+    if (kioskState.rfidBuffer.length >= 4) {
+      const code = kioskState.rfidBuffer;
+      kioskState.rfidBuffer = '';
+      kioskHandleBadge(code);
+    } else {
+      kioskState.rfidBuffer = '';
+    }
+    e.preventDefault();
+    return;
+  }
+  if (/^\d$/.test(e.key)) {
+    kioskState.rfidBuffer += e.key;
+    clearTimeout(kioskState.rfidBufferTimer);
+    kioskState.rfidBufferTimer = setTimeout(() => { kioskState.rfidBuffer = ''; }, 200);
+  }
+}
+
+function kioskHandleBadge(code) {
+  // Cerca per numero_badge
+  const u = state.operatori.find(x => (x.numero_badge||'').replace(/^0+/,'') === code.replace(/^0+/,''));
+  if (!u) {
+    kioskShowError('Badge non riconosciuto');
+    return;
+  }
+  kioskSelectUtente(u);
+}
+
+function kioskShowError(msg) {
+  // Toast di errore in basso, autodismiss
+  const ex = $('#kiosk-toast');
+  if (ex) ex.remove();
+  const t = el('div', { id:'kiosk-toast', class:'kiosk-toast' }, msg);
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2500);
+  kioskBeep('err');
+}
+
+function kioskBeep(kind) {
+  // Beep sintetizzato senza file audio
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    if (kind === 'err') {
+      osc.frequency.value = 220;
+      gain.gain.setValueAtTime(.15, ctx.currentTime);
+      osc.start(); osc.stop(ctx.currentTime + .25);
+    } else {
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(.12, ctx.currentTime);
+      osc.start(); osc.stop(ctx.currentTime + .12);
+    }
+  } catch (e) { /* ignora se WebAudio non disponibile */ }
+}
+
+// ─── SCHERMATA 1: identificazione ───
+function kioskGoToId() {
+  kioskState.utenteSelezionato = null;
+  clearTimeout(kioskState.inactivityTimer);
+  $('#kiosk-step-id').style.display = 'flex';
+  $('#kiosk-step-action').style.display = 'none';
+  $('#kiosk-step-done').style.display = 'none';
+  kioskRenderId();
+  $('#kiosk-rfid-input').focus();
+}
+
+function kioskRenderId() {
+  // Griglia operatori: escludi inattivi e l'account tecnico kiosk
+  const grid = $('#kiosk-utili-grid');
+  grid.innerHTML = '';
+  state.operatori
+    .filter(u => u.attivo && !isKioskRecord(u))
+    .forEach(u => {
+      grid.appendChild(el('div', {
+        class: 'kiosk-tile',
+        onclick: () => kioskSelectUtente(u),
+      },
+        el('div', { class:'kiosk-tile-name' }, u.nome),
+        u.numero_badge ? el('div', { class:'kiosk-tile-sub' }, '#'+u.numero_badge) : null,
+      ));
+    });
+
+  // Lista "mezzi attualmente fuori"
+  const fuori = $('#kiosk-fuori-list');
+  fuori.innerHTML = '';
+  fuori.appendChild(el('div', { class:'kiosk-fuori-title' }, 'Mezzi attualmente fuori'));
+  if (kioskState.mezziInUso.length === 0) {
+    fuori.appendChild(el('div', { class:'kiosk-fuori-empty' }, 'Nessun mezzo fuori al momento'));
+  } else {
+    kioskState.mezziInUso.forEach(uso => {
+      const m = state.mezzi.find(x => x.id === uso.mezzo_id);
+      const u = state.operatoriById[uso.operatore_id];
+      const ora = new Date(uso.data_uscita);
+      fuori.appendChild(el('div', { class:'kiosk-fuori-row' },
+        el('span', {}, (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '')),
+        el('span', { style:'color:var(--mut)' },
+          (u?.nome || '?') + ' — uscito alle ' + z(ora.getHours())+':'+z(ora.getMinutes())),
+      ));
+    });
+  }
+}
+
+function kioskSelectUtente(u) {
+  kioskState.utenteSelezionato = u;
+  kioskBeep('ok');
+  kioskGoToAction();
+}
+
+// ─── SCHERMATA 2: scelta azione ───
+function kioskGoToAction() {
+  $('#kiosk-step-id').style.display = 'none';
+  $('#kiosk-step-action').style.display = 'flex';
+  $('#kiosk-step-done').style.display = 'none';
+  kioskRenderAction();
+  kioskResetInactivity();
+}
+
+function kioskRenderAction() {
+  const u = kioskState.utenteSelezionato;
+  if (!u) { kioskGoToId(); return; }
+
+  $('#kiosk-greet-name').textContent = 'Ciao ' + u.nome;
+  const root = $('#kiosk-action-content');
+  root.innerHTML = '';
+
+  // Ha un mezzo fuori? Se sì, proponi rientro
+  const usoAperto = kioskState.mezziInUso.find(x => x.operatore_id === u.id);
+  if (usoAperto) {
+    const m = state.mezzi.find(x => x.id === usoAperto.mezzo_id);
+    const ora = new Date(usoAperto.data_uscita);
+    const durata = kioskFormatDurata(Date.now() - ora.getTime());
+    root.appendChild(el('div', { class:'kiosk-rientro-box' },
+      el('div', { class:'kiosk-rientro-title' }, 'Hai un mezzo fuori'),
+      el('div', { class:'kiosk-rientro-mezzo' },
+        (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '')),
+      el('div', { class:'kiosk-rientro-info' },
+        'Uscito alle '+z(ora.getHours())+':'+z(ora.getMinutes())+' ('+durata+' fa)'),
+      el('button', { class:'kiosk-rientro-btn', onclick:()=>kioskConfirmRientro(usoAperto) },
+        '✓ Conferma rientro'),
+    ));
+    root.appendChild(el('div', { class:'kiosk-section-title' }, 'Oppure prendi un altro mezzo'));
+  }
+
+  // Lista mezzi disponibili
+  const mezziInUsoIds = kioskState.mezziInUso.map(x => x.mezzo_id);
+  // Mezzi prenotati oggi da OGNI altro utente (se prenotato dall'utente corrente, lo evidenziamo invece di nasconderlo)
+  const mezziPrenotatiAltri = kioskState.prenotazioniOggi
+    .filter(p => p.utente_id !== u.id /* utente_id è l'autore, non l'operatore - vedi nota sotto */)
+    .map(p => p.mezzo_id);
+
+  // Mezzo prenotato dall'utente corrente per oggi
+  const prenMia = kioskState.prenotazioniOggi.find(p => p.utente_id === u.id);
+
+  const disponibili = state.mezzi.filter(m =>
+    !mezziInUsoIds.includes(m.id) && !mezziPrenotatiAltri.includes(m.id)
+  );
+  // Ordina con il prenotato in cima
+  disponibili.sort((a,b) => {
+    if (prenMia) {
+      if (a.id === prenMia.mezzo_id) return -1;
+      if (b.id === prenMia.mezzo_id) return 1;
+    }
+    return a.nome.localeCompare(b.nome);
+  });
+
+  const grid = el('div', { class:'kiosk-grid' });
+  if (disponibili.length === 0) {
+    grid.appendChild(el('div', { class:'kiosk-empty' }, 'Nessun mezzo disponibile al momento.'));
+  } else {
+    disponibili.forEach(m => {
+      const isPren = prenMia && prenMia.mezzo_id === m.id;
+      grid.appendChild(el('div', {
+        class: 'kiosk-tile mezzo'+(isPren ? ' mezzo-prenotato' : ''),
+        style: 'border-left-color:'+(m.colore || '#4eb8ff'),
+        onclick: () => kioskConfirmUscita(m),
+      },
+        el('div', { class:'kiosk-tile-name' }, m.nome),
+        m.targa ? el('div', { class:'kiosk-tile-targa' }, m.targa) : null,
+        isPren ? el('div', { class:'kiosk-tile-prenotato' }, '★ Prenotato per te oggi') : null,
+      ));
+    });
+  }
+  root.appendChild(grid);
+}
+
+async function kioskConfirmUscita(mezzo) {
+  const u = kioskState.utenteSelezionato;
+  try {
+    const { data, error } = await sb.from('usi_mezzo').insert({
+      mezzo_id: mezzo.id,
+      operatore_id: u.id,
+      sede: KIOSK_PARAM,
+    }).select().single();
+    if (error) throw error;
+    // Aggiorna cache subito
+    if (data && !kioskState.mezziInUso.find(x => x.id === data.id))
+      kioskState.mezziInUso.push(data);
+    kioskBeep('ok');
+    kioskShowDone({
+      title: 'Uscita registrata',
+      detail: u.nome + ' → ' + (mezzo.nome + (mezzo.targa ? ' · '+mezzo.targa : '')),
+      ok: true,
+    });
+  } catch (e) {
+    kioskShowError('Errore: ' + (e.message||e));
+  }
+}
+
+async function kioskConfirmRientro(uso) {
+  try {
+    const { data, error } = await sb.from('usi_mezzo')
+      .update({ data_rientro: new Date().toISOString() })
+      .eq('id', uso.id)
+      .select().single();
+    if (error) throw error;
+    // Rimuovi dalla cache aperti
+    kioskState.mezziInUso = kioskState.mezziInUso.filter(x => x.id !== uso.id);
+    const m = state.mezzi.find(x => x.id === uso.mezzo_id);
+    const u = kioskState.utenteSelezionato;
+    const durata = kioskFormatDurata(
+      new Date(data.data_rientro).getTime() - new Date(uso.data_uscita).getTime()
+    );
+    kioskBeep('ok');
+    kioskShowDone({
+      title: 'Rientro registrato',
+      detail: u.nome + ' → ' + (m?.nome||'?') + (m?.targa ? ' · '+m.targa : '') +
+              '\nDurata: ' + durata,
+      ok: true,
+    });
+  } catch (e) {
+    kioskShowError('Errore: ' + (e.message||e));
+  }
+}
+
+// ─── SCHERMATA 3: conferma ───
+function kioskShowDone({ title, detail, ok }) {
+  clearTimeout(kioskState.inactivityTimer);
+  $('#kiosk-step-id').style.display = 'none';
+  $('#kiosk-step-action').style.display = 'none';
+  $('#kiosk-step-done').style.display = 'flex';
+  const root = $('#kiosk-done-msg');
+  root.innerHTML = '';
+  root.appendChild(el('div', { class: 'kiosk-done-card' + (ok ? '' : ' err') },
+    el('div', { class:'kiosk-done-icon' }, ok ? '✓' : '✕'),
+    el('div', { class:'kiosk-done-msg' }, title),
+    el('div', { class:'kiosk-done-detail', style:'white-space:pre-line' }, detail || ''),
+  ));
+  clearTimeout(kioskState.doneTimer);
+  kioskState.doneTimer = setTimeout(kioskGoToId, KIOSK_DONE_MS);
+}
+
+// ─── Inattività ───
+function kioskResetInactivity() {
+  clearTimeout(kioskState.inactivityTimer);
+  kioskState.inactivityTimer = setTimeout(kioskGoToId, KIOSK_INACTIVITY_MS);
+}
+['click','touchstart','keydown'].forEach(ev => {
+  document.addEventListener(ev, () => {
+    if ($('#kiosk-step-action').style.display !== 'none') kioskResetInactivity();
+  });
+});
+
+function kioskFormatDurata(ms) {
+  const min = Math.round(ms / 60000);
+  if (min < 60) return min + ' min';
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h + 'h ' + (m ? m+'min' : '');
+}
+
+init();
+</script>
+</body>
+</html>
