@@ -356,6 +356,55 @@ table.rt tbody tr:hover td{background:var(--hover);}
 /* Warning sessione dimenticata */
 .kiosk-warn-stale{background:rgba(255,204,78,.08);border:2px solid var(--yel);border-radius:8px;padding:16px 20px;margin-bottom:16px;color:var(--yel);font-family:'DM Mono',monospace;font-size:13px;}
 .kiosk-warn-stale strong{color:var(--yel);}
+
+/* ═══ GANTT ═══ */
+.gantt-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px;}
+.gantt-toolbar .switch-bar{display:flex;gap:0;background:var(--sur);border:1px solid var(--brd);border-radius:4px;overflow:hidden;}
+.gantt-toolbar .switch-bar button{padding:6px 14px;background:transparent;border:none;color:var(--mut);font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border-right:1px solid var(--brd);}
+.gantt-toolbar .switch-bar button:last-child{border-right:none;}
+.gantt-toolbar .switch-bar button.act{background:var(--acc);color:#0f0f0e;font-weight:700;}
+.gantt-toolbar .switch-bar button:hover:not(.act){color:var(--txt);background:var(--sur2);}
+.gantt-nav{display:flex;gap:4px;align-items:center;}
+.gantt-nav button{padding:6px 10px;background:var(--sur);border:1px solid var(--brd);color:var(--mut);cursor:pointer;border-radius:3px;font-family:'DM Mono',monospace;font-size:11px;}
+.gantt-nav button:hover{color:var(--txt);border-color:var(--mut);}
+.gantt-nav .label{font-family:'DM Mono',monospace;font-size:12px;color:var(--txt);padding:0 10px;min-width:160px;text-align:center;}
+
+/* Live dashboard */
+.live-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;}
+.live-card{background:var(--sur);border:1px solid var(--brd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;}
+.live-card.attivo{border-color:var(--grn);box-shadow:inset 3px 0 0 var(--grn);}
+.live-card.fermo{opacity:.65;}
+.live-card-hd{display:flex;justify-content:space-between;align-items:center;}
+.live-card-nome{font-size:14px;font-weight:700;}
+.live-card-stato-badge{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:2px;}
+.live-card-stato-badge.attivo{background:rgba(78,255,163,.15);color:var(--grn);}
+.live-card-stato-badge.fermo{background:rgba(107,107,100,.15);color:var(--mut);}
+.live-card-cliente{font-size:12px;color:var(--mut);font-family:'DM Mono',monospace;}
+.live-card-cod{font-family:'DM Mono',monospace;font-size:13px;color:var(--or);font-weight:600;}
+.live-card-tipo{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--mut);}
+.live-card-tipo-dot{width:18px;height:5px;border-radius:2px;}
+.live-card-durata{font-family:'DM Mono',monospace;font-size:22px;color:var(--grn);font-weight:500;margin-top:4px;}
+.live-card-vuoto{font-size:11px;color:var(--mut);font-style:italic;}
+
+/* Gantt storico */
+.gantt-wrap{background:var(--sur);border:1px solid var(--brd);border-radius:6px;overflow:auto;position:relative;}
+.gantt-grid{display:grid;min-width:fit-content;}
+.gantt-hd{display:contents;}
+.gantt-hd-corner{background:var(--sur2);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);padding:8px 12px;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;position:sticky;left:0;top:0;z-index:3;}
+.gantt-hd-time{background:var(--sur2);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);padding:6px 4px;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);text-align:center;position:sticky;top:0;z-index:2;}
+.gantt-hd-time.weekend{background:rgba(255,107,53,.05);color:var(--or);}
+.gantt-hd-time.oggi{background:rgba(212,255,78,.1);color:var(--acc);font-weight:700;}
+.gantt-row-nome{background:var(--sur);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);padding:8px 12px;font-size:12px;font-weight:600;position:sticky;left:0;z-index:1;display:flex;align-items:center;}
+.gantt-row-nome.esterno{color:var(--yel);}
+.gantt-cell{background:var(--bg);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);position:relative;min-height:42px;}
+.gantt-cell.weekend{background:rgba(255,107,53,.03);}
+.gantt-cell.oggi{background:rgba(212,255,78,.03);}
+.gantt-bar{position:absolute;top:6px;bottom:6px;border-radius:3px;cursor:pointer;padding:2px 6px;font-size:10px;color:#0f0f0e;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;display:flex;flex-direction:column;justify-content:center;transition:transform .1s;border:1px solid transparent;}
+.gantt-bar:hover{transform:scaleY(1.06);z-index:5;border-color:var(--txt);}
+.gantt-bar.aperta{box-shadow:0 0 0 2px var(--grn);}
+.gantt-bar-cod{font-family:'DM Mono',monospace;font-size:9px;opacity:.85;}
+.gantt-bar-dur{font-family:'DM Mono',monospace;font-size:9px;opacity:.8;}
+.gantt-empty-row{padding:30px;text-align:center;color:var(--mut);font-family:'DM Mono',monospace;font-size:11px;grid-column:1/-1;border-bottom:1px solid var(--brd);}
 .kiosk-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;padding:14px 24px;border-radius:6px;font-family:'Syne',sans-serif;font-size:15px;font-weight:600;z-index:10000;box-shadow:0 4px 20px rgba(0,0,0,.4);}
 @media (max-width:700px){
   .kiosk-title{font-size:22px;}
@@ -526,6 +575,11 @@ const state = {
   stoSearch: '',
   // Sessioni di lavoro (timbrature kiosk commesse)
   sessioni: [],
+  // Gantt
+  ganttView: 'live',       // 'live' | 'storico'
+  ganttZoom: 'giorno',     // 'giorno' | 'settimana' | 'mese'
+  ganttCursor: new Date(), // data centrale visualizzazione
+  ganttFiltroOperatore: '', // id operatore o '' per tutti
   // Stato kiosk runtime
   kioskOp: null,           // operazione selezionata nel flusso commesse
   kioskMode: null,         // 'menu' | 'mezzi' | 'commesse-list' | 'commesse-tipo' | 'commesse-attiva'
@@ -1009,7 +1063,7 @@ const TAB_STRUCTURE = {
     tabs: [
       { id: 'pianificazione', label: 'Pianificazione', adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
-      { id: 'gantt',          label: 'Gantt',          adminOnly: true,  placeholder: true },
+      { id: 'gantt',          label: 'Gantt',          adminOnly: true },
     ],
   },
   anagrafiche: {
@@ -1069,6 +1123,10 @@ function selectArea(areaId) {
 }
 
 function selectTab(tabId) {
+  // Cleanup eventuali timer di tab precedenti
+  if (typeof ganttLiveTimer !== 'undefined' && ganttLiveTimer) {
+    clearInterval(ganttLiveTimer); ganttLiveTimer = null;
+  }
   $('#tabs').querySelectorAll('button').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tabId);
   });
@@ -1090,9 +1148,7 @@ function renderTab(name) {
     else if (name === 'operatori')    renderOperatori(root);
     else if (name === 'pianificazione') renderPianificazione(root);
     else if (name === 'storico') renderStorico(root);
-    else if (name === 'gantt') renderPlaceholder(root, 'Gantt occupazione',
-      'Vista live: chi sta facendo cosa adesso. Vista storico: timeline settimana/mese.',
-      'Step 4-5');
+    else if (name === 'gantt') renderGantt(root);
     else if (name === 'chiusure') renderChiusure(root);
   } catch (e) {
     console.error('Errore rendering tab '+name+':', e);
@@ -5306,6 +5362,498 @@ async function kioskStopSessione(sess, modalita) {
     kioskBeep('err');
     kioskShowError('Errore di rete: ' + (e.message||e));
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// GANTT — vista live + storico timeline sessioni di lavoro
+// ═══════════════════════════════════════════════════════════
+
+let ganttLiveTimer = null;
+
+function renderGantt(root) {
+  // Stop eventuale timer del refresh live precedente
+  if (ganttLiveTimer) { clearInterval(ganttLiveTimer); ganttLiveTimer = null; }
+
+  root.innerHTML = '';
+
+  // Toolbar superiore: switch Live/Storico
+  const toolbar = el('div', { class:'gantt-toolbar' },
+    el('div', { class:'switch-bar' },
+      el('button', {
+        class: state.ganttView === 'live' ? 'act' : '',
+        onclick: () => { state.ganttView = 'live'; renderTab('gantt'); }
+      }, '● Live'),
+      el('button', {
+        class: state.ganttView === 'storico' ? 'act' : '',
+        onclick: () => { state.ganttView = 'storico'; renderTab('gantt'); }
+      }, 'Storico'),
+    ),
+  );
+  root.append(toolbar);
+
+  if (state.ganttView === 'live') {
+    renderGanttLive(root);
+  } else {
+    renderGanttStorico(root);
+  }
+}
+
+// ─── VISTA LIVE: dashboard chi-sta-facendo-cosa ───
+function renderGanttLive(root) {
+  // Filtra operatori attivi (no kiosk)
+  const operatori = state.operatori.filter(u => u.attivo && !isKioskRecord(u))
+    .sort((a,b) => a.nome.localeCompare(b.nome));
+
+  // KPI riepilogo
+  const attivi = state.sessioni.filter(s => !s.fine).length;
+  const totOperatori = operatori.length;
+  const totOggi = state.sessioni.filter(s => {
+    const ini = (s.inizio||'').substring(0,10);
+    return ini === toLocalISO(new Date());
+  }).length;
+
+  root.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Operatori al lavoro'),
+      el('div', { class:'kv kg' }, String(attivi)+' / '+String(totOperatori))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Sessioni oggi'),
+      el('div', { class:'kv' }, String(totOggi))),
+  ));
+
+  // Griglia card operatori
+  const grid = el('div', { class:'live-grid' });
+  operatori.forEach(u => {
+    const sess = state.sessioni.find(s => s.operatore_id === u.id && !s.fine);
+    const card = el('div', { class: 'live-card ' + (sess ? 'attivo' : 'fermo') });
+
+    const hd = el('div', { class:'live-card-hd' },
+      el('div', { class:'live-card-nome' }, u.nome + (u.esterno ? ' ✦' : '')),
+      el('div', { class:'live-card-stato-badge '+(sess?'attivo':'fermo') },
+        sess ? '● attivo' : 'fermo'),
+    );
+    card.append(hd);
+
+    if (sess) {
+      const op = state.operazioni.find(o => o.id === sess.operazione_id);
+      const cli = op ? state.clienti.find(c => c.id === op.cliente_id) : null;
+      const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+      const tipo = state.tipiLav.find(t => t.id === sess.tipo_lavorazione_id);
+
+      card.append(
+        el('div', { class:'live-card-cliente' }, (cli?.nome || '—') + ' · ' + (op?.numero_ordine || op?.codice_op || '—')),
+        el('div', { class:'live-card-cod' }, art?.codice || '—'),
+        el('div', { class:'live-card-tipo' },
+          el('div', { class:'live-card-tipo-dot', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
+          tipo?.nome || '—',
+        ),
+        el('div', { class:'live-card-durata', 'data-sess-id': sess.id, 'data-inizio': sess.inizio },
+          formatLiveDuration(sess.inizio)),
+      );
+    } else {
+      // Mostra ultima sessione chiusa oggi se c'è
+      const oggi = toLocalISO(new Date());
+      const ultime = state.sessioni
+        .filter(s => s.operatore_id === u.id && s.fine && (s.inizio||'').substring(0,10) === oggi)
+        .sort((a,b) => (b.fine||'').localeCompare(a.fine||''));
+      if (ultime.length) {
+        const ultima = ultime[0];
+        const op = state.operazioni.find(o => o.id === ultima.operazione_id);
+        const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+        const tipo = state.tipiLav.find(t => t.id === ultima.tipo_lavorazione_id);
+        const durSec = ultima.durata_secondi || 0;
+        const totSecOggi = ultime.reduce((s,x) => s + (x.durata_secondi||0), 0);
+        card.append(
+          el('div', { class:'live-card-vuoto' },
+            'Ultima sessione: ' + (art?.codice || '—') + ' (' + (tipo?.nome||'') + ')'),
+          el('div', { class:'live-card-vuoto', style:'color:var(--txt);' },
+            'Totale oggi: ' + formatSecondsHuman(totSecOggi)),
+        );
+      } else {
+        card.append(el('div', { class:'live-card-vuoto' }, 'Nessuna sessione oggi'));
+      }
+    }
+    grid.append(card);
+  });
+
+  if (operatori.length === 0) {
+    root.append(el('div', { class:'empty' }, 'Nessun operatore attivo'));
+  } else {
+    root.append(grid);
+  }
+
+  // Timer aggiornamento durate live
+  ganttLiveTimer = setInterval(() => {
+    document.querySelectorAll('.live-card-durata[data-inizio]').forEach(d => {
+      d.textContent = formatLiveDuration(d.getAttribute('data-inizio'));
+    });
+  }, 1000);
+}
+
+function formatLiveDuration(inizioISO) {
+  const sec = Math.floor((Date.now() - new Date(inizioISO).getTime()) / 1000);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return h+'h '+String(m).padStart(2,'0')+'m';
+  if (m > 0) return m+'m '+String(s).padStart(2,'0')+'s';
+  return s+'s';
+}
+
+function formatSecondsHuman(sec) {
+  if (sec < 60) return sec + ' s';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min + ' min';
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h + 'h ' + (m ? m+'m' : '');
+}
+
+// ─── VISTA STORICO: Gantt classico operatori×tempo ───
+function renderGanttStorico(root) {
+  // Toolbar: switch zoom + nav data
+  const cursor = state.ganttCursor instanceof Date ? state.ganttCursor : new Date();
+  const zoom = state.ganttZoom || 'giorno';
+
+  // Calcola range visualizzato
+  const range = ganttCalcRange(cursor, zoom);
+
+  const navToolbar = el('div', { class:'gantt-toolbar' },
+    el('div', { class:'switch-bar' },
+      el('button', { class: zoom === 'giorno' ? 'act' : '', onclick:() => { state.ganttZoom='giorno'; renderTab('gantt'); } }, 'Giorno'),
+      el('button', { class: zoom === 'settimana' ? 'act' : '', onclick:() => { state.ganttZoom='settimana'; renderTab('gantt'); } }, 'Settimana'),
+      el('button', { class: zoom === 'mese' ? 'act' : '', onclick:() => { state.ganttZoom='mese'; renderTab('gantt'); } }, 'Mese'),
+    ),
+    el('div', { class:'gantt-nav' },
+      el('button', { onclick: () => { state.ganttCursor = ganttShift(cursor, zoom, -1); renderTab('gantt'); }, title:'Indietro' }, '◀'),
+      el('button', { onclick: () => { state.ganttCursor = new Date(); renderTab('gantt'); } }, 'Oggi'),
+      el('button', { onclick: () => { state.ganttCursor = ganttShift(cursor, zoom, +1); renderTab('gantt'); }, title:'Avanti' }, '▶'),
+      el('div', { class:'label' }, ganttRangeLabel(range, zoom)),
+    ),
+  );
+
+  // Select operatore (filtro opzionale)
+  const opChoices = state.operatori
+    .filter(u => u.attivo && !isKioskRecord(u))
+    .sort((a,b) => a.nome.localeCompare(b.nome));
+  const selOper = el('select', {
+    style:'background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:5px 10px;border-radius:3px;font-family:DM Mono,monospace;font-size:11px;',
+    onchange: (e) => { state.ganttFiltroOperatore = e.target.value; renderTab('gantt'); }
+  },
+    el('option', { value:'' }, '— Tutti gli operatori —'),
+    ...opChoices.map(u => el('option', { value:u.id }, u.nome))
+  );
+  selOper.value = state.ganttFiltroOperatore || '';
+  navToolbar.append(selOper);
+
+  root.append(navToolbar);
+
+  // Lista operatori in Y
+  let operatori = opChoices;
+  if (state.ganttFiltroOperatore) {
+    operatori = operatori.filter(u => u.id === state.ganttFiltroOperatore);
+  }
+
+  if (operatori.length === 0) {
+    root.append(el('div', { class:'empty' }, 'Nessun operatore'));
+    return;
+  }
+
+  // Costruisci griglia
+  const wrap = el('div', { class:'gantt-wrap' });
+  const slots = range.slots;
+  const slotWidth = zoom === 'giorno' ? 60 : (zoom === 'settimana' ? 100 : 30);
+  const grid = el('div', { class:'gantt-grid',
+    style: `grid-template-columns: 160px repeat(${slots.length}, ${slotWidth}px);`,
+  });
+
+  // HEADER ROW
+  grid.append(el('div', { class:'gantt-hd-corner' }, 'Operatore'));
+  const oggiISO = toLocalISO(new Date());
+  slots.forEach(slot => {
+    const cls = ['gantt-hd-time'];
+    if (slot.weekend) cls.push('weekend');
+    if (slot.dateISO === oggiISO || (slot.isOggi)) cls.push('oggi');
+    grid.append(el('div', { class:cls.join(' ') }, slot.label));
+  });
+
+  // BODY ROWS
+  operatori.forEach(u => {
+    grid.append(el('div', { class:'gantt-row-nome' + (u.esterno ? ' esterno' : '') }, u.nome));
+
+    // Calcola sessioni nel range per questo operatore
+    const sessUtente = state.sessioni.filter(s =>
+      s.operatore_id === u.id &&
+      sessIntersectsRange(s, range.start, range.end)
+    );
+
+    // Una cella per slot
+    slots.forEach((slot, slotIdx) => {
+      const cellCls = ['gantt-cell'];
+      if (slot.weekend) cellCls.push('weekend');
+      if (slot.dateISO === oggiISO || slot.isOggi) cellCls.push('oggi');
+      const cell = el('div', { class: cellCls.join(' ') });
+
+      // Trova sessioni che cadono in questo slot ("ancorate" al loro slot di inizio)
+      sessUtente.forEach(s => {
+        const inizio = new Date(s.inizio);
+        const fine = s.fine ? new Date(s.fine) : new Date();
+        // L'inizio della sessione cade in questo slot?
+        if (inizio < slot.start || inizio >= slot.end) return;
+
+        const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
+        const colore = tipo?.colore || '#4eb8ff';
+
+        // Calcola larghezza in pixel
+        // (slotWidth / durata_slot_ms) × durata_sessione_ms
+        const slotMs = slot.end - slot.start;
+        const inizioOffsetMs = inizio - slot.start;
+        const durataMs = fine - inizio;
+        const leftPx = (inizioOffsetMs / slotMs) * slotWidth;
+        // Larghezza che si estende oltre il bordo cella se necessario (CSS overflow:visible)
+        const widthPx = Math.max(20, (durataMs / slotMs) * slotWidth);
+
+        const op = state.operazioni.find(o => o.id === s.operazione_id);
+        const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+        const cli = op ? state.clienti.find(c => c.id === op.cliente_id) : null;
+        const durSec = Math.floor((fine - inizio) / 1000);
+
+        const bar = el('div', {
+          class: 'gantt-bar' + (s.fine ? '' : ' aperta'),
+          style: `left:${leftPx}px; width:${widthPx}px; background:${colore};`,
+          title: `${u.nome} su ${art?.codice || '—'} (${cli?.nome || '—'})\n${fmtIT(toLocalISO(inizio))} ${z(inizio.getHours())}:${z(inizio.getMinutes())} → ${s.fine ? (z(fine.getHours())+':'+z(fine.getMinutes())) : 'in corso'}\nDurata: ${formatSecondsHuman(durSec)}\nTipo: ${tipo?.nome || '—'}\n\nClick per modificare`,
+          onclick: (e) => { e.stopPropagation(); openSessioneModal(s); },
+        });
+        // Mostra codice articolo dentro la barra se c'è spazio
+        if (widthPx > 60) {
+          bar.append(el('div', { class:'gantt-bar-cod' }, art?.codice || '—'));
+        }
+        if (widthPx > 90) {
+          bar.append(el('div', { class:'gantt-bar-dur' }, formatSecondsHuman(durSec)));
+        }
+        // Permetti overflow visibile per le barre lunghe
+        cell.style.overflow = 'visible';
+        cell.append(bar);
+      });
+
+      grid.append(cell);
+    });
+  });
+
+  wrap.append(grid);
+  root.append(wrap);
+
+  // Legenda tipi lavorazione
+  if (state.tipiLav.length > 0) {
+    const leg = el('div', { style:'margin-top:14px;display:flex;gap:14px;flex-wrap:wrap;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);' });
+    leg.append(el('span', { style:'text-transform:uppercase;letter-spacing:.08em;font-size:10px;' }, 'Tipi:'));
+    state.tipiLav.filter(t => t.attivo).forEach(t => {
+      leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
+        el('span', { style:`display:inline-block;width:18px;height:5px;border-radius:2px;background:${t.colore||'#6b6b64'};` }),
+        t.nome,
+      ));
+    });
+    leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
+      el('span', { style:'display:inline-block;width:18px;height:14px;border-radius:2px;border:2px solid var(--grn);' }),
+      'In corso',
+    ));
+    root.append(leg);
+  }
+}
+
+// ─── Calcola range visualizzato in base a cursor + zoom ───
+function ganttCalcRange(cursor, zoom) {
+  const slots = [];
+  let start, end;
+
+  if (zoom === 'giorno') {
+    const d = new Date(cursor); d.setHours(0,0,0,0);
+    start = new Date(d);
+    end = new Date(d); end.setDate(end.getDate() + 1);
+    // 24 slot da 1 ora
+    for (let h = 0; h < 24; h++) {
+      const slotStart = new Date(d); slotStart.setHours(h, 0, 0, 0);
+      const slotEnd = new Date(d); slotEnd.setHours(h + 1, 0, 0, 0);
+      slots.push({
+        start: slotStart, end: slotEnd,
+        label: z(h) + ':00',
+        weekend: false,
+        dateISO: toLocalISO(d),
+        isOggi: false,
+      });
+    }
+  } else if (zoom === 'settimana') {
+    // Da lunedì a domenica della settimana del cursore
+    const d = new Date(cursor); d.setHours(0,0,0,0);
+    const dow = (d.getDay() + 6) % 7; // 0 = lun, 6 = dom
+    const lunedi = new Date(d); lunedi.setDate(d.getDate() - dow);
+    start = new Date(lunedi);
+    end = new Date(lunedi); end.setDate(end.getDate() + 7);
+    const giorniNomi = ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
+    for (let i = 0; i < 7; i++) {
+      const g = new Date(lunedi); g.setDate(lunedi.getDate() + i);
+      const gEnd = new Date(g); gEnd.setDate(gEnd.getDate() + 1);
+      const isToday = toLocalISO(g) === toLocalISO(new Date());
+      slots.push({
+        start: g, end: gEnd,
+        label: giorniNomi[i] + ' ' + z(g.getDate()),
+        weekend: i >= 5,
+        dateISO: toLocalISO(g),
+        isOggi: isToday,
+      });
+    }
+  } else if (zoom === 'mese') {
+    // Tutti i giorni del mese del cursore
+    const d = new Date(cursor); d.setHours(0,0,0,0);
+    const primo = new Date(d.getFullYear(), d.getMonth(), 1);
+    const ultimo = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    start = new Date(primo);
+    end = new Date(ultimo); end.setDate(end.getDate() + 1);
+    const oggiISO = toLocalISO(new Date());
+    for (let i = 1; i <= ultimo.getDate(); i++) {
+      const g = new Date(primo.getFullYear(), primo.getMonth(), i);
+      const gEnd = new Date(g); gEnd.setDate(gEnd.getDate() + 1);
+      const dow = g.getDay();
+      slots.push({
+        start: g, end: gEnd,
+        label: String(i),
+        weekend: dow === 0 || dow === 6,
+        dateISO: toLocalISO(g),
+        isOggi: toLocalISO(g) === oggiISO,
+      });
+    }
+  }
+
+  return { start, end, slots };
+}
+
+function ganttShift(cursor, zoom, dir) {
+  const d = new Date(cursor);
+  if (zoom === 'giorno') d.setDate(d.getDate() + dir);
+  else if (zoom === 'settimana') d.setDate(d.getDate() + dir * 7);
+  else if (zoom === 'mese') d.setMonth(d.getMonth() + dir);
+  return d;
+}
+
+function ganttRangeLabel(range, zoom) {
+  if (zoom === 'giorno') {
+    return fmtIT(toLocalISO(range.start));
+  } else if (zoom === 'settimana') {
+    const inizio = range.slots[0].start;
+    const fine = range.slots[range.slots.length - 1].start;
+    return fmtIT(toLocalISO(inizio)) + ' — ' + fmtIT(toLocalISO(fine));
+  } else if (zoom === 'mese') {
+    const m = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+    return m[range.start.getMonth()] + ' ' + range.start.getFullYear();
+  }
+  return '';
+}
+
+function sessIntersectsRange(sess, rangeStart, rangeEnd) {
+  const ini = new Date(sess.inizio);
+  const fin = sess.fine ? new Date(sess.fine) : new Date();
+  return ini < rangeEnd && fin > rangeStart;
+}
+
+// ─── Modal modifica/elimina sessione (admin) ───
+function openSessioneModal(s) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  if (!isAdmin) {
+    toast('Solo gli admin possono modificare le sessioni', 'err');
+    return;
+  }
+
+  const op = state.operazioni.find(o => o.id === s.operazione_id);
+  const cli = op ? state.clienti.find(c => c.id === op.cliente_id) : null;
+  const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+  const operatore = state.operatori.find(u => u.id === s.operatore_id);
+  const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
+
+  const inizioDt = new Date(s.inizio);
+  const fineDt = s.fine ? new Date(s.fine) : null;
+
+  // Per input datetime-local serve formato "YYYY-MM-DDTHH:MM"
+  const dtLocalStr = (d) => `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`;
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Modifica sessione di lavoro'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  body.append(el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;margin-bottom:14px;font-family:monospace;font-size:11px;line-height:1.7;' },
+    el('div', {}, el('span', { style:'color:var(--mut)' }, 'Operatore: '), operatore?.nome || '—'),
+    el('div', {}, el('span', { style:'color:var(--mut)' }, 'Cliente: '), cli?.nome || '—'),
+    el('div', {}, el('span', { style:'color:var(--mut)' }, 'Articolo: '), el('span', { style:'color:var(--or)' }, art?.codice || '—')),
+    el('div', {}, el('span', { style:'color:var(--mut)' }, 'OP / Ordine: '), (op?.codice_op || op?.numero_ordine || '—')),
+    el('div', {}, el('span', { style:'color:var(--mut)' }, 'Tipo: '), tipo?.nome || '—'),
+  ));
+
+  const selTipo = el('select', { name:'tipo_lavorazione_id' },
+    ...state.tipiLav.filter(t => t.attivo).map(t =>
+      el('option', { value:t.id }, t.nome))
+  );
+  selTipo.value = s.tipo_lavorazione_id || '';
+
+  const inInizio = el('input', { type:'datetime-local', name:'inizio', value:dtLocalStr(inizioDt), required:'true' });
+  const inFine = el('input', { type:'datetime-local', name:'fine', value: fineDt ? dtLocalStr(fineDt) : '' });
+
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Tipo lavorazione'), selTipo),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Inizio *'), inInizio),
+      el('div', { class:'field' }, el('label', {}, 'Fine (vuoto = ancora aperta)'), inFine),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Note'),
+      el('textarea', { name:'note', rows:'2' }, s.note || '')),
+  );
+
+  body.append(form);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btnd', onclick: async () => {
+    if (!confirm('Eliminare questa sessione? L\'azione è irreversibile.')) return;
+    const { data, error } = await sb.from('sessioni_lavoro').delete().eq('id', s.id).select();
+    if (error) return toast(error.message, 'err');
+    if (!data || data.length === 0) return toast('Eliminazione bloccata (verifica policy)', 'err');
+    state.sessioni = state.sessioni.filter(x => x.id !== s.id);
+    toast('Sessione eliminata'); closeModal(); renderTab('gantt');
+  } }, '🗑 Elimina'));
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
+
+  const btnSave = el('button', { class:'btnp' }, 'Salva');
+  btnSave.onclick = async () => {
+    const fd = new FormData(form);
+    const inizioStr = fd.get('inizio');
+    const fineStr = fd.get('fine');
+    if (!inizioStr) return toast('Inizio obbligatorio', 'err');
+    if (fineStr && fineStr <= inizioStr) return toast('Fine deve essere dopo inizio', 'err');
+    const payload = {
+      tipo_lavorazione_id: fd.get('tipo_lavorazione_id'),
+      inizio: new Date(inizioStr).toISOString(),
+      fine: fineStr ? new Date(fineStr).toISOString() : null,
+      note: (fd.get('note')||'').trim() || null,
+    };
+    btnSave.disabled = true; btnSave.textContent = 'Salvataggio…';
+    try {
+      const { data, error } = await sb.from('sessioni_lavoro').update(payload).eq('id', s.id).select().single();
+      if (error) {
+        btnSave.disabled = false; btnSave.textContent = 'Salva';
+        return toast(error.message, 'err');
+      }
+      state.sessioni = state.sessioni.map(x => x.id === s.id ? data : x);
+      toast('Sessione aggiornata');
+      closeModal(); renderTab('gantt');
+    } catch (e) {
+      btnSave.disabled = false; btnSave.textContent = 'Salva';
+      toast('Errore di rete: '+(e.message||e), 'err');
+    }
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
 }
 
 init();
