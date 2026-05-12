@@ -170,6 +170,25 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .chip{display:inline-flex;align-items:center;padding:6px 12px;background:var(--sur2);border:1px solid var(--brd);color:var(--mut);font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;border-radius:3px;transition:all .15s;user-select:none;}
 .chip:hover{color:var(--txt);border-color:var(--mut);}
 .chip.act{background:rgba(212,255,78,.08);border-color:var(--acc);color:var(--acc);}
+
+/* Pianificazione */
+.op-table{font-size:11px;}
+.op-table th{font-size:9px;padding:6px 8px;}
+.op-table td{padding:4px 8px;vertical-align:middle;}
+.op-table tr.in-ritardo td{background:rgba(255,78,107,.06);}
+.op-table tr.in-ritardo td:first-child{box-shadow:inset 3px 0 0 var(--red);}
+.op-table tr.consegnata td{opacity:.55;}
+.op-cell-inline{cursor:pointer;padding:3px 6px;border-radius:2px;transition:background .1s;}
+.op-cell-inline:hover{background:rgba(212,255,78,.08);}
+.op-cell-inline.editing{padding:0;background:transparent;}
+.op-cell-inline input,.op-cell-inline select{background:var(--sur2);border:1px solid var(--acc);color:var(--txt);padding:3px 6px;font-family:inherit;font-size:11px;outline:none;border-radius:2px;width:100%;box-sizing:border-box;}
+.prep-dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;margin-right:5px;}
+.prep-dot.vuoto{background:var(--mut);}
+.prep-dot.parziale{background:var(--yel);}
+.prep-dot.completo{background:var(--grn);}
+.calc-cell{color:var(--mut);font-family:'DM Mono',monospace;font-size:10px;}
+.scadenza-vicina{color:var(--yel);font-weight:600;}
+.scadenza-passata{color:var(--red);font-weight:600;}
 .cal-more{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);padding:2px 5px;}
 
 /* Legenda */
@@ -394,6 +413,17 @@ const state = {
   artSearch: '',
   tipiLav: [],             // anagrafica tipi di lavorazione
   chiusure: [],            // chiusure aziendali (festivi non nazionali)
+  operazioni: [],          // operazioni di pianificazione
+  opFilter: 'aperte',      // 'all' | 'aperte' | 'sospese' | 'consegnate'
+  opSearch: '',
+  opSortKey: 'scadenza',
+  opSortDir: 'asc',
+  // Storico
+  stoMese: null,           // YYYY-MM filtro mese (null = tutti)
+  stoCliente: '',          // filtro cliente_id
+  stoAddetto: '',          // filtro addetto_id
+  stoPunt: 'all',          // 'all' | 'puntuali' | 'ritardo'
+  stoSearch: '',
   calCursor: new Date(), currentTab: 'calendario', currentArea: 'mezzi',
   loaded: false,
 };
@@ -658,7 +688,7 @@ window.addEventListener('online', async () => {
 });
 
 async function loadAllData() {
-  const [profili, mezzi, operatori, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure] = await Promise.all([
+  const [profili, mezzi, operatori, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('operatori').select('*').order('nome'),
@@ -670,6 +700,7 @@ async function loadAllData() {
     sb.from('articoli').select('*').order('codice'),
     sb.from('tipi_lavorazione').select('*').order('ordine'),
     sb.from('chiusure_aziendali').select('*').order('data'),
+    sb.from('operazioni').select('*').order('scadenza'),
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
@@ -682,6 +713,7 @@ async function loadAllData() {
   if (articoli.error) throw articoli.error;
   if (tipiLav.error) throw tipiLav.error;
   if (chiusure.error) throw chiusure.error;
+  if (operazioni.error) throw operazioni.error;
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
@@ -695,6 +727,7 @@ async function loadAllData() {
   state.articoli = articoli.data || [];
   state.tipiLav = tipiLav.data || [];
   state.chiusure = chiusure.data || [];
+  state.operazioni = operazioni.data || [];
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -724,6 +757,8 @@ function startRealtime() {
         (p) => applyChange('tipi_lavorazione', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'chiusure_aziendali' },
         (p) => applyChange('chiusure_aziendali', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'operazioni' },
+        (p) => applyChange('operazioni', p))
     .subscribe();
 }
 
@@ -808,6 +843,14 @@ function applyChange(tabella, payload) {
     } else if (ev === 'DELETE') {
       state.chiusure = state.chiusure.filter(x => x.id !== oldRow.id);
     }
+  } else if (tabella === 'operazioni') {
+    if (ev === 'INSERT') {
+      if (!state.operazioni.find(x => x.id === row.id)) state.operazioni.push(row);
+    } else if (ev === 'UPDATE') {
+      state.operazioni = state.operazioni.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.operazioni = state.operazioni.filter(x => x.id !== oldRow.id);
+    }
   }
 
   // Re-render solo la tab attiva
@@ -843,8 +886,8 @@ const TAB_STRUCTURE = {
     label: 'Lavoro',
     adminOnly: false,
     tabs: [
-      { id: 'pianificazione', label: 'Pianificazione', adminOnly: false, placeholder: true },
-      { id: 'storico',        label: 'Storico',        adminOnly: false, placeholder: true },
+      { id: 'pianificazione', label: 'Pianificazione', adminOnly: false },
+      { id: 'storico',        label: 'Storico',        adminOnly: false },
       { id: 'gantt',          label: 'Gantt',          adminOnly: true,  placeholder: true },
     ],
   },
@@ -924,12 +967,8 @@ function renderTab(name) {
     else if (name === 'articoli')     renderArticoli(root);
     else if (name === 'tipi_lav')     renderTipiLavorazione(root);
     else if (name === 'operatori')    renderOperatori(root);
-    else if (name === 'pianificazione') renderPlaceholder(root, 'Pianificazione',
-      'Gestione operazioni: OP, ordine, codice, descrizione, cliente, quantità, scadenza, data inizio.',
-      'Step 2.7');
-    else if (name === 'storico') renderPlaceholder(root, 'Storico',
-      'Operazioni consegnate, con KPI: % puntualità, ritardi, NC post-consegna.',
-      'Step 2.8');
+    else if (name === 'pianificazione') renderPianificazione(root);
+    else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt') renderPlaceholder(root, 'Gantt occupazione',
       'Vista live: chi sta facendo cosa adesso. Vista storico: timeline settimana/mese.',
       'Step 4-5');
@@ -2805,6 +2844,996 @@ async function deleteChiusura(c) {
   state.chiusure = state.chiusure.filter(x => x.id !== c.id);
   toast('Chiusura eliminata'); renderTab('chiusure');
 }
+
+// ═══════════════════════════════════════════════════════════
+// PIANIFICAZIONE — operazioni di lavoro
+// ═══════════════════════════════════════════════════════════
+
+const OP_STATI = {
+  aperta:     { label:'Aperta',     badge:'bok',  color:'var(--grn)' },
+  sospesa:    { label:'Sospesa',    badge:'byel', color:'var(--yel)' },
+  consegnata: { label:'Consegnata', badge:'bgry', color:'var(--mut)' },
+};
+const OP_PREP = {
+  vuoto:    { label:'Vuoto',    classe:'vuoto' },
+  parziale: { label:'Parziale', classe:'parziale' },
+  completo: { label:'Completo', classe:'completo' },
+};
+
+// Calcoli al volo (non in DB)
+function opCalcOre(op) {
+  return ((op.quantita || 0) * (op.minuti_unitari || 0)) / 60;
+}
+function opCalcGiorni(op) {
+  const ore = opCalcOre(op);
+  return Math.ceil(ore / 8); // 8 ore al giorno, arrotondato per eccesso
+}
+function opCalcInizio(op) {
+  if (!op.scadenza) return null;
+  const giorni = opCalcGiorni(op);
+  if (giorni <= 0) return op.scadenza;
+  return indietroGiorniLavorativi(op.scadenza, giorni);
+}
+function opIsRitardo(op) {
+  if (op.stato === 'consegnata') return false;
+  if (!op.scadenza) return false;
+  const oggi = toLocalISO(new Date());
+  return op.scadenza < oggi;
+}
+
+function renderPianificazione(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const search = (state.opSearch || '').toLowerCase();
+  const filter = state.opFilter || 'aperte';
+
+  let list = state.operazioni.slice();
+  if (filter === 'aperte')     list = list.filter(o => o.stato === 'aperta');
+  else if (filter === 'sospese')    list = list.filter(o => o.stato === 'sospesa');
+  else if (filter === 'consegnate') list = list.filter(o => o.stato === 'consegnata');
+
+  if (search) {
+    list = list.filter(o => {
+      const cli = state.clienti.find(c => c.id === o.cliente_id);
+      const art = state.articoli.find(a => a.id === o.articolo_id);
+      return (o.codice_op||'').toLowerCase().includes(search)
+          || (o.numero_ordine||'').toLowerCase().includes(search)
+          || (o.pos||'').toLowerCase().includes(search)
+          || (cli?.nome||'').toLowerCase().includes(search)
+          || (art?.codice||'').toLowerCase().includes(search)
+          || (o.descrizione_extra||'').toLowerCase().includes(search)
+          || (o.note||'').toLowerCase().includes(search);
+    });
+  }
+
+  // Sort
+  const sortKey = state.opSortKey || 'scadenza';
+  const sortDir = state.opSortDir === 'desc' ? -1 : 1;
+  list.sort((a,b) => {
+    let av, bv;
+    if (sortKey === 'cliente') {
+      av = (state.clienti.find(c => c.id === a.cliente_id)?.nome || '');
+      bv = (state.clienti.find(c => c.id === b.cliente_id)?.nome || '');
+    } else if (sortKey === 'articolo') {
+      av = (state.articoli.find(c => c.id === a.articolo_id)?.codice || '');
+      bv = (state.articoli.find(c => c.id === b.articolo_id)?.codice || '');
+    } else {
+      av = a[sortKey] || '';
+      bv = b[sortKey] || '';
+    }
+    if (av < bv) return -1 * sortDir;
+    if (av > bv) return  1 * sortDir;
+    return 0;
+  });
+
+  // KPI
+  const tot = state.operazioni.length;
+  const aperte = state.operazioni.filter(o => o.stato === 'aperta').length;
+  const inRitardo = state.operazioni.filter(opIsRitardo).length;
+  const sospese = state.operazioni.filter(o => o.stato === 'sospesa').length;
+
+  root.innerHTML = '';
+  root.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Totale'),       el('div', { class:'kv ka' }, String(tot))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Aperte'),        el('div', { class:'kv kg' }, String(aperte))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'In ritardo'),    el('div', { class:'kv kr' }, String(inRitardo))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Sospese'),       el('div', { class:'kv ky' }, String(sospese))),
+  ));
+
+  // Chips filtro
+  const chips = el('div', { class:'chips' });
+  [
+    { id:'all',        label:'Tutte' },
+    { id:'aperte',     label:'Aperte' },
+    { id:'sospese',    label:'Sospese' },
+    { id:'consegnate', label:'Consegnate' },
+  ].forEach(opt => {
+    chips.append(el('div', {
+      class: 'chip' + (filter === opt.id ? ' act' : ''),
+      onclick: () => { state.opFilter = opt.id; renderTab('pianificazione'); }
+    }, opt.label));
+  });
+  root.append(chips);
+
+  // Toolbar
+  const toolbar = el('div', { class:'toolbar' },
+    el('h2', {}, 'Pianificazione'),
+    el('input', {
+      type:'text', class:'search',
+      placeholder:'Cerca OP, ordine, cliente, codice…',
+      value: state.opSearch || '',
+      oninput: (e) => { state.opSearch = e.target.value; renderTab('pianificazione'); }
+    }),
+  );
+  if (isAdmin) {
+    toolbar.append(el('button', { class:'btnp', onclick:()=>openOperazioneModal() }, '+ Nuova Operazione'));
+  }
+  root.append(toolbar);
+
+  if (state.clienti.length === 0 || state.articoli.length === 0) {
+    root.append(el('div', { class:'empty' },
+      el('div', { style:'margin-bottom:8px;' }, '⚠ Per creare operazioni servono prima clienti e articoli.'),
+      el('div', { class:'sub' }, 'Vai in Anagrafiche → Clienti e Articoli per aggiungerne.')));
+    return;
+  }
+
+  if (list.length === 0) {
+    root.append(el('div', { class:'empty' },
+      state.operazioni.length === 0
+        ? 'Nessuna operazione ancora. Crea la prima con "+ Nuova Operazione".'
+        : 'Nessuna operazione corrisponde ai filtri.'
+    ));
+    return;
+  }
+
+  // Tabella
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt op-table' });
+
+  const sortHead = (key, label, opts={}) => {
+    const isActive = sortKey === key;
+    const indicator = isActive ? (sortDir === 1 ? ' ↑' : ' ↓') : '';
+    return el('th', {
+      class: opts.tc ? 'tc' : (opts.tr ? 'tr' : ''),
+      style: 'cursor:pointer;',
+      onclick: () => {
+        if (state.opSortKey === key) state.opSortDir = state.opSortDir === 'asc' ? 'desc' : 'asc';
+        else { state.opSortKey = key; state.opSortDir = 'asc'; }
+        renderTab('pianificazione');
+      },
+    }, label + indicator);
+  };
+
+  tbl.append(el('thead', {}, el('tr', {},
+    sortHead('codice_op',       'OP'),
+    sortHead('pos',             'POS'),
+    sortHead('numero_ordine',   'Ordine'),
+    sortHead('cliente',         'Cliente'),
+    sortHead('articolo',        'Codice Art.'),
+    sortHead('quantita',        'Qtà', {tr:true}),
+    sortHead('minuti_unitari',  'Min.', {tr:true}),
+    el('th', { class:'tr' }, 'Ore'),
+    el('th', { class:'tr' }, 'Giorni'),
+    el('th', {}, 'Addetto'),
+    sortHead('scadenza',        'Scadenza'),
+    el('th', {}, 'Inizio'),
+    el('th', { class:'tc' }, 'Prep.'),
+    sortHead('stato',           'Stato', {tc:true}),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+
+  const tb = el('tbody');
+  list.forEach(o => {
+    const cli = state.clienti.find(c => c.id === o.cliente_id);
+    const art = state.articoli.find(a => a.id === o.articolo_id);
+    const addetto = o.addetto_previsto_id
+      ? state.operatori.find(u => u.id === o.addetto_previsto_id)
+      : null;
+    const ore = opCalcOre(o);
+    const giorni = opCalcGiorni(o);
+    const inizio = opCalcInizio(o);
+    const ritardo = opIsRitardo(o);
+
+    let rowClass = '';
+    if (ritardo) rowClass = 'in-ritardo';
+    else if (o.stato === 'consegnata') rowClass = 'consegnata';
+
+    // Scadenza con colore secondo prossimità
+    let scadCls = '';
+    if (o.scadenza && o.stato !== 'consegnata') {
+      const oggi = new Date(); oggi.setHours(0,0,0,0);
+      const scad = parseISODate(o.scadenza);
+      const diff = (scad - oggi) / 86400000;
+      if (diff < 0) scadCls = 'scadenza-passata';
+      else if (diff <= 3) scadCls = 'scadenza-vicina';
+    }
+
+    const tr = el('tr', { class: rowClass });
+
+    // OP (inline editable)
+    tr.append(el('td', { class:'mono', style:'color:var(--or);' },
+      opInlineCell(o, 'codice_op', o.codice_op || '—', 'text')));
+
+    // POS
+    tr.append(el('td', { class:'mono', style:'color:var(--mut);' },
+      opInlineCell(o, 'pos', o.pos || '—', 'text')));
+
+    // Ordine
+    tr.append(el('td', { class:'mono' },
+      opInlineCell(o, 'numero_ordine', o.numero_ordine || '—', 'text')));
+
+    // Cliente (read-only nella riga, modifica solo in modale completa)
+    tr.append(el('td', {}, cli?.nome || '—'));
+
+    // Codice articolo
+    tr.append(el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'));
+
+    // Quantità
+    tr.append(el('td', { class:'tr mono' },
+      opInlineCell(o, 'quantita', String(o.quantita || 0), 'number')));
+
+    // Min unit
+    tr.append(el('td', { class:'tr mono' },
+      opInlineCell(o, 'minuti_unitari', String(o.minuti_unitari || 0), 'number')));
+
+    // Ore (calc)
+    tr.append(el('td', { class:'tr calc-cell' }, ore.toFixed(1)));
+
+    // Giorni (calc)
+    tr.append(el('td', { class:'tr calc-cell' }, String(giorni)));
+
+    // Addetto (inline editable con select)
+    const addettoOptions = [
+      { value:'', label:'—' },
+      ...state.operatori.filter(u => u.attivo).map(u => ({ value:u.id, label:u.nome }))
+    ];
+    tr.append(el('td', { style:'font-size:11px;' },
+      opInlineSelect(o, 'addetto_previsto_id', addetto?.nome || '—', addettoOptions)));
+
+    // Scadenza
+    tr.append(el('td', { class:'mono '+scadCls },
+      opInlineCell(o, 'scadenza', o.scadenza ? fmtIT(o.scadenza) : '—', 'date')));
+
+    // Data inizio (calc)
+    tr.append(el('td', { class:'mono calc-cell' }, inizio ? fmtIT(inizio) : '—'));
+
+    // Stato preparazione (inline editable)
+    const prepOptions = [
+      { value:'vuoto',    label:'Vuoto' },
+      { value:'parziale', label:'Parziale' },
+      { value:'completo', label:'Completo' },
+    ];
+    const prepCls = OP_PREP[o.stato_preparazione]?.classe || 'vuoto';
+    const prepLabel = el('span', {},
+      el('span', { class:'prep-dot '+prepCls }),
+      OP_PREP[o.stato_preparazione]?.label || '—'
+    );
+    tr.append(el('td', { class:'tc', style:'font-size:11px;' },
+      opInlineSelect(o, 'stato_preparazione', prepLabel, prepOptions)));
+
+    // Stato
+    const statoOptions = [
+      { value:'aperta',     label:'Aperta' },
+      { value:'sospesa',    label:'Sospesa' },
+      { value:'consegnata', label:'Consegnata' },
+    ];
+    const statoBadge = el('span', { class:'badge '+(OP_STATI[o.stato]?.badge||'bgry') }, OP_STATI[o.stato]?.label||o.stato);
+    tr.append(el('td', { class:'tc', style:'font-size:11px;' },
+      opInlineSelect(o, 'stato', statoBadge, statoOptions)));
+
+    // Azioni
+    const azioniCell = el('td', { class:'tc' },
+      el('button', { class:'btnsm', onclick:()=>openOperazioneModal(o) }, 'Apri'),
+    );
+    if (o.stato !== 'consegnata' && isAdmin) {
+      azioniCell.append(' ', el('button', {
+        class:'btnsm', style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
+        title:'Segna come consegnata',
+        onclick:()=>quickConsegna(o)
+      }, '✓'));
+    }
+    if (isAdmin) {
+      azioniCell.append(' ', el('button', { class:'btnd', onclick:()=>deleteOperazione(o) }, '✕'));
+    }
+    tr.append(azioniCell);
+
+    tb.append(tr);
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+
+  // Legenda
+  root.append(el('div', { class:'sub', style:'margin-top:14px;font-size:10px;' },
+    'Click su una cella editabile per modificarla al volo. Click su "Apri" per la scheda completa.'));
+}
+
+// Cella inline editabile (text/number/date)
+function opInlineCell(op, field, displayValue, type) {
+  const cell = el('span', { class:'op-cell-inline' }, String(displayValue));
+  cell.onclick = (e) => {
+    e.stopPropagation();
+    if (cell.classList.contains('editing')) return;
+    cell.classList.add('editing');
+    cell.innerHTML = '';
+    const inp = el('input', { type, value: op[field] || '' });
+    cell.appendChild(inp);
+    inp.focus();
+    if (type !== 'date') inp.select();
+
+    const commit = async () => {
+      let val = inp.value;
+      if (type === 'number') {
+        const n = parseInt(val);
+        val = isNaN(n) ? 0 : n;
+      }
+      if (type === 'date' && !val) val = null;
+      if (type === 'text' && (val||'').trim() === '') val = null;
+      // Se non è cambiato, exit silenzioso
+      if (val === op[field] || (val === null && !op[field])) {
+        cell.classList.remove('editing');
+        cell.innerHTML = String(displayValue);
+        return;
+      }
+      cell.innerHTML = '...';
+      const { data, error } = await sb.from('operazioni')
+        .update({ [field]: val }).eq('id', op.id).select().single();
+      cell.classList.remove('editing');
+      if (error) {
+        toast(error.message, 'err');
+        cell.innerHTML = String(displayValue);
+        return;
+      }
+      state.operazioni = state.operazioni.map(x => x.id === op.id ? data : x);
+      renderTab('pianificazione');
+    };
+    inp.onblur = commit;
+    inp.onkeydown = (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); }
+      else if (ev.key === 'Escape') {
+        cell.classList.remove('editing');
+        cell.innerHTML = String(displayValue);
+      }
+    };
+  };
+  return cell;
+}
+
+// Cella inline editabile (select)
+function opInlineSelect(op, field, displayNode, options) {
+  const cell = el('span', { class:'op-cell-inline' });
+  if (typeof displayNode === 'string') cell.textContent = displayNode;
+  else cell.appendChild(displayNode);
+  cell.onclick = (e) => {
+    e.stopPropagation();
+    if (cell.classList.contains('editing')) return;
+    cell.classList.add('editing');
+    cell.innerHTML = '';
+    const sel = el('select', {});
+    options.forEach(o => sel.appendChild(el('option', { value:o.value }, o.label)));
+    sel.value = op[field] || '';
+    cell.appendChild(sel);
+    sel.focus();
+
+    const commit = async () => {
+      let val = sel.value || null;
+      if (val === op[field]) {
+        cell.classList.remove('editing');
+        if (typeof displayNode === 'string') cell.textContent = displayNode;
+        else { cell.innerHTML=''; cell.appendChild(displayNode); }
+        return;
+      }
+      cell.innerHTML = '...';
+      const { data, error } = await sb.from('operazioni')
+        .update({ [field]: val }).eq('id', op.id).select().single();
+      cell.classList.remove('editing');
+      if (error) {
+        toast(error.message, 'err');
+        renderTab('pianificazione');
+        return;
+      }
+      state.operazioni = state.operazioni.map(x => x.id === op.id ? data : x);
+      renderTab('pianificazione');
+    };
+    sel.onchange = commit;
+    sel.onblur = commit;
+    sel.onkeydown = (ev) => { if (ev.key === 'Escape') { cell.classList.remove('editing'); renderTab('pianificazione'); } };
+  };
+  return cell;
+}
+
+// Modale completa per creazione e modifica
+function openOperazioneModal(o) {
+  const isNew = !o;
+  const isAdmin = state.profile?.ruolo === 'admin';
+  o = o || {
+    cliente_id:'', articolo_id:'', numero_ordine:'', pos:'', codice_op:'',
+    descrizione_extra:'', quantita:1, minuti_unitari:0,
+    scadenza:'', cl_consegna_materiali:'',
+    addetto_previsto_id:'', esterno_descrizione:'',
+    stato:'aperta', stato_preparazione:'vuoto', note:'',
+    consegnato_il:'', giustificazione_ritardo:'', nc_post_consegna:'', responsabilita:'',
+  };
+
+  const modal = el('div', { class:'modal', style:'max-width:720px;' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuova Operazione' : (isAdmin ? 'Modifica Operazione' : 'Operazione')),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  // Select cliente
+  const selCliente = el('select', { name:'cliente_id', required:'true' },
+    el('option', { value:'' }, '— seleziona —'),
+    ...state.clienti.filter(c => c.attivo).map(c =>
+      el('option', { value:c.id }, c.nome))
+  );
+  selCliente.value = o.cliente_id || '';
+
+  // Select articolo
+  const selArticolo = el('select', { name:'articolo_id', required:'true' },
+    el('option', { value:'' }, '— seleziona —'),
+    ...state.articoli.filter(a => a.attivo).map(a =>
+      el('option', { value:a.id }, a.codice + (a.descrizione ? ' — '+a.descrizione : '')))
+  );
+  selArticolo.value = o.articolo_id || '';
+
+  // Select addetto
+  const selAddetto = el('select', { name:'addetto_previsto_id' },
+    el('option', { value:'' }, '— nessuno —'),
+    ...state.operatori.filter(u => u.attivo).map(u =>
+      el('option', { value:u.id }, u.nome + (u.esterno ? ' (esterno)' : '')))
+  );
+  selAddetto.value = o.addetto_previsto_id || '';
+
+  // Stato + preparazione
+  const selStato = el('select', { name:'stato' },
+    el('option', { value:'aperta' }, 'Aperta'),
+    el('option', { value:'sospesa' }, 'Sospesa'),
+    el('option', { value:'consegnata' }, 'Consegnata'),
+  );
+  selStato.value = o.stato || 'aperta';
+
+  const selPrep = el('select', { name:'stato_preparazione' },
+    el('option', { value:'vuoto' }, 'Vuoto'),
+    el('option', { value:'parziale' }, 'Parziale'),
+    el('option', { value:'completo' }, 'Completo'),
+  );
+  selPrep.value = o.stato_preparazione || 'vuoto';
+
+  form.append(
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Cliente *'), selCliente),
+      el('div', { class:'field' }, el('label', {}, 'Codice articolo *'), selArticolo),
+    ),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Numero ordine'),
+        el('input', { type:'text', name:'numero_ordine', value:o.numero_ordine||'',
+          placeholder:'es. 26CL-00074' })),
+      el('div', { class:'field' }, el('label', {}, 'POS'),
+        el('input', { type:'text', name:'pos', value:o.pos||'',
+          placeholder:'es. 0010' })),
+      el('div', { class:'field' }, el('label', {}, 'Codice OP / ODP'),
+        el('input', { type:'text', name:'codice_op', value:o.codice_op||'',
+          placeholder:'es. 2026OP0000209' })),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Descrizione extra (specifica per questo lavoro)'),
+      el('input', { type:'text', name:'descrizione_extra', value:o.descrizione_extra||'' })),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Quantità *'),
+        el('input', { type:'number', name:'quantita', value:String(o.quantita||1), min:'1', required:'true' })),
+      el('div', { class:'field' }, el('label', {}, 'Minuti unitari'),
+        el('input', { type:'number', name:'minuti_unitari', value:String(o.minuti_unitari||0), min:'0' })),
+    ),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Scadenza'),
+        el('input', { type:'date', name:'scadenza', value:o.scadenza||'' })),
+      el('div', { class:'field' }, el('label', {}, 'Consegna materiali entro'),
+        el('input', { type:'date', name:'cl_consegna_materiali', value:o.cl_consegna_materiali||'' })),
+    ),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Addetto previsto'), selAddetto),
+      el('div', { class:'field' }, el('label', {}, 'Lavorazione esterna'),
+        el('input', { type:'text', name:'esterno_descrizione', value:o.esterno_descrizione||'',
+          placeholder:'es. OL 4 TEKNINA' })),
+    ),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Stato'), selStato),
+      el('div', { class:'field' }, el('label', {}, 'Preparazione'), selPrep),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Note'),
+      el('textarea', { name:'note', rows:'2' }, o.note||'')),
+  );
+
+  // Sezione storico (solo se consegnata)
+  if (!isNew && o.stato === 'consegnata') {
+    form.append(
+      el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+        '── Dati consegna ──'),
+      el('div', { class:'frow' },
+        el('div', { class:'field' }, el('label', {}, 'Consegnato il'),
+          el('input', { type:'date', name:'consegnato_il', value:o.consegnato_il||'' })),
+        el('div', { class:'field' }, el('label', {}, 'Responsabilità'),
+          el('input', { type:'text', name:'responsabilita', value:o.responsabilita||'' })),
+      ),
+      el('div', { class:'field' }, el('label', {}, 'Giustificazione ritardo'),
+        el('textarea', { name:'giustificazione_ritardo', rows:'2' }, o.giustificazione_ritardo||'')),
+      el('div', { class:'field' }, el('label', {}, 'NC post-consegna'),
+        el('textarea', { name:'nc_post_consegna', rows:'2' }, o.nc_post_consegna||'')),
+    );
+  }
+
+  // Preview calcoli
+  const previewBox = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;margin-top:12px;font-family:monospace;font-size:11px;color:var(--mut);' });
+  const refreshPreview = () => {
+    const fd = new FormData(form);
+    const tmp = {
+      quantita: parseInt(fd.get('quantita'))||0,
+      minuti_unitari: parseInt(fd.get('minuti_unitari'))||0,
+      scadenza: fd.get('scadenza'),
+    };
+    const ore = opCalcOre(tmp);
+    const giorni = opCalcGiorni(tmp);
+    const inizio = opCalcInizio(tmp);
+    previewBox.innerHTML = '';
+    previewBox.append(
+      el('div', {},
+        el('span', { style:'color:var(--acc)' }, 'Ore stimate: '), ore.toFixed(2),
+        el('span', { style:'margin:0 10px;color:var(--brd)' }, '·'),
+        el('span', { style:'color:var(--acc)' }, 'Giorni lavorativi: '), String(giorni),
+        el('span', { style:'margin:0 10px;color:var(--brd)' }, '·'),
+        el('span', { style:'color:var(--acc)' }, 'Data inizio calc.: '), inizio ? fmtIT(inizio) : '— (manca scadenza)',
+      ),
+      el('div', { style:'margin-top:4px;font-size:10px;color:var(--mut);' },
+        'Calcolato come quantità × minuti / 60 ore, divisi in giornate da 8h, escludendo weekend, festivi nazionali e chiusure aziendali.')
+    );
+  };
+  refreshPreview();
+  ['quantita','minuti_unitari','scadenza'].forEach(name => {
+    form.querySelector(`[name=${name}]`).addEventListener('input', refreshPreview);
+  });
+
+  form.appendChild(previewBox);
+
+  body.append(form);
+  modal.append(body);
+
+  // Disabilita campi se non admin
+  if (!isAdmin) {
+    form.querySelectorAll('input,select,textarea').forEach(i => i.disabled = true);
+  }
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  if (isAdmin) {
+    const btnSave = el('button', { class:'btnp' }, 'Salva');
+    btnSave.onclick = async () => {
+      const fd = new FormData(form);
+      const payload = {
+        cliente_id: fd.get('cliente_id') || null,
+        articolo_id: fd.get('articolo_id') || null,
+        numero_ordine: (fd.get('numero_ordine')||'').trim() || null,
+        pos: (fd.get('pos')||'').trim() || null,
+        codice_op: (fd.get('codice_op')||'').trim() || null,
+        descrizione_extra: (fd.get('descrizione_extra')||'').trim() || null,
+        quantita: parseInt(fd.get('quantita')) || 1,
+        minuti_unitari: parseInt(fd.get('minuti_unitari')) || 0,
+        scadenza: fd.get('scadenza') || null,
+        cl_consegna_materiali: fd.get('cl_consegna_materiali') || null,
+        addetto_previsto_id: fd.get('addetto_previsto_id') || null,
+        esterno_descrizione: (fd.get('esterno_descrizione')||'').trim() || null,
+        stato: fd.get('stato') || 'aperta',
+        stato_preparazione: fd.get('stato_preparazione') || 'vuoto',
+        note: (fd.get('note')||'').trim() || null,
+      };
+      if (!isNew && o.stato === 'consegnata') {
+        payload.consegnato_il = fd.get('consegnato_il') || null;
+        payload.giustificazione_ritardo = (fd.get('giustificazione_ritardo')||'').trim() || null;
+        payload.nc_post_consegna = (fd.get('nc_post_consegna')||'').trim() || null;
+        payload.responsabilita = (fd.get('responsabilita')||'').trim() || null;
+      }
+      if (!payload.cliente_id) return toast('Cliente obbligatorio', 'err');
+      if (!payload.articolo_id) return toast('Articolo obbligatorio', 'err');
+      if (payload.quantita <= 0) return toast('Quantità deve essere > 0', 'err');
+
+      btnSave.disabled = true;
+      btnSave.textContent = 'Salvataggio…';
+      try {
+        const q = isNew
+          ? sb.from('operazioni').insert(payload).select().single()
+          : sb.from('operazioni').update(payload).eq('id', o.id).select().single();
+        const { data, error } = await q;
+        if (error) {
+          btnSave.disabled = false;
+          btnSave.textContent = 'Salva';
+          return toast(error.message, 'err');
+        }
+        if (isNew) {
+          if (!state.operazioni.find(x => x.id === data.id)) state.operazioni.push(data);
+        } else {
+          state.operazioni = state.operazioni.map(x => x.id === o.id ? data : x);
+        }
+        toast(isNew ? 'Operazione creata' : 'Operazione aggiornata');
+        closeModal(); renderTab('pianificazione');
+      } catch (e) {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Salva';
+        toast('Errore di rete: '+(e.message||e), 'err');
+      }
+    };
+    foot.append(btnSave);
+  }
+  modal.append(foot);
+  openModal(modal);
+}
+
+async function deleteOperazione(o) {
+  if (!confirm(`Eliminare questa operazione?\n${o.codice_op || ''} ${o.numero_ordine || ''}`)) return;
+  const { data, error } = await sb.from('operazioni').delete().eq('id', o.id).select();
+  if (error) return toast(error.message, 'err');
+  if (!data || data.length === 0) return toast('Eliminazione bloccata', 'err');
+  state.operazioni = state.operazioni.filter(x => x.id !== o.id);
+  toast('Operazione eliminata'); renderTab('pianificazione');
+}
+
+// ═══════════════════════════════════════════════════════════
+// STORICO — operazioni consegnate, KPI puntualità
+// ═══════════════════════════════════════════════════════════
+
+// Calcola giorni di ritardo tra scadenza e consegna (negativo = anticipo, 0 = in tempo, positivo = ritardo)
+function calcRitardoGiorni(o) {
+  if (!o.scadenza || !o.consegnato_il) return null;
+  const scad = parseISODate(o.scadenza);
+  const cons = parseISODate(o.consegnato_il);
+  return Math.round((cons - scad) / 86400000);
+}
+
+function renderStorico(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const search = (state.stoSearch || '').toLowerCase();
+  const filtroMese = state.stoMese || null;
+  const filtroCliente = state.stoCliente || '';
+  const filtroAddetto = state.stoAddetto || '';
+  const filtroPunt = state.stoPunt || 'all';
+
+  // Solo consegnate
+  let list = state.operazioni.filter(o => o.stato === 'consegnata' && o.consegnato_il);
+
+  if (filtroMese) {
+    list = list.filter(o => (o.consegnato_il||'').startsWith(filtroMese));
+  }
+  if (filtroCliente) list = list.filter(o => o.cliente_id === filtroCliente);
+  if (filtroAddetto) list = list.filter(o => o.addetto_previsto_id === filtroAddetto);
+
+  if (filtroPunt === 'puntuali') list = list.filter(o => (calcRitardoGiorni(o)||0) <= 0);
+  else if (filtroPunt === 'ritardo') list = list.filter(o => (calcRitardoGiorni(o)||0) > 0);
+
+  if (search) {
+    list = list.filter(o => {
+      const cli = state.clienti.find(c => c.id === o.cliente_id);
+      const art = state.articoli.find(a => a.id === o.articolo_id);
+      return (o.codice_op||'').toLowerCase().includes(search)
+          || (o.numero_ordine||'').toLowerCase().includes(search)
+          || (cli?.nome||'').toLowerCase().includes(search)
+          || (art?.codice||'').toLowerCase().includes(search)
+          || (o.giustificazione_ritardo||'').toLowerCase().includes(search)
+          || (o.nc_post_consegna||'').toLowerCase().includes(search);
+    });
+  }
+
+  // Sort: più recente prima
+  list.sort((a,b) => (b.consegnato_il||'').localeCompare(a.consegnato_il||''));
+
+  // KPI
+  const tot = list.length;
+  const ritardi = list.map(calcRitardoGiorni).filter(r => r !== null);
+  const puntuali = ritardi.filter(r => r <= 0).length;
+  const inRitardo = ritardi.filter(r => r > 0).length;
+  const percPunt = tot > 0 ? Math.round((puntuali / tot) * 100) : 0;
+  const ritardiPos = ritardi.filter(r => r > 0);
+  const ritardoMedio = ritardiPos.length > 0
+    ? (ritardiPos.reduce((a,b) => a + b, 0) / ritardiPos.length).toFixed(1)
+    : '0';
+  const totPezzi = list.reduce((sum, o) => sum + (o.quantita||0), 0);
+  const conNc = list.filter(o => o.nc_post_consegna && o.nc_post_consegna.trim() !== '').length;
+
+  root.innerHTML = '';
+
+  // KPI
+  const kpiClass = percPunt >= 90 ? 'kg' : (percPunt >= 70 ? 'ky' : 'kr');
+  root.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Consegnate'),       el('div', { class:'kv' }, String(tot))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Puntualità'),       el('div', { class:'kv '+kpiClass }, percPunt+'%')),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'In ritardo'),       el('div', { class:'kv kr' }, String(inRitardo))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Ritardo medio (gg)'), el('div', { class:'kv' }, ritardoMedio)),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Pezzi totali'),     el('div', { class:'kv ka' }, String(totPezzi))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Con NC'),           el('div', { class:'kv ky' }, String(conNc))),
+  ));
+
+  // Filtri mese (chips dei mesi presenti)
+  const mesiDist = new Set();
+  state.operazioni.forEach(o => {
+    if (o.stato === 'consegnata' && o.consegnato_il)
+      mesiDist.add(o.consegnato_il.substring(0,7));
+  });
+  const mesiArr = Array.from(mesiDist).sort().reverse();
+
+  if (mesiArr.length > 0) {
+    const meseChips = el('div', { class:'chips' });
+    meseChips.append(el('div', {
+      class: 'chip' + (!filtroMese ? ' act' : ''),
+      onclick: () => { state.stoMese = null; renderTab('storico'); }
+    }, 'Tutti i mesi'));
+    mesiArr.forEach(m => {
+      const [y, mese] = m.split('-');
+      const meseNomi = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+      meseChips.append(el('div', {
+        class: 'chip' + (filtroMese === m ? ' act' : ''),
+        onclick: () => { state.stoMese = m; renderTab('storico'); }
+      }, meseNomi[parseInt(mese)-1]+' '+y));
+    });
+    root.append(meseChips);
+  }
+
+  // Filtri secondari (chip puntualità)
+  const puntChips = el('div', { class:'chips' });
+  [
+    { id:'all',       label:'Tutte' },
+    { id:'puntuali',  label:'Puntuali' },
+    { id:'ritardo',   label:'In ritardo' },
+  ].forEach(opt => {
+    puntChips.append(el('div', {
+      class: 'chip' + (filtroPunt === opt.id ? ' act' : ''),
+      onclick: () => { state.stoPunt = opt.id; renderTab('storico'); }
+    }, opt.label));
+  });
+  root.append(puntChips);
+
+  // Toolbar con select cliente / addetto + ricerca
+  const selCli = el('select', { class:'search', style:'width:auto;',
+    onchange: (e) => { state.stoCliente = e.target.value; renderTab('storico'); }
+  },
+    el('option', { value:'' }, '— Tutti i clienti —'),
+    ...state.clienti.sort((a,b)=>a.nome.localeCompare(b.nome)).map(c =>
+      el('option', { value:c.id }, c.nome))
+  );
+  selCli.value = filtroCliente;
+
+  const selAdd = el('select', { class:'search', style:'width:auto;',
+    onchange: (e) => { state.stoAddetto = e.target.value; renderTab('storico'); }
+  },
+    el('option', { value:'' }, '— Tutti gli addetti —'),
+    ...state.operatori.sort((a,b)=>a.nome.localeCompare(b.nome)).map(u =>
+      el('option', { value:u.id }, u.nome))
+  );
+  selAdd.value = filtroAddetto;
+
+  const toolbar = el('div', { class:'toolbar' },
+    el('h2', {}, 'Storico consegne'),
+    selCli, selAdd,
+    el('input', {
+      type:'text', class:'search',
+      placeholder:'Cerca…',
+      value: state.stoSearch || '',
+      oninput: (e) => { state.stoSearch = e.target.value; renderTab('storico'); }
+    }),
+    el('button', { class:'btng', onclick:storicoExportExcel }, '⬇ Esporta'),
+  );
+  root.append(toolbar);
+
+  if (list.length === 0) {
+    root.append(el('div', { class:'empty' },
+      state.operazioni.filter(o => o.stato === 'consegnata').length === 0
+        ? 'Nessuna operazione consegnata. Le operazioni passano qui quando vengono marcate come "consegnata" nella Pianificazione.'
+        : 'Nessuna operazione corrisponde ai filtri.'
+    ));
+    return;
+  }
+
+  // Tabella
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt op-table' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'OP'),
+    el('th', {}, 'Ordine'),
+    el('th', {}, 'Cliente'),
+    el('th', {}, 'Codice Art.'),
+    el('th', { class:'tr' }, 'Qtà'),
+    el('th', {}, 'Addetto'),
+    el('th', {}, 'Scadenza'),
+    el('th', {}, 'Consegnato'),
+    el('th', { class:'tc' }, 'Esito'),
+    el('th', {}, 'Note / NC'),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+  const tb = el('tbody');
+
+  list.forEach(o => {
+    const cli = state.clienti.find(c => c.id === o.cliente_id);
+    const art = state.articoli.find(a => a.id === o.articolo_id);
+    const addetto = o.addetto_previsto_id
+      ? state.operatori.find(u => u.id === o.addetto_previsto_id)
+      : null;
+    const ritardo = calcRitardoGiorni(o);
+
+    let esitoBadge;
+    if (ritardo === null) {
+      esitoBadge = el('span', { class:'badge bgry' }, '—');
+    } else if (ritardo < 0) {
+      esitoBadge = el('span', { class:'badge bok' }, 'anticipo '+Math.abs(ritardo)+'gg');
+    } else if (ritardo === 0) {
+      esitoBadge = el('span', { class:'badge bok' }, 'in tempo');
+    } else {
+      esitoBadge = el('span', { class:'badge berr' }, '+'+ritardo+' gg');
+    }
+
+    // Tooltip note
+    const noteText = [];
+    if (o.giustificazione_ritardo) noteText.push('⚠ '+o.giustificazione_ritardo);
+    if (o.nc_post_consegna) noteText.push('NC: '+o.nc_post_consegna);
+    if (o.responsabilita) noteText.push('Resp.: '+o.responsabilita);
+    const noteCell = noteText.length
+      ? el('td', { style:'max-width:280px;font-size:10px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: noteText.join('\n') }, noteText.join(' · '))
+      : el('td', {}, '');
+
+    tb.append(el('tr', { class:'consegnata' },
+      el('td', { class:'mono', style:'color:var(--or);' }, o.codice_op || '—'),
+      el('td', { class:'mono' }, o.numero_ordine || '—'),
+      el('td', {}, cli?.nome || '—'),
+      el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
+      el('td', { class:'tr mono' }, String(o.quantita || 0)),
+      el('td', {}, addetto?.nome || '—'),
+      el('td', { class:'mono' }, o.scadenza ? fmtIT(o.scadenza) : '—'),
+      el('td', { class:'mono' }, fmtIT(o.consegnato_il)),
+      el('td', { class:'tc' }, esitoBadge),
+      noteCell,
+      el('td', { class:'tc' },
+        el('button', { class:'btnsm', onclick:()=>openOperazioneModal(o) }, 'Apri'),
+        isAdmin
+          ? el('span', {}, ' ', el('button', { class:'btng', onclick:()=>riaperturaOperazione(o), title:'Riapri operazione' }, '↺'))
+          : ''
+      ),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+}
+
+// Bottone per riaprire un'operazione (consegnata → aperta, svuota i campi consegna)
+async function riaperturaOperazione(o) {
+  if (!confirm(`Riaprire l'operazione ${o.codice_op || ''} ${o.numero_ordine || ''}?\nVerranno azzerati: data consegna, giustificazione, NC, responsabilità.`)) return;
+  const { data, error } = await sb.from('operazioni').update({
+    stato: 'aperta',
+    consegnato_il: null,
+    giustificazione_ritardo: null,
+    nc_post_consegna: null,
+    responsabilita: null,
+  }).eq('id', o.id).select().single();
+  if (error) return toast(error.message, 'err');
+  state.operazioni = state.operazioni.map(x => x.id === o.id ? data : x);
+  toast('Operazione riaperta'); renderTab('storico');
+}
+
+// Apri il quick-dialog di consegna da Pianificazione
+function quickConsegna(o) {
+  const oggi = toLocalISO(new Date());
+  const ritardo = o.scadenza && o.scadenza < oggi;
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Segna come consegnata'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+
+  const cli = state.clienti.find(c => c.id === o.cliente_id);
+  const art = state.articoli.find(a => a.id === o.articolo_id);
+  body.append(el('div', { class:'sub', style:'margin-bottom:14px;padding:10px;background:var(--sur2);border-radius:4px;font-family:monospace;font-size:11px;line-height:1.6;' },
+    el('div', {}, 'OP: ', el('span', { style:'color:var(--or)' }, o.codice_op || '—'), ' · ',
+      'Ordine: ', el('span', { style:'color:var(--txt)' }, o.numero_ordine || '—')),
+    el('div', {}, cli?.nome || '—', ' · ', art?.codice || '—', ' · ', (o.quantita||0)+' pz'),
+    el('div', {}, 'Scadenza: ', el('span', { style:'color:'+(ritardo?'var(--red)':'var(--txt)') }, o.scadenza ? fmtIT(o.scadenza) : '—')),
+  ));
+
+  const form = el('form');
+  const inData = el('input', { type:'date', name:'consegnato_il', value:oggi, required:'true' });
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Data consegna *'), inData),
+  );
+
+  // Mostra subito i campi NC/giustificazione (sempre, anche se in tempo, opzionali)
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Giustificazione ritardo (se applicabile)'),
+      el('textarea', { name:'giustificazione_ritardo', rows:'2', placeholder: ritardo ? 'Es. attesa materiale, fermo macchina, …' : 'Non richiesta (consegna in tempo)' })),
+    el('div', { class:'field' }, el('label', {}, 'Non conformità post-consegna'),
+      el('textarea', { name:'nc_post_consegna', rows:'2', placeholder:'Es. cliente ha segnalato difetto X' })),
+    el('div', { class:'field' }, el('label', {}, 'Responsabilità'),
+      el('input', { type:'text', name:'responsabilita', placeholder:'Es. interna / fornitore / cliente' })),
+  );
+  body.append(form);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
+  const btnOk = el('button', { class:'btnp' }, '✓ Conferma consegna');
+  btnOk.onclick = async () => {
+    const fd = new FormData(form);
+    if (!fd.get('consegnato_il')) return toast('Data consegna obbligatoria', 'err');
+    btnOk.disabled = true; btnOk.textContent = 'Salvataggio…';
+    try {
+      const { data, error } = await sb.from('operazioni').update({
+        stato: 'consegnata',
+        consegnato_il: fd.get('consegnato_il'),
+        giustificazione_ritardo: (fd.get('giustificazione_ritardo')||'').trim() || null,
+        nc_post_consegna: (fd.get('nc_post_consegna')||'').trim() || null,
+        responsabilita: (fd.get('responsabilita')||'').trim() || null,
+      }).eq('id', o.id).select().single();
+      if (error) {
+        btnOk.disabled = false; btnOk.textContent = '✓ Conferma consegna';
+        return toast(error.message, 'err');
+      }
+      state.operazioni = state.operazioni.map(x => x.id === o.id ? data : x);
+      toast('Operazione consegnata');
+      closeModal(); renderTab(state.currentTab);
+    } catch (e) {
+      btnOk.disabled = false; btnOk.textContent = '✓ Conferma consegna';
+      toast('Errore: '+(e.message||e), 'err');
+    }
+  };
+  foot.append(btnOk);
+  modal.append(foot);
+  openModal(modal);
+}
+
+// Export storico in Excel
+function storicoExportExcel() {
+  if (typeof XLSX === 'undefined') {
+    toast('Libreria Excel non caricata', 'err');
+    return;
+  }
+  const consegnate = state.operazioni.filter(o => o.stato === 'consegnata' && o.consegnato_il);
+  if (consegnate.length === 0) return toast('Nessuna consegna da esportare', 'err');
+
+  const rows = consegnate.map(o => {
+    const cli = state.clienti.find(c => c.id === o.cliente_id);
+    const art = state.articoli.find(a => a.id === o.articolo_id);
+    const addetto = o.addetto_previsto_id
+      ? state.operatori.find(u => u.id === o.addetto_previsto_id)
+      : null;
+    const ritardo = calcRitardoGiorni(o);
+    return {
+      'OP': o.codice_op || '',
+      'POS': o.pos || '',
+      'Ordine': o.numero_ordine || '',
+      'Cliente': cli?.nome || '',
+      'Codice articolo': art?.codice || '',
+      'Descrizione': art?.descrizione || '',
+      'Quantità': o.quantita || 0,
+      'Min. unitari': o.minuti_unitari || 0,
+      'Addetto': addetto?.nome || '',
+      'Scadenza': o.scadenza || '',
+      'Consegnato il': o.consegnato_il || '',
+      'Ritardo (giorni)': ritardo,
+      'Esito': ritardo === null ? '—' : (ritardo <= 0 ? 'In tempo' : 'In ritardo'),
+      'Giustificazione': o.giustificazione_ritardo || '',
+      'NC post-consegna': o.nc_post_consegna || '',
+      'Responsabilità': o.responsabilita || '',
+      'Note': o.note || '',
+    };
+  });
+  rows.sort((a,b) => (b['Consegnato il']||'').localeCompare(a['Consegnato il']||''));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [
+    {wch:16},{wch:8},{wch:16},{wch:24},{wch:22},{wch:30},{wch:8},{wch:10},
+    {wch:18},{wch:12},{wch:12},{wch:10},{wch:12},{wch:30},{wch:30},{wch:18},{wch:30},
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Storico');
+  XLSX.writeFile(wb, 'storico_consegne_'+new Date().toISOString().substring(0,10)+'.xlsx');
+}
+
 
 async function deleteOperatore(u) {
   // Verifico se è usato in qualche prenotazione (dalla cache, no fetch)
