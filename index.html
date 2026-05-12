@@ -419,7 +419,7 @@ table.rt tbody tr:hover td{background:var(--hover);}
     </div>
     <div class="kiosk-header-right">
       <div class="kiosk-clock" id="kiosk-clock">--:--:--</div>
-      <a class="kiosk-exit" href="./" title="Vai all'app principale">⚙ Admin</a>
+      <a class="kiosk-exit" id="kiosk-exit-btn" href="./" title="Esci dal kiosk">⚙ Admin</a>
     </div>
   </div>
 
@@ -581,6 +581,7 @@ const toLocalISO = d => `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate()
 const parseISODate = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d); };
 const monthName = d => d.toLocaleDateString('it-IT', { month:'long', year:'numeric' });
 const fmtIT = iso => { const d = parseISODate(iso); return `${z(d.getDate())}/${z(d.getMonth()+1)}/${d.getFullYear()}`; };
+const fmtT = d => `${z(d.getHours())}:${z(d.getMinutes())}`;
 
 function toast(msg, kind='ok') {
   const t = el('div', { class:'toast'+(kind==='err'?' err':'') }, msg);
@@ -763,7 +764,8 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('change', (e) => {
   if (e.target.id === 'kiosk-jump' && e.target.value) {
-    location.href = './?kiosk=' + e.target.value;
+    window.open('./?kiosk=' + e.target.value, '_blank', 'noopener');
+    e.target.value = ''; // reset al placeholder
   }
 });
 
@@ -4482,7 +4484,28 @@ const kioskState = {
 const KIOSK_INACTIVITY_MS = 15000;     // torna alla schermata 1 dopo 15s
 const KIOSK_DONE_MS = 2000;             // schermata conferma resta 2s
 
+function setupKioskExitButton() {
+  const btn = document.getElementById('kiosk-exit-btn');
+  if (!btn) return;
+  // Se la tab è stata aperta da window.open(), window.opener è valorizzato
+  // e window.history.length è tipicamente 1 (nessuna navigazione precedente)
+  const apertaDaTabAdmin = !!window.opener;
+  if (apertaDaTabAdmin) {
+    btn.textContent = '✕ Chiudi tab';
+    btn.title = 'Chiudi la tab kiosk e torna alla tua sessione admin';
+    btn.href = '#';
+    btn.onclick = (e) => {
+      e.preventDefault();
+      window.close();
+    };
+  }
+  // Altrimenti: lascia comportamento default (href="./" porta all'app)
+}
+
 async function kioskInit() {
+  // Setup bottone "Admin": se la tab è stata aperta da window.open, "chiudi tab"; altrimenti naviga
+  setupKioskExitButton();
+
   // Login automatico con account dedicato
   try {
     const { error } = await sb.auth.signInWithPassword({
