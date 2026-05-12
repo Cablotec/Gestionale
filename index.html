@@ -393,6 +393,7 @@ const state = {
   artFilter: 'attivi',     // 'all' | 'attivi' | 'disattivi'
   artSearch: '',
   tipiLav: [],             // anagrafica tipi di lavorazione
+  chiusure: [],            // chiusure aziendali (festivi non nazionali)
   calCursor: new Date(), currentTab: 'calendario', currentArea: 'mezzi',
   loaded: false,
 };
@@ -657,7 +658,7 @@ window.addEventListener('online', async () => {
 });
 
 async function loadAllData() {
-  const [profili, mezzi, operatori, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav] = await Promise.all([
+  const [profili, mezzi, operatori, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('operatori').select('*').order('nome'),
@@ -668,6 +669,7 @@ async function loadAllData() {
     sb.from('clienti').select('*').order('nome'),
     sb.from('articoli').select('*').order('codice'),
     sb.from('tipi_lavorazione').select('*').order('ordine'),
+    sb.from('chiusure_aziendali').select('*').order('data'),
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
@@ -679,6 +681,7 @@ async function loadAllData() {
   if (clienti.error) throw clienti.error;
   if (articoli.error) throw articoli.error;
   if (tipiLav.error) throw tipiLav.error;
+  if (chiusure.error) throw chiusure.error;
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
@@ -691,6 +694,7 @@ async function loadAllData() {
   state.clienti = clienti.data || [];
   state.articoli = articoli.data || [];
   state.tipiLav = tipiLav.data || [];
+  state.chiusure = chiusure.data || [];
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -718,6 +722,8 @@ function startRealtime() {
         (p) => applyChange('articoli', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'tipi_lavorazione' },
         (p) => applyChange('tipi_lavorazione', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'chiusure_aziendali' },
+        (p) => applyChange('chiusure_aziendali', p))
     .subscribe();
 }
 
@@ -794,6 +800,14 @@ function applyChange(tabella, payload) {
     } else if (ev === 'DELETE') {
       state.tipiLav = state.tipiLav.filter(x => x.id !== oldRow.id);
     }
+  } else if (tabella === 'chiusure_aziendali') {
+    if (ev === 'INSERT') {
+      if (!state.chiusure.find(x => x.id === row.id)) state.chiusure.push(row);
+    } else if (ev === 'UPDATE') {
+      state.chiusure = state.chiusure.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.chiusure = state.chiusure.filter(x => x.id !== oldRow.id);
+    }
   }
 
   // Re-render solo la tab attiva
@@ -848,7 +862,7 @@ const TAB_STRUCTURE = {
     label: 'Sistema',
     adminOnly: true,
     tabs: [
-      { id: 'chiusure',       label: 'Chiusure aziendali', adminOnly: true, placeholder: true },
+      { id: 'chiusure',       label: 'Chiusure aziendali', adminOnly: true },
     ],
   },
 };
@@ -919,9 +933,7 @@ function renderTab(name) {
     else if (name === 'gantt') renderPlaceholder(root, 'Gantt occupazione',
       'Vista live: chi sta facendo cosa adesso. Vista storico: timeline settimana/mese.',
       'Step 4-5');
-    else if (name === 'chiusure') renderPlaceholder(root, 'Chiusure aziendali',
-      'Festività aziendali e ponti, usate per calcolare le date inizio operazioni.',
-      'Step 2.6');
+    else if (name === 'chiusure') renderChiusure(root);
   } catch (e) {
     console.error('Errore rendering tab '+name+':', e);
     root.innerHTML = '';
@@ -2479,6 +2491,319 @@ async function deleteTipoLav(t) {
   }
   state.tipiLav = state.tipiLav.filter(x => x.id !== t.id);
   toast('Tipo eliminato'); renderTab('tipi_lav');
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHIUSURE AZIENDALI + FESTIVI NAZIONALI ITALIANI
+// ═══════════════════════════════════════════════════════════
+
+// Calcolo Pasqua con la formula di Gauss (per Pasqua e Pasquetta)
+function calcolaPasqua(anno) {
+  const a = anno % 19;
+  const b = Math.floor(anno / 100);
+  const c = anno % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mese = Math.floor((h + l - 7 * m + 114) / 31);
+  const giorno = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(anno, mese - 1, giorno);
+}
+
+// Festivi nazionali italiani fissi (mese, giorno)
+const FESTIVI_NAZ_FISSI = [
+  { m:1, d:1,  nome:'Capodanno' },
+  { m:1, d:6,  nome:'Epifania' },
+  { m:4, d:25, nome:'Festa della Liberazione' },
+  { m:5, d:1,  nome:'Festa del Lavoro' },
+  { m:6, d:2,  nome:'Festa della Repubblica' },
+  { m:8, d:15, nome:'Ferragosto' },
+  { m:11,d:1,  nome:'Ognissanti' },
+  { m:12,d:8,  nome:'Immacolata' },
+  { m:12,d:25, nome:'Natale' },
+  { m:12,d:26, nome:'Santo Stefano' },
+];
+
+// Ritorna l'elenco dei festivi nazionali per un dato anno
+function festiviNazionali(anno) {
+  const list = FESTIVI_NAZ_FISSI.map(f => ({
+    data: new Date(anno, f.m-1, f.d),
+    nome: f.nome,
+  }));
+  const pasqua = calcolaPasqua(anno);
+  list.push({ data: pasqua, nome: 'Pasqua' });
+  const pasquetta = new Date(pasqua);
+  pasquetta.setDate(pasqua.getDate() + 1);
+  list.push({ data: pasquetta, nome: 'Pasquetta' });
+  return list.sort((a,b) => a.data - b.data);
+}
+
+// Set di ISO date "YYYY-MM-DD" per i festivi nazionali in un range di anni
+function festiviNazIsoSet(annoMin, annoMax) {
+  const s = new Set();
+  for (let y = annoMin; y <= annoMax; y++) {
+    festiviNazionali(y).forEach(f => s.add(toLocalISO(f.data)));
+  }
+  return s;
+}
+
+// Set di ISO date per le chiusure aziendali (con ricorrenza)
+function chiusureIsoSet(annoMin, annoMax) {
+  const s = new Set();
+  state.chiusure.forEach(c => {
+    if (!c.data) return;
+    if (c.ricorrente) {
+      // applica la stessa data ad ogni anno nel range
+      const md = c.data.substring(5);  // "MM-DD"
+      for (let y = annoMin; y <= annoMax; y++) {
+        s.add(`${y}-${md}`);
+      }
+    } else {
+      s.add(c.data);
+    }
+  });
+  return s;
+}
+
+// Verifica se un dato giorno è non lavorativo (weekend, festivo nazionale o chiusura aziendale)
+function isGiornoNonLavorativo(dateObj) {
+  const dow = dateObj.getDay();
+  if (dow === 0 || dow === 6) return true; // domenica o sabato
+  const iso = toLocalISO(dateObj);
+  const anno = dateObj.getFullYear();
+  const festivi = festiviNazIsoSet(anno, anno);
+  if (festivi.has(iso)) return true;
+  const chiusure = chiusureIsoSet(anno, anno);
+  if (chiusure.has(iso)) return true;
+  return false;
+}
+
+// Calcola data inizio: data scadenza - N giorni lavorativi
+function indietroGiorniLavorativi(scadenzaIso, giorni) {
+  const d = parseISODate(scadenzaIso);
+  let rest = giorni;
+  while (rest > 0) {
+    d.setDate(d.getDate() - 1);
+    if (!isGiornoNonLavorativo(d)) rest--;
+  }
+  return toLocalISO(d);
+}
+
+// Conta giorni lavorativi tra due date (incluse)
+function contaGiorniLavorativi(daIso, aIso) {
+  let count = 0;
+  const a = parseISODate(daIso);
+  const b = parseISODate(aIso);
+  while (a <= b) {
+    if (!isGiornoNonLavorativo(a)) count++;
+    a.setDate(a.getDate() + 1);
+  }
+  return count;
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHIUSURE AZIENDALI — UI
+// ═══════════════════════════════════════════════════════════
+function renderChiusure(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const annoAttuale = new Date().getFullYear();
+  const annoFiltro = state.chiusureAnno || annoAttuale;
+
+  // Costruisco lista unificata: festivi nazionali + chiusure aziendali per l'anno selezionato
+  const items = [];
+  // Festivi nazionali (calcolati, non modificabili)
+  festiviNazionali(annoFiltro).forEach(f => {
+    items.push({
+      iso: toLocalISO(f.data),
+      descrizione: f.nome,
+      tipo: 'nazionale',
+      dateObj: f.data,
+    });
+  });
+  // Chiusure aziendali (database)
+  state.chiusure.forEach(c => {
+    const dateRel = c.ricorrente
+      ? new Date(annoFiltro, parseInt(c.data.substring(5,7))-1, parseInt(c.data.substring(8,10)))
+      : parseISODate(c.data);
+    // Se non ricorrente, mostra solo nell'anno della data
+    if (!c.ricorrente && dateRel.getFullYear() !== annoFiltro) return;
+    items.push({
+      id: c.id,
+      iso: toLocalISO(dateRel),
+      descrizione: c.descrizione + (c.ricorrente ? ' (ricorrente)' : ''),
+      tipo: 'aziendale',
+      ricorrente: c.ricorrente,
+      dataOriginale: c.data,
+      dateObj: dateRel,
+    });
+  });
+  items.sort((a,b) => a.dateObj - b.dateObj);
+
+  // KPI
+  const totNaz = items.filter(x => x.tipo === 'nazionale').length;
+  const totAz = items.filter(x => x.tipo === 'aziendale').length;
+  // Conta giorni lavorativi nell'anno
+  const iniAnno = toLocalISO(new Date(annoFiltro, 0, 1));
+  const finAnno = toLocalISO(new Date(annoFiltro, 11, 31));
+  const lav = contaGiorniLavorativi(iniAnno, finAnno);
+
+  root.innerHTML = '';
+
+  root.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Festivi nazionali'), el('div', { class:'kv kb' }, String(totNaz))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Chiusure aziendali'), el('div', { class:'kv ky' }, String(totAz))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Giorni lavorativi '+annoFiltro), el('div', { class:'kv kg' }, String(lav))),
+  ));
+
+  // Selettore anno
+  const annoBar = el('div', { class:'chips' });
+  for (let y = annoAttuale - 1; y <= annoAttuale + 2; y++) {
+    annoBar.append(el('div', {
+      class: 'chip' + (annoFiltro === y ? ' act' : ''),
+      onclick: () => { state.chiusureAnno = y; renderTab('chiusure'); },
+    }, String(y)));
+  }
+  root.append(annoBar);
+
+  const toolbar = el('div', { class:'toolbar' },
+    el('h2', {}, 'Festivi e chiusure aziendali'),
+  );
+  if (isAdmin) {
+    toolbar.append(el('button', { class:'btnp', onclick:()=>openChiusuraModal() }, '+ Nuova Chiusura'));
+  }
+  root.append(toolbar);
+  root.append(el('div', { class:'sub', style:'margin-bottom:14px;' },
+    'I festivi nazionali italiani sono calcolati automaticamente (Pasqua compresa). Le chiusure aziendali si aggiungono qui sotto.'));
+
+  if (items.length === 0) {
+    root.append(el('div', { class:'empty' }, 'Nessuna chiusura per l\'anno selezionato.'));
+    return;
+  }
+
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Data'),
+    el('th', {}, 'Giorno'),
+    el('th', {}, 'Descrizione'),
+    el('th', { class:'tc' }, 'Tipo'),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+  const tb = el('tbody');
+  const giorniSett = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+  items.forEach(it => {
+    tb.append(el('tr', {},
+      el('td', { class:'mono' }, fmtIT(it.iso)),
+      el('td', { class:'mono', style:'color:var(--mut);' }, giorniSett[it.dateObj.getDay()]),
+      el('td', {}, it.descrizione),
+      el('td', { class:'tc' }, it.tipo === 'nazionale'
+        ? el('span', { class:'badge bblu' }, 'naz.')
+        : el('span', { class:'badge byel' }, 'aziendale')),
+      el('td', { class:'tc' },
+        it.tipo === 'aziendale' && isAdmin
+          ? el('span', {},
+              el('button', { class:'btnsm', onclick:()=>openChiusuraModal(state.chiusure.find(c => c.id === it.id)) }, 'Modifica'),
+              ' ',
+              el('button', { class:'btnd', onclick:()=>deleteChiusura(state.chiusure.find(c => c.id === it.id)) }, 'Elimina'),
+            )
+          : '—'
+      ),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+}
+
+function openChiusuraModal(c) {
+  const isNew = !c;
+  c = c || { data: toLocalISO(new Date()), descrizione:'', ricorrente:false };
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuova Chiusura Aziendale' : 'Modifica Chiusura'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  const inData = el('input', { type:'date', name:'data', value:c.data||'', required:'true' });
+  const inDesc = el('input', { type:'text', name:'descrizione', value:c.descrizione||'', required:'true',
+    placeholder:'es. Ponte 2 giugno, Ferie agosto, Festa patronale…' });
+  const selRicorrente = el('select', { name:'ricorrente' },
+    el('option', { value:'false' }, 'No — vale solo per quella data'),
+    el('option', { value:'true' }, 'Sì — si ripete ogni anno alla stessa data'));
+  selRicorrente.value = String(!!c.ricorrente);
+
+  form.append(
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Data *'), inData),
+      el('div', { class:'field' }, el('label', {}, 'Ricorrente'), selRicorrente),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Descrizione *'), inDesc),
+  );
+
+  body.append(form);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  const btnSave = el('button', { class:'btnp' }, 'Salva');
+  btnSave.onclick = async () => {
+    const fd = new FormData(form);
+    const payload = {
+      data: fd.get('data'),
+      descrizione: (fd.get('descrizione')||'').trim(),
+      ricorrente: fd.get('ricorrente') === 'true',
+    };
+    if (!payload.data) return toast('Data obbligatoria', 'err');
+    if (!payload.descrizione) return toast('Descrizione obbligatoria', 'err');
+    btnSave.disabled = true;
+    btnSave.textContent = 'Salvataggio…';
+    try {
+      const q = isNew
+        ? sb.from('chiusure_aziendali').insert(payload).select().single()
+        : sb.from('chiusure_aziendali').update(payload).eq('id', c.id).select().single();
+      const { data, error } = await q;
+      if (error) {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Salva';
+        if (error.code === '23505') return toast('Esiste già una chiusura per questa data', 'err');
+        return toast(error.message, 'err');
+      }
+      if (isNew) {
+        if (!state.chiusure.find(x => x.id === data.id)) state.chiusure.push(data);
+      } else {
+        state.chiusure = state.chiusure.map(x => x.id === c.id ? data : x);
+      }
+      toast(isNew ? 'Chiusura creata' : 'Chiusura aggiornata');
+      closeModal(); renderTab('chiusure');
+    } catch (e) {
+      btnSave.disabled = false;
+      btnSave.textContent = 'Salva';
+      toast('Errore di rete: '+(e.message||e), 'err');
+    }
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+}
+
+async function deleteChiusura(c) {
+  if (!c) return;
+  if (!confirm(`Eliminare la chiusura "${c.descrizione}" del ${fmtIT(c.data)}?`)) return;
+  const { data, error } = await sb.from('chiusure_aziendali').delete().eq('id', c.id).select();
+  if (error) return toast(error.message, 'err');
+  if (!data || data.length === 0) return toast('Eliminazione bloccata: verifica le policy DELETE', 'err');
+  state.chiusure = state.chiusure.filter(x => x.id !== c.id);
+  toast('Chiusura eliminata'); renderTab('chiusure');
 }
 
 async function deleteOperatore(u) {
