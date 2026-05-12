@@ -4534,18 +4534,45 @@ function kioskUpdateClock() {
 
 async function kioskLoadAll() {
   // Carica mezzi, operatori, usi aperti, prenotazioni di oggi
+  // + clienti, articoli, tipi_lav, operazioni, sessioni per il flusso commesse
   const oggi = toLocalISO(new Date());
-  const [mezzi, util, usi, pren] = await Promise.all([
+  const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni] = await Promise.all([
     sb.from('mezzi').select('*').eq('attivo', true).order('nome'),
     sb.from('operatori').select('*').eq('attivo', true).order('nome'),
     sb.from('usi_mezzo').select('*').is('data_rientro', null),
     sb.from('prenotazioni').select('*').lte('data_inizio', oggi).gte('data_fine', oggi),
+    sb.from('clienti').select('*').eq('attivo', true).order('nome'),
+    sb.from('articoli').select('*').eq('attivo', true).order('codice'),
+    sb.from('tipi_lavorazione').select('*').eq('attivo', true).order('ordine'),
+    sb.from('operazioni').select('*').neq('stato', 'consegnata').order('scadenza'),
+    sb.from('sessioni_lavoro').select('*').is('fine', null),
   ]);
   state.mezzi = mezzi.data || [];
   state.operatori = util.data || [];
   state.operatoriById = Object.fromEntries(state.operatori.map(u => [u.id, u]));
   kioskState.mezziInUso = usi.data || [];
   kioskState.prenotazioniOggi = pren.data || [];
+  state.clienti = clienti.data || [];
+  state.articoli = articoli.data || [];
+  state.tipiLav = tipiLav.data || [];
+  state.operazioni = operazioni.data || [];
+  state.sessioni = sessioni.data || [];
+  // Log diagnostico (visibile in console)
+  console.log('[KIOSK] Loaded:', {
+    mezzi: state.mezzi.length,
+    operatori: state.operatori.length,
+    clienti: state.clienti.length,
+    articoli: state.articoli.length,
+    tipiLav: state.tipiLav.length,
+    operazioni: state.operazioni.length,
+    sessioni_aperte: state.sessioni.length,
+  });
+  // Log errori se ci sono
+  [['mezzi',mezzi],['operatori',util],['usi',usi],['pren',pren],
+   ['clienti',clienti],['articoli',articoli],['tipiLav',tipiLav],
+   ['operazioni',operazioni],['sessioni',sessioni]].forEach(([n,r]) => {
+    if (r.error) console.error('[KIOSK] Errore caricamento', n, r.error);
+  });
 }
 
 function kioskStartRealtime() {
@@ -4573,6 +4600,21 @@ function kioskStartRealtime() {
     .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni' }, () => {
       kioskLoadAll().then(kioskRefreshActive);
     })
+    .on('postgres_changes', { event:'*', schema:'public', table:'operazioni' }, () => {
+      kioskLoadAll().then(kioskRefreshActive);
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'sessioni_lavoro' }, () => {
+      kioskLoadAll().then(kioskRefreshActive);
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'clienti' }, () => {
+      kioskLoadAll().then(kioskRefreshActive);
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'articoli' }, () => {
+      kioskLoadAll().then(kioskRefreshActive);
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'tipi_lavorazione' }, () => {
+      kioskLoadAll().then(kioskRefreshActive);
+    })
     .subscribe();
 }
 
@@ -4580,6 +4622,8 @@ function kioskRefreshActive() {
   // Re-render della schermata corrente
   if ($('#kiosk-step-id').style.display !== 'none') kioskRenderId();
   else if ($('#kiosk-step-action').style.display !== 'none') kioskRenderAction();
+  else if ($('#kiosk-step-op-list').style.display !== 'none') kioskRenderOpList();
+  else if ($('#kiosk-step-attiva').style.display !== 'none') kioskRenderAttiva();
 }
 
 // ─── Listener RFID: cattura sequenze di cifre seguite da Invio ───
@@ -4994,7 +5038,7 @@ function kioskRenderOpList() {
       sec.append(grid);
       root.append(sec);
     } else if (q && mieFiltered.length === 0) {
-      root.append(el('div', { class:'kiosk-empty' }, 'Nessuna operazione trovata per "' + esc(kCom.search) + '"'));
+      root.append(el('div', { class:'kiosk-empty' }, 'Nessuna operazione trovata per "' + kCom.search + '"'));
     }
   }
 }
