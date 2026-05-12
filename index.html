@@ -303,6 +303,59 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .kiosk-done-icon{font-size:64px;margin-bottom:20px;line-height:1;}
 .kiosk-done-msg{font-size:30px;font-weight:700;margin-bottom:14px;}
 .kiosk-done-detail{font-family:'DM Mono',monospace;font-size:14px;color:var(--mut);line-height:1.7;}
+
+/* Menu kiosk (Mezzi / Commesse) */
+.kiosk-menu-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;flex:1;align-content:center;padding:40px 0;}
+.kiosk-menu-btn{padding:60px 40px;background:var(--sur);border:2px solid var(--brd);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:14px;transition:all .15s;color:var(--txt);font-family:inherit;}
+.kiosk-menu-btn:hover,.kiosk-menu-btn:active{border-color:var(--acc);background:rgba(212,255,78,.05);transform:scale(.99);}
+.kmb-icon{font-size:80px;line-height:1;}
+.kmb-label{font-size:32px;font-weight:800;letter-spacing:-.02em;}
+.kmb-sub{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);letter-spacing:.06em;text-transform:uppercase;}
+
+/* Lista operazioni nel kiosk */
+.kiosk-op-section{margin-bottom:18px;}
+.kiosk-op-section-hd{font-family:'DM Mono',monospace;font-size:11px;color:var(--acc);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--acc);}
+.kiosk-op-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
+.kiosk-op-card{background:var(--sur);border:2px solid var(--brd);border-radius:8px;padding:16px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:6px;transition:all .15s;color:var(--txt);font-family:inherit;}
+.kiosk-op-card:hover,.kiosk-op-card:active{border-color:var(--acc);background:rgba(212,255,78,.04);}
+.kiosk-op-card-cliente{font-size:13px;font-weight:700;color:var(--txt);}
+.kiosk-op-card-cod{font-family:'DM Mono',monospace;font-size:14px;color:var(--or);font-weight:600;}
+.kiosk-op-card-info{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.04em;display:flex;justify-content:space-between;margin-top:4px;}
+.kiosk-op-card-scad.passata{color:var(--red);font-weight:600;}
+.kiosk-op-card-scad.vicina{color:var(--yel);}
+
+.kiosk-op-search-box{margin:14px 0;display:flex;gap:10px;align-items:center;}
+.kiosk-op-search-box input{flex:1;background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:14px 18px;border-radius:6px;font-family:'DM Mono',monospace;font-size:14px;outline:none;}
+.kiosk-op-search-box input:focus{border-color:var(--acc);}
+.kiosk-op-toggle-altre{padding:14px 20px;background:transparent;border:1px solid var(--brd);color:var(--mut);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;border-radius:4px;cursor:pointer;}
+.kiosk-op-toggle-altre:hover{color:var(--txt);border-color:var(--mut);}
+
+/* Tipi lavorazione */
+.kiosk-tipo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px;padding:30px 0;}
+.kiosk-tipo-btn{padding:40px 24px;background:var(--sur);border:3px solid var(--brd);border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:10px;font-family:inherit;color:var(--txt);transition:all .15s;}
+.kiosk-tipo-btn:hover,.kiosk-tipo-btn:active{transform:scale(.98);}
+.ktipo-color-bar{width:60px;height:8px;border-radius:4px;}
+.ktipo-name{font-size:22px;font-weight:700;}
+
+/* Sessione attiva */
+.kiosk-attiva-card{background:var(--sur);border:3px solid var(--grn);border-radius:12px;padding:30px 36px;margin-bottom:20px;}
+.kiosk-attiva-cliente{font-size:14px;color:var(--mut);font-family:'DM Mono',monospace;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;}
+.kiosk-attiva-cod{font-size:30px;font-weight:800;color:var(--txt);margin-bottom:6px;line-height:1.1;}
+.kiosk-attiva-tipo{display:inline-flex;align-items:center;gap:8px;font-family:'DM Mono',monospace;font-size:13px;color:var(--mut);margin-bottom:18px;}
+.kiosk-attiva-tipo .ktipo-color-bar{width:28px;height:5px;}
+.kiosk-attiva-stats{display:grid;grid-template-columns:1fr 1fr;gap:20px;padding-top:14px;border-top:1px solid var(--brd);}
+.kas-block{display:flex;flex-direction:column;}
+.kas-label{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+.kas-value{font-family:'DM Mono',monospace;font-size:28px;color:var(--grn);font-weight:500;}
+.kiosk-attiva-actions{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.kiosk-attiva-btn{padding:24px;font-family:'Syne',sans-serif;font-size:17px;font-weight:700;border:none;border-radius:8px;cursor:pointer;text-transform:uppercase;letter-spacing:.05em;transition:all .15s;}
+.kiosk-attiva-btn.pause{background:var(--yel);color:#0f0f0e;}
+.kiosk-attiva-btn.switch{background:var(--blu);color:#fff;}
+.kiosk-attiva-btn:hover,.kiosk-attiva-btn:active{filter:brightness(1.1);transform:scale(.99);}
+
+/* Warning sessione dimenticata */
+.kiosk-warn-stale{background:rgba(255,204,78,.08);border:2px solid var(--yel);border-radius:8px;padding:16px 20px;margin-bottom:16px;color:var(--yel);font-family:'DM Mono',monospace;font-size:13px;}
+.kiosk-warn-stale strong{color:var(--yel);}
 .kiosk-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;padding:14px 24px;border-radius:6px;font-family:'Syne',sans-serif;font-size:15px;font-weight:600;z-index:10000;box-shadow:0 4px 20px rgba(0,0,0,.4);}
 @media (max-width:700px){
   .kiosk-title{font-size:22px;}
@@ -390,6 +443,53 @@ table.rt tbody tr:hover td{background:var(--hover);}
     <div id="kiosk-action-content"></div>
   </div>
 
+  <!-- Schermata 2bis: menu (Mezzi / Commesse) -->
+  <div id="kiosk-step-menu" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name" id="kiosk-menu-name">Ciao</div>
+      <button class="kiosk-cancel" onclick="kioskGoToId()">Annulla</button>
+    </div>
+    <div class="kiosk-menu-grid">
+      <button class="kiosk-menu-btn" onclick="kioskGoToMezzi()">
+        <div class="kmb-icon">🚗</div>
+        <div class="kmb-label">Mezzi</div>
+        <div class="kmb-sub">Check-out e rientro</div>
+      </button>
+      <button class="kiosk-menu-btn" onclick="kioskGoToCommesse()">
+        <div class="kmb-icon">⚙</div>
+        <div class="kmb-label">Commesse</div>
+        <div class="kmb-sub">Avvia / sospendi lavoro</div>
+      </button>
+    </div>
+  </div>
+
+  <!-- Schermata commesse - lista operazioni -->
+  <div id="kiosk-step-op-list" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name" id="kiosk-op-name">Seleziona operazione</div>
+      <button class="kiosk-cancel" onclick="kioskGoToMenu()">Indietro</button>
+    </div>
+    <div id="kiosk-op-list-content"></div>
+  </div>
+
+  <!-- Schermata commesse - selezione tipo lavorazione -->
+  <div id="kiosk-step-tipo" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name">Quale tipo di lavoro?</div>
+      <button class="kiosk-cancel" onclick="kioskGoToOpList()">Indietro</button>
+    </div>
+    <div id="kiosk-tipo-content"></div>
+  </div>
+
+  <!-- Schermata commesse - sessione attiva -->
+  <div id="kiosk-step-attiva" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name" id="kiosk-attiva-name">Stai lavorando su</div>
+      <button class="kiosk-cancel" onclick="kioskGoToId()">Esci</button>
+    </div>
+    <div id="kiosk-attiva-content"></div>
+  </div>
+
   <!-- Schermata 3: conferma -->
   <div id="kiosk-step-done" class="kiosk-step" style="display:none">
     <div class="kiosk-done" id="kiosk-done-msg"></div>
@@ -424,6 +524,12 @@ const state = {
   stoAddetto: '',          // filtro addetto_id
   stoPunt: 'all',          // 'all' | 'puntuali' | 'ritardo'
   stoSearch: '',
+  // Sessioni di lavoro (timbrature kiosk commesse)
+  sessioni: [],
+  // Stato kiosk runtime
+  kioskOp: null,           // operazione selezionata nel flusso commesse
+  kioskMode: null,         // 'menu' | 'mezzi' | 'commesse-list' | 'commesse-tipo' | 'commesse-attiva'
+  kioskTimer: null,        // setInterval handle per refresh durata
   calCursor: new Date(), currentTab: 'calendario', currentArea: 'mezzi',
   loaded: false,
 };
@@ -688,7 +794,7 @@ window.addEventListener('online', async () => {
 });
 
 async function loadAllData() {
-  const [profili, mezzi, operatori, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni] = await Promise.all([
+  const [profili, mezzi, operatori, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('operatori').select('*').order('nome'),
@@ -701,6 +807,7 @@ async function loadAllData() {
     sb.from('tipi_lavorazione').select('*').order('ordine'),
     sb.from('chiusure_aziendali').select('*').order('data'),
     sb.from('operazioni').select('*').order('scadenza'),
+    sb.from('sessioni_lavoro').select('*').order('inizio', { ascending:false }),
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
@@ -714,6 +821,7 @@ async function loadAllData() {
   if (tipiLav.error) throw tipiLav.error;
   if (chiusure.error) throw chiusure.error;
   if (operazioni.error) throw operazioni.error;
+  if (sessioni.error) throw sessioni.error;
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
@@ -728,6 +836,7 @@ async function loadAllData() {
   state.tipiLav = tipiLav.data || [];
   state.chiusure = chiusure.data || [];
   state.operazioni = operazioni.data || [];
+  state.sessioni = sessioni.data || [];
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -759,6 +868,8 @@ function startRealtime() {
         (p) => applyChange('chiusure_aziendali', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'operazioni' },
         (p) => applyChange('operazioni', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'sessioni_lavoro' },
+        (p) => applyChange('sessioni_lavoro', p))
     .subscribe();
 }
 
@@ -850,6 +961,14 @@ function applyChange(tabella, payload) {
       state.operazioni = state.operazioni.map(x => x.id === row.id ? row : x);
     } else if (ev === 'DELETE') {
       state.operazioni = state.operazioni.filter(x => x.id !== oldRow.id);
+    }
+  } else if (tabella === 'sessioni_lavoro') {
+    if (ev === 'INSERT') {
+      if (!state.sessioni.find(x => x.id === row.id)) state.sessioni.unshift(row);
+    } else if (ev === 'UPDATE') {
+      state.sessioni = state.sessioni.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.sessioni = state.sessioni.filter(x => x.id !== oldRow.id);
     }
   }
 
@@ -4532,9 +4651,9 @@ function kioskBeep(kind) {
 function kioskGoToId() {
   kioskState.utenteSelezionato = null;
   clearTimeout(kioskState.inactivityTimer);
+  if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
+  kioskHideAllSteps();
   $('#kiosk-step-id').style.display = 'flex';
-  $('#kiosk-step-action').style.display = 'none';
-  $('#kiosk-step-done').style.display = 'none';
   kioskRenderId();
   $('#kiosk-rfid-input').focus();
 }
@@ -4578,14 +4697,40 @@ function kioskRenderId() {
 function kioskSelectUtente(u) {
   kioskState.utenteSelezionato = u;
   kioskBeep('ok');
+  // Se ha una sessione lavoro aperta, va direttamente lì
+  const sess = state.sessioni.find(s => s.operatore_id === u.id && !s.fine);
+  if (sess) {
+    kioskGoToAttiva();
+  } else {
+    kioskGoToMenu();
+  }
+}
+
+// ─── SCHERMATA MENU (Mezzi / Commesse) ───
+function kioskGoToMenu() {
+  kioskHideAllSteps();
+  $('#kiosk-step-menu').style.display = 'flex';
+  const u = kioskState.utenteSelezionato;
+  if (u) $('#kiosk-menu-name').textContent = 'Ciao ' + u.nome;
+  kioskResetInactivity();
+}
+
+function kioskGoToMezzi() {
   kioskGoToAction();
+}
+
+function kioskHideAllSteps() {
+  ['kiosk-step-id','kiosk-step-action','kiosk-step-menu',
+   'kiosk-step-op-list','kiosk-step-tipo','kiosk-step-attiva',
+   'kiosk-step-done'].forEach(id => {
+    const e = $('#'+id); if (e) e.style.display = 'none';
+  });
 }
 
 // ─── SCHERMATA 2: scelta azione ───
 function kioskGoToAction() {
-  $('#kiosk-step-id').style.display = 'none';
+  kioskHideAllSteps();
   $('#kiosk-step-action').style.display = 'flex';
-  $('#kiosk-step-done').style.display = 'none';
   kioskRenderAction();
   kioskResetInactivity();
 }
@@ -4741,6 +4886,359 @@ function kioskFormatDurata(ms) {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return h + 'h ' + (m ? m+'min' : '');
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// KIOSK COMMESSE — timbrature operatori su operazioni
+// ═══════════════════════════════════════════════════════════
+
+// Stato runtime del flusso commesse
+const kCom = {
+  vediAltre: false,       // toggle "cerca altre operazioni"
+  search: '',             // testo ricerca
+  opSelezionata: null,    // operazione su cui si farà start
+};
+
+// ─── ENTRY POINT da menu ───
+function kioskGoToCommesse() {
+  // Reset stato locale del flusso
+  kCom.vediAltre = false;
+  kCom.search = '';
+  kCom.opSelezionata = null;
+  kioskGoToOpList();
+}
+
+// ─── Schermata lista operazioni ───
+function kioskGoToOpList() {
+  kioskHideAllSteps();
+  $('#kiosk-step-op-list').style.display = 'flex';
+  kioskRenderOpList();
+  kioskResetInactivity();
+}
+
+function kioskRenderOpList() {
+  const u = kioskState.utenteSelezionato;
+  if (!u) { kioskGoToId(); return; }
+
+  $('#kiosk-op-name').textContent = 'Ciao ' + u.nome + ' — seleziona operazione';
+  const root = $('#kiosk-op-list-content');
+  root.innerHTML = '';
+
+  // Operazioni aperte = non consegnate
+  const aperte = state.operazioni.filter(o => o.stato !== 'consegnata');
+  const mie = aperte.filter(o => o.addetto_previsto_id === u.id);
+  const altre = aperte.filter(o => o.addetto_previsto_id !== u.id);
+
+  // Box ricerca
+  const searchBox = el('div', { class:'kiosk-op-search-box' });
+  const inp = el('input', {
+    type:'text', placeholder:'🔍 Cerca operazione (codice, ordine, cliente)…',
+    value: kCom.search,
+    oninput: (e) => {
+      kCom.search = e.target.value;
+      kioskRenderOpList();
+      // Mantieni focus
+      setTimeout(() => {
+        const newInp = root.querySelector('.kiosk-op-search-box input');
+        if (newInp) { newInp.focus(); newInp.setSelectionRange(newInp.value.length, newInp.value.length); }
+      }, 0);
+    },
+  });
+  searchBox.append(inp);
+
+  const toggleBtn = el('button', { class:'kiosk-op-toggle-altre',
+    onclick: () => { kCom.vediAltre = !kCom.vediAltre; kioskRenderOpList(); }
+  }, kCom.vediAltre ? '✕ Nascondi altre' : '+ Vedi tutte');
+  searchBox.append(toggleBtn);
+
+  root.append(searchBox);
+
+  const q = kCom.search.toLowerCase();
+  const filtra = (lista) => {
+    if (!q) return lista;
+    return lista.filter(o => {
+      const cli = state.clienti.find(c => c.id === o.cliente_id);
+      const art = state.articoli.find(a => a.id === o.articolo_id);
+      return (o.codice_op||'').toLowerCase().includes(q)
+          || (o.numero_ordine||'').toLowerCase().includes(q)
+          || (cli?.nome||'').toLowerCase().includes(q)
+          || (art?.codice||'').toLowerCase().includes(q);
+    });
+  };
+
+  const mieFiltered = filtra(mie);
+  const altreFiltered = filtra(altre);
+
+  // Sezione "Le tue operazioni"
+  if (mieFiltered.length > 0) {
+    const sec = el('div', { class:'kiosk-op-section' });
+    sec.append(el('div', { class:'kiosk-op-section-hd' }, '⭐ Le tue operazioni assegnate'));
+    const grid = el('div', { class:'kiosk-op-grid' });
+    mieFiltered.forEach(o => grid.append(kioskOpCard(o)));
+    sec.append(grid);
+    root.append(sec);
+  } else if (!q && !kCom.vediAltre) {
+    root.append(el('div', { class:'kiosk-empty', style:'padding:20px;' },
+      'Nessuna operazione assegnata a te. Clicca "Vedi tutte" per scegliere da quelle aperte.'));
+  }
+
+  // Sezione "Altre operazioni"
+  if (kCom.vediAltre || q) {
+    if (altreFiltered.length > 0) {
+      const sec = el('div', { class:'kiosk-op-section' });
+      sec.append(el('div', { class:'kiosk-op-section-hd', style:'color:var(--mut);border-color:var(--brd);' },
+        '🔍 Altre operazioni aperte'));
+      const grid = el('div', { class:'kiosk-op-grid' });
+      altreFiltered.forEach(o => grid.append(kioskOpCard(o)));
+      sec.append(grid);
+      root.append(sec);
+    } else if (q && mieFiltered.length === 0) {
+      root.append(el('div', { class:'kiosk-empty' }, 'Nessuna operazione trovata per "' + esc(kCom.search) + '"'));
+    }
+  }
+}
+
+function kioskOpCard(o) {
+  const cli = state.clienti.find(c => c.id === o.cliente_id);
+  const art = state.articoli.find(a => a.id === o.articolo_id);
+  const oggi = toLocalISO(new Date());
+  let scadCls = '';
+  if (o.scadenza && o.scadenza < oggi) scadCls = 'passata';
+  else if (o.scadenza) {
+    const diff = (parseISODate(o.scadenza) - new Date()) / 86400000;
+    if (diff <= 3) scadCls = 'vicina';
+  }
+  return el('button', {
+    class:'kiosk-op-card',
+    onclick: () => kioskSelectOperazione(o),
+  },
+    el('div', { class:'kiosk-op-card-cliente' }, cli?.nome || '— senza cliente —'),
+    el('div', { class:'kiosk-op-card-cod' }, art?.codice || '—'),
+    el('div', { class:'kiosk-op-card-info' },
+      el('span', {}, (o.numero_ordine || o.codice_op || '') + ' · ' + (o.quantita||0) + ' pz'),
+      el('span', { class:'kiosk-op-card-scad '+scadCls },
+        o.scadenza ? fmtIT(o.scadenza) : '—'),
+    ),
+  );
+}
+
+function kioskSelectOperazione(o) {
+  kCom.opSelezionata = o;
+  kioskBeep('ok');
+  kioskGoToTipo();
+}
+
+// ─── Schermata selezione tipo lavorazione ───
+function kioskGoToTipo() {
+  kioskHideAllSteps();
+  $('#kiosk-step-tipo').style.display = 'flex';
+  kioskRenderTipo();
+  kioskResetInactivity();
+}
+
+function kioskRenderTipo() {
+  const o = kCom.opSelezionata;
+  if (!o) { kioskGoToOpList(); return; }
+  const root = $('#kiosk-tipo-content');
+  root.innerHTML = '';
+
+  // Riepilogo operazione
+  const cli = state.clienti.find(c => c.id === o.cliente_id);
+  const art = state.articoli.find(a => a.id === o.articolo_id);
+  root.append(el('div', { style:'background:var(--sur);border:1px solid var(--brd);border-radius:8px;padding:14px 18px;margin-bottom:20px;' },
+    el('div', { style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;' }, 'Operazione selezionata'),
+    el('div', { style:'font-size:18px;font-weight:700;margin-bottom:4px;' }, cli?.nome || '—'),
+    el('div', { style:'font-family:DM Mono,monospace;font-size:13px;color:var(--or);' },
+      (art?.codice || '—') + ' · ' + (o.numero_ordine || o.codice_op || '')),
+  ));
+
+  // Griglia tipi attivi
+  const tipi = state.tipiLav
+    .filter(t => t.attivo)
+    .sort((a,b) => (a.ordine||0) - (b.ordine||0));
+
+  if (tipi.length === 0) {
+    root.append(el('div', { class:'kiosk-empty' }, 'Nessun tipo di lavorazione definito. L\'admin deve crearne almeno uno in Anagrafiche → Tipi lavorazione.'));
+    return;
+  }
+
+  const grid = el('div', { class:'kiosk-tipo-grid' });
+  tipi.forEach(t => {
+    grid.append(el('button', {
+      class:'kiosk-tipo-btn',
+      style: 'border-color:'+(t.colore||'#6b6b64')+';',
+      onclick: () => kioskSelectTipo(t),
+    },
+      el('div', { class:'ktipo-color-bar', style:'background:'+(t.colore||'#6b6b64')+';' }),
+      el('div', { class:'ktipo-name' }, t.nome),
+    ));
+  });
+  root.append(grid);
+}
+
+async function kioskSelectTipo(tipo) {
+  const u = kioskState.utenteSelezionato;
+  const o = kCom.opSelezionata;
+  if (!u || !o || !tipo) return;
+
+  // Crea sessione
+  const sedeUrl = new URLSearchParams(location.search).get('kiosk') || 'sede?';
+  try {
+    const { data, error } = await sb.from('sessioni_lavoro').insert({
+      operazione_id: o.id,
+      operatore_id: u.id,
+      tipo_lavorazione_id: tipo.id,
+      sede: sedeUrl,
+      inizio: new Date().toISOString(),
+    }).select().single();
+    if (error) {
+      kioskBeep('err');
+      kioskShowError('Errore: ' + error.message);
+      return;
+    }
+    // Aggiorna cache locale
+    if (!state.sessioni.find(s => s.id === data.id)) state.sessioni.unshift(data);
+    kioskBeep('ok');
+    kioskGoToAttiva();
+  } catch (e) {
+    kioskBeep('err');
+    kioskShowError('Errore di rete: ' + (e.message||e));
+  }
+}
+
+// ─── Schermata sessione attiva ───
+function kioskGoToAttiva() {
+  kioskHideAllSteps();
+  $('#kiosk-step-attiva').style.display = 'flex';
+  kioskRenderAttiva();
+  // Avvia timer per refresh durata ogni secondo
+  if (state.kioskTimer) clearInterval(state.kioskTimer);
+  state.kioskTimer = setInterval(kioskRefreshDurata, 1000);
+  kioskResetInactivity();
+}
+
+function kioskRenderAttiva() {
+  const u = kioskState.utenteSelezionato;
+  if (!u) { kioskGoToId(); return; }
+  const sess = state.sessioni.find(s => s.operatore_id === u.id && !s.fine);
+  if (!sess) {
+    // Nessuna sessione aperta: torna al menu
+    kioskGoToMenu();
+    return;
+  }
+
+  $('#kiosk-attiva-name').textContent = 'Stai lavorando, ' + u.nome;
+  const root = $('#kiosk-attiva-content');
+  root.innerHTML = '';
+
+  const o = state.operazioni.find(x => x.id === sess.operazione_id);
+  const cli = o ? state.clienti.find(c => c.id === o.cliente_id) : null;
+  const art = o ? state.articoli.find(a => a.id === o.articolo_id) : null;
+  const tipo = state.tipiLav.find(t => t.id === sess.tipo_lavorazione_id);
+
+  // Warning sessione molto vecchia (>12h)
+  const inizioDate = new Date(sess.inizio);
+  const ageH = (Date.now() - inizioDate.getTime()) / 3600000;
+  if (ageH > 12) {
+    root.append(el('div', { class:'kiosk-warn-stale' },
+      el('strong', {}, '⚠ Sessione aperta da più di 12 ore'),
+      el('div', { style:'margin-top:6px;' },
+        'Iniziata il ' + fmtIT(toLocalISO(inizioDate)) + ' alle ' + fmtT(inizioDate) + '. Forse hai dimenticato di sospenderla?'),
+    ));
+  }
+
+  // Card sessione attiva
+  const card = el('div', { class:'kiosk-attiva-card' });
+  card.append(
+    el('div', { class:'kiosk-attiva-cliente' }, cli?.nome || '— senza cliente —'),
+    el('div', { class:'kiosk-attiva-cod' }, art?.codice || '—'),
+    el('div', { class:'kiosk-attiva-tipo' },
+      el('div', { class:'ktipo-color-bar', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
+      tipo?.nome || '— tipo sconosciuto —',
+      ' · ',
+      o?.numero_ordine || o?.codice_op || '—',
+    ),
+    el('div', { class:'kiosk-attiva-stats' },
+      el('div', { class:'kas-block' },
+        el('div', { class:'kas-label' }, 'Iniziato alle'),
+        el('div', { class:'kas-value' }, fmtT(inizioDate)),
+      ),
+      el('div', { class:'kas-block' },
+        el('div', { class:'kas-label' }, 'Durata'),
+        el('div', { class:'kas-value', id:'kiosk-durata-live' }, kioskFormatDurataLive(inizioDate)),
+      ),
+    ),
+  );
+  root.append(card);
+
+  // Bottoni azione
+  const actions = el('div', { class:'kiosk-attiva-actions' });
+  actions.append(
+    el('button', { class:'kiosk-attiva-btn pause', onclick: () => kioskStopSessione(sess, 'pause') },
+      '⏸ Sospendi'),
+    el('button', { class:'kiosk-attiva-btn switch', onclick: () => kioskStopSessione(sess, 'switch') },
+      '⏹ Cambia lavoro'),
+  );
+  root.append(actions);
+}
+
+function kioskRefreshDurata() {
+  const u = kioskState.utenteSelezionato;
+  if (!u) return;
+  const sess = state.sessioni.find(s => s.operatore_id === u.id && !s.fine);
+  if (!sess) return;
+  const liveEl = $('#kiosk-durata-live');
+  if (liveEl) liveEl.textContent = kioskFormatDurataLive(new Date(sess.inizio));
+}
+
+function kioskFormatDurataLive(inizioDate) {
+  const sec = Math.floor((Date.now() - inizioDate.getTime()) / 1000);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return h+'h '+String(m).padStart(2,'0')+'m';
+  if (m > 0) return m+'m '+String(s).padStart(2,'0')+'s';
+  return s+'s';
+}
+
+async function kioskStopSessione(sess, modalita) {
+  // modalita: 'pause' = chiudi e torna a id, 'switch' = chiudi e vai a lista operazioni
+  try {
+    const { data, error } = await sb.from('sessioni_lavoro').update({
+      fine: new Date().toISOString(),
+    }).eq('id', sess.id).select().single();
+    if (error) {
+      kioskBeep('err');
+      kioskShowError('Errore: ' + error.message);
+      return;
+    }
+    state.sessioni = state.sessioni.map(s => s.id === sess.id ? data : s);
+    kioskBeep('ok');
+    if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
+
+    if (modalita === 'pause') {
+      // Sospensione: mostra conferma e torna a id
+      const durataS = Math.floor((new Date(data.fine) - new Date(data.inizio)) / 1000);
+      const h = Math.floor(durataS / 3600);
+      const m = Math.floor((durataS % 3600) / 60);
+      const durStr = h > 0 ? h+'h '+m+'m' : m+' min';
+      kioskShowDone({
+        title: 'Sessione sospesa',
+        detail: 'Durata: ' + durStr,
+        ok: true,
+      });
+    } else {
+      // Switch: vai a lista operazioni per scegliere nuova
+      kCom.opSelezionata = null;
+      kCom.search = '';
+      kCom.vediAltre = false;
+      kioskGoToOpList();
+    }
+  } catch (e) {
+    kioskBeep('err');
+    kioskShowError('Errore di rete: ' + (e.message||e));
+  }
 }
 
 init();
