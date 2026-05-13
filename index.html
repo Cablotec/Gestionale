@@ -1692,8 +1692,8 @@ function renderClienti(root) {
   if (search) {
     list = list.filter(c =>
       (c.nome||'').toLowerCase().includes(search) ||
-      (c.ragione_sociale||'').toLowerCase().includes(search) ||
-      (c.referente||'').toLowerCase().includes(search) ||
+      (c.citta||'').toLowerCase().includes(search) ||
+      (c.via||'').toLowerCase().includes(search) ||
       (c.p_iva||'').toLowerCase().includes(search)
     );
   }
@@ -1730,7 +1730,7 @@ function renderClienti(root) {
     el('h2', {}, 'Clienti'),
     el('input', {
       type:'text', class:'search',
-      placeholder:'Cerca per nome, ragione sociale, P.IVA, referente…',
+      placeholder:'Cerca per nome, indirizzo, città, P.IVA…',
       value: state.cliSearch || '',
       oninput: (e) => { state.cliSearch = e.target.value; renderTab('clienti'); }
     }),
@@ -1765,10 +1765,10 @@ function renderClienti(root) {
   const tbl = el('table', { class:'rt' });
   tbl.append(el('thead', {}, el('tr', {},
     el('th', {}, 'Nome'),
-    el('th', {}, 'Ragione sociale'),
+    el('th', {}, 'Indirizzo'),
+    el('th', {}, 'Città'),
     el('th', {}, 'P. IVA'),
-    el('th', {}, 'Referente'),
-    el('th', {}, 'Telefono'),
+    el('th', {}, 'Email'),
     el('th', { class:'tc' }, 'Stato'),
     el('th', { class:'tc' }, 'Azioni'),
   )));
@@ -1776,10 +1776,10 @@ function renderClienti(root) {
   list.forEach(c => {
     tb.append(el('tr', {},
       el('td', {}, c.nome || '—'),
-      el('td', { style:'color:var(--mut);font-size:11px;' }, c.ragione_sociale || ''),
+      el('td', { style:'font-size:11px;color:var(--mut);' }, c.via || ''),
+      el('td', { style:'font-size:11px;' }, c.citta ? c.citta + (c.provincia ? ' ('+c.provincia+')' : '') : ''),
       el('td', { class:'mono', style:'font-size:11px;' }, c.p_iva || ''),
-      el('td', {}, c.referente || ''),
-      el('td', { class:'mono', style:'font-size:11px;' }, c.telefono || ''),
+      el('td', { class:'mono', style:'font-size:11px;' }, c.email || ''),
       el('td', { class:'tc' }, c.attivo
         ? el('span', { class:'badge bok' }, 'attivo')
         : el('span', { class:'badge bgry' }, 'disatt.')),
@@ -1802,7 +1802,7 @@ function renderClienti(root) {
 function openClienteModal(c) {
   const isNew = !c;
   const isAdmin = state.profile?.ruolo === 'admin';
-  c = c || { nome:'', ragione_sociale:'', indirizzo:'', p_iva:'', referente:'', email:'', telefono:'', note:'', attivo:true };
+  c = c || { nome:'', via:'', citta:'', cap:'', provincia:'', p_iva:'', email:'', note:'', attivo:true };
   const readonly = !isAdmin;
 
   const modal = el('div', { class:'modal' });
@@ -1815,12 +1815,12 @@ function openClienteModal(c) {
   const form = el('form');
 
   const inNome = el('input', { type:'text', name:'nome', value:c.nome||'', required:'true' });
-  const inRagSoc = el('input', { type:'text', name:'ragione_sociale', value:c.ragione_sociale||'' });
-  const inIndirizzo = el('input', { type:'text', name:'indirizzo', value:c.indirizzo||'' });
+  const inVia = el('input', { type:'text', name:'via', value:c.via||'', placeholder:'es. Via Roma 15' });
+  const inCitta = el('input', { type:'text', name:'citta', value:c.citta||'', placeholder:'es. Milano' });
+  const inCap = el('input', { type:'text', name:'cap', value:c.cap||'', placeholder:'20100', maxlength:'5' });
+  const inProvincia = el('input', { type:'text', name:'provincia', value:c.provincia||'', placeholder:'MI', maxlength:'2', style:'text-transform:uppercase;' });
   const inPIva = el('input', { type:'text', name:'p_iva', value:c.p_iva||'' });
-  const inReferente = el('input', { type:'text', name:'referente', value:c.referente||'' });
   const inEmail = el('input', { type:'email', name:'email', value:c.email||'' });
-  const inTelefono = el('input', { type:'text', name:'telefono', value:c.telefono||'' });
   const inNote = el('textarea', { name:'note', rows:'2' }, c.note || '');
   const selAttivo = el('select', { name:'attivo' },
     el('option', { value:'true' }, 'Attivo'),
@@ -1828,23 +1828,27 @@ function openClienteModal(c) {
   selAttivo.value = String(!!c.attivo);
 
   if (readonly) {
-    [inNome, inRagSoc, inIndirizzo, inPIva, inReferente, inEmail, inTelefono, inNote, selAttivo]
+    [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inEmail, inNote, selAttivo]
       .forEach(i => i.disabled = true);
   }
 
   form.append(
-    el('div', { class:'field' }, el('label', {}, 'Nome breve *'), inNome,
+    el('div', { class:'field' }, el('label', {}, 'Nome *'), inNome,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Es. "TEMA SINERGIE" — usato come identificativo veloce nelle operazioni.')),
-    el('div', { class:'field' }, el('label', {}, 'Ragione sociale completa'), inRagSoc),
+        'Es. "TEMA SINERGIE" — usato come identificativo veloce nelle operazioni e prenotazioni.')),
+    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+      '── Indirizzo ──'),
+    el('div', { class:'field' }, el('label', {}, 'Via e civico'), inVia),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Città'), inCitta),
+      el('div', { class:'field' }, el('label', {}, 'CAP'), inCap),
+      el('div', { class:'field' }, el('label', {}, 'Prov.'), inProvincia),
+    ),
+    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+      '── Altri dati ──'),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'P. IVA / C.F.'), inPIva),
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
-    ),
-    el('div', { class:'field' }, el('label', {}, 'Indirizzo'), inIndirizzo),
-    el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Referente'), inReferente),
-      el('div', { class:'field' }, el('label', {}, 'Telefono'), inTelefono),
     ),
     el('div', { class:'field' }, el('label', {}, 'Email'), inEmail),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
@@ -1861,12 +1865,12 @@ function openClienteModal(c) {
       const fd = new FormData(form);
       const payload = {
         nome: (fd.get('nome')||'').trim(),
-        ragione_sociale: (fd.get('ragione_sociale')||'').trim() || null,
-        indirizzo: (fd.get('indirizzo')||'').trim() || null,
+        via: (fd.get('via')||'').trim() || null,
+        citta: (fd.get('citta')||'').trim() || null,
+        cap: (fd.get('cap')||'').trim() || null,
+        provincia: (fd.get('provincia')||'').trim().toUpperCase() || null,
         p_iva: (fd.get('p_iva')||'').trim() || null,
-        referente: (fd.get('referente')||'').trim() || null,
         email: (fd.get('email')||'').trim() || null,
-        telefono: (fd.get('telefono')||'').trim() || null,
         note: (fd.get('note')||'').trim() || null,
         attivo: fd.get('attivo') === 'true',
       };
@@ -1946,23 +1950,23 @@ function openClientiImportPreviewModal(rows) {
     return null;
   };
   const colNome = findCol('nome','cliente','name','customer');
-  const colRagSoc = findCol('ragione sociale','ragione_sociale','rag_soc','denominazione');
-  const colIndir = findCol('indirizzo','address','via');
+  const colVia = findCol('via','indirizzo','address','street');
+  const colCitta = findCol('citta','città','city','localita','località');
+  const colCap = findCol('cap','zip','postal');
+  const colProvincia = findCol('provincia','prov','pr','province');
   const colPIva = findCol('p.iva','p_iva','partita iva','partita_iva','piva','vat','codice fiscale','cf');
-  const colReferente = findCol('referente','contatto','contact');
   const colEmail = findCol('email','e-mail','mail');
-  const colTel = findCol('telefono','tel','phone');
   const colNote = findCol('note','notes','annotazioni');
 
   const parsed = rows.map((r, idx) => ({
     _row: idx + 2,
     nome: (colNome ? r[colNome] : '').toString().trim(),
-    ragione_sociale: colRagSoc ? (r[colRagSoc]||'').toString().trim() || null : null,
-    indirizzo: colIndir ? (r[colIndir]||'').toString().trim() || null : null,
+    via: colVia ? (r[colVia]||'').toString().trim() || null : null,
+    citta: colCitta ? (r[colCitta]||'').toString().trim() || null : null,
+    cap: colCap ? (r[colCap]||'').toString().trim() || null : null,
+    provincia: colProvincia ? (r[colProvincia]||'').toString().trim().toUpperCase() || null : null,
     p_iva: colPIva ? (r[colPIva]||'').toString().trim() || null : null,
-    referente: colReferente ? (r[colReferente]||'').toString().trim() || null : null,
     email: colEmail ? (r[colEmail]||'').toString().trim() || null : null,
-    telefono: colTel ? (r[colTel]||'').toString().trim() || null : null,
     note: colNote ? (r[colNote]||'').toString().trim() || null : null,
   }));
 
@@ -1998,12 +2002,12 @@ function openClientiImportPreviewModal(rows) {
   const mapBox = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;font-family:monospace;font-size:11px;line-height:1.8;' });
   [
     ['nome', colNome],
-    ['ragione_sociale', colRagSoc],
-    ['indirizzo', colIndir],
+    ['via', colVia],
+    ['citta', colCitta],
+    ['cap', colCap],
+    ['provincia', colProvincia],
     ['p_iva', colPIva],
-    ['referente', colReferente],
     ['email', colEmail],
-    ['telefono', colTel],
     ['note', colNote],
   ].forEach(([campo, col]) => {
     mapBox.append(el('div', {},
@@ -2026,14 +2030,14 @@ function openClientiImportPreviewModal(rows) {
     body.append(el('div', { class:'sub', style:'margin:14px 0 6px;' }, `Anteprima (prime ${Math.min(5, validi.length)} righe valide):`));
     const tbl = el('table', { class:'rt', style:'font-size:11px;' });
     tbl.append(el('thead', {}, el('tr', {},
-      el('th', {}, 'Nome'), el('th', {}, 'Rag. soc.'), el('th', {}, 'P.IVA'), el('th', {}, 'Referente'),
+      el('th', {}, 'Nome'), el('th', {}, 'Via'), el('th', {}, 'Città'), el('th', {}, 'P.IVA'),
     )));
     const tb = el('tbody');
     validi.slice(0,5).forEach(p => tb.append(el('tr', {},
       el('td', {}, p.nome),
-      el('td', {}, p.ragione_sociale || ''),
+      el('td', {}, p.via || ''),
+      el('td', {}, p.citta || (p.provincia ? '('+p.provincia+')' : '')),
       el('td', { class:'mono' }, p.p_iva || ''),
-      el('td', {}, p.referente || ''),
     )));
     tbl.append(tb);
     body.append(tbl);
@@ -2059,9 +2063,8 @@ async function clientiImportEsegui(nuovi, aggiornamenti) {
 
   if (nuovi.length) {
     const batch = nuovi.map(p => ({
-      nome: p.nome, ragione_sociale: p.ragione_sociale, indirizzo: p.indirizzo,
-      p_iva: p.p_iva, referente: p.referente, email: p.email,
-      telefono: p.telefono, note: p.note,
+      nome: p.nome, via: p.via, citta: p.citta, cap: p.cap, provincia: p.provincia,
+      p_iva: p.p_iva, email: p.email, note: p.note,
     }));
     const { data, error } = await sb.from('clienti').insert(batch).select();
     if (error) {
@@ -2079,9 +2082,8 @@ async function clientiImportEsegui(nuovi, aggiornamenti) {
     const existing = state.clienti.find(c => (c.nome||'').toLowerCase() === p.nome.toLowerCase());
     if (!existing) { errUpd++; continue; }
     const { data, error } = await sb.from('clienti').update({
-      ragione_sociale: p.ragione_sociale, indirizzo: p.indirizzo,
-      p_iva: p.p_iva, referente: p.referente,
-      email: p.email, telefono: p.telefono, note: p.note,
+      via: p.via, citta: p.citta, cap: p.cap, provincia: p.provincia,
+      p_iva: p.p_iva, email: p.email, note: p.note,
     }).eq('id', existing.id).select().single();
     if (error) errUpd++;
     else {
@@ -2102,17 +2104,17 @@ function clientiExportExcel() {
   }
   const rows = state.clienti.map(c => ({
     nome: c.nome,
-    ragione_sociale: c.ragione_sociale || '',
-    indirizzo: c.indirizzo || '',
+    via: c.via || '',
+    citta: c.citta || '',
+    cap: c.cap || '',
+    provincia: c.provincia || '',
     p_iva: c.p_iva || '',
-    referente: c.referente || '',
     email: c.email || '',
-    telefono: c.telefono || '',
     note: c.note || '',
     attivo: c.attivo ? 'sì' : 'no',
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{wch:24},{wch:32},{wch:30},{wch:14},{wch:20},{wch:24},{wch:14},{wch:30},{wch:8}];
+  ws['!cols'] = [{wch:24},{wch:30},{wch:20},{wch:8},{wch:8},{wch:14},{wch:24},{wch:30},{wch:8}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Clienti');
   XLSX.writeFile(wb, 'clienti_'+new Date().toISOString().substring(0,10)+'.xlsx');
@@ -4351,14 +4353,43 @@ async function openPrenotazioneModal(p) {
       listaWrap.append(el('div', { class:'sub' }, 'Nessuna consegna. Aggiungine una se serve elencare destinazioni.'));
     }
     consegne.forEach((c, i) => {
-      listaWrap.append(el('div', { class:'consegna-row' },
+      // Costruisci select clienti
+      const clientiAttivi = state.clienti.filter(x => x.attivo).sort((a,b)=>a.nome.localeCompare(b.nome));
+      const selCli = el('select', { style:'flex:1;' },
+        el('option', { value:'' }, '— scegli cliente —'),
+        ...clientiAttivi.map(cl => el('option', { value:cl.id }, cl.nome))
+      );
+      selCli.value = c.cliente_id || '';
+      selCli.onchange = (e) => { c.cliente_id = e.target.value || null; renderConsegne(); };
+
+      // Indirizzo dedotto dal cliente
+      let indirizzoDedotto = '—';
+      if (c.cliente_id) {
+        const cli = state.clienti.find(x => x.id === c.cliente_id);
+        if (cli) {
+          const parts = [];
+          if (cli.via) parts.push(cli.via);
+          const luogo = [cli.cap, cli.citta].filter(Boolean).join(' ');
+          if (luogo) parts.push(luogo);
+          if (cli.provincia) parts.push('('+cli.provincia+')');
+          indirizzoDedotto = parts.length ? parts.join(' · ') : '⚠ Cliente senza indirizzo';
+        }
+      }
+
+      const row = el('div', { class:'consegna-row', style:'flex-direction:column;gap:4px;align-items:stretch;' });
+      const rowMain = el('div', { style:'display:flex;gap:6px;align-items:center;' },
         el('div', { class:'num' }, String(i+1)),
-        el('input', { type:'text', placeholder:'Indirizzo / luogo', value:c.indirizzo||'',
-                      oninput: e => c.indirizzo = e.target.value }),
-        el('input', { type:'text', placeholder:'Cosa consegnare', value:c.descrizione||'',
-                      oninput: e => c.descrizione = e.target.value }),
+        selCli,
+        el('input', { type:'text', placeholder:'Cosa consegnare (opz.)', value:c.descrizione||'',
+                      oninput: e => c.descrizione = e.target.value,
+                      style:'flex:1.5;' }),
         el('button', { type:'button', class:'btnd', onclick: () => { consegne.splice(i,1); renderConsegne(); } }, '✕'),
-      ));
+      );
+      const rowIndir = el('div', {
+        style:'font-family:monospace;font-size:10px;color:'+(c.cliente_id && !state.clienti.find(x=>x.id===c.cliente_id)?.via ? 'var(--yel)' : 'var(--mut)')+';padding-left:34px;',
+      }, indirizzoDedotto);
+      row.append(rowMain, rowIndir);
+      listaWrap.append(row);
     });
   };
   renderConsegne();
@@ -4368,7 +4399,7 @@ async function openPrenotazioneModal(p) {
       el('label', {}, 'Lista consegne / fermate'),
       listaWrap,
       el('button', { type:'button', class:'btnsm', style:'margin-top:8px;align-self:flex-start;',
-        onclick: () => { consegne.push({ indirizzo:'', descrizione:'', ordine:consegne.length, _new:true }); renderConsegne(); }
+        onclick: () => { consegne.push({ cliente_id:null, descrizione:'', ordine:consegne.length, _new:true }); renderConsegne(); }
       }, '+ Aggiungi consegna'),
     ),
   );
@@ -4467,12 +4498,13 @@ async function openPrenotazioneModal(p) {
     }
 
     await sb.from('consegne').delete().eq('prenotazione_id', prenId);
-    const validi = consegne.filter(c => (c.indirizzo||'').trim() || (c.descrizione||'').trim());
+    const validi = consegne.filter(c => c.cliente_id || (c.descrizione||'').trim());
     let nuoveConsegne = [];
     if (validi.length) {
       const rows = validi.map((c, i) => ({
         prenotazione_id: prenId, ordine: i,
-        indirizzo: c.indirizzo || '', descrizione: c.descrizione || null,
+        cliente_id: c.cliente_id || null,
+        descrizione: c.descrizione || null,
       }));
       const { data, error } = await sb.from('consegne').insert(rows).select();
       if (error) return toast('Salvato ma errore nelle consegne: '+error.message, 'err');
