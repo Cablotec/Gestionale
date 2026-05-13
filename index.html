@@ -4287,7 +4287,6 @@ async function openPrenotazioneModal(p) {
       if (!u) return;
       selectedWrap.append(el('span', { class:'util-pill' },
         el('span', {}, u.nome),
-        u.numero_badge ? el('span', { class:'util-pill-badge' }, '#'+u.numero_badge) : null,
         canEdit ? el('button', {
           type:'button', class:'util-pill-x',
           onclick: () => {
@@ -4303,8 +4302,7 @@ async function openPrenotazioneModal(p) {
     const q = searchInput.value.trim().toLowerCase();
     const filtered = operatoriAttivi.filter(u => {
       if (!q) return true;
-      return (u.nome || '').toLowerCase().includes(q)
-          || (u.numero_badge || '').toLowerCase().includes(q);
+      return (u.nome || '').toLowerCase().includes(q);
     });
     dropList.innerHTML = '';
     if (filtered.length === 0) {
@@ -4324,7 +4322,6 @@ async function openPrenotazioneModal(p) {
       },
         el('span', { class:'util-row-chk' }, isSel ? '✓' : ''),
         el('span', { class:'util-row-name' }, u.nome),
-        u.numero_badge ? el('span', { class:'util-row-badge' }, '#'+u.numero_badge) : null,
       ));
     });
   };
@@ -4455,6 +4452,8 @@ async function openPrenotazioneModal(p) {
       const rowTop = el('div', { class:'row-top' },
         el('div', { class:'num' }, String(i+1)),
         acWrap,
+        el('input', { type:'text', placeholder:'Cosa consegnare (opz.)', value:c.descrizione||'',
+                      oninput: e => c.descrizione = e.target.value, style:'flex:1;' }),
         el('button', { type:'button', class:'btnd', onclick: () => { consegne.splice(i,1); renderConsegne(); } }, '✕'),
       );
 
@@ -4462,13 +4461,7 @@ async function openPrenotazioneModal(p) {
       const rowIndir = el('div', { class:'indir-info', style: indirIsWarn ? 'color:var(--yel);' : '' },
         indirizzoDedotto);
 
-      // Riga 3: descrizione opzionale
-      const rowBot = el('div', { class:'row-bottom' },
-        el('input', { type:'text', placeholder:'Cosa consegnare / note (opz.)', value:c.descrizione||'',
-                      oninput: e => c.descrizione = e.target.value }),
-      );
-
-      row.append(rowTop, rowIndir, rowBot);
+      row.append(rowTop, rowIndir);
       listaWrap.append(row);
     });
   };
