@@ -217,9 +217,23 @@ table.rt tbody tr:hover td{background:var(--hover);}
 
 /* Lista consegne */
 .consegne-list{display:flex;flex-direction:column;gap:6px;}
-.consegna-row{display:grid;grid-template-columns:24px 1fr 1fr auto;gap:6px;align-items:center;}
-.consegna-row .num{background:var(--sur2);border:1px solid var(--brd);border-radius:3px;text-align:center;padding:5px 0;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
-.consegna-row input{padding:5px 8px !important;font-size:11px !important;}
+.consegna-row{display:flex;flex-direction:column;gap:4px;padding:8px;background:var(--sur);border:1px solid var(--brd);border-radius:4px;}
+.consegna-row .row-top{display:flex;gap:6px;align-items:center;}
+.consegna-row .num{background:var(--sur2);border:1px solid var(--brd);border-radius:3px;text-align:center;padding:4px 8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);min-width:22px;flex-shrink:0;}
+.consegna-row input{padding:6px 10px !important;font-size:12px !important;flex:1;}
+.consegna-row .row-bottom{display:flex;gap:6px;align-items:center;padding-left:30px;}
+.consegna-row .row-bottom input{flex:1;}
+.consegna-row .indir-info{font-family:monospace;font-size:10px;color:var(--mut);padding-left:30px;}
+
+/* Autocomplete cliente */
+.cli-ac-wrap{position:relative;flex:1;}
+.cli-ac-list{position:absolute;top:100%;left:0;right:0;background:var(--sur2);border:1px solid var(--acc);border-top:none;border-radius:0 0 4px 4px;max-height:220px;overflow-y:auto;z-index:1000;display:none;}
+.cli-ac-list.open{display:block;}
+.cli-ac-item{padding:7px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--brd);}
+.cli-ac-item:last-child{border-bottom:none;}
+.cli-ac-item:hover,.cli-ac-item.sel{background:rgba(212,255,78,.1);color:var(--acc);}
+.cli-ac-item .cli-name{font-weight:600;}
+.cli-ac-item .cli-meta{font-family:monospace;font-size:10px;color:var(--mut);margin-left:6px;}
 
 /* Multi-select operatori */
 /* Multi-select operatori con ricerca */
@@ -4353,42 +4367,108 @@ async function openPrenotazioneModal(p) {
       listaWrap.append(el('div', { class:'sub' }, 'Nessuna consegna. Aggiungine una se serve elencare destinazioni.'));
     }
     consegne.forEach((c, i) => {
-      // Costruisci select clienti
-      const clientiAttivi = state.clienti.filter(x => x.attivo).sort((a,b)=>a.nome.localeCompare(b.nome));
-      const selCli = el('select', { style:'flex:1;' },
-        el('option', { value:'' }, '— scegli cliente —'),
-        ...clientiAttivi.map(cl => el('option', { value:cl.id }, cl.nome))
-      );
-      selCli.value = c.cliente_id || '';
-      selCli.onchange = (e) => { c.cliente_id = e.target.value || null; renderConsegne(); };
-
       // Indirizzo dedotto dal cliente
+      const cli = c.cliente_id ? state.clienti.find(x => x.id === c.cliente_id) : null;
       let indirizzoDedotto = '—';
-      if (c.cliente_id) {
-        const cli = state.clienti.find(x => x.id === c.cliente_id);
-        if (cli) {
-          const parts = [];
-          if (cli.via) parts.push(cli.via);
-          const luogo = [cli.cap, cli.citta].filter(Boolean).join(' ');
-          if (luogo) parts.push(luogo);
-          if (cli.provincia) parts.push('('+cli.provincia+')');
-          indirizzoDedotto = parts.length ? parts.join(' · ') : '⚠ Cliente senza indirizzo';
-        }
+      let indirIsWarn = false;
+      if (cli) {
+        const parts = [];
+        if (cli.via) parts.push(cli.via);
+        const luogo = [cli.cap, cli.citta].filter(Boolean).join(' ');
+        if (luogo) parts.push(luogo);
+        if (cli.provincia) parts.push('('+cli.provincia+')');
+        if (parts.length) indirizzoDedotto = parts.join(' · ');
+        else { indirizzoDedotto = '⚠ Cliente senza indirizzo configurato'; indirIsWarn = true; }
+      } else if (c.cliente_id) {
+        indirizzoDedotto = '⚠ Cliente non trovato'; indirIsWarn = true;
       }
 
-      const row = el('div', { class:'consegna-row', style:'flex-direction:column;gap:4px;align-items:stretch;' });
-      const rowMain = el('div', { style:'display:flex;gap:6px;align-items:center;' },
+      // Row container
+      const row = el('div', { class:'consegna-row' });
+
+      // Riga 1: numero + autocomplete cliente + bottone delete
+      const acWrap = el('div', { class:'cli-ac-wrap' });
+      const acInput = el('input', {
+        type:'text',
+        placeholder:'Cerca cliente per nome…',
+        value: cli ? cli.nome : '',
+        autocomplete:'off',
+      });
+      const acList = el('div', { class:'cli-ac-list' });
+      acWrap.append(acInput, acList);
+
+      let highlightIdx = -1;
+      const refreshList = () => {
+        const q = acInput.value.toLowerCase().trim();
+        const filtered = state.clienti
+          .filter(x => x.attivo)
+          .filter(x => !q || x.nome.toLowerCase().includes(q) ||
+                       (x.citta||'').toLowerCase().includes(q) ||
+                       (x.p_iva||'').toLowerCase().includes(q))
+          .sort((a,b) => a.nome.localeCompare(b.nome))
+          .slice(0, 20);
+        acList.innerHTML = '';
+        if (filtered.length === 0) { acList.classList.remove('open'); return; }
+        filtered.forEach((x, idx) => {
+          const item = el('div', { class:'cli-ac-item' + (idx === highlightIdx ? ' sel' : '') },
+            el('span', { class:'cli-name' }, x.nome),
+            el('span', { class:'cli-meta' }, [x.citta, x.provincia].filter(Boolean).join(' · ')),
+          );
+          item.onmousedown = (e) => {
+            e.preventDefault();
+            c.cliente_id = x.id;
+            acInput.value = x.nome;
+            acList.classList.remove('open');
+            renderConsegne(); // re-render per aggiornare l'indirizzo
+          };
+          acList.append(item);
+        });
+        acList.classList.add('open');
+      };
+
+      acInput.oninput = () => {
+        highlightIdx = -1;
+        c.cliente_id = null; // resetta selezione finché non sceglie
+        refreshList();
+      };
+      acInput.onfocus = () => refreshList();
+      acInput.onblur = () => { setTimeout(() => acList.classList.remove('open'), 200); };
+      acInput.onkeydown = (e) => {
+        if (!acList.classList.contains('open')) return;
+        const items = acList.querySelectorAll('.cli-ac-item');
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          highlightIdx = Math.min(highlightIdx + 1, items.length - 1);
+          items.forEach((it, i) => it.classList.toggle('sel', i === highlightIdx));
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          highlightIdx = Math.max(highlightIdx - 1, 0);
+          items.forEach((it, i) => it.classList.toggle('sel', i === highlightIdx));
+        } else if (e.key === 'Enter' && highlightIdx >= 0) {
+          e.preventDefault();
+          items[highlightIdx].dispatchEvent(new Event('mousedown'));
+        } else if (e.key === 'Escape') {
+          acList.classList.remove('open');
+        }
+      };
+
+      const rowTop = el('div', { class:'row-top' },
         el('div', { class:'num' }, String(i+1)),
-        selCli,
-        el('input', { type:'text', placeholder:'Cosa consegnare (opz.)', value:c.descrizione||'',
-                      oninput: e => c.descrizione = e.target.value,
-                      style:'flex:1.5;' }),
+        acWrap,
         el('button', { type:'button', class:'btnd', onclick: () => { consegne.splice(i,1); renderConsegne(); } }, '✕'),
       );
-      const rowIndir = el('div', {
-        style:'font-family:monospace;font-size:10px;color:'+(c.cliente_id && !state.clienti.find(x=>x.id===c.cliente_id)?.via ? 'var(--yel)' : 'var(--mut)')+';padding-left:34px;',
-      }, indirizzoDedotto);
-      row.append(rowMain, rowIndir);
+
+      // Riga 2: indirizzo dedotto
+      const rowIndir = el('div', { class:'indir-info', style: indirIsWarn ? 'color:var(--yel);' : '' },
+        indirizzoDedotto);
+
+      // Riga 3: descrizione opzionale
+      const rowBot = el('div', { class:'row-bottom' },
+        el('input', { type:'text', placeholder:'Cosa consegnare / note (opz.)', value:c.descrizione||'',
+                      oninput: e => c.descrizione = e.target.value }),
+      );
+
+      row.append(rowTop, rowIndir, rowBot);
       listaWrap.append(row);
     });
   };
