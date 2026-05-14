@@ -730,65 +730,49 @@ function renderAuth() {
   $('#app-screen').style.display = 'none';
   const root = $('#auth-screen');
   root.style.display = 'flex';
-  let mode = 'login';
-  const draw = () => {
-    root.innerHTML = '';
-    const box = el('div', { class:'auth-box' });
-    box.append(
-      el('h2', { html:'Cabl<span>otec</span>' }),
-      el('div', { class:'auth-sub' }, mode==='login' ? 'Sistema gestionale — accedi' : 'Sistema gestionale — registrati'),
-      el('div', { class:'auth-tabs' },
-        el('button', { class: mode==='login'?'active':'', onclick:()=>{mode='login';draw();} }, 'Accedi'),
-        el('button', { class: mode==='signup'?'active':'', onclick:()=>{mode='signup';draw();} }, 'Registrati'),
-      ),
-    );
-    const form = el('form');
-    if (mode === 'signup') {
-      form.append(el('div', { class:'field' },
-        el('label', {}, 'Nome'),
-        el('input', { type:'text', name:'nome', required:'true', placeholder:'Mario Rossi' }),
-      ));
+  root.innerHTML = '';
+
+  const box = el('div', { class:'auth-box' });
+  box.append(
+    el('h2', { html:'Cabl<span>otec</span>' }),
+    el('div', { class:'auth-sub' }, 'Sistema gestionale — accedi'),
+  );
+
+  const form = el('form');
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Email'),
+      el('input', { type:'email', name:'email', required:'true', autocomplete:'email' })),
+    el('div', { class:'field' }, el('label', {}, 'Password'),
+      el('input', { type:'password', name:'password', required:'true', minlength:'6',
+                    autocomplete:'current-password' })),
+    el('button', { type:'submit', class:'btnp', style:'width:100%;padding:11px;margin-top:6px;' },
+      'Accedi'),
+  );
+  const msg = el('div', { class:'auth-msg' });
+  form.append(msg);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    msg.className = 'auth-msg';
+    msg.textContent = 'Attendere…';
+    const fd = new FormData(form);
+    try {
+      const { error } = await sb.auth.signInWithPassword({
+        email: fd.get('email'), password: fd.get('password'),
+      });
+      if (error) throw error;
+    } catch (err) {
+      msg.className = 'auth-msg err';
+      msg.textContent = err.message || 'Errore di accesso';
     }
-    form.append(
-      el('div', { class:'field' }, el('label', {}, 'Email'),
-        el('input', { type:'email', name:'email', required:'true', autocomplete:'email' })),
-      el('div', { class:'field' }, el('label', {}, 'Password'),
-        el('input', { type:'password', name:'password', required:'true', minlength:'6',
-                      autocomplete: mode==='login'?'current-password':'new-password' })),
-      el('button', { type:'submit', class:'btnp', style:'width:100%;padding:11px;margin-top:6px;' },
-        mode==='login' ? 'Accedi' : 'Registrati'),
-    );
-    const msg = el('div', { class:'auth-msg' });
-    form.append(msg);
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      msg.className = 'auth-msg';
-      msg.textContent = 'Attendere…';
-      const fd = new FormData(form);
-      try {
-        if (mode === 'login') {
-          const { error } = await sb.auth.signInWithPassword({
-            email: fd.get('email'), password: fd.get('password'),
-          });
-          if (error) throw error;
-        } else {
-          const { error } = await sb.auth.signUp({
-            email: fd.get('email'), password: fd.get('password'),
-            options: { data: { nome: fd.get('nome') } },
-          });
-          if (error) throw error;
-          msg.className = 'auth-msg ok';
-          msg.textContent = 'Registrazione ok. Se richiesta conferma email, controlla la posta — poi accedi.';
-        }
-      } catch (err) {
-        msg.className = 'auth-msg err';
-        msg.textContent = err.message || 'Errore di accesso';
-      }
-    });
-    box.append(form);
-    root.append(box);
-  };
-  draw();
+  });
+  box.append(form);
+
+  box.append(el('div', { class:'auth-foot', style:'margin-top:16px;font-size:11px;color:var(--mut);text-align:center;line-height:1.6;' },
+    'Gli account vengono creati dall\'amministratore.',
+    el('br'),
+    'Per problemi di accesso contatta l\'ufficio.'));
+
+  root.append(box);
 }
 
 async function afterLogin() {
