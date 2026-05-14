@@ -462,8 +462,7 @@ table.rt tbody tr:hover td{background:var(--hover);}
   <nav class="nav" id="tabs-macro">
     <button class="navtab active" data-area="mezzi">Mezzi</button>
     <button class="navtab" data-area="lavoro">Lavoro</button>
-    <button class="navtab" data-area="anagrafiche" id="area-anagrafiche" style="display:none">Anagrafiche</button>
-    <button class="navtab" data-area="sistema" id="area-sistema" style="display:none">Sistema</button>
+    <button class="navtab" data-area="gestione" id="area-gestione" style="display:none">Gestione</button>
   </nav>
   <nav class="nav nav-sub" id="tabs"></nav>
 
@@ -802,8 +801,7 @@ async function afterLogin() {
   $('#user-name').innerHTML = '<b>'+(state.profile.nome || state.profile.email)+'</b>';
   $('#role-pill').innerHTML = state.profile.ruolo === 'admin'
     ? '<span class="badge bvio">admin</span>' : '<span class="badge bgry">user</span>';
-  $('#area-anagrafiche').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
-  $('#area-sistema').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
+  $('#area-gestione').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#kiosk-jump').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   applyTheme(localStorage.getItem('theme') || 'dark');
 
@@ -1069,7 +1067,6 @@ const TAB_STRUCTURE = {
     tabs: [
       { id: 'calendario',  label: 'Calendario',  adminOnly: false },
       { id: 'elenco',      label: 'Prenotazioni', adminOnly: false },
-      { id: 'mezzi',       label: 'Anagrafica mezzi', adminOnly: false },
     ],
   },
   lavoro: {
@@ -1081,20 +1078,15 @@ const TAB_STRUCTURE = {
       { id: 'gantt',          label: 'Gantt',          adminOnly: true },
     ],
   },
-  anagrafiche: {
-    label: 'Anagrafiche',
+  gestione: {
+    label: 'Gestione',
     adminOnly: true,
     tabs: [
-      { id: 'clienti',        label: 'Clienti',       adminOnly: true },
-      { id: 'articoli',       label: 'Articoli',      adminOnly: true },
-      { id: 'tipi_lav',       label: 'Tipi lavorazione', adminOnly: true },
-      { id: 'operatori',      label: 'Utenti',        adminOnly: true },
-    ],
-  },
-  sistema: {
-    label: 'Sistema',
-    adminOnly: true,
-    tabs: [
+      { id: 'clienti',        label: 'Clienti',           adminOnly: true },
+      { id: 'articoli',       label: 'Articoli',          adminOnly: true },
+      { id: 'tipi_lav',       label: 'Tipi lavorazione',  adminOnly: true },
+      { id: 'mezzi',          label: 'Anagrafica mezzi',  adminOnly: true },
+      { id: 'operatori',      label: 'Utenti',            adminOnly: true },
       { id: 'chiusure',       label: 'Chiusure aziendali', adminOnly: true },
     ],
   },
@@ -1541,13 +1533,12 @@ async function deleteMezzo(m) {
 function renderOperatori(root) {
   root.innerHTML = '';
   root.append(el('div', { class:'toolbar' },
-    el('h2', {}, 'Operatori dei mezzi'),
-    el('button', { class:'btnp', onclick:()=>openOperatoreModal() }, '+ Nuovo Operatore'),
+    el('h2', {}, 'Utenti & Accessi'),
+    el('button', { class:'btnp', onclick:()=>openOperatoreModal() }, '+ Nuovo Utente'),
   ));
 
-  // Tab interna: Operatori vs Account login
   root.append(el('div', { class:'sub', style:'margin-bottom:12px;' },
-    'Anagrafica delle persone che usano i mezzi (può non avere un account login).'));
+    'Anagrafica delle persone (operatori, uffici, esterni). Un utente può avere un account login collegato, oppure usare solo il badge al kiosk.'));
 
   const tw = el('div', { class:'tw' });
   const tbl = el('table', { class:'rt' });
@@ -1564,8 +1555,9 @@ function renderOperatori(root) {
   state.utenti.filter(u => !isKioskRecord(u)).forEach(u => {
     const account = u.account_id ? state.profiliById[u.account_id] : null;
     const accountCell = account
-      ? el('span', { class:'badge bok', title:account.email }, '✓ '+(account.ruolo||'user'))
-      : el('span', { class:'badge bgry' }, '—');
+      ? el('span', { class:'badge bok', title:account.email },
+          (account.ruolo === 'admin' ? '★ admin' : '✓ user'))
+      : el('span', { class:'badge bgry' }, 'nessuno');
     tb.append(el('tr', {},
       el('td', {}, u.nome),
       el('td', { class:'mono' }, u.numero_badge || '—'),
@@ -1590,16 +1582,52 @@ function renderOperatori(root) {
   tw.append(tbl);
   root.append(tw);
 
-  // Sezione: account loggati senza operatore (caso raro, ma utile per debug)
+  // ─── Sezione: come si crea un accesso ───
+  const utentiSenzaAccount = state.utenti
+    .filter(u => !isKioskRecord(u) && u.attivo && !u.account_id);
+
+  const box = el('div', { style:'margin-top:24px;padding:14px 16px;background:var(--sur);border:1px solid var(--brd);border-radius:6px;' });
+  box.append(el('div', { class:'kl', style:'margin-bottom:8px;' }, 'Come creare un accesso login'));
+  box.append(el('div', { class:'sub', style:'line-height:1.7;' },
+    el('div', {}, '1. Vai sulla dashboard Supabase → Authentication → Add User'),
+    el('div', {}, '2. Email con lo schema aziendale: ',
+      el('span', { class:'mono', style:'color:var(--acc);' }, 'nome.cognome@cablotec.net')),
+    el('div', {}, '3. Imposta una password iniziale e comunicala alla persona'),
+    el('div', {}, '4. Torna qui, clicca "Modifica" sull\'utente e collega l\'account appena creato'),
+  ));
+
+  if (utentiSenzaAccount.length > 0) {
+    box.append(el('div', { style:'margin-top:12px;padding-top:12px;border-top:1px solid var(--brd);' },
+      el('div', { class:'kl', style:'color:var(--yel);margin-bottom:6px;' },
+        `⚠ ${utentiSenzaAccount.length} utenti attivi senza account login`),
+      el('div', { class:'sub', style:'margin-bottom:6px;' },
+        'Questi non possono entrare nell\'app (es. per segnare ferie). Se devono, crea loro un account:'),
+      ...utentiSenzaAccount.map(u => {
+        // Suggerisce l'email secondo lo schema
+        const slug = (u.nome || '').toLowerCase().trim()
+          .replace(/\s+/g, '.').replace(/[^a-z.]/g, '');
+        return el('div', { class:'mono', style:'font-size:11px;margin-top:3px;' },
+          `• ${u.nome}  →  `,
+          el('span', { style:'color:var(--acc);' }, slug ? slug+'@cablotec.net' : '(nome non valido)'));
+      }),
+    ));
+  }
+
+  // Account login senza utente collegato (orfani)
   const profili = Object.values(state.profiliById).filter(p => !isKioskRecord(p));
   const orfani = profili.filter(p => !state.utenti.find(u => u.account_id === p.id));
   if (orfani.length > 0) {
-    root.append(el('div', { style:'margin-top:24px;padding:12px;background:var(--sur);border:1px solid var(--yel);border-radius:4px;' },
-      el('div', { class:'kl', style:'color:var(--yel);margin-bottom:8px;' }, '⚠ Account senza operatore collegato'),
-      el('div', { class:'sub' }, 'Questi account login non hanno una scheda operatore. Crea un operatore e collegaci l\'account, oppure aspetta che si auto-colleghi.'),
-      ...orfani.map(p => el('div', { class:'mono', style:'font-size:11px;margin-top:4px;' }, `• ${p.nome} — ${p.email}`)),
+    box.append(el('div', { style:'margin-top:12px;padding-top:12px;border-top:1px solid var(--brd);' },
+      el('div', { class:'kl', style:'color:var(--or);margin-bottom:6px;' },
+        `⚠ ${orfani.length} account login non collegati a un utente`),
+      el('div', { class:'sub', style:'margin-bottom:6px;' },
+        'Questi account possono fare login ma non sono collegati a una scheda anagrafica. Modifica l\'utente corrispondente e collega l\'account:'),
+      ...orfani.map(p => el('div', { class:'mono', style:'font-size:11px;margin-top:3px;' },
+        `• ${p.email}  (${p.ruolo || 'user'})`)),
     ));
   }
+
+  root.append(box);
 }
 
 function openOperatoreModal(u) {
@@ -1611,7 +1639,7 @@ function openOperatoreModal(u) {
 
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
-    el('h2', {}, isNew ? 'Nuovo Operatore' : 'Modifica Operatore'),
+    el('h2', {}, isNew ? 'Nuovo Utente' : 'Modifica Utente'),
     el('button', { class:'mclose', onclick:closeModal }, '✕'),
   ));
   const body = el('div', { class:'mbody' });
@@ -1637,7 +1665,7 @@ function openOperatoreModal(u) {
     el('div', { class:'field' }, el('label', {}, 'Account login collegato (opz.)'),
       selAccount,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Collega questo operatore a un account login, se ne ha uno.')),
+        'Collega questo utente a un account login Supabase, se ne ha uno. L\'account va prima creato dalla dashboard Supabase.')),
     el('div', { class:'field' }, el('label', {}, 'Note (opz.)'),
       el('textarea', { name:'note', rows:'2' }, u.note||'')),
     el('div', { class:'frow' },
@@ -4149,8 +4177,10 @@ async function toggleRuolo(u) {
   const nuovo = u.ruolo === 'admin' ? 'user' : 'admin';
   const { error } = await sb.from('profili').update({ ruolo: nuovo }).eq('id', u.id);
   if (error) return toast(error.message, 'err');
+  // Aggiorna cache locale
+  if (state.profiliById[u.id]) state.profiliById[u.id].ruolo = nuovo;
   toast(`${u.nome || u.email} → ${nuovo}`);
-  renderTab('utenti');
+  renderTab('operatori');
 }
 
 function openModal(content) {
