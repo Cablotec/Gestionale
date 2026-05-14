@@ -237,16 +237,17 @@ table.rt tbody tr:hover td{background:var(--hover);}
 
 /* Multi-select operatori */
 /* Multi-select operatori con ricerca */
-.util-selected{display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px 4px 0 0;border-bottom:none;min-height:42px;align-items:center;}
+.util-selected{display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;min-height:42px;align-items:center;}
 .util-empty{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);font-style:italic;}
 .util-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 4px 4px 9px;background:rgba(212,255,78,.1);border:1px solid var(--acc);border-radius:3px;font-family:'Syne',sans-serif;font-size:12px;color:var(--txt);}
 .util-pill-badge{font-family:'DM Mono',monospace;font-size:10px;color:var(--or);background:rgba(255,107,53,.1);padding:1px 5px;border-radius:2px;}
 .util-pill-x{background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:11px;padding:2px 4px;line-height:1;border-radius:2px;transition:all .12s;}
 .util-pill-x:hover{color:var(--red);background:rgba(255,78,107,.1);}
-.util-dropwrap{display:flex;flex-direction:column;border:1px solid var(--brd);border-top:none;border-radius:0 0 4px 4px;background:var(--sur2);overflow:hidden;}
-.util-search{background:var(--sur2);border:none;border-bottom:1px solid var(--brd);color:var(--txt);padding:8px 10px;font-family:'DM Mono',monospace;font-size:11px;outline:none;width:100%;}
-.util-search:focus{background:var(--bg);}
-.util-droplist{max-height:180px;overflow-y:auto;}
+.util-dropwrap{position:relative;margin-top:6px;}
+.util-search{background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:7px 10px;font-family:'DM Mono',monospace;font-size:11px;outline:none;width:100%;border-radius:4px;}
+.util-search:focus{border-color:var(--acc);}
+.util-droplist{position:absolute;top:100%;left:0;right:0;background:var(--sur2);border:1px solid var(--acc);border-top:none;border-radius:0 0 4px 4px;max-height:240px;overflow-y:auto;z-index:1000;display:none;}
+.util-droplist.open{display:block;}
 .util-row{display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;font-family:'Syne',sans-serif;font-size:12px;border-bottom:1px solid var(--brd);user-select:none;transition:background .12s;}
 .util-row:last-child{border-bottom:none;}
 .util-row:hover{background:var(--hover2);}
@@ -564,10 +565,10 @@ table.rt tbody tr:hover td{background:var(--hover);}
 let sb = null;
 const state = {
   session: null, profile: null, profiliById: {}, mezzi: [],
-  operatori: [], operatoriById: {},
+  utenti: [], utentiById: {},
   prenotazioni: [],
   consegne: [],            // tutte le consegne in memoria
-  prenOp: [],            // pivot prenotazione_id ↔ operatore_id
+  prenOp: [],            // pivot prenotazione_id ↔ utente_id
   usiMezzo: [],            // tutti gli usi mezzo (aperti e chiusi)
   clienti: [],             // anagrafica clienti
   cliFilter: 'attivi',     // 'all' | 'attivi' | 'disattivi'
@@ -864,13 +865,13 @@ window.addEventListener('online', async () => {
 });
 
 async function loadAllData() {
-  const [profili, mezzi, operatori, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
-    sb.from('operatori').select('*').order('nome'),
+    sb.from('utenti').select('*').order('nome'),
     sb.from('prenotazioni').select('*').order('data_inizio'),
     sb.from('consegne').select('*').order('ordine'),
-    sb.from('prenotazioni_operatori').select('*'),
+    sb.from('prenotazioni_utenti').select('*'),
     sb.from('usi_mezzo').select('*').order('data_uscita'),
     sb.from('clienti').select('*').order('nome'),
     sb.from('articoli').select('*').order('codice'),
@@ -881,7 +882,7 @@ async function loadAllData() {
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
-  if (operatori.error) throw operatori.error;
+  if (utenti.error) throw utenti.error;
   if (prenotazioni.error) throw prenotazioni.error;
   if (consegne.error) throw consegne.error;
   if (prenOp.error) throw prenOp.error;
@@ -895,8 +896,8 @@ async function loadAllData() {
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
-  state.operatori = operatori.data || [];
-  state.operatoriById = Object.fromEntries(state.operatori.map(u=>[u.id,u]));
+  state.utenti = utenti.data || [];
+  state.utentiById = Object.fromEntries(state.utenti.map(u=>[u.id,u]));
   state.prenotazioni = prenotazioni.data || [];
   state.consegne = consegne.data || [];
   state.prenOp = prenOp.data || [];
@@ -918,14 +919,14 @@ function startRealtime() {
         (p) => applyChange('prenotazioni', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'mezzi' },
         (p) => applyChange('mezzi', p))
-    .on('postgres_changes', { event:'*', schema:'public', table:'operatori' },
-        (p) => applyChange('operatori', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'utenti' },
+        (p) => applyChange('utenti', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'profili' },
         (p) => applyChange('profili', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'consegne' },
         (p) => applyChange('consegne', p))
-    .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni_operatori' },
-        (p) => applyChange('prenotazioni_operatori', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni_utenti' },
+        (p) => applyChange('prenotazioni_utenti', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'usi_mezzo' },
         (p) => applyChange('usi_mezzo', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'clienti' },
@@ -958,16 +959,16 @@ function applyChange(tabella, payload) {
       if (!state.mezzi.find(x => x.id === row.id)) state.mezzi.push(row);
     } else if (ev === 'UPDATE') state.mezzi = state.mezzi.map(x => x.id === row.id ? row : x);
     else if (ev === 'DELETE') state.mezzi = state.mezzi.filter(x => x.id !== oldRow.id);
-  } else if (tabella === 'operatori') {
+  } else if (tabella === 'utenti') {
     if (ev === 'INSERT') {
-      if (!state.operatori.find(x => x.id === row.id)) state.operatori.push(row);
-      state.operatoriById[row.id] = row;
+      if (!state.utenti.find(x => x.id === row.id)) state.utenti.push(row);
+      state.utentiById[row.id] = row;
     } else if (ev === 'UPDATE') {
-      state.operatori = state.operatori.map(x => x.id === row.id ? row : x);
-      state.operatoriById[row.id] = row;
+      state.utenti = state.utenti.map(x => x.id === row.id ? row : x);
+      state.utentiById[row.id] = row;
     } else if (ev === 'DELETE') {
-      state.operatori = state.operatori.filter(x => x.id !== oldRow.id);
-      delete state.operatoriById[oldRow.id];
+      state.utenti = state.utenti.filter(x => x.id !== oldRow.id);
+      delete state.utentiById[oldRow.id];
     }
   } else if (tabella === 'profili') {
     if (ev === 'INSERT' || ev === 'UPDATE') state.profiliById[row.id] = row;
@@ -977,13 +978,13 @@ function applyChange(tabella, payload) {
       if (!state.consegne.find(x => x.id === row.id)) state.consegne.push(row);
     } else if (ev === 'UPDATE') state.consegne = state.consegne.map(x => x.id === row.id ? row : x);
     else if (ev === 'DELETE') state.consegne = state.consegne.filter(x => x.id !== oldRow.id);
-  } else if (tabella === 'prenotazioni_operatori') {
+  } else if (tabella === 'prenotazioni_utenti') {
     if (ev === 'INSERT') {
       const dup = state.prenOp.find(x =>
-        x.prenotazione_id === row.prenotazione_id && x.operatore_id === row.operatore_id);
+        x.prenotazione_id === row.prenotazione_id && x.utente_id === row.utente_id);
       if (!dup) state.prenOp.push(row);
     } else if (ev === 'DELETE') state.prenOp = state.prenOp.filter(x =>
-      !(x.prenotazione_id === oldRow.prenotazione_id && x.operatore_id === oldRow.operatore_id));
+      !(x.prenotazione_id === oldRow.prenotazione_id && x.utente_id === oldRow.utente_id));
   } else if (tabella === 'usi_mezzo') {
     if (ev === 'INSERT') {
       if (!state.usiMezzo.find(x => x.id === row.id)) state.usiMezzo.push(row);
@@ -1048,7 +1049,7 @@ function applyChange(tabella, payload) {
 
 function loadPrenotazioneOperatori(prenId) {
   // Legge dalla cache in memoria (sync)
-  return state.prenOp.filter(r => r.prenotazione_id === prenId).map(r => r.operatore_id);
+  return state.prenOp.filter(r => r.prenotazione_id === prenId).map(r => r.utente_id);
 }
 
 // Verifica sovrapposizioni dalla cache in memoria (no fetch)
@@ -1087,7 +1088,7 @@ const TAB_STRUCTURE = {
       { id: 'clienti',        label: 'Clienti',       adminOnly: true },
       { id: 'articoli',       label: 'Articoli',      adminOnly: true },
       { id: 'tipi_lav',       label: 'Tipi lavorazione', adminOnly: true },
-      { id: 'operatori',      label: 'Operatori',     adminOnly: true },
+      { id: 'operatori',      label: 'Utenti',        adminOnly: true },
     ],
   },
   sistema: {
@@ -1274,7 +1275,7 @@ function renderCalendar(root) {
         const color = TIPO_COLOR[p.tipo] || '#6b6b64';
         const utilNomi = state.prenOp
           .filter(r => r.prenotazione_id === p.id)
-          .map(r => state.operatoriById[r.operatore_id]?.nome)
+          .map(r => state.utentiById[r.utente_id]?.nome)
           .filter(Boolean);
         const utilLbl = utilNomi.length ? utilNomi.join(', ') : '—';
         box.append(el('div', {
@@ -1287,7 +1288,7 @@ function renderCalendar(root) {
         // entry.kind === 'uso'
         const u = entry.data;
         const m = mezziById[u.mezzo_id];
-        const utz = state.operatoriById[u.operatore_id];
+        const utz = state.utentiById[u.utente_id];
         const oraUscita = new Date(u.data_uscita);
         const oraRientro = u.data_rientro ? new Date(u.data_rientro) : null;
         const titleParts = [
@@ -1338,7 +1339,7 @@ function openDayDetailModal(iso, evs) {
       const m = mezziById[p.mezzo_id];
       const utilNomi = state.prenOp
         .filter(r => r.prenotazione_id === p.id)
-        .map(r => state.operatoriById[r.operatore_id]?.nome)
+        .map(r => state.utentiById[r.utente_id]?.nome)
         .filter(Boolean);
       const color = TIPO_COLOR[p.tipo] || '#6b6b64';
       body.append(el('div', {
@@ -1356,7 +1357,7 @@ function openDayDetailModal(iso, evs) {
     } else {
       const u = entry.data;
       const m = mezziById[u.mezzo_id];
-      const utz = state.operatoriById[u.operatore_id];
+      const utz = state.utentiById[u.utente_id];
       const oraUscita = new Date(u.data_uscita);
       const oraRientro = u.data_rientro ? new Date(u.data_rientro) : null;
       const cls = entry.aperto ? 'day-row day-row-uso-aperto' : 'day-row day-row-uso-chiuso';
@@ -1427,7 +1428,7 @@ function renderElenco(root) {
     const periodo = p.data_inizio === p.data_fine ? fmtIT(p.data_inizio) : `${fmtIT(p.data_inizio)} → ${fmtIT(p.data_fine)}`;
     const utilNomi = state.prenOp
       .filter(r => r.prenotazione_id === p.id)
-      .map(r => state.operatoriById[r.operatore_id]?.nome)
+      .map(r => state.utentiById[r.utente_id]?.nome)
       .filter(Boolean);
     tb.append(el('tr', {},
       el('td', { class:'mono' }, periodo),
@@ -1451,10 +1452,10 @@ function renderMezzi(root) {
   const seiMesiFa = toLocalISO(new Date(oggi.getFullYear(), oggi.getMonth()-6, oggi.getDate()));
   const prenList = state.prenotazioni.filter(p => p.data_fine >= seiMesiFa);
 
-  // Indice pivot per pren_id → array di operatore_id (dalla cache)
+  // Indice pivot per pren_id → array di utente_id (dalla cache)
   const pivotByPren = {};
   state.prenOp.forEach(r => {
-    (pivotByPren[r.prenotazione_id] = pivotByPren[r.prenotazione_id] || []).push(r.operatore_id);
+    (pivotByPren[r.prenotazione_id] = pivotByPren[r.prenotazione_id] || []).push(r.utente_id);
   });
 
   // Per ogni mezzo: operatori distinti + conteggio
@@ -1493,7 +1494,7 @@ function renderMezzi(root) {
     const utentiOrdinati = Object.entries(stats.operatori)
       .sort((a,b) => b[1] - a[1])
       .map(([uid, count]) => {
-        const u = state.operatoriById[uid];
+        const u = state.utentiById[uid];
         const nome = u?.nome || '?';
         return `${nome} (${count})`;
       });
@@ -1560,7 +1561,7 @@ function renderOperatori(root) {
     el('th', { class:'tc' }, 'Azioni'),
   )));
   const tb = el('tbody');
-  state.operatori.filter(u => !isKioskRecord(u)).forEach(u => {
+  state.utenti.filter(u => !isKioskRecord(u)).forEach(u => {
     const account = u.account_id ? state.profiliById[u.account_id] : null;
     const accountCell = account
       ? el('span', { class:'badge bok', title:account.email }, '✓ '+(account.ruolo||'user'))
@@ -1591,7 +1592,7 @@ function renderOperatori(root) {
 
   // Sezione: account loggati senza operatore (caso raro, ma utile per debug)
   const profili = Object.values(state.profiliById).filter(p => !isKioskRecord(p));
-  const orfani = profili.filter(p => !state.operatori.find(u => u.account_id === p.id));
+  const orfani = profili.filter(p => !state.utenti.find(u => u.account_id === p.id));
   if (orfani.length > 0) {
     root.append(el('div', { style:'margin-top:24px;padding:12px;background:var(--sur);border:1px solid var(--yel);border-radius:4px;' },
       el('div', { class:'kl', style:'color:var(--yel);margin-bottom:8px;' }, '⚠ Account senza operatore collegato'),
@@ -1606,7 +1607,7 @@ function openOperatoreModal(u) {
   u = u || { nome:'', numero_badge:'', email:'', account_id:null, attivo:true, esterno:false, note:'' };
   const accountsLiberi = Object.values(state.profiliById)
     .filter(p => !isKioskRecord(p))
-    .filter(p => !state.operatori.find(x => x.account_id === p.id && x.id !== u.id));
+    .filter(p => !state.utenti.find(x => x.account_id === p.id && x.id !== u.id));
 
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
@@ -1671,20 +1672,20 @@ function openOperatoreModal(u) {
       };
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
       const q = isNew
-        ? sb.from('operatori').insert(payload).select().single()
-        : sb.from('operatori').update(payload).eq('id', u.id).select().single();
+        ? sb.from('utenti').insert(payload).select().single()
+        : sb.from('utenti').update(payload).eq('id', u.id).select().single();
       const { data, error } = await q;
       if (error) {
-        if (error.message.includes('operatori_badge_uniq')) return toast('Numero badge già in uso', 'err');
-        if (error.message.includes('operatori_email_uniq')) return toast('Email già in uso', 'err');
-        if (error.message.includes('operatori_account_uniq')) return toast('Account già collegato a un altro operatore', 'err');
+        if (error.message.includes('badge_uniq')) return toast('Numero badge già in uso', 'err');
+        if (error.message.includes('email_uniq')) return toast('Email già in uso', 'err');
+        if (error.message.includes('account_uniq')) return toast('Account già collegato a un altro utente', 'err');
         return toast(error.message, 'err');
       }
       // Aggiorna cache locale
-      if (isNew) state.operatori.push(data);
-      else state.operatori = state.operatori.map(x => x.id === u.id ? data : x);
-      state.operatoriById[data.id] = data;
-      toast(isNew ? 'Operatore creato' : 'Operatore aggiornato');
+      if (isNew) state.utenti.push(data);
+      else state.utenti = state.utenti.map(x => x.id === u.id ? data : x);
+      state.utentiById[data.id] = data;
+      toast(isNew ? 'Utente creato' : 'Utente aggiornato');
       closeModal(); renderTab('operatori');
     }}, 'Salva'),
   ));
@@ -3235,7 +3236,7 @@ function renderPianificazione(root) {
     const cli = state.clienti.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
     const addetto = o.addetto_previsto_id
-      ? state.operatori.find(u => u.id === o.addetto_previsto_id)
+      ? state.utenti.find(u => u.id === o.addetto_previsto_id)
       : null;
     const ore = opCalcOre(o);
     const giorni = opCalcGiorni(o);
@@ -3309,7 +3310,7 @@ function renderPianificazione(root) {
     // Addetto (inline editable con select)
     const addettoOptions = [
       { value:'', label:'—' },
-      ...state.operatori.filter(u => u.attivo).map(u => ({ value:u.id, label:u.nome }))
+      ...state.utenti.filter(u => u.attivo).map(u => ({ value:u.id, label:u.nome }))
     ];
     tr.append(el('td', { style:'font-size:11px;' },
       opInlineSelect(o, 'addetto_previsto_id', addetto?.nome || '—', addettoOptions)));
@@ -3507,7 +3508,7 @@ function openOperazioneModal(o) {
   // Select addetto
   const selAddetto = el('select', { name:'addetto_previsto_id' },
     el('option', { value:'' }, '— nessuno —'),
-    ...state.operatori.filter(u => u.attivo).map(u =>
+    ...state.utenti.filter(u => u.attivo).map(u =>
       el('option', { value:u.id }, u.nome + (u.esterno ? ' (esterno)' : '')))
   );
   selAddetto.value = o.addetto_previsto_id || '';
@@ -3634,7 +3635,7 @@ function openOperazioneModal(o) {
       // Lista sessioni
       const sessList = el('div', { style:'max-height:240px;overflow-y:auto;font-family:monospace;font-size:11px;' });
       sessOp.forEach(s => {
-        const oper = state.operatori.find(u => u.id === s.operatore_id);
+        const oper = state.utenti.find(u => u.id === s.utente_id);
         const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
         const ini = new Date(s.inizio);
         const fin = s.fine ? new Date(s.fine) : null;
@@ -3900,7 +3901,7 @@ function renderStorico(root) {
     onchange: (e) => { state.stoAddetto = e.target.value; renderTab('storico'); }
   },
     el('option', { value:'' }, '— Tutti gli addetti —'),
-    ...state.operatori.sort((a,b)=>a.nome.localeCompare(b.nome)).map(u =>
+    ...state.utenti.sort((a,b)=>a.nome.localeCompare(b.nome)).map(u =>
       el('option', { value:u.id }, u.nome))
   );
   selAdd.value = filtroAddetto;
@@ -3949,7 +3950,7 @@ function renderStorico(root) {
     const cli = state.clienti.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
     const addetto = o.addetto_previsto_id
-      ? state.operatori.find(u => u.id === o.addetto_previsto_id)
+      ? state.utenti.find(u => u.id === o.addetto_previsto_id)
       : null;
     const ritardo = calcRitardoGiorni(o);
 
@@ -4095,7 +4096,7 @@ function storicoExportExcel() {
     const cli = state.clienti.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
     const addetto = o.addetto_previsto_id
-      ? state.operatori.find(u => u.id === o.addetto_previsto_id)
+      ? state.utenti.find(u => u.id === o.addetto_previsto_id)
       : null;
     const ritardo = calcRitardoGiorni(o);
     return {
@@ -4133,15 +4134,15 @@ function storicoExportExcel() {
 
 async function deleteOperatore(u) {
   // Verifico se è usato in qualche prenotazione (dalla cache, no fetch)
-  const count = state.prenOp.filter(r => r.operatore_id === u.id).length;
+  const count = state.prenOp.filter(r => r.utente_id === u.id).length;
   if (count > 0) return toast(`Impossibile: ${u.nome} è associato a ${count} prenotazioni`, 'err');
   if (!confirm(`Eliminare l'operatore "${u.nome}"?`)) return;
-  const { error } = await sb.from('operatori').delete().eq('id', u.id);
+  const { error } = await sb.from('utenti').delete().eq('id', u.id);
   if (error) return toast(error.message, 'err');
   // Aggiorna subito la cache locale
-  state.operatori = state.operatori.filter(x => x.id !== u.id);
-  delete state.operatoriById[u.id];
-  toast('Operatore eliminato'); renderTab('operatori');
+  state.utenti = state.utenti.filter(x => x.id !== u.id);
+  delete state.utentiById[u.id];
+  toast('Utente eliminato'); renderTab('operatori');
 }
 
 async function toggleRuolo(u) {
@@ -4224,21 +4225,21 @@ async function openPrenotazioneModal(p) {
   const today = toLocalISO(new Date());
   const mezziAttivi = state.mezzi.filter(x=>x.attivo);
   if (mezziAttivi.length === 0) return toast('Nessun mezzo attivo. Chiedi a un admin di aggiungerne uno.', 'err');
-  if (state.operatori.filter(u=>u.attivo).length === 0)
-    return toast('Nessun operatore configurato. Chiedi a un admin di aggiungerne almeno uno.', 'err');
+  if (state.utenti.filter(u=>u.attivo).length === 0)
+    return toast('Nessun utente configurato. Chiedi a un admin di aggiungerne almeno uno.', 'err');
 
   let consegne = [];
-  let operatoriSel = [];  // ID degli operatori associati
+  let utentiSel = [];  // ID degli operatori associati
   if (!isNew) {
     // Copio dalle consegne in cache (clone per non mutare la sorgente prima del salvataggio)
     consegne = state.consegne.filter(c => c.prenotazione_id === p.id)
       .sort((a,b) => (a.ordine||0) - (b.ordine||0))
       .map(c => ({ ...c }));
-    operatoriSel = loadPrenotazioneOperatori(p.id);
+    utentiSel = loadPrenotazioneOperatori(p.id);
   } else {
     // Se sto creando: pre-seleziono l'operatore collegato all'account corrente (se c'è)
-    const mioUtil = state.operatori.find(u => u.account_id === state.profile.id);
-    if (mioUtil) operatoriSel = [mioUtil.id];
+    const mioUtil = state.utenti.find(u => u.account_id === state.profile.id);
+    if (mioUtil) utentiSel = [mioUtil.id];
   }
   const canEdit = isNew || p.utente_id === state.profile.id || state.profile.ruolo === 'admin';
 
@@ -4266,31 +4267,35 @@ async function openPrenotazioneModal(p) {
   );
 
   // Multi-select operatori (obbligatorio) — dropdown searchable
-  const operatoriAttivi = state.operatori.filter(u => u.attivo && !isKioskRecord(u));
+  const utentiAttivi = state.utenti.filter(u => u.attivo && !isKioskRecord(u));
 
   const selectedWrap = el('div', { class:'util-selected' });
   const searchInput = el('input', {
-    type:'text', class:'util-search', placeholder:'Cerca per nome o badge…',
+    type:'text', class:'util-search', placeholder:'Aggiungi utente (clicca o cerca per nome)…',
     autocomplete:'off',
   });
   const dropList = el('div', { class:'util-droplist' });
   const dropWrap = el('div', { class:'util-dropwrap' }, searchInput, dropList);
 
+  // Focus apre la lista, blur la chiude (con piccolo delay per gestire click sulla lista)
+  searchInput.onfocus = () => { dropList.classList.add('open'); renderDropList(); };
+  searchInput.onblur = () => { setTimeout(() => dropList.classList.remove('open'), 180); };
+
   const renderSelected = () => {
     selectedWrap.innerHTML = '';
-    if (operatoriSel.length === 0) {
-      selectedWrap.append(el('span', { class:'util-empty' }, 'Nessun operatore selezionato'));
+    if (utentiSel.length === 0) {
+      selectedWrap.append(el('span', { class:'util-empty' }, 'Nessun utente selezionato'));
       return;
     }
-    operatoriSel.forEach(uid => {
-      const u = state.operatoriById[uid];
+    utentiSel.forEach(uid => {
+      const u = state.utentiById[uid];
       if (!u) return;
       selectedWrap.append(el('span', { class:'util-pill' },
         el('span', {}, u.nome),
         canEdit ? el('button', {
           type:'button', class:'util-pill-x',
           onclick: () => {
-            operatoriSel = operatoriSel.filter(x => x !== uid);
+            utentiSel = utentiSel.filter(x => x !== uid);
             renderSelected(); renderDropList();
           },
         }, '✕') : null,
@@ -4300,23 +4305,23 @@ async function openPrenotazioneModal(p) {
 
   const renderDropList = () => {
     const q = searchInput.value.trim().toLowerCase();
-    const filtered = operatoriAttivi.filter(u => {
+    const filtered = utentiAttivi.filter(u => {
       if (!q) return true;
       return (u.nome || '').toLowerCase().includes(q);
     });
     dropList.innerHTML = '';
     if (filtered.length === 0) {
-      dropList.append(el('div', { class:'util-noresult' }, 'Nessun operatore trovato'));
+      dropList.append(el('div', { class:'util-noresult' }, 'Nessun utente trovato'));
       return;
     }
     filtered.forEach(u => {
-      const isSel = operatoriSel.includes(u.id);
+      const isSel = utentiSel.includes(u.id);
       dropList.append(el('div', {
         class: 'util-row' + (isSel ? ' selected' : ''),
         onclick: () => {
           if (!canEdit) return;
-          if (isSel) operatoriSel = operatoriSel.filter(x => x !== u.id);
-          else operatoriSel.push(u.id);
+          if (isSel) utentiSel = utentiSel.filter(x => x !== u.id);
+          else utentiSel.push(u.id);
           renderSelected(); renderDropList();
         },
       },
@@ -4328,7 +4333,7 @@ async function openPrenotazioneModal(p) {
 
   searchInput.oninput = renderDropList;
   renderSelected();
-  renderDropList();
+  // Non chiamare renderDropList() qui: la lista appare solo al focus
 
   form.append(
     el('div', { class:'field' },
@@ -4336,7 +4341,7 @@ async function openPrenotazioneModal(p) {
       selectedWrap,
       dropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Cerca e clicca per selezionare. Almeno 1 obbligatorio.'),
+        'Almeno 1 obbligatorio. Clicca sul campo qui sopra per aprire la lista.'),
     ),
   );
 
@@ -4516,7 +4521,7 @@ async function openPrenotazioneModal(p) {
       return toast('Compila i campi obbligatori', 'err');
     if (payload.data_fine < payload.data_inizio)
       return toast('Data fine non può essere prima dell\'inizio', 'err');
-    if (operatoriSel.length === 0)
+    if (utentiSel.length === 0)
       return toast('Seleziona almeno un operatore del mezzo', 'err');
 
     // CHECK SOVRAPPOSIZIONI prima di salvare
@@ -4561,12 +4566,12 @@ async function openPrenotazioneModal(p) {
     }
 
     // Aggiorno operatori associati: cancello tutti e reinserisco
-    await sb.from('prenotazioni_operatori').delete().eq('prenotazione_id', prenId);
+    await sb.from('prenotazioni_utenti').delete().eq('prenotazione_id', prenId);
     let nuoviPrenUtil = [];
-    if (operatoriSel.length > 0) {
-      const rows = operatoriSel.map(uid => ({ prenotazione_id: prenId, operatore_id: uid }));
-      const { data, error } = await sb.from('prenotazioni_operatori').insert(rows).select();
-      if (error) return toast('Errore associazione operatori: '+error.message, 'err');
+    if (utentiSel.length > 0) {
+      const rows = utentiSel.map(uid => ({ prenotazione_id: prenId, utente_id: uid }));
+      const { data, error } = await sb.from('prenotazioni_utenti').insert(rows).select();
+      if (error) return toast('Errore associazione utenti: '+error.message, 'err');
       nuoviPrenUtil = data || rows;
     }
 
@@ -4591,7 +4596,7 @@ async function openPrenotazioneModal(p) {
       state.prenotazioni = state.prenotazioni.map(x => x.id === prenId ? prenRow : x);
     }
     // Per pivot e consegne: rimuovo le righe duplicate (potrebbero arrivare dal realtime in parallelo)
-    const idsPrenUtil = new Set(nuoviPrenUtil.map(r => r.prenotazione_id+'|'+r.operatore_id));
+    const idsPrenUtil = new Set(nuoviPrenUtil.map(r => r.prenotazione_id+'|'+r.utente_id));
     state.prenOp = state.prenOp.filter(r => r.prenotazione_id !== prenId).concat(nuoviPrenUtil);
     const idsConsegne = new Set(nuoveConsegne.map(r => r.id));
     state.consegne = state.consegne.filter(c => c.prenotazione_id !== prenId).concat(nuoveConsegne);
@@ -4608,7 +4613,7 @@ async function openPrenotazioneModal(p) {
 // ═══════════════════════════════════════════════════════════
 function openUsoMezzoModal(uso) {
   const m = state.mezzi.find(x => x.id === uso.mezzo_id);
-  const utz = state.operatoriById[uso.operatore_id];
+  const utz = state.utentiById[uso.utente_id];
   const isAdmin = state.profile?.ruolo === 'admin';
   const aperto = !uso.data_rientro;
 
@@ -4839,7 +4844,7 @@ async function kioskLoadAll() {
   const oggi = toLocalISO(new Date());
   const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni] = await Promise.all([
     sb.from('mezzi').select('*').eq('attivo', true).order('nome'),
-    sb.from('operatori').select('*').eq('attivo', true).order('nome'),
+    sb.from('utenti').select('*').eq('attivo', true).order('nome'),
     sb.from('usi_mezzo').select('*').is('data_rientro', null),
     sb.from('prenotazioni').select('*').lte('data_inizio', oggi).gte('data_fine', oggi),
     sb.from('clienti').select('*').eq('attivo', true).order('nome'),
@@ -4849,8 +4854,8 @@ async function kioskLoadAll() {
     sb.from('sessioni_lavoro').select('*').is('fine', null),
   ]);
   state.mezzi = mezzi.data || [];
-  state.operatori = util.data || [];
-  state.operatoriById = Object.fromEntries(state.operatori.map(u => [u.id, u]));
+  state.utenti = util.data || [];
+  state.utentiById = Object.fromEntries(state.utenti.map(u => [u.id, u]));
   kioskState.mezziInUso = usi.data || [];
   kioskState.prenotazioniOggi = pren.data || [];
   state.clienti = clienti.data || [];
@@ -4861,7 +4866,7 @@ async function kioskLoadAll() {
   // Log diagnostico (visibile in console)
   console.log('[KIOSK] Loaded:', {
     mezzi: state.mezzi.length,
-    operatori: state.operatori.length,
+    operatori: state.utenti.length,
     clienti: state.clienti.length,
     articoli: state.articoli.length,
     tipiLav: state.tipiLav.length,
@@ -4895,7 +4900,7 @@ function kioskStartRealtime() {
     .on('postgres_changes', { event:'*', schema:'public', table:'mezzi' }, () => {
       kioskLoadAll().then(kioskRefreshActive);
     })
-    .on('postgres_changes', { event:'*', schema:'public', table:'operatori' }, () => {
+    .on('postgres_changes', { event:'*', schema:'public', table:'utenti' }, () => {
       kioskLoadAll().then(kioskRefreshActive);
     })
     .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni' }, () => {
@@ -4955,7 +4960,7 @@ function kioskRfidListener(e) {
 
 function kioskHandleBadge(code) {
   // Cerca per numero_badge
-  const u = state.operatori.find(x => (x.numero_badge||'').replace(/^0+/,'') === code.replace(/^0+/,''));
+  const u = state.utenti.find(x => (x.numero_badge||'').replace(/^0+/,'') === code.replace(/^0+/,''));
   if (!u) {
     kioskShowError('Badge non riconosciuto');
     return;
@@ -5007,7 +5012,7 @@ function kioskRenderId() {
   // Griglia operatori: escludi inattivi e l'account tecnico kiosk
   const grid = $('#kiosk-utili-grid');
   grid.innerHTML = '';
-  state.operatori
+  state.utenti
     .filter(u => u.attivo && !isKioskRecord(u))
     .forEach(u => {
       grid.appendChild(el('div', {
@@ -5028,7 +5033,7 @@ function kioskRenderId() {
   } else {
     kioskState.mezziInUso.forEach(uso => {
       const m = state.mezzi.find(x => x.id === uso.mezzo_id);
-      const u = state.operatoriById[uso.operatore_id];
+      const u = state.utentiById[uso.utente_id];
       const ora = new Date(uso.data_uscita);
       fuori.appendChild(el('div', { class:'kiosk-fuori-row' },
         el('span', {}, (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '')),
@@ -5043,7 +5048,7 @@ function kioskSelectUtente(u) {
   kioskState.utenteSelezionato = u;
   kioskBeep('ok');
   // Se ha una sessione lavoro aperta, va direttamente lì
-  const sess = state.sessioni.find(s => s.operatore_id === u.id && !s.fine);
+  const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
   if (sess) {
     kioskGoToAttiva();
   } else {
@@ -5089,7 +5094,7 @@ function kioskRenderAction() {
   root.innerHTML = '';
 
   // Ha un mezzo fuori? Se sì, proponi rientro
-  const usoAperto = kioskState.mezziInUso.find(x => x.operatore_id === u.id);
+  const usoAperto = kioskState.mezziInUso.find(x => x.utente_id === u.id);
   if (usoAperto) {
     const m = state.mezzi.find(x => x.id === usoAperto.mezzo_id);
     const ora = new Date(usoAperto.data_uscita);
@@ -5153,7 +5158,7 @@ async function kioskConfirmUscita(mezzo) {
   try {
     const { data, error } = await sb.from('usi_mezzo').insert({
       mezzo_id: mezzo.id,
-      operatore_id: u.id,
+      utente_id: u.id,
       sede: KIOSK_PARAM,
     }).select().single();
     if (error) throw error;
@@ -5432,7 +5437,7 @@ async function kioskSelectTipo(tipo) {
   try {
     const { data, error } = await sb.from('sessioni_lavoro').insert({
       operazione_id: o.id,
-      operatore_id: u.id,
+      utente_id: u.id,
       tipo_lavorazione_id: tipo.id,
       sede: sedeUrl,
       inizio: new Date().toISOString(),
@@ -5466,7 +5471,7 @@ function kioskGoToAttiva() {
 function kioskRenderAttiva() {
   const u = kioskState.utenteSelezionato;
   if (!u) { kioskGoToId(); return; }
-  const sess = state.sessioni.find(s => s.operatore_id === u.id && !s.fine);
+  const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
   if (!sess) {
     // Nessuna sessione aperta: torna al menu
     kioskGoToMenu();
@@ -5531,7 +5536,7 @@ function kioskRenderAttiva() {
 function kioskRefreshDurata() {
   const u = kioskState.utenteSelezionato;
   if (!u) return;
-  const sess = state.sessioni.find(s => s.operatore_id === u.id && !s.fine);
+  const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
   if (!sess) return;
   const liveEl = $('#kiosk-durata-live');
   if (liveEl) liveEl.textContent = kioskFormatDurataLive(new Date(sess.inizio));
@@ -5624,7 +5629,7 @@ function renderGantt(root) {
 // ─── VISTA LIVE: dashboard chi-sta-facendo-cosa ───
 function renderGanttLive(root) {
   // Filtra operatori attivi (no kiosk)
-  const operatori = state.operatori.filter(u => u.attivo && !isKioskRecord(u))
+  const operatori = state.utenti.filter(u => u.attivo && !isKioskRecord(u))
     .sort((a,b) => a.nome.localeCompare(b.nome));
 
   // KPI riepilogo
@@ -5645,7 +5650,7 @@ function renderGanttLive(root) {
   // Griglia card operatori
   const grid = el('div', { class:'live-grid' });
   operatori.forEach(u => {
-    const sess = state.sessioni.find(s => s.operatore_id === u.id && !s.fine);
+    const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
     const card = el('div', { class: 'live-card ' + (sess ? 'attivo' : 'fermo') });
 
     const hd = el('div', { class:'live-card-hd' },
@@ -5675,7 +5680,7 @@ function renderGanttLive(root) {
       // Mostra ultima sessione chiusa oggi se c'è
       const oggi = toLocalISO(new Date());
       const ultime = state.sessioni
-        .filter(s => s.operatore_id === u.id && s.fine && (s.inizio||'').substring(0,10) === oggi)
+        .filter(s => s.utente_id === u.id && s.fine && (s.inizio||'').substring(0,10) === oggi)
         .sort((a,b) => (b.fine||'').localeCompare(a.fine||''));
       if (ultime.length) {
         const ultima = ultime[0];
@@ -5698,7 +5703,7 @@ function renderGanttLive(root) {
   });
 
   if (operatori.length === 0) {
-    root.append(el('div', { class:'empty' }, 'Nessun operatore attivo'));
+    root.append(el('div', { class:'empty' }, 'Nessun utente attivo'));
   } else {
     root.append(grid);
   }
@@ -5754,7 +5759,7 @@ function renderGanttStorico(root) {
   );
 
   // Select operatore (filtro opzionale)
-  const opChoices = state.operatori
+  const opChoices = state.utenti
     .filter(u => u.attivo && !isKioskRecord(u))
     .sort((a,b) => a.nome.localeCompare(b.nome));
   const selOper = el('select', {
@@ -5776,7 +5781,7 @@ function renderGanttStorico(root) {
   }
 
   if (operatori.length === 0) {
-    root.append(el('div', { class:'empty' }, 'Nessun operatore'));
+    root.append(el('div', { class:'empty' }, 'Nessun utente'));
     return;
   }
 
@@ -5804,7 +5809,7 @@ function renderGanttStorico(root) {
 
     // Calcola sessioni nel range per questo operatore
     const sessUtente = state.sessioni.filter(s =>
-      s.operatore_id === u.id &&
+      s.utente_id === u.id &&
       sessIntersectsRange(s, range.start, range.end)
     );
 
@@ -5987,7 +5992,7 @@ function openSessioneModal(s) {
   const op = state.operazioni.find(o => o.id === s.operazione_id);
   const cli = op ? state.clienti.find(c => c.id === op.cliente_id) : null;
   const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
-  const operatore = state.operatori.find(u => u.id === s.operatore_id);
+  const operatore = state.utenti.find(u => u.id === s.utente_id);
   const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
 
   const inizioDt = new Date(s.inizio);
