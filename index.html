@@ -590,6 +590,13 @@ const state = {
   stoSearch: '',
   // Sessioni di lavoro (timbrature kiosk commesse)
   sessioni: [],
+  // Assenze
+  tipiAssenza: [],         // anagrafica tipi assenza (personalizzabili)
+  assenze: [],             // tutte le assenze
+  assFiltroUtente: '',     // filtro vista admin
+  assFiltroTipo: '',
+  assFiltroStato: 'valida',
+  assFiltroMese: null,     // YYYY-MM
   // Gantt
   ganttView: 'live',       // 'live' | 'storico'
   ganttZoom: 'giorno',     // 'giorno' | 'settimana' | 'mese'
@@ -847,7 +854,7 @@ window.addEventListener('online', async () => {
 });
 
 async function loadAllData() {
-  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('utenti').select('*').order('nome'),
@@ -861,6 +868,8 @@ async function loadAllData() {
     sb.from('chiusure_aziendali').select('*').order('data'),
     sb.from('operazioni').select('*').order('scadenza'),
     sb.from('sessioni_lavoro').select('*').order('inizio', { ascending:false }),
+    sb.from('tipi_assenza').select('*').order('ordine'),
+    sb.from('assenze').select('*').order('data_inizio', { ascending:false }),
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
@@ -875,6 +884,8 @@ async function loadAllData() {
   if (chiusure.error) throw chiusure.error;
   if (operazioni.error) throw operazioni.error;
   if (sessioni.error) throw sessioni.error;
+  if (tipiAssenza.error) throw tipiAssenza.error;
+  if (assenze.error) throw assenze.error;
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
@@ -890,6 +901,8 @@ async function loadAllData() {
   state.chiusure = chiusure.data || [];
   state.operazioni = operazioni.data || [];
   state.sessioni = sessioni.data || [];
+  state.tipiAssenza = tipiAssenza.data || [];
+  state.assenze = assenze.data || [];
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -923,6 +936,10 @@ function startRealtime() {
         (p) => applyChange('operazioni', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'sessioni_lavoro' },
         (p) => applyChange('sessioni_lavoro', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'tipi_assenza' },
+        (p) => applyChange('tipi_assenza', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'assenze' },
+        (p) => applyChange('assenze', p))
     .subscribe();
 }
 
@@ -1023,6 +1040,22 @@ function applyChange(tabella, payload) {
     } else if (ev === 'DELETE') {
       state.sessioni = state.sessioni.filter(x => x.id !== oldRow.id);
     }
+  } else if (tabella === 'tipi_assenza') {
+    if (ev === 'INSERT') {
+      if (!state.tipiAssenza.find(x => x.id === row.id)) state.tipiAssenza.push(row);
+    } else if (ev === 'UPDATE') {
+      state.tipiAssenza = state.tipiAssenza.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.tipiAssenza = state.tipiAssenza.filter(x => x.id !== oldRow.id);
+    }
+  } else if (tabella === 'assenze') {
+    if (ev === 'INSERT') {
+      if (!state.assenze.find(x => x.id === row.id)) state.assenze.unshift(row);
+    } else if (ev === 'UPDATE') {
+      state.assenze = state.assenze.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.assenze = state.assenze.filter(x => x.id !== oldRow.id);
+    }
   }
 
   // Re-render solo la tab attiva
@@ -1072,6 +1105,8 @@ const TAB_STRUCTURE = {
       { id: 'mezzi',          label: 'Anagrafica mezzi',  adminOnly: true },
       { id: 'operatori',      label: 'Utenti',            adminOnly: true },
       { id: 'chiusure',       label: 'Chiusure aziendali', adminOnly: true },
+      { id: 'assenze',        label: 'Assenze',           adminOnly: true },
+      { id: 'tipi_assenza',   label: 'Tipi assenza',      adminOnly: true },
     ],
   },
 };
@@ -1141,6 +1176,8 @@ function renderTab(name) {
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt') renderGantt(root);
     else if (name === 'chiusure') renderChiusure(root);
+    else if (name === 'assenze') renderAssenze(root);
+    else if (name === 'tipi_assenza') renderTipiAssenza(root);
   } catch (e) {
     console.error('Errore rendering tab '+name+':', e);
     root.innerHTML = '';
@@ -6095,6 +6132,500 @@ function openSessioneModal(s) {
   foot.append(btnSave);
   modal.append(foot);
   openModal(modal);
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// ASSENZE — tipi assenza (anagrafica) + vista admin
+// ═══════════════════════════════════════════════════════════
+
+const TIPI_ASSENZA_COLORI = [
+  '#4effa3', '#ffcc4e', '#ff4e6b', '#4eb8ff',
+  '#d4ff4e', '#ff6b35', '#b88fff', '#6b6b64',
+];
+
+// ─── TIPI ASSENZA (anagrafica, come tipi lavorazione) ───
+function renderTipiAssenza(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const list = state.tipiAssenza.slice().sort((a,b) => (a.ordine||0) - (b.ordine||0));
+
+  root.innerHTML = '';
+  const toolbar = el('div', { class:'toolbar' },
+    el('h2', {}, 'Tipi di assenza'),
+  );
+  if (isAdmin) {
+    toolbar.append(el('button', { class:'btnp', onclick:()=>openTipoAssenzaModal() }, '+ Nuovo Tipo'));
+  }
+  root.append(toolbar);
+  root.append(el('div', { class:'sub', style:'margin-bottom:14px;' },
+    'Categorie di assenza selezionabili quando si inserisce ferie, permesso, malattia, ecc.'));
+
+  if (list.length === 0) {
+    root.append(el('div', { class:'empty' }, 'Nessun tipo definito. Aggiungi il primo.'));
+    return;
+  }
+
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', { class:'tc', style:'width:60px;' }, 'Ord.'),
+    el('th', {}, 'Nome'),
+    el('th', { class:'tc' }, 'Colore'),
+    el('th', { class:'tc' }, 'Stato'),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+  const tb = el('tbody');
+  list.forEach(t => {
+    tb.append(el('tr', {},
+      el('td', { class:'tc mono' }, String(t.ordine || 0)),
+      el('td', {}, t.nome),
+      el('td', { class:'tc' }, el('span', {
+        style: `display:inline-block;width:24px;height:14px;border-radius:2px;background:${t.colore||'#6b6b64'};vertical-align:middle;border:1px solid var(--brd);`,
+      })),
+      el('td', { class:'tc' }, t.attivo
+        ? el('span', { class:'badge bok' }, 'attivo')
+        : el('span', { class:'badge bgry' }, 'disatt.')),
+      el('td', { class:'tc' },
+        isAdmin
+          ? el('span', {},
+              el('button', { class:'btnsm', onclick:()=>openTipoAssenzaModal(t) }, 'Modifica'),
+              ' ',
+              el('button', { class:'btnd', onclick:()=>deleteTipoAssenza(t) }, 'Elimina'),
+            )
+          : '—'
+      ),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+}
+
+function openTipoAssenzaModal(t) {
+  const isNew = !t;
+  const nextOrdine = isNew
+    ? (Math.max(0, ...state.tipiAssenza.map(x => x.ordine||0)) + 1)
+    : t.ordine;
+  t = t || { nome:'', ordine: nextOrdine, colore: TIPI_ASSENZA_COLORI[state.tipiAssenza.length % TIPI_ASSENZA_COLORI.length], attivo:true };
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuovo Tipo di Assenza' : 'Modifica Tipo di Assenza'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  const inNome = el('input', { type:'text', name:'nome', value:t.nome||'', required:'true' });
+  const inOrdine = el('input', { type:'number', name:'ordine', value:String(t.ordine||0), min:'0' });
+  const selAttivo = el('select', { name:'attivo' },
+    el('option', { value:'true' }, 'Attivo'),
+    el('option', { value:'false' }, 'Disattivato'));
+  selAttivo.value = String(!!t.attivo);
+
+  let coloreScelto = t.colore || TIPI_ASSENZA_COLORI[0];
+  const palette = el('div', { style:'display:flex;flex-wrap:wrap;gap:6px;padding:6px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;' });
+  const refreshPalette = () => {
+    palette.innerHTML = '';
+    TIPI_ASSENZA_COLORI.forEach(col => {
+      const sel = col === coloreScelto;
+      palette.append(el('button', {
+        type:'button',
+        style: `width:34px;height:28px;border-radius:3px;background:${col};border:2px solid ${sel?'var(--acc)':'transparent'};cursor:pointer;outline:none;`,
+        onclick: () => { coloreScelto = col; refreshPalette(); },
+      }));
+    });
+  };
+  refreshPalette();
+
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Nome *'), inNome,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Es. "Ferie", "Permesso", "Malattia", "Trasferta".')),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Ordine'), inOrdine,
+        el('div', { class:'sub', style:'margin-top:4px;' }, 'Posizione nella lista.')),
+      el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Colore'), palette),
+  );
+
+  body.append(form);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  const btnSave = el('button', { class:'btnp' }, 'Salva');
+  btnSave.onclick = async () => {
+    const fd = new FormData(form);
+    const payload = {
+      nome: (fd.get('nome')||'').trim(),
+      ordine: parseInt(fd.get('ordine')) || 0,
+      colore: coloreScelto,
+      attivo: fd.get('attivo') === 'true',
+    };
+    if (!payload.nome) return toast('Nome obbligatorio', 'err');
+    btnSave.disabled = true;
+    btnSave.textContent = 'Salvataggio…';
+    try {
+      const q = isNew
+        ? sb.from('tipi_assenza').insert(payload).select().single()
+        : sb.from('tipi_assenza').update(payload).eq('id', t.id).select().single();
+      const { data, error } = await q;
+      if (error) {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Salva';
+        if (error.code === '23505') return toast('Nome già esistente', 'err');
+        return toast(error.message, 'err');
+      }
+      if (isNew) {
+        if (!state.tipiAssenza.find(x => x.id === data.id)) state.tipiAssenza.push(data);
+      } else {
+        state.tipiAssenza = state.tipiAssenza.map(x => x.id === t.id ? data : x);
+      }
+      toast(isNew ? 'Tipo creato' : 'Tipo aggiornato');
+      closeModal(); renderTab('tipi_assenza');
+    } catch (e) {
+      btnSave.disabled = false;
+      btnSave.textContent = 'Salva';
+      toast('Errore di rete: '+(e.message||e), 'err');
+    }
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+}
+
+async function deleteTipoAssenza(t) {
+  if (!confirm(`Eliminare il tipo "${t.nome}"?\nLe assenze che lo usano resteranno ma senza tipo.`)) return;
+  const { data, error } = await sb.from('tipi_assenza').delete().eq('id', t.id).select();
+  if (error) return toast(error.message, 'err');
+  if (!data || data.length === 0) {
+    return toast('Eliminazione bloccata: verifica le policy DELETE su tipi_assenza', 'err');
+  }
+  state.tipiAssenza = state.tipiAssenza.filter(x => x.id !== t.id);
+  toast('Tipo eliminato'); renderTab('tipi_assenza');
+}
+
+// ─── Helper: giorni lavorativi di un'assenza (esclude weekend/festivi/chiusure) ───
+function assenzaGiorniLavorativi(a) {
+  if (!a.data_inizio || !a.data_fine) return 0;
+  return contaGiorniLavorativi(a.data_inizio, a.data_fine);
+}
+
+// ─── VISTA ADMIN: elenco di tutte le assenze ───
+function renderAssenze(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  root.innerHTML = '';
+
+  const toolbar = el('div', { class:'toolbar' },
+    el('h2', {}, 'Assenze'),
+  );
+  if (isAdmin) {
+    toolbar.append(el('button', { class:'btnp', onclick:()=>openAssenzaModal() }, '+ Nuova Assenza'));
+  }
+  root.append(toolbar);
+  root.append(el('div', { class:'sub', style:'margin-bottom:14px;' },
+    'Ferie, permessi e altre assenze di tutto il personale. Il conteggio giorni esclude weekend, festivi e chiusure aziendali.'));
+
+  // ── Filtri ──
+  const filtri = el('div', { class:'toolbar', style:'gap:8px;flex-wrap:wrap;' });
+
+  const utentiOrdinati = state.utenti
+    .filter(u => !isKioskRecord(u))
+    .sort((a,b) => a.nome.localeCompare(b.nome));
+  const selUtente = el('select', {
+    style:'background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:5px 10px;border-radius:3px;font-size:12px;',
+    onchange: e => { state.assFiltroUtente = e.target.value; renderTab('assenze'); }
+  },
+    el('option', { value:'' }, '— Tutti gli utenti —'),
+    ...utentiOrdinati.map(u => el('option', { value:u.id }, u.nome)),
+  );
+  selUtente.value = state.assFiltroUtente || '';
+
+  const selTipo = el('select', {
+    style:'background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:5px 10px;border-radius:3px;font-size:12px;',
+    onchange: e => { state.assFiltroTipo = e.target.value; renderTab('assenze'); }
+  },
+    el('option', { value:'' }, '— Tutti i tipi —'),
+    ...state.tipiAssenza.filter(t=>t.attivo).map(t => el('option', { value:t.id }, t.nome)),
+  );
+  selTipo.value = state.assFiltroTipo || '';
+
+  const selStato = el('select', {
+    style:'background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:5px 10px;border-radius:3px;font-size:12px;',
+    onchange: e => { state.assFiltroStato = e.target.value; renderTab('assenze'); }
+  },
+    el('option', { value:'valida' }, 'Solo valide'),
+    el('option', { value:'annullata' }, 'Solo annullate'),
+    el('option', { value:'' }, 'Tutte'),
+  );
+  selStato.value = state.assFiltroStato || 'valida';
+
+  const inMese = el('input', {
+    type:'month',
+    value: state.assFiltroMese || '',
+    style:'background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:5px 10px;border-radius:3px;font-size:12px;',
+    onchange: e => { state.assFiltroMese = e.target.value || null; renderTab('assenze'); }
+  });
+
+  filtri.append(
+    el('span', { class:'sub' }, 'Filtri:'),
+    selUtente, selTipo, selStato, inMese,
+  );
+  if (state.assFiltroUtente || state.assFiltroTipo || state.assFiltroStato !== 'valida' || state.assFiltroMese) {
+    filtri.append(el('button', { class:'btng', onclick: () => {
+      state.assFiltroUtente=''; state.assFiltroTipo=''; state.assFiltroStato='valida'; state.assFiltroMese=null;
+      renderTab('assenze');
+    }}, 'Azzera filtri'));
+  }
+  root.append(filtri);
+
+  // ── Applica filtri ──
+  let list = state.assenze.slice();
+  if (state.assFiltroUtente) list = list.filter(a => a.utente_id === state.assFiltroUtente);
+  if (state.assFiltroTipo)   list = list.filter(a => a.tipo_assenza_id === state.assFiltroTipo);
+  if (state.assFiltroStato)  list = list.filter(a => a.stato === state.assFiltroStato);
+  if (state.assFiltroMese) {
+    // Assenza che interseca il mese selezionato
+    const [yy, mm] = state.assFiltroMese.split('-').map(Number);
+    const meseInizio = new Date(yy, mm-1, 1);
+    const meseFine = new Date(yy, mm, 0);
+    list = list.filter(a => {
+      const ai = parseISODate(a.data_inizio);
+      const af = parseISODate(a.data_fine);
+      return ai <= meseFine && af >= meseInizio;
+    });
+  }
+  list.sort((a,b) => (b.data_inizio||'').localeCompare(a.data_inizio||''));
+
+  // ── KPI riepilogo ──
+  const valide = state.assenze.filter(a => a.stato === 'valida');
+  const oggiISO = toLocalISO(new Date());
+  const inCorso = valide.filter(a => a.data_inizio <= oggiISO && a.data_fine >= oggiISO);
+  root.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Assenze valide'),
+      el('div', { class:'kv' }, String(valide.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'In corso oggi'),
+      el('div', { class:'kv ky' }, String(inCorso.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Risultati filtro'),
+      el('div', { class:'kv kb' }, String(list.length))),
+  ));
+
+  if (list.length === 0) {
+    root.append(el('div', { class:'empty' }, 'Nessuna assenza con questi filtri.'));
+    return;
+  }
+
+  // ── Tabella ──
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Utente'),
+    el('th', {}, 'Tipo'),
+    el('th', {}, 'Dal'),
+    el('th', {}, 'Al'),
+    el('th', { class:'tc' }, 'Giorni lav.'),
+    el('th', {}, 'Note'),
+    el('th', {}, 'Stato'),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+  const tb = el('tbody');
+  list.forEach(a => {
+    const u = state.utentiById[a.utente_id];
+    const tipo = state.tipiAssenza.find(t => t.id === a.tipo_assenza_id);
+    const gg = assenzaGiorniLavorativi(a);
+    const annullata = a.stato === 'annullata';
+
+    const tr = el('tr', {});
+    if (annullata) tr.style.opacity = '0.5';
+
+    tr.append(
+      el('td', {}, u ? u.nome : '—'),
+      el('td', {}, tipo
+        ? el('span', { style:'display:inline-flex;align-items:center;gap:6px;' },
+            el('span', { style:`display:inline-block;width:10px;height:10px;border-radius:2px;background:${tipo.colore||'#6b6b64'};` }),
+            tipo.nome)
+        : el('span', { class:'badge bgry' }, 'senza tipo')),
+      el('td', { class:'mono' }, fmtIT(a.data_inizio)),
+      el('td', { class:'mono' }, fmtIT(a.data_fine)),
+      el('td', { class:'tc mono' }, String(gg)),
+      el('td', { style:'font-size:11px;color:var(--mut);max-width:200px;' },
+        a.note || (annullata && a.note_annullamento ? '↳ annullata: '+a.note_annullamento : '—')),
+      el('td', {}, annullata
+        ? el('span', { class:'badge bgry' }, 'annullata')
+        : el('span', { class:'badge bok' }, 'valida')),
+      el('td', { class:'tc' },
+        isAdmin
+          ? el('span', {},
+              !annullata ? el('button', { class:'btnsm', onclick:()=>openAssenzaModal(a) }, 'Modifica') : null,
+              !annullata ? ' ' : null,
+              !annullata
+                ? el('button', { class:'btnd', onclick:()=>annullaAssenza(a) }, 'Annulla')
+                : el('button', { class:'btnsm', onclick:()=>ripristinaAssenza(a) }, 'Ripristina'),
+            )
+          : '—'
+      ),
+    );
+    tb.append(tr);
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+}
+
+// ─── Modal nuova/modifica assenza ───
+function openAssenzaModal(a) {
+  const isNew = !a;
+  const oggi = toLocalISO(new Date());
+  a = a || { utente_id:'', tipo_assenza_id:'', data_inizio:oggi, data_fine:oggi, note:'' };
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuova Assenza' : 'Modifica Assenza'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  const utentiOrdinati = state.utenti
+    .filter(u => !isKioskRecord(u) && u.attivo)
+    .sort((x,y) => x.nome.localeCompare(y.nome));
+  const selUtente = el('select', { name:'utente_id', required:'true' },
+    el('option', { value:'' }, '— Seleziona utente —'),
+    ...utentiOrdinati.map(u => el('option', { value:u.id }, u.nome)),
+  );
+  selUtente.value = a.utente_id || '';
+
+  const selTipo = el('select', { name:'tipo_assenza_id', required:'true' },
+    el('option', { value:'' }, '— Seleziona tipo —'),
+    ...state.tipiAssenza.filter(t=>t.attivo).sort((x,y)=>(x.ordine||0)-(y.ordine||0))
+      .map(t => el('option', { value:t.id }, t.nome)),
+  );
+  selTipo.value = a.tipo_assenza_id || '';
+
+  const inDal = el('input', { type:'date', name:'data_inizio', value:a.data_inizio||oggi, required:'true' });
+  const inAl  = el('input', { type:'date', name:'data_fine',   value:a.data_fine||oggi,   required:'true' });
+
+  // Anteprima giorni lavorativi
+  const previewGG = el('div', { class:'sub', style:'margin-top:4px;' });
+  const refreshGG = () => {
+    const di = inDal.value, df = inAl.value;
+    if (di && df && di <= df) {
+      const gg = contaGiorniLavorativi(di, df);
+      previewGG.textContent = `${gg} giorni lavorativi (esclusi weekend, festivi e chiusure aziendali)`;
+      previewGG.style.color = 'var(--grn)';
+    } else if (di && df && di > df) {
+      previewGG.textContent = '⚠ La data finale è prima di quella iniziale';
+      previewGG.style.color = 'var(--red)';
+    } else {
+      previewGG.textContent = '';
+    }
+  };
+  inDal.onchange = () => { if (inAl.value < inDal.value) inAl.value = inDal.value; refreshGG(); };
+  inAl.onchange = refreshGG;
+
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Utente *'), selUtente),
+    el('div', { class:'field' }, el('label', {}, 'Tipo di assenza *'), selTipo),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Dal *'), inDal),
+      el('div', { class:'field' }, el('label', {}, 'Al *'), inAl),
+    ),
+    previewGG,
+    el('div', { class:'field', style:'margin-top:8px;' }, el('label', {}, 'Note (opz.)'),
+      el('textarea', { name:'note', rows:'2' }, a.note||'')),
+  );
+  refreshGG();
+
+  body.append(form);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  const btnSave = el('button', { class:'btnp' }, 'Salva');
+  btnSave.onclick = async () => {
+    const fd = new FormData(form);
+    const payload = {
+      utente_id: fd.get('utente_id'),
+      tipo_assenza_id: fd.get('tipo_assenza_id') || null,
+      data_inizio: fd.get('data_inizio'),
+      data_fine: fd.get('data_fine'),
+      note: (fd.get('note')||'').trim() || null,
+    };
+    if (!payload.utente_id) return toast('Seleziona un utente', 'err');
+    if (!payload.tipo_assenza_id) return toast('Seleziona il tipo', 'err');
+    if (!payload.data_inizio || !payload.data_fine) return toast('Inserisci le date', 'err');
+    if (payload.data_fine < payload.data_inizio) return toast('La data finale è prima di quella iniziale', 'err');
+
+    btnSave.disabled = true;
+    btnSave.textContent = 'Salvataggio…';
+    try {
+      let q;
+      if (isNew) {
+        payload.stato = 'valida';
+        payload.creato_da = state.profile.id;
+        q = sb.from('assenze').insert(payload).select().single();
+      } else {
+        q = sb.from('assenze').update(payload).eq('id', a.id).select().single();
+      }
+      const { data, error } = await q;
+      if (error) {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Salva';
+        return toast(error.message, 'err');
+      }
+      if (isNew) {
+        if (!state.assenze.find(x => x.id === data.id)) state.assenze.unshift(data);
+      } else {
+        state.assenze = state.assenze.map(x => x.id === a.id ? data : x);
+      }
+      toast(isNew ? 'Assenza registrata' : 'Assenza aggiornata');
+      closeModal(); renderTab('assenze');
+    } catch (e) {
+      btnSave.disabled = false;
+      btnSave.textContent = 'Salva';
+      toast('Errore di rete: '+(e.message||e), 'err');
+    }
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+}
+
+// ─── Annulla un'assenza (admin) ───
+async function annullaAssenza(a) {
+  const u = state.utentiById[a.utente_id];
+  const motivo = prompt(
+    `Annullare l'assenza di ${u ? u.nome : '?'} dal ${fmtIT(a.data_inizio)} al ${fmtIT(a.data_fine)}?\n\n` +
+    `Inserisci il motivo dell'annullamento (opzionale):`
+  );
+  // prompt restituisce null se l'utente annulla il dialog
+  if (motivo === null) return;
+
+  const { data, error } = await sb.from('assenze').update({
+    stato: 'annullata',
+    annullata_da: state.profile.id,
+    note_annullamento: motivo.trim() || null,
+  }).eq('id', a.id).select().single();
+  if (error) return toast(error.message, 'err');
+  state.assenze = state.assenze.map(x => x.id === a.id ? data : x);
+  toast('Assenza annullata'); renderTab('assenze');
+}
+
+// ─── Ripristina un'assenza annullata (admin) ───
+async function ripristinaAssenza(a) {
+  if (!confirm('Ripristinare questa assenza come valida?')) return;
+  const { data, error } = await sb.from('assenze').update({
+    stato: 'valida',
+    annullata_da: null,
+    note_annullamento: null,
+  }).eq('id', a.id).select().single();
+  if (error) return toast(error.message, 'err');
+  state.assenze = state.assenze.map(x => x.id === a.id ? data : x);
+  toast('Assenza ripristinata'); renderTab('assenze');
 }
 
 init();
