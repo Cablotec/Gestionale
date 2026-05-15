@@ -441,17 +441,17 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .assv2-legend .ld{width:14px;height:12px;border:1px solid rgba(255,255,255,.1);flex-shrink:0;border-radius:1px;}
 
 .assv2-cal-wrap{overflow:auto;border:1px solid var(--brd);background:var(--sur);border-radius:4px;margin-bottom:10px;}
-table.assv2-cal{border-collapse:collapse;width:auto;}
+table.assv2-cal{border-collapse:collapse;width:100%;table-layout:fixed;}
 table.assv2-cal th,table.assv2-cal td{border:1px solid var(--brd);}
 .assv2-th-month{background:var(--sur2);color:var(--acc);font-family:'Syne',sans-serif;font-size:12px;font-weight:800;padding:5px 8px;text-align:center;letter-spacing:.05em;text-transform:uppercase;}
-.assv2-col-name{min-width:120px;position:sticky;left:0;z-index:3;}
+.assv2-col-name{width:140px;min-width:140px;max-width:140px;position:sticky;left:0;z-index:3;}
 th.assv2-col-name{background:var(--sur2);color:var(--mut);font-family:'DM Mono',monospace;font-size:9px;font-weight:700;padding:4px 8px;text-align:left;letter-spacing:.08em;text-transform:uppercase;}
-td.assv2-col-name{padding:4px 8px;background:var(--sur);color:var(--txt);white-space:nowrap;font-family:'Syne',sans-serif;font-size:11px;font-weight:600;}
+td.assv2-col-name{padding:4px 8px;background:var(--sur);color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'Syne',sans-serif;font-size:11px;font-weight:600;}
 td.assv2-col-name.esterno{color:var(--yel);}
-.assv2-th-day{text-align:center;padding:2px 1px;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;background:var(--sur2);color:var(--mut);min-width:24px;max-width:24px;}
-.assv2-th-dow{text-align:center;padding:1px;font-family:'DM Mono',monospace;font-size:8px;font-weight:700;background:var(--sur2);color:var(--mut);opacity:.7;min-width:24px;max-width:24px;}
-.assv2-td-day{text-align:center;height:24px;min-width:24px;max-width:24px;user-select:none;background:var(--bg);position:relative;}
-.assv2-td-day span{display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;}
+.assv2-th-day{text-align:center;padding:2px 1px;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;background:var(--sur2);color:var(--mut);}
+.assv2-th-dow{text-align:center;padding:1px;font-family:'DM Mono',monospace;font-size:8px;font-weight:700;background:var(--sur2);color:var(--mut);opacity:.7;}
+.assv2-td-day{text-align:center;height:30px;user-select:none;background:var(--bg);position:relative;padding:0;}
+.assv2-td-day span{display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;}
 .assv2-td-day.can-edit{cursor:pointer;}
 .assv2-td-day.can-edit:hover{outline:2px solid var(--acc);outline-offset:-2px;}
 .assv2-td-day.we{background:rgba(255,78,107,.18);}
@@ -1358,156 +1358,13 @@ function renderTab(name) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// CALENDARI → GENERALE — vista panoramica aziendale
+// CALENDARI → GENERALE — riusa renderCalendar in modalità panoramica
 // ═══════════════════════════════════════════════════════════
 
 function renderGenerale(root) {
-  root.innerHTML = '';
-
-  // Cursor mese
-  if (!state.genCursor) state.genCursor = new Date();
-  const cur = state.genCursor;
-  const anno = cur.getFullYear();
-  const mese = cur.getMonth();
-
-  const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-
-  // Header con navigazione mese
-  root.append(el('div', { class:'cal-head' },
-    el('button', { class:'btng', onclick:()=>{
-      state.genCursor = new Date(anno, mese-1, 1); renderTab('generale');
-    }}, '← Prec'),
-    el('button', { class:'btng', onclick:()=>{
-      state.genCursor = new Date(); renderTab('generale');
-    }}, 'Oggi'),
-    el('button', { class:'btng', onclick:()=>{
-      state.genCursor = new Date(anno, mese+1, 1); renderTab('generale');
-    }}, 'Succ →'),
-    el('h2', { style:'margin-left:14px;' }, `${MESI[mese]} ${anno}`),
-  ));
-
-  root.append(el('div', { class:'sub', style:'margin-bottom:14px;' },
-    'Panoramica del mese: chi è in ferie/permesso, chiusure aziendali e festività.'));
-
-  // Costruisco mappa data → eventi (assenze + chiusure + festività)
-  const festSet = festiviAnno(anno);
-  const oggiISO = toLocalISO(new Date());
-  const primoGiorno = new Date(anno, mese, 1);
-  const ultimoGiorno = new Date(anno, mese+1, 0);
-
-  // Trova il lunedì della settimana del primo del mese (per griglia 7 colonne)
-  const firstDow = (primoGiorno.getDay() + 6) % 7; // 0=lun
-  const gridStart = new Date(anno, mese, 1 - firstDow);
-
-  // Calcola N settimane da mostrare
-  const totDays = firstDow + ultimoGiorno.getDate();
-  const numSet = Math.ceil(totDays / 7);
-
-  // Costruisci grid
-  const grid = el('div', {
-    style: 'display:grid;grid-template-columns:repeat(7,1fr);gap:4px;background:var(--brd);border:1px solid var(--brd);border-radius:4px;overflow:hidden;'
-  });
-
-  // Header giorni della settimana
-  ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].forEach((dn,i) => {
-    grid.append(el('div', {
-      style: `background:var(--sur2);padding:6px 8px;font-family:DM Mono,monospace;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${i>=5?'var(--red)':'var(--mut)'};text-align:center;`
-    }, dn));
-  });
-
-  // Celle giorni
-  for (let i = 0; i < numSet * 7; i++) {
-    const d = new Date(gridStart);
-    d.setDate(gridStart.getDate() + i);
-    const iso = toLocalISO(d);
-    const giorno = d.getDate();
-    const inMese = d.getMonth() === mese;
-    const dow = (d.getDay() + 6) % 7;
-    const isWE = dow >= 5;
-    const isFes = festSet.has(iso);
-    const chiusura = getChiusuraAziendale(iso);
-    const isOggi = iso === oggiISO;
-
-    const ass = state.assenze.filter(a => a.data === iso && a.stato === 'valida');
-
-    // Colore sfondo cella
-    let bg = 'var(--bg)';
-    let opacity = inMese ? '1' : '0.35';
-    if (chiusura) bg = 'rgba(255,107,53,.18)';
-    else if (isFes) bg = 'rgba(78,184,255,.15)';
-    else if (isWE) bg = 'rgba(255,78,107,.08)';
-
-    const cell = el('div', {
-      style: `background:${bg};padding:6px 7px;min-height:80px;opacity:${opacity};position:relative;${isOggi?'box-shadow:inset 0 0 0 2px var(--acc);':''}`
-    });
-
-    // Numero giorno
-    cell.append(el('div', {
-      style: `font-family:DM Mono,monospace;font-size:11px;font-weight:700;color:${isOggi?'var(--acc)':(isFes?'var(--blu)':(isWE?'var(--red)':'var(--txt)'))};margin-bottom:3px;`
-    }, String(giorno)));
-
-    // Festività
-    if (isFes && inMese) {
-      const festInfo = (typeof festiviNazionali === 'function')
-        ? festiviNazionali(anno).find(f => {
-            const isoF = f.data instanceof Date ? toLocalISO(f.data) : f.data;
-            return isoF === iso;
-          })
-        : null;
-      cell.append(el('div', {
-        style: 'font-family:DM Mono,monospace;font-size:9px;color:var(--blu);font-weight:700;margin-bottom:2px;',
-        title: festInfo?.nome || 'Festivo',
-      }, '🎉 ' + (festInfo?.nome || 'Festivo')));
-    }
-
-    // Chiusura aziendale
-    if (chiusura && inMese) {
-      cell.append(el('div', {
-        style: 'font-family:DM Mono,monospace;font-size:9px;color:var(--or);font-weight:700;margin-bottom:2px;',
-        title: chiusura.descrizione || 'Chiusura',
-      }, '🔒 ' + (chiusura.descrizione || 'Chiusura')));
-    }
-
-    // Assenze (compatte)
-    if (ass.length && inMese) {
-      ass.forEach(a => {
-        const u = state.utentiById[a.utente_id];
-        const tipo = state.tipiAssenza.find(t => t.id === a.tipo_assenza_id);
-        const codice = tipo?.codice || '?';
-        const ore = parseFloat(a.ore) || 0;
-        const labelOre = ore >= 8 ? '' : ` ${ore}h`;
-        const nome = u ? (u.nome.split(' ')[0]) : '?'; // solo nome
-        cell.append(el('div', {
-          style: `font-family:DM Mono,monospace;font-size:9px;color:${tipo?.colore||'var(--mut)'};margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`,
-          title: `${u?.nome || '—'} — ${tipo?.nome || '?'} (${ore}h)${a.note ? '\n'+a.note : ''}`,
-        }, `${codice} ${nome}${labelOre}`));
-      });
-    }
-
-    grid.append(cell);
-  }
-
-  root.append(grid);
-
-  // Legenda
-  const leg = el('div', {
-    style: 'display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;font-family:DM Mono,monospace;font-size:10px;color:var(--mut);'
-  });
-  leg.append(el('span', {},
-    el('span', { style:'display:inline-block;width:12px;height:10px;background:rgba(78,184,255,.5);vertical-align:middle;margin-right:4px;' }),
-    '🎉 Festività'));
-  leg.append(el('span', {},
-    el('span', { style:'display:inline-block;width:12px;height:10px;background:rgba(255,107,53,.5);vertical-align:middle;margin-right:4px;' }),
-    '🔒 Chiusura aziendale'));
-  leg.append(el('span', {},
-    el('span', { style:'display:inline-block;width:12px;height:10px;background:rgba(255,78,107,.3);vertical-align:middle;margin-right:4px;' }),
-    'Weekend'));
-  state.tipiAssenza.filter(t => t.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0)).forEach(t => {
-    leg.append(el('span', {},
-      el('span', { style:`display:inline-block;width:12px;height:10px;background:${t.colore};vertical-align:middle;margin-right:4px;` }),
-      `${t.codice || '?'} ${t.nome}`));
-  });
-  root.append(leg);
+  // Attiva la modalità "solo assenze" sul calendario condiviso
+  state.calMode = 'generale';
+  renderCalendar(root);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1517,6 +1374,7 @@ function renderGenerale(root) {
 // Vista unificata Mezzi: calendario in cima + tabella prenotazioni sotto
 function renderCalMezzi(root) {
   root.innerHTML = '';
+  state.calMode = 'mezzi';
 
   // Sezione 1: calendario
   const calSection = el('div', {});
@@ -1535,6 +1393,11 @@ function renderCalMezzi(root) {
 }
 
 function renderCalendar(root) {
+  // calMode controlla cosa mostrare: 'mezzi' (default) o 'generale' (solo assenze/festività/chiusure)
+  const calMode = state.calMode || 'mezzi';
+  const isGenerale = calMode === 'generale';
+  const targetTab = isGenerale ? 'generale' : 'cal_mezzi';
+
   const cur = state.calCursor;
   const first = new Date(cur.getFullYear(), cur.getMonth(), 1);
   const last  = new Date(cur.getFullYear(), cur.getMonth()+1, 0);
@@ -1548,13 +1411,14 @@ function renderCalendar(root) {
   const todayISO = toLocalISO(new Date());
 
   // Filtro le prenotazioni della cache che intersecano la griglia
-  const prenInRange = state.prenotazioni.filter(p =>
+  const prenInRange = isGenerale ? [] : state.prenotazioni.filter(p =>
     p.data_inizio <= endISO && p.data_fine >= startISO
   );
   // Filtro gli usi mezzo che intersecano la griglia
   // - aperti (data_rientro = null): visualizzati da data_uscita fino ad oggi
   // - chiusi: visualizzati da data_uscita a data_rientro
-  const usiInRange = state.usiMezzo.filter(u => {
+  // In modalità "generale" escludiamo gli usi dei mezzi
+  const usiInRange = isGenerale ? [] : state.usiMezzo.filter(u => {
     const usoStart = u.data_uscita.substring(0, 10);
     const usoEnd = u.data_rientro ? u.data_rientro.substring(0, 10) : todayISO;
     return usoStart <= endISO && usoEnd >= startISO;
@@ -1591,35 +1455,64 @@ function renderCalendar(root) {
   }
 
   root.innerHTML = '';
-  root.append(el('div', { class:'cal-head' },
-    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()-1,1); renderTab('cal_mezzi'); }}, '← Prec'),
-    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(); renderTab('cal_mezzi'); }}, 'Oggi'),
-    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()+1,1); renderTab('cal_mezzi'); }}, 'Succ →'),
+  const headChildren = [
+    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()-1,1); renderTab(targetTab); }}, '← Prec'),
+    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(); renderTab(targetTab); }}, 'Oggi'),
+    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()+1,1); renderTab(targetTab); }}, 'Succ →'),
     el('h2', { style:'flex:1' }, monthName(cur)),
-    el('button', { class:'btnp', onclick:()=>openPrenotazioneModal() }, '+ Nuova Prenotazione'),
-  ));
+  ];
+  if (!isGenerale) {
+    headChildren.push(el('button', { class:'btnp', onclick:()=>openPrenotazioneModal() }, '+ Nuova Prenotazione'));
+  }
+  root.append(el('div', { class:'cal-head' }, ...headChildren));
 
   const legend = el('div', { class:'legend' });
-  TIPI.forEach(t => legend.append(el('span', { class:'lg' },
-    el('span', { class:'swatch', style:`background:${t.color}` }), t.label
-  )));
-  // Legenda usi mezzo
-  legend.append(el('span', { class:'lg' },
-    el('span', { class:'swatch swatch-uso-aperto' }), 'Uso in corso'));
-  legend.append(el('span', { class:'lg' },
-    el('span', { class:'swatch swatch-uso-chiuso' }), 'Uso chiuso'));
+  if (!isGenerale) {
+    TIPI.forEach(t => legend.append(el('span', { class:'lg' },
+      el('span', { class:'swatch', style:`background:${t.color}` }), t.label
+    )));
+    legend.append(el('span', { class:'lg' },
+      el('span', { class:'swatch swatch-uso-aperto' }), 'Uso in corso'));
+    legend.append(el('span', { class:'lg' },
+      el('span', { class:'swatch swatch-uso-chiuso' }), 'Uso chiuso'));
+  }
+  // Assenze + chiusure + festivi: mostrate in entrambe le modalità
   legend.append(el('span', { class:'lg' },
     el('span', { class:'swatch', style:'background:rgba(78,255,163,.4);border-color:var(--grn);' }), '🌴 Assenza'));
+  if (isGenerale) {
+    legend.append(el('span', { class:'lg' },
+      el('span', { class:'swatch', style:'background:rgba(255,107,53,.4);border-color:var(--or);' }), '🔒 Chiusura azienda'));
+    legend.append(el('span', { class:'lg' },
+      el('span', { class:'swatch', style:'background:rgba(78,184,255,.4);border-color:var(--blu);' }), '🎉 Festività'));
+  }
   root.append(legend);
 
   const grid = el('div', { class:'cal-grid' });
   ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].forEach(d => grid.append(el('div', { class:'cal-dow' }, d)));
+
+  // Calcola festività dell'anno e dell'anno seguente (per griglie a cavallo di anni)
+  const festSet = new Set();
+  if (typeof festiviAnno === 'function') {
+    festiviAnno(cur.getFullYear()).forEach(x => festSet.add(x));
+    festiviAnno(cur.getFullYear()+1).forEach(x => festSet.add(x));
+  }
+  const festivitaNomi = {};
+  if (typeof festiviNazionali === 'function') {
+    [cur.getFullYear(), cur.getFullYear()+1, cur.getFullYear()-1].forEach(y => {
+      festiviNazionali(y).forEach(f => {
+        const iso = f.data instanceof Date ? toLocalISO(f.data) : f.data;
+        if (iso) festivitaNomi[iso] = f.nome;
+      });
+    });
+  }
 
   for (let d = new Date(startGrid); d <= endGrid; d.setDate(d.getDate()+1)) {
     const iso = toLocalISO(d);
     const inMonth = d.getMonth() === cur.getMonth();
     const dow = (d.getDay()+6)%7;
     const isWeekend = dow >= 5;
+    const isFestivo = festSet.has(iso);
+    const chiusura = (typeof getChiusuraAziendale === 'function') ? getChiusuraAziendale(iso) : null;
     const cls = ['cal-cell'];
     if (!inMonth) cls.push('other');
     if (iso === todayISO) cls.push('today');
@@ -1628,10 +1521,31 @@ function renderCalendar(root) {
       class: cls.join(' '),
       onclick: (e) => {
         if (e.target.closest('.cal-evt')) return;
+        if (isGenerale) return; // niente click in modalità generale
         openPrenotazioneModal({ data_inizio: iso, data_fine: iso });
       }
     });
+    // Background tinto per festività/chiusure
+    if (chiusura) cell.style.background = 'rgba(255,107,53,.10)';
+    else if (isFestivo) cell.style.background = 'rgba(78,184,255,.10)';
+
     cell.append(el('div', { class:'cal-day-num' }, String(d.getDate())));
+
+    // Eventi "speciali" (festività + chiusure) prima degli altri
+    if (isFestivo) {
+      cell.append(el('div', {
+        class: 'cal-evt',
+        style: 'border-left-color:var(--blu);background:rgba(78,184,255,.15);color:var(--blu);font-weight:600;',
+        title: festivitaNomi[iso] || 'Festività',
+      }, '🎉 ' + (festivitaNomi[iso] || 'Festivo')));
+    }
+    if (chiusura) {
+      cell.append(el('div', {
+        class: 'cal-evt',
+        style: 'border-left-color:var(--or);background:rgba(255,107,53,.15);color:var(--or);font-weight:600;',
+        title: chiusura.descrizione || 'Chiusura aziendale',
+      }, '🔒 ' + (chiusura.descrizione || 'Chiusura')));
+    }
     const evs = byDay[iso] || [];
     const max = window.innerWidth < 640 ? 2 : 3;
     const box = el('div', { class:'cal-events' });
