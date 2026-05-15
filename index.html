@@ -549,9 +549,8 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
   </header>
 
   <nav class="nav" id="tabs-macro">
-    <button class="navtab active" data-area="mezzi">Mezzi</button>
+    <button class="navtab active" data-area="calendari">Calendari</button>
     <button class="navtab" data-area="lavoro">Lavoro</button>
-    <button class="navtab" data-area="personale">Personale</button>
     <button class="navtab" data-area="gestione" id="area-gestione" style="display:none">Gestione</button>
   </nav>
   <nav class="nav nav-sub" id="tabs"></nav>
@@ -1240,12 +1239,13 @@ function checkSovrapposizioni(mezzoId, dataInizio, dataFine, escludiId) {
 
 // Definizione macro-aree e sotto-tab
 const TAB_STRUCTURE = {
-  mezzi: {
-    label: 'Mezzi',
+  calendari: {
+    label: 'Calendari',
     adminOnly: false,
     tabs: [
-      { id: 'calendario',  label: 'Calendario',  adminOnly: false },
-      { id: 'elenco',      label: 'Prenotazioni', adminOnly: false },
+      { id: 'generale',    label: 'Generale',    adminOnly: false },
+      { id: 'cal_mezzi',   label: 'Mezzi',       adminOnly: false },
+      { id: 'cal_assenze', label: 'Assenze',     adminOnly: false },
     ],
   },
   lavoro: {
@@ -1267,15 +1267,7 @@ const TAB_STRUCTURE = {
       { id: 'mezzi',          label: 'Anagrafica mezzi',  adminOnly: true },
       { id: 'operatori',      label: 'Utenti',            adminOnly: true },
       { id: 'chiusure',       label: 'Chiusure aziendali', adminOnly: true },
-      { id: 'assenze',        label: 'Assenze',           adminOnly: true },
       { id: 'tipi_assenza',   label: 'Tipi assenza',      adminOnly: true },
-    ],
-  },
-  personale: {
-    label: 'Personale',
-    adminOnly: false,
-    tabs: [
-      { id: 'mie_assenze',    label: 'Le mie assenze',    adminOnly: false },
     ],
   },
 };
@@ -1287,8 +1279,8 @@ function bindTabs() {
       selectArea(b.dataset.area);
     };
   });
-  // All'avvio, seleziono la macro-area "Mezzi"
-  selectArea('mezzi');
+  // All'avvio, seleziono la macro-area "Calendari"
+  selectArea('calendari');
 }
 
 function selectArea(areaId) {
@@ -1342,8 +1334,9 @@ function renderTab(name) {
   const root = $('#tab-content');
   if (!state.loaded) { root.innerHTML = '<div class="empty">Caricamento…</div>'; return; }
   try {
-    if (name === 'calendario')        renderCalendar(root);
-    else if (name === 'elenco')       renderElenco(root);
+    if (name === 'generale')          renderGenerale(root);
+    else if (name === 'cal_mezzi')    renderCalMezzi(root);
+    else if (name === 'cal_assenze')  renderAssenze(root);
     else if (name === 'mezzi')        renderMezzi(root);
     else if (name === 'clienti')      renderClienti(root);
     else if (name === 'articoli')     renderArticoli(root);
@@ -1353,9 +1346,7 @@ function renderTab(name) {
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt') renderGantt(root);
     else if (name === 'chiusure') renderChiusure(root);
-    else if (name === 'assenze') renderAssenze(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
-    else if (name === 'mie_assenze') renderMieAssenze(root);
   } catch (e) {
     console.error('Errore rendering tab '+name+':', e);
     root.innerHTML = '';
@@ -1364,6 +1355,183 @@ function renderTab(name) {
       el('button', { class:'btnp', onclick:()=>renderTab(name) }, 'Riprova'),
     ));
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CALENDARI → GENERALE — vista panoramica aziendale
+// ═══════════════════════════════════════════════════════════
+
+function renderGenerale(root) {
+  root.innerHTML = '';
+
+  // Cursor mese
+  if (!state.genCursor) state.genCursor = new Date();
+  const cur = state.genCursor;
+  const anno = cur.getFullYear();
+  const mese = cur.getMonth();
+
+  const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+
+  // Header con navigazione mese
+  root.append(el('div', { class:'cal-head' },
+    el('button', { class:'btng', onclick:()=>{
+      state.genCursor = new Date(anno, mese-1, 1); renderTab('generale');
+    }}, '← Prec'),
+    el('button', { class:'btng', onclick:()=>{
+      state.genCursor = new Date(); renderTab('generale');
+    }}, 'Oggi'),
+    el('button', { class:'btng', onclick:()=>{
+      state.genCursor = new Date(anno, mese+1, 1); renderTab('generale');
+    }}, 'Succ →'),
+    el('h2', { style:'margin-left:14px;' }, `${MESI[mese]} ${anno}`),
+  ));
+
+  root.append(el('div', { class:'sub', style:'margin-bottom:14px;' },
+    'Panoramica del mese: chi è in ferie/permesso, chiusure aziendali e festività.'));
+
+  // Costruisco mappa data → eventi (assenze + chiusure + festività)
+  const festSet = festiviAnno(anno);
+  const oggiISO = toLocalISO(new Date());
+  const primoGiorno = new Date(anno, mese, 1);
+  const ultimoGiorno = new Date(anno, mese+1, 0);
+
+  // Trova il lunedì della settimana del primo del mese (per griglia 7 colonne)
+  const firstDow = (primoGiorno.getDay() + 6) % 7; // 0=lun
+  const gridStart = new Date(anno, mese, 1 - firstDow);
+
+  // Calcola N settimane da mostrare
+  const totDays = firstDow + ultimoGiorno.getDate();
+  const numSet = Math.ceil(totDays / 7);
+
+  // Costruisci grid
+  const grid = el('div', {
+    style: 'display:grid;grid-template-columns:repeat(7,1fr);gap:4px;background:var(--brd);border:1px solid var(--brd);border-radius:4px;overflow:hidden;'
+  });
+
+  // Header giorni della settimana
+  ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].forEach((dn,i) => {
+    grid.append(el('div', {
+      style: `background:var(--sur2);padding:6px 8px;font-family:DM Mono,monospace;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${i>=5?'var(--red)':'var(--mut)'};text-align:center;`
+    }, dn));
+  });
+
+  // Celle giorni
+  for (let i = 0; i < numSet * 7; i++) {
+    const d = new Date(gridStart);
+    d.setDate(gridStart.getDate() + i);
+    const iso = toLocalISO(d);
+    const giorno = d.getDate();
+    const inMese = d.getMonth() === mese;
+    const dow = (d.getDay() + 6) % 7;
+    const isWE = dow >= 5;
+    const isFes = festSet.has(iso);
+    const chiusura = getChiusuraAziendale(iso);
+    const isOggi = iso === oggiISO;
+
+    const ass = state.assenze.filter(a => a.data === iso && a.stato === 'valida');
+
+    // Colore sfondo cella
+    let bg = 'var(--bg)';
+    let opacity = inMese ? '1' : '0.35';
+    if (chiusura) bg = 'rgba(255,107,53,.18)';
+    else if (isFes) bg = 'rgba(78,184,255,.15)';
+    else if (isWE) bg = 'rgba(255,78,107,.08)';
+
+    const cell = el('div', {
+      style: `background:${bg};padding:6px 7px;min-height:80px;opacity:${opacity};position:relative;${isOggi?'box-shadow:inset 0 0 0 2px var(--acc);':''}`
+    });
+
+    // Numero giorno
+    cell.append(el('div', {
+      style: `font-family:DM Mono,monospace;font-size:11px;font-weight:700;color:${isOggi?'var(--acc)':(isFes?'var(--blu)':(isWE?'var(--red)':'var(--txt)'))};margin-bottom:3px;`
+    }, String(giorno)));
+
+    // Festività
+    if (isFes && inMese) {
+      const festInfo = (typeof festiviNazionali === 'function')
+        ? festiviNazionali(anno).find(f => {
+            const isoF = f.data instanceof Date ? toLocalISO(f.data) : f.data;
+            return isoF === iso;
+          })
+        : null;
+      cell.append(el('div', {
+        style: 'font-family:DM Mono,monospace;font-size:9px;color:var(--blu);font-weight:700;margin-bottom:2px;',
+        title: festInfo?.nome || 'Festivo',
+      }, '🎉 ' + (festInfo?.nome || 'Festivo')));
+    }
+
+    // Chiusura aziendale
+    if (chiusura && inMese) {
+      cell.append(el('div', {
+        style: 'font-family:DM Mono,monospace;font-size:9px;color:var(--or);font-weight:700;margin-bottom:2px;',
+        title: chiusura.descrizione || 'Chiusura',
+      }, '🔒 ' + (chiusura.descrizione || 'Chiusura')));
+    }
+
+    // Assenze (compatte)
+    if (ass.length && inMese) {
+      ass.forEach(a => {
+        const u = state.utentiById[a.utente_id];
+        const tipo = state.tipiAssenza.find(t => t.id === a.tipo_assenza_id);
+        const codice = tipo?.codice || '?';
+        const ore = parseFloat(a.ore) || 0;
+        const labelOre = ore >= 8 ? '' : ` ${ore}h`;
+        const nome = u ? (u.nome.split(' ')[0]) : '?'; // solo nome
+        cell.append(el('div', {
+          style: `font-family:DM Mono,monospace;font-size:9px;color:${tipo?.colore||'var(--mut)'};margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`,
+          title: `${u?.nome || '—'} — ${tipo?.nome || '?'} (${ore}h)${a.note ? '\n'+a.note : ''}`,
+        }, `${codice} ${nome}${labelOre}`));
+      });
+    }
+
+    grid.append(cell);
+  }
+
+  root.append(grid);
+
+  // Legenda
+  const leg = el('div', {
+    style: 'display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;font-family:DM Mono,monospace;font-size:10px;color:var(--mut);'
+  });
+  leg.append(el('span', {},
+    el('span', { style:'display:inline-block;width:12px;height:10px;background:rgba(78,184,255,.5);vertical-align:middle;margin-right:4px;' }),
+    '🎉 Festività'));
+  leg.append(el('span', {},
+    el('span', { style:'display:inline-block;width:12px;height:10px;background:rgba(255,107,53,.5);vertical-align:middle;margin-right:4px;' }),
+    '🔒 Chiusura aziendale'));
+  leg.append(el('span', {},
+    el('span', { style:'display:inline-block;width:12px;height:10px;background:rgba(255,78,107,.3);vertical-align:middle;margin-right:4px;' }),
+    'Weekend'));
+  state.tipiAssenza.filter(t => t.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0)).forEach(t => {
+    leg.append(el('span', {},
+      el('span', { style:`display:inline-block;width:12px;height:10px;background:${t.colore};vertical-align:middle;margin-right:4px;` }),
+      `${t.codice || '?'} ${t.nome}`));
+  });
+  root.append(leg);
+}
+
+// ═══════════════════════════════════════════════════════════
+// CALENDARI → MEZZI (calendario + tabella)
+// ═══════════════════════════════════════════════════════════
+
+// Vista unificata Mezzi: calendario in cima + tabella prenotazioni sotto
+function renderCalMezzi(root) {
+  root.innerHTML = '';
+
+  // Sezione 1: calendario
+  const calSection = el('div', {});
+  renderCalendar(calSection);
+  root.append(calSection);
+
+  // Separatore visivo
+  root.append(el('div', {
+    style: 'height:1px;background:var(--brd);margin:24px 0 18px;'
+  }));
+
+  // Sezione 2: tabella prenotazioni
+  const tblSection = el('div', {});
+  renderElenco(tblSection);
+  root.append(tblSection);
 }
 
 function renderCalendar(root) {
@@ -1424,9 +1592,9 @@ function renderCalendar(root) {
 
   root.innerHTML = '';
   root.append(el('div', { class:'cal-head' },
-    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()-1,1); renderTab('calendario'); }}, '← Prec'),
-    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(); renderTab('calendario'); }}, 'Oggi'),
-    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()+1,1); renderTab('calendario'); }}, 'Succ →'),
+    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()-1,1); renderTab('cal_mezzi'); }}, '← Prec'),
+    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(); renderTab('cal_mezzi'); }}, 'Oggi'),
+    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()+1,1); renderTab('cal_mezzi'); }}, 'Succ →'),
     el('h2', { style:'flex:1' }, monthName(cur)),
     el('button', { class:'btnp', onclick:()=>openPrenotazioneModal() }, '+ Nuova Prenotazione'),
   ));
@@ -1525,7 +1693,7 @@ function renderCalendar(root) {
           class: 'cal-evt cal-assenza',
           style: `border-left-color:${colore};background:${colore}1a;`,
           title: `Assenza: ${utz?.nome || '—'}\nTipo: ${tipo?.nome || 'senza tipo'}\nOre: ${ore}\n${fmtIT(ass.data)}${ass.note ? '\nNote: '+ass.note : ''}`,
-          onclick: (e) => { e.stopPropagation(); if (state.profile?.ruolo === 'admin') { switchToTab('gestione','assenze'); } }
+          onclick: (e) => { e.stopPropagation(); switchToTab('calendari','cal_assenze'); }
         }, `🌴 ${utz?.nome || '?'} · ${tipo?.codice || tipo?.nome || 'assente'}${labelOre}`));
       }
     });
@@ -6516,9 +6684,64 @@ function contaOreAnno(utenteId, anno) {
 // VISTA AMMINISTRATORE — calendario matrice
 // ═══════════════════════════════════════════════════════════
 
+// Trova il record utente collegato al profilo loggato
+function getMioUtente() {
+  if (!state.profile) return null;
+  return state.utenti.find(u => u.account_id === state.profile.id) || null;
+}
+
 function renderAssenze(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
+  const mioUtente = getMioUtente();
   root.innerHTML = '';
+
+  // Mini-riassunto personale (se ho un utente collegato)
+  if (mioUtente) {
+    const annoCorr = new Date().getFullYear();
+    const mie = state.assenze.filter(a =>
+      a.utente_id === mioUtente.id && a.stato === 'valida'
+    );
+    const oreAnno = contaOreAnno(mioUtente.id, annoCorr);
+
+    // Calcola ore per tipo (anno corrente)
+    const orePerTipo = {};
+    mie.forEach(a => {
+      const d = parseISODate(a.data);
+      if (d.getFullYear() !== annoCorr) return;
+      orePerTipo[a.tipo_assenza_id] = (orePerTipo[a.tipo_assenza_id] || 0) + (parseFloat(a.ore) || 0);
+    });
+
+    const riass = el('div', {
+      style: 'background:var(--sur);border:1px solid var(--brd);border-left:3px solid var(--acc);border-radius:4px;padding:10px 14px;margin-bottom:14px;'
+    });
+    riass.append(el('div', {
+      style: 'font-family:DM Mono,monospace;font-size:9px;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;'
+    }, `★ Le tue assenze — ${annoCorr}`));
+
+    const statsRow = el('div', {
+      style: 'display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;'
+    });
+    statsRow.append(el('div', {},
+      el('span', { style:'font-family:DM Mono,monospace;font-size:18px;font-weight:700;color:var(--acc);' }, oreAnno + 'h'),
+      el('span', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-left:6px;' }, 'totale'),
+    ));
+    const tipiAttivi = state.tipiAssenza.filter(t => t.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0));
+    tipiAttivi.forEach(t => {
+      const ore = orePerTipo[t.id] || 0;
+      if (ore === 0) return;
+      statsRow.append(el('div', {},
+        el('span', { style:`font-family:DM Mono,monospace;font-size:14px;font-weight:700;color:${t.colore};` }, ore + 'h'),
+        el('span', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-left:4px;' },
+          t.codice ? `${t.codice} (${t.nome})` : t.nome),
+      ));
+    });
+    if (oreAnno === 0) {
+      statsRow.append(el('span', { style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);' },
+        'Nessuna assenza registrata quest\'anno'));
+    }
+    riass.append(statsRow);
+    root.append(riass);
+  }
 
   // Toolbar superiore: switch Mese / Riepilogo
   const toolbar = el('div', { class:'assv2-toolbar' },
@@ -6526,11 +6749,11 @@ function renderAssenze(root) {
     el('div', { class:'switch-bar' },
       el('button', {
         class: state.assVistaCal === 'mese' ? 'act' : '',
-        onclick: () => { state.assVistaCal = 'mese'; renderTab('assenze'); }
+        onclick: () => { state.assVistaCal = 'mese'; renderTab('cal_assenze'); }
       }, 'Calendario'),
       el('button', {
         class: state.assVistaCal === 'riepilogo' ? 'act' : '',
-        onclick: () => { state.assVistaCal = 'riepilogo'; renderTab('assenze'); }
+        onclick: () => { state.assVistaCal = 'riepilogo'; renderTab('cal_assenze'); }
       }, 'Riepilogo annuale'),
     ),
   );
@@ -6543,7 +6766,7 @@ function renderAssenze(root) {
   anni.forEach(y => {
     yearpick.append(el('button', {
       class: state.assAnno === y ? 'act' : '',
-      onclick: () => { state.assAnno = y; renderTab('assenze'); }
+      onclick: () => { state.assAnno = y; renderTab('cal_assenze'); }
     }, String(y)));
   });
   root.append(yearpick);
@@ -6558,7 +6781,7 @@ function renderAssenze(root) {
   MESI_NOMI.forEach((nome, i) => {
     mesiBar.append(el('div', {
       class: 'assv2-tab' + (state.assMese === i ? ' active' : ''),
-      onclick: () => { state.assMese = i; renderTab('assenze'); }
+      onclick: () => { state.assMese = i; renderTab('cal_assenze'); }
     }, nome));
   });
   root.append(mesiBar);
@@ -6668,11 +6891,27 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
     .filter(u => u.attivo && !isKioskRecord(u))
     .sort((a,b) => a.nome.localeCompare(b.nome));
 
-  utenti.forEach(u => {
+  const mioUtente = getMioUtente();
+  const mioUtenteId = mioUtente?.id || null;
+
+  // Per i non-admin: la propria riga in cima (se esiste)
+  let utentiOrdinati = utenti;
+  if (!isAdmin && mioUtenteId) {
+    utentiOrdinati = [
+      ...utenti.filter(u => u.id === mioUtenteId),
+      ...utenti.filter(u => u.id !== mioUtenteId),
+    ];
+  }
+
+  utentiOrdinati.forEach(u => {
+    const isMia = u.id === mioUtenteId;
     const tr = el('tr');
+    if (isMia) tr.style.background = 'rgba(212,255,78,.04)';
+
     tr.append(el('td', {
       class: 'assv2-col-name' + (u.esterno ? ' esterno' : ''),
-    }, u.nome + (u.esterno ? ' ✦' : '')));
+      style: isMia ? 'border-left:3px solid var(--acc);' : '',
+    }, (isMia ? '★ ' : '') + u.nome + (u.esterno ? ' ✦' : '')));
 
     giorni.forEach(g => {
       const cls = ['assv2-td-day'];
@@ -6708,7 +6947,8 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
 
       if (g.oggi) cls.push('oggi');
 
-      const canEdit = isAdmin && !g.weekend && !g.festivo && !g.chiusura;
+      const canEdit = (isAdmin || (mioUtenteId && u.id === mioUtenteId))
+        && !g.weekend && !g.festivo && !g.chiusura;
       if (canEdit) cls.push('can-edit');
 
       const td = el('td', {
@@ -6888,7 +7128,7 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
       }
       toast('Assenza salvata');
       closeModal();
-      renderTab('assenze');
+      renderTab('cal_assenze');
     } catch (e) {
       btnSave.disabled = false;
       btnSave.textContent = 'Salva';
@@ -6939,7 +7179,7 @@ async function eliminaAssenza(a) {
   state.assenze = state.assenze.filter(x => x.id !== a.id);
   toast('Assenza eliminata');
   closeModal();
-  renderTab('assenze');
+  renderTab('cal_assenze');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -6953,7 +7193,7 @@ async function toggleChiusuraAziendale(iso, esistente) {
     if (error) return toast(error.message, 'err');
     state.chiusure = state.chiusure.filter(c => c.id !== esistente.id);
     toast('Chiusura rimossa');
-    renderTab('assenze');
+    renderTab('cal_assenze');
   } else {
     const desc = prompt(`Descrizione chiusura del ${fmtIT(iso)} (es. "Ponte" o "Festività patronale"):`, 'Chiusura');
     if (desc === null) return;
@@ -6963,7 +7203,7 @@ async function toggleChiusuraAziendale(iso, esistente) {
     if (error) return toast(error.message, 'err');
     state.chiusure.push(data);
     toast('Chiusura aggiunta');
-    renderTab('assenze');
+    renderTab('cal_assenze');
   }
 }
 
@@ -7041,361 +7281,6 @@ function renderRiepilogoAssenze(root) {
   tblTipi.append(tbT);
   wrapTipi.append(tblTipi);
   root.append(wrapTipi);
-}
-
-// ═══════════════════════════════════════════════════════════
-// VISTA PERSONALE — "Le mie assenze"
-// ═══════════════════════════════════════════════════════════
-
-function getMioUtente() {
-  return state.utenti.find(u => u.account_id === state.profile.id) || null;
-}
-
-function renderMieAssenze(root) {
-  root.innerHTML = '';
-  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Le mie assenze')));
-
-  const mioUtente = getMioUtente();
-
-  if (!mioUtente) {
-    root.append(el('div', { style:'padding:20px;background:var(--sur);border:1px solid var(--yel);border-radius:6px;' },
-      el('div', { class:'kl', style:'color:var(--yel);margin-bottom:8px;' }, '⚠ Account non collegato'),
-      el('div', { class:'sub', style:'line-height:1.7;' },
-        'Il tuo account login non è ancora collegato a una scheda anagrafica.',
-        el('br'),
-        'Contatta l\'amministratore: deve collegare il tuo account in Gestione → Utenti.'),
-    ));
-    return;
-  }
-
-  // KPI
-  const annoCorr = new Date().getFullYear();
-  const mie = state.assenze.filter(a => a.utente_id === mioUtente.id && a.stato === 'valida');
-  const oreAnno = contaOreAnno(mioUtente.id, annoCorr);
-
-  // Calcola ore per tipo (anno corrente)
-  const orePerTipo = {};
-  mie.forEach(a => {
-    const d = parseISODate(a.data);
-    if (d.getFullYear() !== annoCorr) return;
-    orePerTipo[a.tipo_assenza_id] = (orePerTipo[a.tipo_assenza_id] || 0) + (parseFloat(a.ore) || 0);
-  });
-
-  const statsBox = el('div', { class:'mie-stats' });
-  statsBox.append(el('div', { class:'mie-stat' },
-    el('div', { class:'mie-stat-lbl' }, `Ore totali ${annoCorr}`),
-    el('div', { class:'mie-stat-val', style:'color:var(--acc);' }, oreAnno + 'h'),
-  ));
-  state.tipiAssenza.filter(t => t.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0)).forEach(t => {
-    const ore = orePerTipo[t.id] || 0;
-    if (ore === 0) return;
-    statsBox.append(el('div', { class:'mie-stat' },
-      el('div', { class:'mie-stat-lbl' }, t.nome),
-      el('div', { class:'mie-stat-val', style:`color:${t.colore};` }, ore + 'h'),
-    ));
-  });
-  root.append(statsBox);
-
-  // Selettore anno + mese (compatto)
-  if (state.assAnno === undefined) state.assAnno = annoCorr;
-  if (state.assMese === undefined) state.assMese = new Date().getMonth();
-  const anni = [annoCorr - 1, annoCorr, annoCorr + 1];
-  const yearpick = el('div', { class:'assv2-yearpick' });
-  anni.forEach(y => {
-    yearpick.append(el('button', {
-      class: state.assAnno === y ? 'act' : '',
-      onclick: () => { state.assAnno = y; renderTab('mie_assenze'); }
-    }, String(y)));
-  });
-  root.append(yearpick);
-
-  const mesiBar = el('div', { class:'assv2-tabbar' });
-  MESI_NOMI.forEach((nome, i) => {
-    mesiBar.append(el('div', {
-      class: 'assv2-tab' + (state.assMese === i ? ' active' : ''),
-      onclick: () => { state.assMese = i; renderTab('mie_assenze'); }
-    }, nome));
-  });
-  root.append(mesiBar);
-
-  // Mini calendario solo per me — riuso renderCalendarioMese ma con un solo utente
-  renderCalendarioMeseMio(root, mioUtente, state.assAnno, state.assMese);
-}
-
-function renderCalendarioMeseMio(root, utente, anno, mese) {
-  const numGiorni = new Date(anno, mese + 1, 0).getDate();
-  const festSet = festiviAnno(anno);
-  const oggiISO = toLocalISO(new Date());
-
-  const giorni = [];
-  for (let d = 1; d <= numGiorni; d++) {
-    const dateObj = new Date(anno, mese, d);
-    const iso = toLocalISO(dateObj);
-    giorni.push({
-      d, iso, dateObj,
-      dow: (dateObj.getDay() + 6) % 7,
-      weekend: isWeekend(dateObj),
-      festivo: isFestivo(iso, festSet),
-      oggi: iso === oggiISO,
-      chiusura: getChiusuraAziendale(iso),
-    });
-  }
-
-  // Legenda compatta
-  const legend = el('div', { class:'assv2-legend' });
-  state.tipiAssenza.filter(t => t.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0)).forEach(t => {
-    legend.append(el('span', { class:'leg' },
-      el('span', { class:'ld', style:`background:${t.colore||'#6b6b64'};` }),
-      `${t.codice || '?'} = ${t.nome}`));
-  });
-  root.append(legend);
-
-  root.append(el('div', { class:'assv2-hint' },
-    '✎ Clicca su un giorno per inserire/modificare la tua assenza'));
-
-  const wrap = el('div', { class:'assv2-cal-wrap' });
-  const table = el('table', { class:'assv2-cal' });
-
-  // Header mese
-  table.append(el('tr', {},
-    el('th', { class:'assv2-th-month', colspan: String(numGiorni + 1) },
-      MESI_ESTESI[mese].toUpperCase() + ' ' + anno)));
-
-  // Numeri giorni
-  const trDays = el('tr');
-  trDays.append(el('th', { class:'assv2-col-name' }, ''));
-  giorni.forEach(g => {
-    const cls = ['assv2-th-day'];
-    if (g.weekend) cls.push('we');
-    else if (g.festivo) cls.push('fes');
-    else if (g.chiusura) cls.push('ca');
-    if (g.oggi) cls.push('oggi');
-    trDays.append(el('th', { class: cls.join(' ') }, String(g.d)));
-  });
-  table.append(trDays);
-
-  // DOW
-  const trDow = el('tr');
-  trDow.append(el('th', { class:'assv2-col-name' }, ''));
-  giorni.forEach(g => {
-    const cls = ['assv2-th-dow'];
-    if (g.weekend) cls.push('we');
-    else if (g.festivo) cls.push('fes');
-    trDow.append(el('th', { class: cls.join(' ') }, GIORNI_BREVI[g.dow]));
-  });
-  table.append(trDow);
-
-  // Riga utente
-  const tr = el('tr');
-  tr.append(el('td', { class:'assv2-col-name' }, utente.nome));
-  giorni.forEach(g => {
-    const cls = ['assv2-td-day'];
-    if (g.weekend) cls.push('we');
-    else if (g.festivo) cls.push('fes');
-    else if (g.chiusura) cls.push('ca');
-    if (g.oggi) cls.push('oggi');
-
-    const ass = getAssenza(utente.id, g.iso);
-    let label = '';
-    let bgInline = '';
-    let colInline = '';
-
-    if (g.festivo) label = 'FS';
-    else if (g.chiusura) label = 'CA';
-
-    if (ass) {
-      const tipo = state.tipiAssenza.find(t => t.id === ass.tipo_assenza_id);
-      const codice = tipo?.codice || '?';
-      const ore = parseFloat(ass.ore) || 0;
-      label = ore >= 8 ? codice : codice + ore;
-      cls.push('has-ass');
-      if (!g.weekend && !g.festivo && !g.chiusura) {
-        bgInline = (tipo?.colore || '#6b6b64');
-        colInline = textColorOnBg(bgInline);
-      }
-    }
-
-    const canEdit = !g.weekend && !g.festivo && !g.chiusura;
-    if (canEdit) cls.push('can-edit');
-
-    const td = el('td', {
-      class: cls.join(' '),
-      title: ass ? `${ass.ore}h - ${state.tipiAssenza.find(t=>t.id===ass.tipo_assenza_id)?.nome || ''}${ass.note ? '\nNote: '+ass.note : ''}` : '',
-    });
-    const span = el('span', {}, label);
-    if (bgInline) {
-      span.style.background = bgInline;
-      span.style.color = colInline;
-    }
-    td.append(span);
-    if (canEdit) {
-      td.onclick = () => openCellaAssenzaModalMio(utente, g.iso, ass);
-    }
-    tr.append(td);
-  });
-  table.append(tr);
-
-  wrap.append(table);
-  root.append(wrap);
-}
-
-// Variante della modal per la vista personale (usa renderTab mie_assenze al posto di assenze)
-function openCellaAssenzaModalMio(utente, iso, assEsistente) {
-  // Riusiamo openCellaAssenzaModal ma sovrascrivendo il refresh finale
-  // Più semplice: copia la logica e cambia la renderTab
-  const modal = el('div', { class:'modal' });
-  modal.append(el('div', { class:'mhd' },
-    el('h2', {}, assEsistente ? 'Modifica Assenza' : 'Nuova Assenza'),
-    el('button', { class:'mclose', onclick:closeModal }, '✕'),
-  ));
-
-  const body = el('div', { class:'mbody' });
-  body.append(el('div', { class:'assv2-modal-step' }, `${utente.nome} · ${fmtIT(iso)}`));
-
-  let tipoSel = assEsistente?.tipo_assenza_id || '';
-  let oreSel = assEsistente ? parseFloat(assEsistente.ore) : null;
-
-  body.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;' }, 'Tipo:'));
-  const chipsTipo = el('div', { class:'assv2-chips' });
-  state.tipiAssenza.filter(t => t.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0)).forEach(t => {
-    const chip = el('div', {
-      class: 'assv2-chip',
-      onclick: () => {
-        tipoSel = t.id;
-        if (oreSel === null) oreSel = parseFloat(t.ore_default) || 8;
-        refresh();
-      },
-    }, t.codice ? `${t.codice} — ${t.nome}` : t.nome);
-    chipsTipo.append(chip);
-  });
-  body.append(chipsTipo);
-
-  body.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;' }, 'Ore:'));
-  const chipsOre = el('div', { class:'assv2-chips' });
-  const orePresets = [8, 4, 2, 1, 0.5];
-  orePresets.forEach(o => {
-    chipsOre.append(el('div', {
-      class: 'assv2-chip',
-      onclick: () => { oreSel = o; refresh(); },
-    }, o + 'h'));
-  });
-  const inputAltro = el('input', {
-    type: 'number', step: '0.5', min: '0', max: '24', placeholder: 'altro',
-    style: 'flex:0 0 70px;height:auto;padding:9px 8px;font-family:DM Mono,monospace;font-size:11px;background:var(--sur2);border:2px solid var(--brd);color:var(--txt);border-radius:3px;',
-  });
-  inputAltro.onchange = () => {
-    const v = parseFloat(inputAltro.value);
-    if (!isNaN(v) && v >= 0 && v <= 24) {
-      oreSel = Math.round(v * 2) / 2;
-      refresh();
-    }
-  };
-  chipsOre.append(inputAltro);
-  body.append(chipsOre);
-
-  body.append(el('div', { class:'field', style:'margin-top:10px;' },
-    el('label', {}, 'Note (opz.)'),
-    el('textarea', { id:'ass-note', rows:'2' }, assEsistente?.note || ''),
-  ));
-
-  const riepilogo = el('div', {
-    style: 'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);padding:8px 10px;background:var(--sur2);border-radius:3px;margin-top:10px;'
-  });
-  body.append(riepilogo);
-
-  modal.append(body);
-
-  const foot = el('div', { class:'mfoot' });
-  if (assEsistente) {
-    foot.append(el('button', {
-      class: 'btnd',
-      onclick: async () => {
-        if (!confirm(`Eliminare la tua assenza del ${fmtIT(iso)}?`)) return;
-        const { data, error } = await sb.from('assenze').delete().eq('id', assEsistente.id).select();
-        if (error) return toast(error.message, 'err');
-        if (!data || !data.length) return toast('Eliminazione bloccata', 'err');
-        state.assenze = state.assenze.filter(x => x.id !== assEsistente.id);
-        toast('Assenza eliminata');
-        closeModal();
-        renderTab('mie_assenze');
-      },
-    }, '🗑 Elimina'));
-  }
-  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
-  const btnSave = el('button', { class:'btnp' }, 'Salva');
-  btnSave.onclick = async () => {
-    if (!tipoSel) return toast('Seleziona il tipo', 'err');
-    if (oreSel === null || oreSel < 0) return toast('Inserisci le ore', 'err');
-    btnSave.disabled = true;
-    btnSave.textContent = 'Salvataggio…';
-    const note = (document.getElementById('ass-note').value || '').trim() || null;
-    try {
-      let q;
-      if (assEsistente) {
-        q = sb.from('assenze').update({
-          tipo_assenza_id: tipoSel, ore: oreSel, note,
-        }).eq('id', assEsistente.id).select().single();
-      } else {
-        q = sb.from('assenze').insert({
-          utente_id: utente.id, tipo_assenza_id: tipoSel,
-          data: iso, ore: oreSel, stato: 'valida', note,
-          creato_da: state.profile.id,
-        }).select().single();
-      }
-      const { data, error } = await q;
-      if (error) {
-        btnSave.disabled = false;
-        btnSave.textContent = 'Salva';
-        if (error.code === '23505') return toast('Esiste già un\'assenza per questo giorno', 'err');
-        return toast(error.message, 'err');
-      }
-      if (assEsistente) {
-        state.assenze = state.assenze.map(x => x.id === data.id ? data : x);
-      } else {
-        if (!state.assenze.find(x => x.id === data.id)) state.assenze.unshift(data);
-      }
-      toast('Assenza salvata');
-      closeModal();
-      renderTab('mie_assenze');
-    } catch (e) {
-      btnSave.disabled = false;
-      btnSave.textContent = 'Salva';
-      toast('Errore: '+(e.message||e), 'err');
-    }
-  };
-  foot.append(btnSave);
-  modal.append(foot);
-  openModal(modal);
-
-  function refresh() {
-    const tipiAttivi = state.tipiAssenza.filter(t => t.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0));
-    chipsTipo.querySelectorAll('.assv2-chip').forEach((c, i) => {
-      const t = tipiAttivi[i];
-      const isSel = tipoSel === t.id;
-      c.className = 'assv2-chip' + (isSel ? ' sel' : '');
-      c.style.cssText = isSel
-        ? `background:${t.colore};color:${textColorOnBg(t.colore)};border-color:${t.colore};`
-        : `border-color:${t.colore};color:${t.colore};`;
-    });
-    chipsOre.querySelectorAll('.assv2-chip').forEach((c, i) => {
-      c.className = 'assv2-chip' + (oreSel === orePresets[i] ? ' sel' : '');
-    });
-    if (oreSel !== null && !orePresets.includes(oreSel)) {
-      inputAltro.value = oreSel;
-    }
-    const tipo = state.tipiAssenza.find(t => t.id === tipoSel);
-    if (tipo && oreSel !== null) {
-      riepilogo.innerHTML = '';
-      riepilogo.append(
-        el('span', { style:'color:var(--txt);font-weight:700;' }, `${tipo.nome}: ${oreSel}h`),
-        ' su ',
-        el('span', { style:'color:var(--acc);' }, fmtIT(iso)),
-      );
-    } else {
-      riepilogo.textContent = 'Seleziona tipo e ore';
-    }
-  }
-  refresh();
 }
 
 // ═══════════════════════════════════════════════════════════
