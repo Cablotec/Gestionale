@@ -417,12 +417,17 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .gantt-cell{background:var(--bg);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);position:relative;min-height:42px;}
 .gantt-cell.weekend{background:rgba(255,107,53,.03);}
 .gantt-cell.oggi{background:rgba(212,255,78,.03);}
-.gantt-bar{position:absolute;top:6px;bottom:6px;border-radius:3px;cursor:pointer;padding:2px 6px;font-size:10px;color:#0f0f0e;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;display:flex;flex-direction:column;justify-content:center;transition:transform .1s;border:1px solid transparent;}
+.gantt-bar{position:absolute;top:6px;bottom:6px;border-radius:3px;cursor:pointer;padding:2px 6px;font-size:10px;color:#0f0f0e;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;display:flex;flex-direction:column;justify-content:center;transition:transform .1s;border:1px solid transparent;z-index:1;}
 .gantt-bar:hover{transform:scaleY(1.06);z-index:5;border-color:var(--txt);}
 .gantt-bar.aperta{box-shadow:0 0 0 2px var(--grn);}
 .gantt-bar-cod{font-family:'DM Mono',monospace;font-size:9px;opacity:.85;}
 .gantt-bar-dur{font-family:'DM Mono',monospace;font-size:9px;opacity:.8;}
 .gantt-empty-row{padding:30px;text-align:center;color:var(--mut);font-family:'DM Mono',monospace;font-size:11px;grid-column:1/-1;border-bottom:1px solid var(--brd);}
+
+/* Overlay assenza sul gantt — strato sotto le barre, non interattivo per il clic */
+.gantt-ass-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:#0f0f0e;letter-spacing:.05em;pointer-events:none;z-index:0;}
+.gantt-ass-overlay.partial{justify-content:flex-end;padding-right:3px;opacity:.7;}
+.gantt-cell.has-ass{background:repeating-linear-gradient(135deg,rgba(107,107,100,.18) 0,rgba(107,107,100,.18) 6px,transparent 6px,transparent 12px);}
 
 /* ═══ CALENDARIO ASSENZE V2 — matrice compatta ═══ */
 .assv2-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;}
@@ -6061,21 +6066,34 @@ function renderGantt(root) {
 
 // ─── VISTA LIVE: dashboard chi-sta-facendo-cosa ───
 function renderGanttLive(root) {
-  // Filtra operatori attivi (no kiosk)
-  const operatori = state.utenti.filter(u => u.attivo && !isKioskRecord(u))
+  // Filtra operatori attivi (no kiosk, no esterni)
+  const operatori = state.utenti.filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
     .sort((a,b) => a.nome.localeCompare(b.nome));
+
+  const oggiISO = toLocalISO(new Date());
+
+  // Mappa utente_id → assenza valida oggi
+  const assOggiByUtente = {};
+  state.assenze.forEach(a => {
+    if (a.stato === 'valida' && a.data === oggiISO) {
+      assOggiByUtente[a.utente_id] = a;
+    }
+  });
 
   // KPI riepilogo
   const attivi = state.sessioni.filter(s => !s.fine).length;
   const totOperatori = operatori.length;
+  const assOggi = operatori.filter(u => assOggiByUtente[u.id]).length;
   const totOggi = state.sessioni.filter(s => {
     const ini = (s.inizio||'').substring(0,10);
-    return ini === toLocalISO(new Date());
+    return ini === oggiISO;
   }).length;
 
   root.append(el('div', { class:'kpis' },
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Operatori al lavoro'),
       el('div', { class:'kv kg' }, String(attivi)+' / '+String(totOperatori))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Assenti oggi'),
+      el('div', { class:'kv ky' }, String(assOggi))),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Sessioni oggi'),
       el('div', { class:'kv' }, String(totOggi))),
   ));
@@ -6084,16 +6102,44 @@ function renderGanttLive(root) {
   const grid = el('div', { class:'live-grid' });
   operatori.forEach(u => {
     const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
-    const card = el('div', { class: 'live-card ' + (sess ? 'attivo' : 'fermo') });
+    const assOggi = assOggiByUtente[u.id];
+
+    let cardClass = 'live-card ';
+    if (sess) cardClass += 'attivo';
+    else if (assOggi) cardClass += 'fermo';
+    else cardClass += 'fermo';
+
+    const card = el('div', { class: cardClass });
+    if (assOggi) {
+      const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
+      card.style.background = `${(tipo?.colore || '#6b6b64')}15`;
+      card.style.borderColor = (tipo?.colore || '#6b6b64');
+    }
+
+    let badgeStato;
+    if (sess) badgeStato = '● attivo';
+    else if (assOggi) {
+      const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
+      const ore = parseFloat(assOggi.ore) || 0;
+      badgeStato = (tipo?.codice || 'A') + (ore >= 8 ? '' : ' ' + ore + 'h');
+    } else badgeStato = 'fermo';
 
     const hd = el('div', { class:'live-card-hd' },
-      el('div', { class:'live-card-nome' }, u.nome + (u.esterno ? ' ✦' : '')),
-      el('div', { class:'live-card-stato-badge '+(sess?'attivo':'fermo') },
-        sess ? '● attivo' : 'fermo'),
+      el('div', { class:'live-card-nome' }, u.nome),
+      el('div', {
+        class:'live-card-stato-badge '+(sess?'attivo':'fermo'),
+        style: assOggi ? `color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};border-color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};` : '',
+      }, badgeStato),
     );
     card.append(hd);
 
-    if (sess) {
+    if (assOggi) {
+      const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
+      const ore = parseFloat(assOggi.ore) || 0;
+      card.append(el('div', {
+        style: 'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-top:6px;',
+      }, `${tipo?.nome || 'Assenza'} · ${ore}h${assOggi.note ? ' — '+assOggi.note : ''}`));
+    } else if (sess) {
       const op = state.operazioni.find(o => o.id === sess.operazione_id);
       const cli = op ? state.clienti.find(c => c.id === op.cliente_id) : null;
       const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
@@ -6191,9 +6237,9 @@ function renderGanttStorico(root) {
     ),
   );
 
-  // Select operatore (filtro opzionale)
+  // Select operatore (filtro opzionale) — esclude esterni dal Gantt
   const opChoices = state.utenti
-    .filter(u => u.attivo && !isKioskRecord(u))
+    .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
     .sort((a,b) => a.nome.localeCompare(b.nome));
   const selOper = el('select', {
     style:'background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:5px 10px;border-radius:3px;font-family:DM Mono,monospace;font-size:11px;',
@@ -6246,12 +6292,54 @@ function renderGanttStorico(root) {
       sessIntersectsRange(s, range.start, range.end)
     );
 
+    // Mappa data → assenza valida per questo operatore (lookup O(1) per slot)
+    const assByDate = {};
+    state.assenze.forEach(a => {
+      if (a.utente_id === u.id && a.stato === 'valida') {
+        assByDate[a.data] = a;
+      }
+    });
+
     // Una cella per slot
     slots.forEach((slot, slotIdx) => {
       const cellCls = ['gantt-cell'];
       if (slot.weekend) cellCls.push('weekend');
       if (slot.dateISO === oggiISO || slot.isOggi) cellCls.push('oggi');
+
+      // Verifica se in questo slot c'è un'assenza per l'operatore
+      const ass = assByDate[slot.dateISO];
+      if (ass) cellCls.push('has-ass');
+
       const cell = el('div', { class: cellCls.join(' ') });
+
+      // Overlay assenza (sotto le barre, non interattivo)
+      if (ass) {
+        const tipo = state.tipiAssenza.find(t => t.id === ass.tipo_assenza_id);
+        const codice = tipo?.codice || '?';
+        const ore = parseFloat(ass.ore) || 0;
+        const isPiena = ore >= 8;
+        // Etichetta: in zoom giorno mostriamo il codice solo nel primo slot del giorno (slot 0:00)
+        // In settimana/mese, l'etichetta è una sola per slot/cella
+        let showLabel = '';
+        if (zoom === 'giorno') {
+          // In modalità giorno: cella di ogni ora. Mostro il codice solo nello slot 8 (orario lavorativo tipico)
+          // così non si ripete 24 volte; il pattern hatched copre tutta la giornata
+          if (slot.start.getHours() === 8) showLabel = isPiena ? codice : codice + ore;
+        } else {
+          showLabel = isPiena ? codice : codice + ore;
+        }
+
+        if (showLabel) {
+          cell.append(el('div', {
+            class: 'gantt-ass-overlay' + (isPiena ? '' : ' partial'),
+            style: `background:${(tipo?.colore || '#6b6b64')}33;`,  // 33 = 20% alpha
+            title: `${u.nome} — ${tipo?.nome || 'Assenza'} (${ore}h)${ass.note ? '\n'+ass.note : ''}`,
+          }, showLabel));
+        } else {
+          // Solo sfondo tinto, nessuna etichetta
+          cell.style.background = (tipo?.colore || '#6b6b64') + '22';
+        }
+      }
 
       // Trova sessioni che cadono in questo slot ("ancorate" al loro slot di inizio)
       sessUtente.forEach(s => {
@@ -6315,6 +6403,10 @@ function renderGanttStorico(root) {
     leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
       el('span', { style:'display:inline-block;width:18px;height:14px;border-radius:2px;border:2px solid var(--grn);' }),
       'In corso',
+    ));
+    leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
+      el('span', { style:'display:inline-block;width:18px;height:14px;border-radius:2px;background:repeating-linear-gradient(135deg,rgba(107,107,100,.4) 0,rgba(107,107,100,.4) 4px,transparent 4px,transparent 8px);' }),
+      'Assenza',
     ));
     root.append(leg);
   }
