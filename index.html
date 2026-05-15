@@ -441,12 +441,12 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .assv2-legend .ld{width:14px;height:12px;border:1px solid rgba(255,255,255,.1);flex-shrink:0;border-radius:1px;}
 
 .assv2-cal-wrap{overflow:auto;border:1px solid var(--brd);background:var(--sur);border-radius:4px;margin-bottom:10px;}
-table.assv2-cal{border-collapse:collapse;width:100%;table-layout:fixed;}
+table.assv2-cal{border-collapse:collapse;width:100%;}
 table.assv2-cal th,table.assv2-cal td{border:1px solid var(--brd);}
 .assv2-th-month{background:var(--sur2);color:var(--acc);font-family:'Syne',sans-serif;font-size:12px;font-weight:800;padding:5px 8px;text-align:center;letter-spacing:.05em;text-transform:uppercase;}
-.assv2-col-name{width:140px;min-width:140px;max-width:140px;position:sticky;left:0;z-index:3;}
-th.assv2-col-name{background:var(--sur2);color:var(--mut);font-family:'DM Mono',monospace;font-size:9px;font-weight:700;padding:4px 8px;text-align:left;letter-spacing:.08em;text-transform:uppercase;}
-td.assv2-col-name{padding:4px 8px;background:var(--sur);color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'Syne',sans-serif;font-size:11px;font-weight:600;}
+.assv2-col-name{width:1%;white-space:nowrap;position:sticky;left:0;z-index:3;}
+th.assv2-col-name{background:var(--sur2);color:var(--mut);font-family:'DM Mono',monospace;font-size:9px;font-weight:700;padding:4px 10px;text-align:left;letter-spacing:.08em;text-transform:uppercase;}
+td.assv2-col-name{padding:4px 12px 4px 10px;background:var(--sur);color:var(--txt);font-family:'Syne',sans-serif;font-size:11px;font-weight:600;}
 td.assv2-col-name.esterno{color:var(--yel);}
 .assv2-th-day{text-align:center;padding:2px 1px;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;background:var(--sur2);color:var(--mut);}
 .assv2-th-dow{text-align:center;padding:1px;font-family:'DM Mono',monospace;font-size:8px;font-weight:700;background:var(--sur2);color:var(--mut);opacity:.7;}
@@ -1478,7 +1478,7 @@ function renderCalendar(root) {
   }
   // Assenze + chiusure + festivi: mostrate in entrambe le modalità
   legend.append(el('span', { class:'lg' },
-    el('span', { class:'swatch', style:'background:rgba(78,255,163,.4);border-color:var(--grn);' }), '🌴 Assenza'));
+    el('span', { class:'swatch', style:'background:rgba(78,255,163,.4);border-color:var(--grn);' }), 'Assenza'));
   if (isGenerale) {
     legend.append(el('span', { class:'lg' },
       el('span', { class:'swatch', style:'background:rgba(255,107,53,.4);border-color:var(--or);' }), '🔒 Chiusura azienda'));
@@ -1608,7 +1608,7 @@ function renderCalendar(root) {
           style: `border-left-color:${colore};background:${colore}1a;`,
           title: `Assenza: ${utz?.nome || '—'}\nTipo: ${tipo?.nome || 'senza tipo'}\nOre: ${ore}\n${fmtIT(ass.data)}${ass.note ? '\nNote: '+ass.note : ''}`,
           onclick: (e) => { e.stopPropagation(); switchToTab('calendari','cal_assenze'); }
-        }, `🌴 ${utz?.nome || '?'} · ${tipo?.codice || tipo?.nome || 'assente'}${labelOre}`));
+        }, `${utz?.nome || '?'} · ${tipo?.codice || tipo?.nome || 'assente'}${labelOre}`));
       }
     });
     if (evs.length > max) {
@@ -5442,7 +5442,7 @@ function kioskRenderId() {
   const grid = $('#kiosk-utili-grid');
   grid.innerHTML = '';
   state.utenti
-    .filter(u => u.attivo && !isKioskRecord(u))
+    .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
     .forEach(u => {
       grid.appendChild(el('div', {
         class: 'kiosk-tile',
@@ -6778,31 +6778,9 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
   });
   table.append(trDow);
 
-  // Riga 4: chiusure aziendali (riga speciale, cliccabile solo admin)
-  const trCh = el('tr');
-  trCh.append(el('td', { class:'assv2-col-name assv2-ch-name' }, '🔒 Chiusure'));
-  giorni.forEach(g => {
-    const cls = ['assv2-td-day'];
-    if (g.weekend) cls.push('we');
-    else if (g.festivo) cls.push('fes');
-    else if (g.chiusura) cls.push('ca');
-    if (g.oggi) cls.push('oggi');
-    if (isAdmin) cls.push('assv2-td-ch can-edit');
-    const lblCh = g.chiusura ? 'CA' : '';
-    const td = el('td', {
-      class: cls.join(' '),
-      title: g.chiusura ? `Chiusura aziendale: ${g.chiusura.descrizione || ''}` : '',
-    }, el('span', {}, lblCh));
-    if (isAdmin) {
-      td.onclick = () => toggleChiusuraAziendale(g.iso, g.chiusura);
-    }
-    trCh.append(td);
-  });
-  table.append(trCh);
-
-  // Righe utenti (no kiosk)
+  // Righe utenti (no kiosk, no esterni)
   const utenti = state.utenti
-    .filter(u => u.attivo && !isKioskRecord(u))
+    .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
     .sort((a,b) => a.nome.localeCompare(b.nome));
 
   const mioUtente = getMioUtente();
@@ -6922,6 +6900,17 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
   let tipoSel = assEsistente?.tipo_assenza_id || '';
   let oreSel = assEsistente ? parseFloat(assEsistente.ore) : null;
 
+  // Determina il comportamento ore in base al codice del tipo
+  // F/M/FS = giornata fissa 8h; P = permesso con input step 0.5; altri = chips presets
+  function modalitaOre(tipoId) {
+    const tipo = state.tipiAssenza.find(t => t.id === tipoId);
+    if (!tipo) return 'presets';
+    const c = (tipo.codice || '').toUpperCase();
+    if (c === 'F' || c === 'M') return 'fissa';
+    if (c === 'P') return 'permesso';
+    return 'presets';
+  }
+
   const chipsTipo = el('div', { class:'assv2-chips' });
   state.tipiAssenza.filter(t => t.attivo)
     .sort((a,b)=>(a.ordine||0)-(b.ordine||0))
@@ -6933,8 +6922,16 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
           : `border-color:${t.colore};color:${t.colore};`,
         onclick: () => {
           tipoSel = t.id;
-          // Se non c'è ancora un'ora scelta, usa il default del tipo
-          if (oreSel === null) oreSel = parseFloat(t.ore_default) || 8;
+          // Riassesta le ore in base al tipo
+          const mod = modalitaOre(tipoSel);
+          if (mod === 'fissa') oreSel = 8;
+          else if (mod === 'permesso') {
+            // se non era ancora settato o veniva da un tipo "fisso", parto da 0.5
+            if (oreSel === null || oreSel >= 8) oreSel = 0.5;
+          } else {
+            if (oreSel === null) oreSel = parseFloat(t.ore_default) || 8;
+          }
+          renderUIOre();
           refresh();
         },
       }, t.codice ? `${t.codice} — ${t.nome}` : t.nome);
@@ -6942,38 +6939,107 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     });
   body.append(chipsTipo);
 
-  // Step 2: ore (scaglioni 0.5)
-  body.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;' }, 'Ore (scaglioni di 30 minuti):'));
-  const chipsOre = el('div', { class:'assv2-chips' });
+  // Step 2: sezione ore (cambia in base al tipo)
+  const oreLabel = el('div', {
+    style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;'
+  }, 'Ore:');
+  body.append(oreLabel);
 
-  // Bottoni rapidi: 8h, 4h, 2h, 1h, 0.5h + bottone "altro"
-  const orePresets = [8, 4, 2, 1, 0.5];
-  orePresets.forEach(o => {
-    chipsOre.append(el('div', {
-      class: 'assv2-chip' + (oreSel === o ? ' sel' : ''),
-      onclick: () => { oreSel = o; refresh(); },
-    }, o + 'h'));
-  });
-  // Input manuale per valori non standard
-  const inputAltro = el('input', {
-    type: 'number',
-    step: '0.5',
-    min: '0',
-    max: '24',
-    placeholder: 'altro',
-    style: 'flex:0 0 70px;height:auto;padding:9px 8px;font-family:DM Mono,monospace;font-size:11px;background:var(--sur2);border:2px solid var(--brd);color:var(--txt);border-radius:3px;',
-    value: oreSel !== null && !orePresets.includes(oreSel) ? oreSel : '',
-  });
-  inputAltro.onchange = () => {
-    const v = parseFloat(inputAltro.value);
-    if (!isNaN(v) && v >= 0 && v <= 24) {
-      // Arrotonda a 0.5
-      oreSel = Math.round(v * 2) / 2;
-      refresh();
+  const oreContainer = el('div', {});
+  body.append(oreContainer);
+
+  // Funzione che ridisegna la sezione "ore" in base al tipo selezionato
+  function renderUIOre() {
+    oreContainer.innerHTML = '';
+    if (!tipoSel) {
+      oreLabel.style.display = 'none';
+      return;
     }
-  };
-  chipsOre.append(inputAltro);
-  body.append(chipsOre);
+    oreLabel.style.display = '';
+    const mod = modalitaOre(tipoSel);
+
+    if (mod === 'fissa') {
+      // Giornata intera fissa — mostra solo info, niente input
+      oreLabel.style.display = 'none';
+      const tipo = state.tipiAssenza.find(t => t.id === tipoSel);
+      oreContainer.append(el('div', {
+        style: `background:var(--sur2);border:1px solid var(--brd);border-left:3px solid ${tipo?.colore || 'var(--mut)'};padding:9px 12px;border-radius:3px;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-bottom:12px;`
+      },
+        el('span', { style:'color:var(--txt);font-weight:700;' }, '8h '),
+        '— giornata intera',
+      ));
+    } else if (mod === 'permesso') {
+      // Permesso: stepper compatto con bottoni −/+ e input step 0.5
+      const stepper = el('div', {
+        style:'display:flex;align-items:center;gap:6px;margin-bottom:12px;'
+      });
+      const btnMinus = el('button', {
+        type:'button',
+        style:'width:38px;height:38px;font-size:18px;font-weight:700;background:var(--sur2);border:2px solid var(--brd);color:var(--txt);border-radius:3px;cursor:pointer;',
+        onclick: () => {
+          const v = Math.max(0, (oreSel || 0) - 0.5);
+          oreSel = Math.round(v * 2) / 2;
+          inputOre.value = oreSel;
+          refresh();
+        },
+      }, '−');
+      const inputOre = el('input', {
+        type:'number',
+        step:'0.5',
+        min:'0',
+        max:'8',
+        value: String(oreSel ?? 0.5),
+        style:'flex:1;height:38px;text-align:center;font-family:DM Mono,monospace;font-size:16px;font-weight:700;background:var(--sur2);border:2px solid var(--acc);color:var(--acc);border-radius:3px;outline:none;',
+      });
+      inputOre.onchange = () => {
+        const v = parseFloat(inputOre.value);
+        if (isNaN(v) || v < 0) { inputOre.value = 0; oreSel = 0; }
+        else if (v > 8) { inputOre.value = 8; oreSel = 8; }
+        else { oreSel = Math.round(v * 2) / 2; inputOre.value = oreSel; }
+        refresh();
+      };
+      const btnPlus = el('button', {
+        type:'button',
+        style:'width:38px;height:38px;font-size:18px;font-weight:700;background:var(--sur2);border:2px solid var(--brd);color:var(--txt);border-radius:3px;cursor:pointer;',
+        onclick: () => {
+          const v = Math.min(8, (oreSel || 0) + 0.5);
+          oreSel = Math.round(v * 2) / 2;
+          inputOre.value = oreSel;
+          refresh();
+        },
+      }, '+');
+      const lbl = el('span', { style:'font-family:DM Mono,monospace;font-size:13px;color:var(--mut);min-width:28px;' }, 'h');
+      stepper.append(btnMinus, inputOre, lbl, btnPlus);
+      oreContainer.append(stepper);
+      oreContainer.append(el('div', {
+        style:'font-family:DM Mono,monospace;font-size:9px;color:var(--mut);'
+      }, 'Da 0 a 8 ore, scaglioni di 30 minuti'));
+    } else {
+      // "presets" — chips 8/4/2/1/0.5 + input altro (per tipo "Altro/V")
+      const chipsOre = el('div', { class:'assv2-chips' });
+      const orePresets = [8, 4, 2, 1, 0.5];
+      orePresets.forEach(o => {
+        chipsOre.append(el('div', {
+          class: 'assv2-chip' + (oreSel === o ? ' sel' : ''),
+          onclick: () => { oreSel = o; refresh(); },
+        }, o + 'h'));
+      });
+      const inputAltro = el('input', {
+        type:'number', step:'0.5', min:'0', max:'24', placeholder:'altro',
+        style:'flex:0 0 70px;height:auto;padding:9px 8px;font-family:DM Mono,monospace;font-size:11px;background:var(--sur2);border:2px solid var(--brd);color:var(--txt);border-radius:3px;',
+        value: oreSel !== null && !orePresets.includes(oreSel) ? oreSel : '',
+      });
+      inputAltro.onchange = () => {
+        const v = parseFloat(inputAltro.value);
+        if (!isNaN(v) && v >= 0 && v <= 24) {
+          oreSel = Math.round(v * 2) / 2;
+          refresh();
+        }
+      };
+      chipsOre.append(inputAltro);
+      oreContainer.append(chipsOre);
+    }
+  }
 
   // Note
   body.append(el('div', { class:'field', style:'margin-top:10px;' },
@@ -7055,22 +7121,18 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
 
   function refresh() {
     // Aggiorna chips tipo
+    const tipiAttivi = state.tipiAssenza.filter(x => x.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0));
     chipsTipo.querySelectorAll('.assv2-chip').forEach((c, i) => {
-      const t = state.tipiAssenza.filter(x => x.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0))[i];
+      const t = tipiAttivi[i];
+      if (!t) return;
       const isSel = tipoSel === t.id;
       c.className = 'assv2-chip' + (isSel ? ' sel' : '');
       c.style.cssText = isSel
         ? `background:${t.colore};color:${textColorOnBg(t.colore)};border-color:${t.colore};`
         : `border-color:${t.colore};color:${t.colore};`;
     });
-    // Aggiorna chips ore
-    chipsOre.querySelectorAll('.assv2-chip').forEach((c, i) => {
-      c.className = 'assv2-chip' + (oreSel === orePresets[i] ? ' sel' : '');
-    });
-    if (oreSel !== null && !orePresets.includes(oreSel)) {
-      inputAltro.value = oreSel;
-    }
-    // Riepilogo
+    // La sezione ore è ridisegnata da renderUIOre quando cambia il tipo;
+    // qui aggiorniamo solo il riepilogo finale.
     const tipo = state.tipiAssenza.find(t => t.id === tipoSel);
     if (tipo && oreSel !== null) {
       riepilogo.innerHTML = '';
@@ -7080,9 +7142,11 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
         el('span', { style:'color:var(--acc);' }, fmtIT(iso)),
       );
     } else {
-      riepilogo.textContent = 'Seleziona tipo e ore per continuare';
+      riepilogo.textContent = 'Seleziona tipo per continuare';
     }
   }
+  // Render iniziale UI ore + refresh per popolare il riepilogo
+  renderUIOre();
   refresh();
 }
 
@@ -7128,7 +7192,7 @@ async function toggleChiusuraAziendale(iso, esistente) {
 function renderRiepilogoAssenze(root) {
   const anno = state.assAnno;
   const utenti = state.utenti
-    .filter(u => u.attivo && !isKioskRecord(u))
+    .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
     .sort((a,b) => a.nome.localeCompare(b.nome));
 
   root.append(el('div', { class:'sub', style:'margin-bottom:8px;' },
