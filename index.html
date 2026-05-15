@@ -623,6 +623,8 @@ const state = {
   assFiltroMese: null,     // YYYY-MM
   assVista: 'tabella',     // 'tabella' | 'calendario'
   assCalCursor: new Date(),// mese visualizzato nel calendario assenze
+  // Operazioni: multi-addetto (tabella ponte)
+  opAddetti: [],           // [{operazione_id, utente_id}]
   // Gantt
   ganttView: 'live',       // 'live' | 'storico'
   ganttZoom: 'giorno',     // 'giorno' | 'settimana' | 'mese'
@@ -880,7 +882,7 @@ window.addEventListener('online', async () => {
 });
 
 async function loadAllData() {
-  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('utenti').select('*').order('nome'),
@@ -896,6 +898,7 @@ async function loadAllData() {
     sb.from('sessioni_lavoro').select('*').order('inizio', { ascending:false }),
     sb.from('tipi_assenza').select('*').order('ordine'),
     sb.from('assenze').select('*').order('data_inizio', { ascending:false }),
+    sb.from('operazioni_addetti').select('*'),
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
@@ -912,6 +915,7 @@ async function loadAllData() {
   if (sessioni.error) throw sessioni.error;
   if (tipiAssenza.error) throw tipiAssenza.error;
   if (assenze.error) throw assenze.error;
+  if (opAddetti.error) throw opAddetti.error;
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
@@ -929,6 +933,7 @@ async function loadAllData() {
   state.sessioni = sessioni.data || [];
   state.tipiAssenza = tipiAssenza.data || [];
   state.assenze = assenze.data || [];
+  state.opAddetti = opAddetti.data || [];
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -966,6 +971,8 @@ function startRealtime() {
         (p) => applyChange('tipi_assenza', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'assenze' },
         (p) => applyChange('assenze', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'operazioni_addetti' },
+        (p) => applyChange('operazioni_addetti', p))
     .subscribe();
 }
 
@@ -1082,6 +1089,16 @@ function applyChange(tabella, payload) {
     } else if (ev === 'DELETE') {
       state.assenze = state.assenze.filter(x => x.id !== oldRow.id);
     }
+  } else if (tabella === 'operazioni_addetti') {
+    // PK composta (operazione_id, utente_id) — no campo id
+    const matchKey = (a, b) =>
+      a.operazione_id === b.operazione_id && a.utente_id === b.utente_id;
+    if (ev === 'INSERT') {
+      if (!state.opAddetti.find(x => matchKey(x, row))) state.opAddetti.push(row);
+    } else if (ev === 'DELETE') {
+      state.opAddetti = state.opAddetti.filter(x => !matchKey(x, oldRow));
+    }
+    // UPDATE non dovrebbe mai succedere su una tabella ponte pura
   }
 
   // Re-render solo la tab attiva
@@ -1091,6 +1108,62 @@ function applyChange(tabella, payload) {
 function loadPrenotazioneOperatori(prenId) {
   // Legge dalla cache in memoria (sync)
   return state.prenOp.filter(r => r.prenotazione_id === prenId).map(r => r.utente_id);
+}
+
+// Restituisce gli id degli addetti previsti di un'operazione (dalla cache, sync)
+function getOperazioneAddetti(opId) {
+  return state.opAddetti.filter(r => r.operazione_id === opId).map(r => r.utente_id);
+}
+
+// Sincronizza gli addetti previsti di un'operazione: diff tra vecchi e nuovi
+// Ritorna { error } o {} se ok.
+async function syncOperazioneAddetti(opId, nuoviIds) {
+  const vecchi = getOperazioneAddetti(opId);
+  const daAggiungere = nuoviIds.filter(id => !vecchi.includes(id));
+  const daRimuovere = vecchi.filter(id => !nuoviIds.includes(id));
+
+  // Inserisci nuovi
+  if (daAggiungere.length) {
+    const rows = daAggiungere.map(uid => ({ operazione_id: opId, utente_id: uid }));
+    const { error } = await sb.from('operazioni_addetti').insert(rows);
+    if (error) return { error };
+    // Aggiorna cache locale (il realtime lo farà anche, ma evitiamo flicker)
+    rows.forEach(r => { if (!state.opAddetti.find(x => x.operazione_id===r.operazione_id && x.utente_id===r.utente_id)) state.opAddetti.push(r); });
+  }
+  // Rimuovi vecchi
+  for (const uid of daRimuovere) {
+    const { error } = await sb.from('operazioni_addetti')
+      .delete()
+      .eq('operazione_id', opId)
+      .eq('utente_id', uid);
+    if (error) return { error };
+    state.opAddetti = state.opAddetti.filter(x => !(x.operazione_id===opId && x.utente_id===uid));
+  }
+  return {};
+}
+
+// Restituisce etichetta breve + dettaglio della destinazione di una prenotazione.
+// Una prenotazione può avere 0..N consegne (tappe). Ogni consegna ha un cliente_id (opz).
+// → { breve: 'TEMA SINERGIE' | 'TEMA SINERGIE +2' | 'Multi-stop' | '—', tooltip: 'lista cli' }
+function getPrenotazioneDestinazione(prenId) {
+  const cons = state.consegne
+    .filter(c => c.prenotazione_id === prenId)
+    .sort((a,b) => (a.ordine||0) - (b.ordine||0));
+  if (cons.length === 0) return { breve: '—', tooltip: 'Nessuna destinazione' };
+  const nomi = cons.map(c => {
+    if (c.cliente_id) {
+      const cli = state.clienti.find(x => x.id === c.cliente_id);
+      return cli ? cli.nome : '(cliente eliminato)';
+    }
+    return c.descrizione || '(senza destinazione)';
+  });
+  // Etichetta breve: primo nome + "+N" se ce ne sono altri
+  let breve;
+  if (cons.length === 1) breve = nomi[0];
+  else breve = nomi[0] + ' +' + (cons.length - 1);
+  // Tooltip: lista completa
+  const tooltip = nomi.map((n, i) => (i+1) + '. ' + n).join('\n');
+  return { breve, tooltip };
 }
 
 // Verifica sovrapposizioni dalla cache in memoria (no fetch)
@@ -1346,12 +1419,17 @@ function renderCalendar(root) {
           .map(r => state.utentiById[r.utente_id]?.nome)
           .filter(Boolean);
         const utilLbl = utilNomi.length ? utilNomi.join(', ') : '—';
+        const dest = getPrenotazioneDestinazione(p.id);
+        // Etichetta nel calendario: mezzo · destinazione (o operatore se manca dest)
+        const lblPezzi = [m?.nome || '?'];
+        if (dest.breve !== '—') lblPezzi.push('→ '+dest.breve);
+        else lblPezzi.push(utilLbl);
         box.append(el('div', {
           class: 'cal-evt',
           style: `border-left-color:${color}`,
-          title: `Mezzo: ${m?.nome || '—'}\nOperatori: ${utilLbl}\nTipo: ${p.tipo}\nCreata da: ${autore}`,
+          title: `Mezzo: ${m?.nome || '—'}\nDestinazione:\n${dest.tooltip}\nOperatori: ${utilLbl}\nTipo: ${p.tipo}\nCreata da: ${autore}`,
           onclick: (e) => { e.stopPropagation(); openPrenotazioneModal(p); }
-        }, `${m?.nome || '?'} · ${utilLbl}`));
+        }, lblPezzi.join(' ')));
       } else if (entry.kind === 'uso') {
         // entry.kind === 'uso'
         const u = entry.data;
@@ -1422,13 +1500,15 @@ function openDayDetailModal(iso, evs) {
         .map(r => state.utentiById[r.utente_id]?.nome)
         .filter(Boolean);
       const color = TIPO_COLOR[p.tipo] || '#6b6b64';
+      const dest = getPrenotazioneDestinazione(p.id);
       body.append(el('div', {
         class:'day-row',
         style:`border-left-color:${color};`,
         onclick: () => { closeModal(); openPrenotazioneModal(p); },
       },
         el('div', { class:'day-row-title' },
-          (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '')),
+          (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '') +
+          (dest.breve !== '—' ? ' → '+dest.breve : '')),
         el('div', { class:'day-row-sub' },
           el('span', { class:'badge '+TIPO_BADGE[p.tipo] }, p.tipo),
           ' ',
@@ -1498,7 +1578,7 @@ function renderElenco(root) {
   const tw = el('div', { class:'tw' });
   const tbl = el('table', { class:'rt' });
   tbl.append(el('thead', {}, el('tr', {},
-    el('th', {}, 'Periodo'), el('th', {}, 'Mezzo'), el('th', {}, 'Tipo'),
+    el('th', {}, 'Periodo'), el('th', {}, 'Mezzo'), el('th', {}, 'Destinazione'), el('th', {}, 'Tipo'),
     el('th', {}, 'Operatori'), el('th', {}, 'Prenotato da'), el('th', { class:'tc' }, 'Azioni'),
   )));
   const tb = el('tbody');
@@ -1510,9 +1590,14 @@ function renderElenco(root) {
       .filter(r => r.prenotazione_id === p.id)
       .map(r => state.utentiById[r.utente_id]?.nome)
       .filter(Boolean);
+    const dest = getPrenotazioneDestinazione(p.id);
     tb.append(el('tr', {},
       el('td', { class:'mono' }, periodo),
       el('td', {}, el('span', { class:'cod-cell' }, m ? m.nome : '—')),
+      el('td', { title: dest.tooltip },
+        dest.breve === '—'
+          ? el('span', { class:'sub' }, '—')
+          : el('span', {}, dest.breve)),
       el('td', {}, el('span', { class:'badge '+TIPO_BADGE[p.tipo] }, p.tipo)),
       el('td', {}, utilNomi.length ? utilNomi.join(', ') : '—'),
       el('td', { class:'mono' }, u?.nome || u?.email || '—'),
@@ -3351,9 +3436,10 @@ function renderPianificazione(root) {
   list.forEach(o => {
     const cli = state.clienti.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
-    const addetto = o.addetto_previsto_id
-      ? state.utenti.find(u => u.id === o.addetto_previsto_id)
-      : null;
+    const addettiIds = getOperazioneAddetti(o.id);
+    const addettiNomi = addettiIds
+      .map(id => state.utenti.find(u => u.id === id)?.nome)
+      .filter(Boolean);
     const ore = opCalcOre(o);
     const giorni = opCalcGiorni(o);
     const inizio = opCalcInizio(o);
@@ -3423,13 +3509,21 @@ function renderPianificazione(root) {
     // Giorni (calc)
     tr.append(el('td', { class:'tr calc-cell' }, String(giorni)));
 
-    // Addetto (inline editable con select)
-    const addettoOptions = [
-      { value:'', label:'—' },
-      ...state.utenti.filter(u => u.attivo).map(u => ({ value:u.id, label:u.nome }))
-    ];
-    tr.append(el('td', { style:'font-size:11px;' },
-      opInlineSelect(o, 'addetto_previsto_id', addetto?.nome || '—', addettoOptions)));
+    // Addetti previsti (read-only, click → modal)
+    let addettiLbl, addettiTooltip;
+    if (addettiNomi.length === 0) { addettiLbl = '—'; addettiTooltip = 'Nessun addetto previsto'; }
+    else if (addettiNomi.length === 1) { addettiLbl = addettiNomi[0]; addettiTooltip = addettiNomi[0]; }
+    else {
+      // Primo nome abbreviato + "+N"
+      const primo = addettiNomi[0].split(' ')[0];
+      addettiLbl = `${primo} +${addettiNomi.length - 1}`;
+      addettiTooltip = addettiNomi.join('\n');
+    }
+    tr.append(el('td', {
+      style:'font-size:11px;cursor:pointer;',
+      title: addettiTooltip + '\n\nClick per modificare',
+      onclick: () => openOperazioneModal(o),
+    }, addettiLbl));
 
     // Scadenza
     tr.append(el('td', { class:'mono '+scadCls },
@@ -3591,10 +3685,14 @@ function openOperazioneModal(o) {
     cliente_id:'', articolo_id:'', numero_ordine:'', pos:'', codice_op:'',
     descrizione_extra:'', quantita:1, minuti_unitari:0,
     scadenza:'', cl_consegna_materiali:'',
-    addetto_previsto_id:'', esterno_descrizione:'',
+    esterno_descrizione:'',
     stato:'aperta', stato_preparazione:'vuoto', note:'',
     consegnato_il:'', giustificazione_ritardo:'', nc_post_consegna:'', responsabilita:'',
   };
+
+  // Stato locale degli addetti previsti (modificabile, sincronizzato al salvataggio)
+  let addettiSel = isNew ? [] : getOperazioneAddetti(o.id).slice();
+  const canEdit = isAdmin;
 
   const modal = el('div', { class:'modal', style:'max-width:720px;' });
   modal.append(el('div', { class:'mhd' },
@@ -3621,13 +3719,68 @@ function openOperazioneModal(o) {
   );
   selArticolo.value = o.articolo_id || '';
 
-  // Select addetto
-  const selAddetto = el('select', { name:'addetto_previsto_id' },
-    el('option', { value:'' }, '— nessuno —'),
-    ...state.utenti.filter(u => u.attivo).map(u =>
-      el('option', { value:u.id }, u.nome + (u.esterno ? ' (esterno)' : '')))
-  );
-  selAddetto.value = o.addetto_previsto_id || '';
+  // Multi-select addetti (lo stesso pattern di "Chi userà il mezzo")
+  const utentiAttiviAdd = state.utenti.filter(u => u.attivo && !isKioskRecord(u));
+  const addSelectedWrap = el('div', { class:'util-selected' });
+  const addSearchInput = el('input', {
+    type:'text', class:'util-search',
+    placeholder:'Aggiungi addetto (clicca o cerca)…',
+    autocomplete:'off',
+  });
+  const addDropList = el('div', { class:'util-droplist' });
+  const addDropWrap = el('div', { class:'util-dropwrap' }, addSearchInput, addDropList);
+  addSearchInput.onfocus = () => { addDropList.classList.add('open'); renderAddDropList(); };
+  addSearchInput.onblur = () => { setTimeout(() => addDropList.classList.remove('open'), 180); };
+
+  const renderAddSelected = () => {
+    addSelectedWrap.innerHTML = '';
+    if (addettiSel.length === 0) {
+      addSelectedWrap.append(el('span', { class:'util-empty' }, 'Nessun addetto previsto'));
+      return;
+    }
+    addettiSel.forEach(uid => {
+      const u = utentiAttiviAdd.find(x => x.id === uid);
+      if (!u) return;
+      addSelectedWrap.append(el('span', { class:'util-pill' },
+        el('span', {}, u.nome + (u.esterno ? ' ✦' : '')),
+        canEdit ? el('button', {
+          type:'button', class:'util-pill-x',
+          onclick: () => {
+            addettiSel = addettiSel.filter(x => x !== uid);
+            renderAddSelected(); renderAddDropList();
+          },
+        }, '✕') : null,
+      ));
+    });
+  };
+  const renderAddDropList = () => {
+    const q = addSearchInput.value.trim().toLowerCase();
+    const filtered = utentiAttiviAdd.filter(u =>
+      !q || (u.nome || '').toLowerCase().includes(q)
+    );
+    addDropList.innerHTML = '';
+    if (!filtered.length) {
+      addDropList.append(el('div', { class:'util-noresult' }, 'Nessun utente trovato'));
+      return;
+    }
+    filtered.forEach(u => {
+      const isSel = addettiSel.includes(u.id);
+      addDropList.append(el('div', {
+        class: 'util-row' + (isSel ? ' selected' : ''),
+        onclick: () => {
+          if (!canEdit) return;
+          if (isSel) addettiSel = addettiSel.filter(x => x !== u.id);
+          else addettiSel.push(u.id);
+          renderAddSelected(); renderAddDropList();
+        },
+      },
+        el('span', { class:'util-row-chk' }, isSel ? '✓' : ''),
+        el('span', { class:'util-row-name' }, u.nome + (u.esterno ? ' ✦' : '')),
+      ));
+    });
+  };
+  addSearchInput.oninput = renderAddDropList;
+  renderAddSelected();
 
   // Stato + preparazione
   const selStato = el('select', { name:'stato' },
@@ -3674,12 +3827,13 @@ function openOperazioneModal(o) {
       el('div', { class:'field' }, el('label', {}, 'Consegna materiali entro'),
         el('input', { type:'date', name:'cl_consegna_materiali', value:o.cl_consegna_materiali||'' })),
     ),
-    el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Addetto previsto'), selAddetto),
-      el('div', { class:'field' }, el('label', {}, 'Lavorazione esterna'),
-        el('input', { type:'text', name:'esterno_descrizione', value:o.esterno_descrizione||'',
-          placeholder:'es. OL 4 TEKNINA' })),
-    ),
+    el('div', { class:'field' }, el('label', {}, 'Addetti previsti'),
+      addSelectedWrap, addDropWrap,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Puoi assegnare più persone. Il lavoro verrà ripartito tra loro.')),
+    el('div', { class:'field' }, el('label', {}, 'Lavorazione esterna'),
+      el('input', { type:'text', name:'esterno_descrizione', value:o.esterno_descrizione||'',
+        placeholder:'es. OL 4 TEKNINA' })),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Stato'), selStato),
       el('div', { class:'field' }, el('label', {}, 'Preparazione'), selPrep),
@@ -3834,7 +3988,6 @@ function openOperazioneModal(o) {
         minuti_unitari: parseInt(fd.get('minuti_unitari')) || 0,
         scadenza: fd.get('scadenza') || null,
         cl_consegna_materiali: fd.get('cl_consegna_materiali') || null,
-        addetto_previsto_id: fd.get('addetto_previsto_id') || null,
         esterno_descrizione: (fd.get('esterno_descrizione')||'').trim() || null,
         stato: fd.get('stato') || 'aperta',
         stato_preparazione: fd.get('stato_preparazione') || 'vuoto',
@@ -3866,6 +4019,13 @@ function openOperazioneModal(o) {
           if (!state.operazioni.find(x => x.id === data.id)) state.operazioni.push(data);
         } else {
           state.operazioni = state.operazioni.map(x => x.id === o.id ? data : x);
+        }
+        // Sincronizza gli addetti previsti nella tabella ponte
+        const syncRes = await syncOperazioneAddetti(data.id, addettiSel);
+        if (syncRes.error) {
+          btnSave.disabled = false;
+          btnSave.textContent = 'Salva';
+          return toast('Operazione salvata, ma errore addetti: '+syncRes.error.message, 'err');
         }
         toast(isNew ? 'Operazione creata' : 'Operazione aggiornata');
         closeModal(); renderTab('pianificazione');
@@ -3917,7 +4077,9 @@ function renderStorico(root) {
     list = list.filter(o => (o.consegnato_il||'').startsWith(filtroMese));
   }
   if (filtroCliente) list = list.filter(o => o.cliente_id === filtroCliente);
-  if (filtroAddetto) list = list.filter(o => o.addetto_previsto_id === filtroAddetto);
+  if (filtroAddetto) {
+    list = list.filter(o => getOperazioneAddetti(o.id).includes(filtroAddetto));
+  }
 
   if (filtroPunt === 'puntuali') list = list.filter(o => (calcRitardoGiorni(o)||0) <= 0);
   else if (filtroPunt === 'ritardo') list = list.filter(o => (calcRitardoGiorni(o)||0) > 0);
@@ -4065,9 +4227,11 @@ function renderStorico(root) {
   list.forEach(o => {
     const cli = state.clienti.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
-    const addetto = o.addetto_previsto_id
-      ? state.utenti.find(u => u.id === o.addetto_previsto_id)
-      : null;
+    const addettiIds = getOperazioneAddetti(o.id);
+    const addettiNomi = addettiIds
+      .map(id => state.utenti.find(u => u.id === id)?.nome)
+      .filter(Boolean);
+    const addettiLbl = addettiNomi.length ? addettiNomi.join(', ') : '—';
     const ritardo = calcRitardoGiorni(o);
 
     let esitoBadge;
@@ -4096,7 +4260,7 @@ function renderStorico(root) {
       el('td', {}, cli?.nome || '—'),
       el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
       el('td', { class:'tr mono' }, String(o.quantita || 0)),
-      el('td', {}, addetto?.nome || '—'),
+      el('td', {}, addettiLbl),
       el('td', { class:'mono' }, o.scadenza ? fmtIT(o.scadenza) : '—'),
       el('td', { class:'mono' }, fmtIT(o.consegnato_il)),
       el('td', { class:'tc' }, esitoBadge),
@@ -4211,9 +4375,9 @@ function storicoExportExcel() {
   const rows = consegnate.map(o => {
     const cli = state.clienti.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
-    const addetto = o.addetto_previsto_id
-      ? state.utenti.find(u => u.id === o.addetto_previsto_id)
-      : null;
+    const addettiNomi = getOperazioneAddetti(o.id)
+      .map(id => state.utenti.find(u => u.id === id)?.nome)
+      .filter(Boolean);
     const ritardo = calcRitardoGiorni(o);
     return {
       'OP': o.codice_op || '',
@@ -4224,7 +4388,7 @@ function storicoExportExcel() {
       'Descrizione': art?.descrizione || '',
       'Quantità': o.quantita || 0,
       'Min. unitari': o.minuti_unitari || 0,
-      'Addetto': addetto?.nome || '',
+      'Addetti': addettiNomi.join(', '),
       'Scadenza': o.scadenza || '',
       'Consegnato il': o.consegnato_il || '',
       'Ritardo (giorni)': ritardo,
@@ -4960,7 +5124,7 @@ async function kioskLoadAll() {
   // Carica mezzi, operatori, usi aperti, prenotazioni di oggi
   // + clienti, articoli, tipi_lav, operazioni, sessioni per il flusso commesse
   const oggi = toLocalISO(new Date());
-  const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni] = await Promise.all([
+  const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti] = await Promise.all([
     sb.from('mezzi').select('*').eq('attivo', true).order('nome'),
     sb.from('utenti').select('*').eq('attivo', true).order('nome'),
     sb.from('usi_mezzo').select('*').is('data_rientro', null),
@@ -4970,6 +5134,7 @@ async function kioskLoadAll() {
     sb.from('tipi_lavorazione').select('*').eq('attivo', true).order('ordine'),
     sb.from('operazioni').select('*').neq('stato', 'consegnata').order('scadenza'),
     sb.from('sessioni_lavoro').select('*').is('fine', null),
+    sb.from('operazioni_addetti').select('*'),
   ]);
   state.mezzi = mezzi.data || [];
   state.utenti = util.data || [];
@@ -4981,6 +5146,7 @@ async function kioskLoadAll() {
   state.tipiLav = tipiLav.data || [];
   state.operazioni = operazioni.data || [];
   state.sessioni = sessioni.data || [];
+  state.opAddetti = opAddetti.data || [];
   // Log diagnostico (visibile in console)
   console.log('[KIOSK] Loaded:', {
     mezzi: state.mezzi.length,
@@ -4989,12 +5155,13 @@ async function kioskLoadAll() {
     articoli: state.articoli.length,
     tipiLav: state.tipiLav.length,
     operazioni: state.operazioni.length,
+    opAddetti: state.opAddetti.length,
     sessioni_aperte: state.sessioni.length,
   });
   // Log errori se ci sono
   [['mezzi',mezzi],['operatori',util],['usi',usi],['pren',pren],
    ['clienti',clienti],['articoli',articoli],['tipiLav',tipiLav],
-   ['operazioni',operazioni],['sessioni',sessioni]].forEach(([n,r]) => {
+   ['operazioni',operazioni],['sessioni',sessioni],['opAddetti',opAddetti]].forEach(([n,r]) => {
     if (r.error) console.error('[KIOSK] Errore caricamento', n, r.error);
   });
 }
@@ -5395,8 +5562,12 @@ function kioskRenderOpList() {
 
   // Operazioni aperte = non consegnate
   const aperte = state.operazioni.filter(o => o.stato !== 'consegnata');
-  const mie = aperte.filter(o => o.addetto_previsto_id === u.id);
-  const altre = aperte.filter(o => o.addetto_previsto_id !== u.id);
+  // Set degli id operazione dove questo utente è tra gli addetti previsti
+  const mieIds = new Set(
+    state.opAddetti.filter(r => r.utente_id === u.id).map(r => r.operazione_id)
+  );
+  const mie = aperte.filter(o => mieIds.has(o.id));
+  const altre = aperte.filter(o => !mieIds.has(o.id));
 
   // Box ricerca
   const searchBox = el('div', { class:'kiosk-op-search-box' });
