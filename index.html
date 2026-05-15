@@ -6449,20 +6449,25 @@ const MESI_NOMI = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','
 const MESI_ESTESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const GIORNI_BREVI = ['L','M','M','G','V','S','D']; // lun-dom (0=lun)
 
-// Festività nazionali italiane (fisse). Capodanno, Epifania, Pasqua/Lunedì Angelo (calcolate),
-// 25 aprile, 1 maggio, 2 giugno, 15 agosto, 1 novembre, 8/25/26 dicembre.
+// Festività nazionali italiane (Set di stringhe ISO YYYY-MM-DD)
 function festiviAnno(anno) {
-  // riusa la funzione esistente festiviNazionali se disponibile
+  // riusa la funzione esistente festiviNazionali se disponibile (ritorna array di {data, nome})
   if (typeof festiviNazionali === 'function') {
-    return festiviNazionali(anno);
+    const lista = festiviNazionali(anno);
+    const s = new Set();
+    lista.forEach(f => {
+      // f.data può essere Date o stringa
+      const iso = f.data instanceof Date ? toLocalISO(f.data) : (f.data || '');
+      if (iso) s.add(iso);
+    });
+    return s;
   }
   // fallback semplice
-  const fisse = [
+  return new Set([
     `${anno}-01-01`, `${anno}-01-06`, `${anno}-04-25`, `${anno}-05-01`,
     `${anno}-06-02`, `${anno}-08-15`, `${anno}-11-01`,
     `${anno}-12-08`, `${anno}-12-25`, `${anno}-12-26`,
-  ];
-  return new Set(fisse);
+  ]);
 }
 
 function isWeekend(dateObj) {
