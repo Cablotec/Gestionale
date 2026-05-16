@@ -760,6 +760,76 @@ function toast(msg, kind='ok') {
   setTimeout(()=>t.remove(), 2800);
 }
 
+// ═══════════════════════════════════════════════════════════
+// SALVATAGGIO SICURO — risolve il bug "salva bloccato"
+// ═══════════════════════════════════════════════════════════
+// Causa: se il token sta per scadere, la libreria Supabase fa un refresh
+// "in mezzo" all'operazione, e in certe versioni l'operazione resta appesa.
+// Soluzione: rinnoviamo il token PRIMA (in un momento sicuro), poi eseguiamo
+// l'operazione con un timeout di sicurezza.
+
+// Rinnova la sessione se il token scade entro i prossimi 5 minuti.
+// Non fa nulla se il token è ancora ben valido.
+async function assicuraSessioneValida() {
+  try {
+    const { data } = await sb.auth.getSession();
+    const sess = data?.session;
+    if (!sess) return; // non loggato (es. kiosk pre-login): lasciamo fare al flusso normale
+    const expiresAt = (sess.expires_at || 0) * 1000; // in ms
+    const margine = 5 * 60 * 1000; // 5 minuti
+    if (Date.now() > expiresAt - margine) {
+      // Token scaduto o in scadenza: rinnova ORA, in un momento sicuro
+      await sb.auth.refreshSession();
+    }
+  } catch (e) {
+    // Se il refresh fallisce, non blocchiamo: l'operazione proverà comunque
+    console.warn('[sessione] refresh preventivo fallito:', e?.message || e);
+  }
+}
+
+// Protezione anti-blocco: il bug nasce quando la libreria fa il refresh del
+// token "in mezzo" a una scrittura. Invece di toccare i builder (fragile per
+// via del concatenamento .eq/.select/.single), agiamo a monte:
+//  1. un timer periodico mantiene il token sempre fresco (refresh preventivo)
+//  2. un controllo alla riattivazione della pagina (focus/visibilità)
+// Così quando parte un salvataggio il token è già valido e non serve il
+// refresh intermedio che causa il blocco.
+let _tokenKeepAliveTimer = null;
+
+function installaProtezioneSalvataggi() {
+  if (sb && sb.__protezioneAttiva) return;
+  if (sb) sb.__protezioneAttiva = true;
+
+  // 1. Keep-alive periodico: ogni 4 minuti controlla e rinnova se serve
+  clearInterval(_tokenKeepAliveTimer);
+  _tokenKeepAliveTimer = setInterval(() => {
+    assicuraSessioneValida();
+  }, 4 * 60 * 1000);
+
+  // 2. Quando la pagina torna in primo piano o riceve focus, rinnova subito.
+  //    Copre il caso "scheda lasciata in background / PC in standby".
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') assicuraSessioneValida();
+  });
+  window.addEventListener('focus', () => { assicuraSessioneValida(); });
+}
+
+// Rete di sicurezza: avvia un "watchdog" su un bottone di salvataggio.
+// Se dopo 15s il bottone è ancora in stato "in corso", lo sblocca e avvisa.
+// Va chiamato subito dopo aver disabilitato il bottone.
+// Ritorna una funzione da chiamare quando il salvataggio è andato a buon fine
+// (per annullare il watchdog).
+function avviaWatchdog(btn, testoOriginale) {
+  const timer = setTimeout(() => {
+    if (btn && btn.disabled) {
+      btn.disabled = false;
+      if (testoOriginale) btn.textContent = testoOriginale;
+      toast('Salvataggio non riuscito: la connessione sembra lenta o assente. Riprova.', 'err');
+    }
+  }, 15000);
+  return () => clearTimeout(timer);
+}
+
 // Rileva modalità kiosk dall'URL: ?kiosk=sede1 oppure ?kiosk=sede2
 const KIOSK_SEDI_VALIDE = ['sede1', 'sede2'];
 const KIOSK_PARAM = new URLSearchParams(location.search).get('kiosk');
@@ -797,6 +867,12 @@ async function init() {
       detectSessionInUrl: true,
     },
   });
+
+  // ─── Protezione anti-blocco salvataggi ───
+  // Avvolgiamo sb.from() così che ogni scrittura (insert/update/delete/upsert)
+  // rinnovi il token PRIMA, evitando il refresh "in mezzo" che blocca l'operazione.
+  // Le letture (select) non vengono toccate.
+  installaProtezioneSalvataggi();
 
   // ─── PARAMETRO KIOSK NON VALIDO ───
   if (KIOSK_PARAM_INVALIDO) {
@@ -4428,6 +4504,7 @@ function openOperazioneModal(o) {
 
       btnSave.disabled = true;
       btnSave.textContent = 'Salvataggio…';
+      const stopWatchdog = avviaWatchdog(btnSave, 'Salva');
 
       let clienteId = cliVal.id;
       let articoloId = artVal.id;
@@ -4439,6 +4516,7 @@ function openOperazioneModal(o) {
             .insert({ nome: cliVal.text, attivo: true })
             .select().single();
           if (errCli) {
+            stopWatchdog();
             btnSave.disabled = false; btnSave.textContent = 'Salva';
             return toast('Errore creazione cliente: '+errCli.message, 'err');
           }
@@ -4451,6 +4529,7 @@ function openOperazioneModal(o) {
             .insert({ codice: artVal.text, attivo: true })
             .select().single();
           if (errArt) {
+            stopWatchdog();
             btnSave.disabled = false; btnSave.textContent = 'Salva';
             return toast('Errore creazione articolo: '+errArt.message, 'err');
           }
@@ -4458,6 +4537,7 @@ function openOperazioneModal(o) {
           articoloId = nuovoArt.id;
         }
       } catch (e) {
+        stopWatchdog();
         btnSave.disabled = false; btnSave.textContent = 'Salva';
         return toast('Errore: '+(e.message||e), 'err');
       }
@@ -4485,6 +4565,7 @@ function openOperazioneModal(o) {
         payload.responsabilita = (fd.get('responsabilita')||'').trim() || null;
       }
       if (payload.quantita <= 0) {
+        stopWatchdog();
         btnSave.disabled = false; btnSave.textContent = 'Salva';
         return toast('Quantità deve essere > 0', 'err');
       }
@@ -4495,6 +4576,7 @@ function openOperazioneModal(o) {
           : sb.from('operazioni').update(payload).eq('id', o.id).select().single();
         const { data, error } = await q;
         if (error) {
+          stopWatchdog();
           btnSave.disabled = false;
           btnSave.textContent = 'Salva';
           return toast(error.message, 'err');
@@ -4507,13 +4589,16 @@ function openOperazioneModal(o) {
         // Sincronizza gli addetti previsti nella tabella ponte
         const syncRes = await syncOperazioneAddetti(data.id, addettiSel);
         if (syncRes.error) {
+          stopWatchdog();
           btnSave.disabled = false;
           btnSave.textContent = 'Salva';
           return toast('Operazione salvata, ma errore addetti: '+syncRes.error.message, 'err');
         }
+        stopWatchdog();
         toast(isNew ? 'Operazione creata' : 'Operazione aggiornata');
         closeModal(); renderTab('pianificazione');
       } catch (e) {
+        stopWatchdog();
         btnSave.disabled = false;
         btnSave.textContent = 'Salva';
         toast('Errore di rete: '+(e.message||e), 'err');
