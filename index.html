@@ -3608,33 +3608,33 @@ function renderPianificazione(root) {
       else if (diff <= 3) scadCls = 'scadenza-vicina';
     }
 
-    const tr = el('tr', { class: rowClass });
+    const tr = el('tr', {
+      class: rowClass,
+      style: 'cursor:pointer;',
+      onclick: () => openOperazioneModal(o),
+      title: 'Click per aprire la scheda',
+    });
 
-    // OP (inline editable)
-    tr.append(el('td', { class:'mono', style:'color:var(--or);' },
-      opInlineCell(o, 'codice_op', o.codice_op || '—', 'text')));
+    // OP
+    tr.append(el('td', { class:'mono', style:'color:var(--or);' }, o.codice_op || '—'));
 
     // POS
-    tr.append(el('td', { class:'mono', style:'color:var(--mut);' },
-      opInlineCell(o, 'pos', o.pos || '—', 'text')));
+    tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.pos || '—'));
 
     // Ordine
-    tr.append(el('td', { class:'mono' },
-      opInlineCell(o, 'numero_ordine', o.numero_ordine || '—', 'text')));
+    tr.append(el('td', { class:'mono' }, o.numero_ordine || '—'));
 
-    // Cliente (read-only nella riga, modifica solo in modale completa)
+    // Cliente
     tr.append(el('td', {}, cli?.nome || '—'));
 
     // Codice articolo
     tr.append(el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'));
 
     // Quantità
-    tr.append(el('td', { class:'tr mono' },
-      opInlineCell(o, 'quantita', String(o.quantita || 0), 'number')));
+    tr.append(el('td', { class:'tr mono' }, String(o.quantita || 0)));
 
     // Min unit
-    tr.append(el('td', { class:'tr mono' },
-      opInlineCell(o, 'minuti_unitari', String(o.minuti_unitari || 0), 'number')));
+    tr.append(el('td', { class:'tr mono' }, String(o.minuti_unitari || 0)));
 
     // Ore (calc)
     tr.append(el('td', { class:'tr calc-cell' }, ore.toFixed(1)));
@@ -3658,66 +3658,49 @@ function renderPianificazione(root) {
     // Giorni (calc)
     tr.append(el('td', { class:'tr calc-cell' }, String(giorni)));
 
-    // Addetti previsti (read-only, click → modal)
+    // Addetti previsti
     let addettiLbl, addettiTooltip;
     if (addettiNomi.length === 0) { addettiLbl = '—'; addettiTooltip = 'Nessun addetto previsto'; }
     else if (addettiNomi.length === 1) { addettiLbl = addettiNomi[0]; addettiTooltip = addettiNomi[0]; }
     else {
-      // Primo nome abbreviato + "+N"
       const primo = addettiNomi[0].split(' ')[0];
       addettiLbl = `${primo} +${addettiNomi.length - 1}`;
       addettiTooltip = addettiNomi.join('\n');
     }
-    tr.append(el('td', {
-      style:'font-size:11px;cursor:pointer;',
-      title: addettiTooltip + '\n\nClick per modificare',
-      onclick: () => openOperazioneModal(o),
-    }, addettiLbl));
+    tr.append(el('td', { style:'font-size:11px;', title: addettiTooltip }, addettiLbl));
 
     // Scadenza
-    tr.append(el('td', { class:'mono '+scadCls },
-      opInlineCell(o, 'scadenza', o.scadenza ? fmtIT(o.scadenza) : '—', 'date')));
+    tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
 
     // Data inizio (calc)
     tr.append(el('td', { class:'mono calc-cell' }, inizio ? fmtIT(inizio) : '—'));
 
-    // Stato preparazione (inline editable)
-    const prepOptions = [
-      { value:'vuoto',    label:'Vuoto' },
-      { value:'parziale', label:'Parziale' },
-      { value:'completo', label:'Completo' },
-    ];
+    // Stato preparazione
     const prepCls = OP_PREP[o.stato_preparazione]?.classe || 'vuoto';
-    const prepLabel = el('span', {},
-      el('span', { class:'prep-dot '+prepCls }),
-      OP_PREP[o.stato_preparazione]?.label || '—'
-    );
     tr.append(el('td', { class:'tc', style:'font-size:11px;' },
-      opInlineSelect(o, 'stato_preparazione', prepLabel, prepOptions)));
+      el('span', {},
+        el('span', { class:'prep-dot '+prepCls }),
+        OP_PREP[o.stato_preparazione]?.label || '—'
+      )));
 
     // Stato
-    const statoOptions = [
-      { value:'aperta',     label:'Aperta' },
-      { value:'sospesa',    label:'Sospesa' },
-      { value:'consegnata', label:'Consegnata' },
-    ];
-    const statoBadge = el('span', { class:'badge '+(OP_STATI[o.stato]?.badge||'bgry') }, OP_STATI[o.stato]?.label||o.stato);
     tr.append(el('td', { class:'tc', style:'font-size:11px;' },
-      opInlineSelect(o, 'stato', statoBadge, statoOptions)));
+      el('span', { class:'badge '+(OP_STATI[o.stato]?.badge||'bgry') }, OP_STATI[o.stato]?.label||o.stato)));
 
-    // Azioni
-    const azioniCell = el('td', { class:'tc' },
-      el('button', { class:'btnsm', onclick:()=>openOperazioneModal(o) }, 'Apri'),
-    );
+    // Azioni (✓ consegna rapida + ✕ elimina) — stopPropagation per non aprire la modal
+    const azioniCell = el('td', { class:'tc' });
     if (o.stato !== 'consegnata' && isAdmin) {
-      azioniCell.append(' ', el('button', {
+      azioniCell.append(el('button', {
         class:'btnsm', style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
         title:'Segna come consegnata',
-        onclick:()=>quickConsegna(o)
+        onclick:(e)=>{ e.stopPropagation(); quickConsegna(o); }
       }, '✓'));
     }
     if (isAdmin) {
-      azioniCell.append(' ', el('button', { class:'btnd', onclick:()=>deleteOperazione(o) }, '✕'));
+      azioniCell.append(' ', el('button', {
+        class:'btnd',
+        onclick:(e)=>{ e.stopPropagation(); deleteOperazione(o); }
+      }, '✕'));
     }
     tr.append(azioniCell);
 
@@ -3729,7 +3712,7 @@ function renderPianificazione(root) {
 
   // Legenda
   root.append(el('div', { class:'sub', style:'margin-top:14px;font-size:10px;' },
-    'Click su una cella editabile per modificarla al volo. Click su "Apri" per la scheda completa.'));
+    'Click su una riga per aprire la scheda completa dell\'operazione.'));
 }
 
 // Cella inline editabile (text/number/date)
@@ -3827,6 +3810,99 @@ function opInlineSelect(op, field, displayNode, options) {
 }
 
 // Modale completa per creazione e modifica
+// ─── Campo autocomplete con creazione al volo ───
+// items: array di record; getLabel: funzione record→stringa; getId: record→id
+// onState: callback({mode:'existing'|'new'|'empty', id, text}) chiamato a ogni cambiamento
+// Ritorna { wrap, getValue } dove getValue() → {mode, id, text}
+function makeAutocompleteCreate(opts) {
+  const { items, getLabel, placeholder, initialId, entityLabel } = opts;
+  let selMode = 'empty';   // 'empty' | 'existing' | 'new'
+  let selId = null;
+  let selText = '';
+
+  // Inizializza con valore esistente
+  if (initialId) {
+    const rec = items.find(x => x.id === initialId);
+    if (rec) { selMode = 'existing'; selId = rec.id; selText = getLabel(rec); }
+  }
+
+  const input = el('input', {
+    type:'text', autocomplete:'off',
+    placeholder: placeholder || 'Cerca o digita…',
+    value: selText,
+    style:'width:100%;',
+  });
+  const dropList = el('div', { class:'util-droplist' });
+  const hint = el('div', {
+    style:'font-family:DM Mono,monospace;font-size:10px;margin-top:4px;min-height:14px;'
+  });
+  const wrap = el('div', { class:'util-dropwrap', style:'position:relative;' }, input, dropList);
+  const container = el('div', {}, wrap, hint);
+
+  function updateHint() {
+    hint.innerHTML = '';
+    if (selMode === 'new' && selText) {
+      hint.style.color = 'var(--yel)';
+      hint.textContent = `⚠ "${selText}" non in anagrafica — verrà creato come nuovo ${entityLabel}`;
+    } else if (selMode === 'existing') {
+      hint.style.color = 'var(--grn)';
+      hint.textContent = `✓ ${entityLabel} esistente`;
+    } else {
+      hint.textContent = '';
+    }
+  }
+
+  function recompute() {
+    const txt = input.value.trim();
+    selText = txt;
+    if (!txt) { selMode = 'empty'; selId = null; updateHint(); return; }
+    // Match esatto (case-insensitive) con un record esistente?
+    const exact = items.find(x => getLabel(x).toLowerCase() === txt.toLowerCase());
+    if (exact) { selMode = 'existing'; selId = exact.id; }
+    else { selMode = 'new'; selId = null; }
+    updateHint();
+  }
+
+  function renderDrop() {
+    const txt = input.value.trim().toLowerCase();
+    dropList.innerHTML = '';
+    const filtered = txt
+      ? items.filter(x => getLabel(x).toLowerCase().includes(txt))
+      : items.slice(0, 30);
+    filtered.slice(0, 50).forEach(rec => {
+      dropList.append(el('div', {
+        class:'util-row',
+        onclick: () => {
+          input.value = getLabel(rec);
+          selMode = 'existing'; selId = rec.id; selText = getLabel(rec);
+          dropList.classList.remove('open');
+          updateHint();
+        },
+      },
+        el('span', { class:'util-row-name' }, getLabel(rec)),
+      ));
+    });
+    if (!filtered.length && txt) {
+      dropList.append(el('div', {
+        class:'util-row',
+        style:'color:var(--yel);cursor:default;',
+      }, `Nessun risultato — "${input.value.trim()}" sarà creato come nuovo`));
+    }
+    dropList.classList.add('open');
+  }
+
+  input.oninput = () => { recompute(); renderDrop(); };
+  input.onfocus = () => renderDrop();
+  input.onblur = () => { setTimeout(() => dropList.classList.remove('open'), 180); recompute(); };
+
+  updateHint();
+
+  return {
+    container,
+    getValue: () => { recompute(); return { mode: selMode, id: selId, text: selText }; },
+  };
+}
+
 function openOperazioneModal(o) {
   const isNew = !o;
   const isAdmin = state.profile?.ruolo === 'admin';
@@ -3852,21 +3928,23 @@ function openOperazioneModal(o) {
   const body = el('div', { class:'mbody' });
   const form = el('form');
 
-  // Select cliente
-  const selCliente = el('select', { name:'cliente_id', required:'true' },
-    el('option', { value:'' }, '— seleziona —'),
-    ...state.clienti.filter(c => c.attivo).map(c =>
-      el('option', { value:c.id }, c.nome))
-  );
-  selCliente.value = o.cliente_id || '';
+  // Autocomplete cliente — con creazione al volo
+  const acCliente = makeAutocompleteCreate({
+    items: state.clienti.filter(c => c.attivo),
+    getLabel: c => c.nome,
+    placeholder: 'Cerca o digita nuovo cliente…',
+    initialId: o.cliente_id || null,
+    entityLabel: 'cliente',
+  });
 
-  // Select articolo
-  const selArticolo = el('select', { name:'articolo_id', required:'true' },
-    el('option', { value:'' }, '— seleziona —'),
-    ...state.articoli.filter(a => a.attivo).map(a =>
-      el('option', { value:a.id }, a.codice + (a.descrizione ? ' — '+a.descrizione : '')))
-  );
-  selArticolo.value = o.articolo_id || '';
+  // Autocomplete articolo — con creazione al volo
+  const acArticolo = makeAutocompleteCreate({
+    items: state.articoli.filter(a => a.attivo),
+    getLabel: a => a.codice,
+    placeholder: 'Cerca o digita nuovo codice…',
+    initialId: o.articolo_id || null,
+    entityLabel: 'articolo',
+  });
 
   // Multi-select addetti (lo stesso pattern di "Chi userà il mezzo")
   const utentiAttiviAdd = state.utenti.filter(u => u.attivo && !isKioskRecord(u));
@@ -3948,8 +4026,8 @@ function openOperazioneModal(o) {
 
   form.append(
     el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Cliente *'), selCliente),
-      el('div', { class:'field' }, el('label', {}, 'Codice articolo *'), selArticolo),
+      el('div', { class:'field' }, el('label', {}, 'Cliente *'), acCliente.container),
+      el('div', { class:'field' }, el('label', {}, 'Codice articolo *'), acArticolo.container),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Numero ordine'),
@@ -4126,9 +4204,53 @@ function openOperazioneModal(o) {
     const btnSave = el('button', { class:'btnp' }, 'Salva');
     btnSave.onclick = async () => {
       const fd = new FormData(form);
+
+      // Risolvi cliente e articolo: se nuovi, creali al volo in anagrafica
+      const cliVal = acCliente.getValue();
+      const artVal = acArticolo.getValue();
+
+      if (cliVal.mode === 'empty') return toast('Cliente obbligatorio', 'err');
+      if (artVal.mode === 'empty') return toast('Articolo obbligatorio', 'err');
+
+      btnSave.disabled = true;
+      btnSave.textContent = 'Salvataggio…';
+
+      let clienteId = cliVal.id;
+      let articoloId = artVal.id;
+
+      try {
+        // Crea cliente nuovo se serve
+        if (cliVal.mode === 'new') {
+          const { data: nuovoCli, error: errCli } = await sb.from('clienti')
+            .insert({ nome: cliVal.text, attivo: true })
+            .select().single();
+          if (errCli) {
+            btnSave.disabled = false; btnSave.textContent = 'Salva';
+            return toast('Errore creazione cliente: '+errCli.message, 'err');
+          }
+          if (!state.clienti.find(x => x.id === nuovoCli.id)) state.clienti.push(nuovoCli);
+          clienteId = nuovoCli.id;
+        }
+        // Crea articolo nuovo se serve
+        if (artVal.mode === 'new') {
+          const { data: nuovoArt, error: errArt } = await sb.from('articoli')
+            .insert({ codice: artVal.text, attivo: true })
+            .select().single();
+          if (errArt) {
+            btnSave.disabled = false; btnSave.textContent = 'Salva';
+            return toast('Errore creazione articolo: '+errArt.message, 'err');
+          }
+          if (!state.articoli.find(x => x.id === nuovoArt.id)) state.articoli.push(nuovoArt);
+          articoloId = nuovoArt.id;
+        }
+      } catch (e) {
+        btnSave.disabled = false; btnSave.textContent = 'Salva';
+        return toast('Errore: '+(e.message||e), 'err');
+      }
+
       const payload = {
-        cliente_id: fd.get('cliente_id') || null,
-        articolo_id: fd.get('articolo_id') || null,
+        cliente_id: clienteId,
+        articolo_id: articoloId,
         numero_ordine: (fd.get('numero_ordine')||'').trim() || null,
         pos: (fd.get('pos')||'').trim() || null,
         codice_op: (fd.get('codice_op')||'').trim() || null,
@@ -4148,12 +4270,11 @@ function openOperazioneModal(o) {
         payload.nc_post_consegna = (fd.get('nc_post_consegna')||'').trim() || null;
         payload.responsabilita = (fd.get('responsabilita')||'').trim() || null;
       }
-      if (!payload.cliente_id) return toast('Cliente obbligatorio', 'err');
-      if (!payload.articolo_id) return toast('Articolo obbligatorio', 'err');
-      if (payload.quantita <= 0) return toast('Quantità deve essere > 0', 'err');
+      if (payload.quantita <= 0) {
+        btnSave.disabled = false; btnSave.textContent = 'Salva';
+        return toast('Quantità deve essere > 0', 'err');
+      }
 
-      btnSave.disabled = true;
-      btnSave.textContent = 'Salvataggio…';
       try {
         const q = isNew
           ? sb.from('operazioni').insert(payload).select().single()
