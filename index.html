@@ -1852,6 +1852,31 @@ async function deleteMezzo(m) {
   toast('Mezzo eliminato'); renderTab('mezzi');
 }
 
+// ─── Chiama la Edge Function gestione-account ───
+// azione: 'crea' | 'reset_password'. Ritorna {ok, ...} o {error}
+async function chiamaGestioneAccount(payload) {
+  try {
+    const { data: sessData } = await sb.auth.getSession();
+    const token = sessData?.session?.access_token;
+    if (!token) return { error: 'Sessione scaduta — rifai il login' };
+
+    const resp = await fetch(SUPABASE_URL + '/functions/v1/gestione-account', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) return { error: data.error || ('Errore ' + resp.status) };
+    return data;
+  } catch (e) {
+    return { error: 'Errore di rete: ' + (e?.message || e) };
+  }
+}
+
 function renderOperatori(root) {
   root.innerHTML = '';
   root.append(el('div', { class:'toolbar' },
@@ -1867,7 +1892,6 @@ function renderOperatori(root) {
   tbl.append(el('thead', {}, el('tr', {},
     el('th', {}, 'Nome'),
     el('th', {}, 'Badge NFC'),
-    el('th', {}, 'Email'),
     el('th', {}, 'Tipo'),
     el('th', {}, 'Account login'),
     el('th', {}, 'Stato'),
@@ -1880,24 +1904,40 @@ function renderOperatori(root) {
       ? el('span', { class:'badge bok', title:account.email },
           (account.ruolo === 'admin' ? '★ admin' : '✓ user'))
       : el('span', { class:'badge bgry' }, 'nessuno');
+
+    const azioniCell = el('td', { class:'tc' },
+      el('button', { class:'btnsm', onclick:()=>openOperatoreModal(u) }, 'Modifica'),
+    );
+    // Account collegato → bottoni ruolo + reset password
+    if (account) {
+      azioniCell.append(' ', el('button', {
+        class:'btnsm', onclick:()=>toggleRuolo(account),
+        title:'Cambia ruolo dell\'account collegato',
+      }, account.ruolo==='admin' ? 'Rendi user' : 'Rendi admin'));
+      azioniCell.append(' ', el('button', {
+        class:'btnsm', style:'background:rgba(78,184,255,.15);color:var(--blu);border-color:var(--blu);',
+        onclick:()=>openResetPasswordModal(u, account),
+        title:'Imposta una nuova password per questo account',
+      }, '🔑 Password'));
+    } else {
+      // Nessun account → bottone crea account
+      azioniCell.append(' ', el('button', {
+        class:'btnsm', style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
+        onclick:()=>openCreaAccountModal(u),
+        title:'Crea un account login per questo utente',
+      }, '+ Crea account'));
+    }
+    azioniCell.append(' ', el('button', { class:'btnd', onclick:()=>deleteOperatore(u) }, 'Elimina'));
+
     tb.append(el('tr', {},
       el('td', {}, u.nome),
       el('td', { class:'mono' }, u.numero_badge || '—'),
-      el('td', { class:'mono', style:'font-size:11px;' }, u.email || '—'),
       el('td', {}, u.esterno
         ? el('span', { class:'badge byel' }, 'esterno')
         : el('span', { class:'badge bblu' }, 'interno')),
       el('td', {}, accountCell),
       el('td', {}, u.attivo ? el('span', { class:'badge bok' }, 'attivo') : el('span', { class:'badge bgry' }, 'disatt.')),
-      el('td', { class:'tc' },
-        el('button', { class:'btnsm', onclick:()=>openOperatoreModal(u) }, 'Modifica'),
-        ' ',
-        account ? el('button', { class:'btnsm', onclick:()=>toggleRuolo(account),
-                                  title:'Cambia ruolo dell\'account collegato' },
-                       account.ruolo==='admin' ? 'Rendi user' : 'Rendi admin') : null,
-        ' ',
-        el('button', { class:'btnd', onclick:()=>deleteOperatore(u) }, 'Elimina'),
-      ),
+      azioniCell,
     ));
   });
   tbl.append(tb);
@@ -1952,6 +1992,185 @@ function renderOperatori(root) {
   root.append(box);
 }
 
+// ─── Modal: crea account login per un utente ───
+function openCreaAccountModal(u) {
+  // Suggerisci email da nome.cognome@cablotec.net
+  let emailSuggerita = '';
+  const parti = (u.nome || '').trim().toLowerCase().split(/\s+/);
+  if (parti.length >= 2) {
+    // primo nome . ultimo cognome, senza accenti
+    const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g,'');
+    emailSuggerita = norm(parti[0]) + '.' + norm(parti[parti.length-1]) + '@cablotec.net';
+  }
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Crea account login'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  body.append(el('div', { class:'sub', style:'margin-bottom:14px;line-height:1.6;' },
+    `Crea un account di accesso per `, el('strong', {}, u.nome),
+    `. L'account verrà creato e collegato automaticamente a questa scheda utente.`));
+
+  const inEmail = el('input', { type:'email', value: emailSuggerita,
+    placeholder:'nome.cognome@cablotec.net' });
+  const inPwd = el('input', { type:'text', value:'',
+    placeholder:'almeno 6 caratteri' });
+
+  // Genera una password casuale leggibile
+  const btnGen = el('button', { type:'button', class:'btng', style:'font-size:11px;' },
+    '🎲 Genera');
+  btnGen.onclick = () => {
+    const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+    let p = '';
+    for (let i=0;i<8;i++) p += chars[Math.floor(Math.random()*chars.length)];
+    inPwd.value = p;
+  };
+
+  body.append(
+    el('div', { class:'field' }, el('label', {}, 'Email *'), inEmail),
+    el('div', { class:'field' }, el('label', {}, 'Password *'),
+      el('div', { style:'display:flex;gap:6px;' }, inPwd, btnGen)),
+    el('div', { class:'sub', style:'margin-top:4px;' },
+      'Per le email aziendali "anagrafiche" (non caselle reali) va bene una password semplice da comunicare a voce. Annotala: non sarà più visibile dopo.'),
+  );
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
+  const btnSave = el('button', { class:'btnp' }, 'Crea account');
+  btnSave.onclick = async () => {
+    const email = (inEmail.value||'').trim().toLowerCase();
+    const pwd = (inPwd.value||'').trim();
+    if (!email) return toast('Inserisci l\'email', 'err');
+    if (pwd.length < 6) return toast('La password deve avere almeno 6 caratteri', 'err');
+
+    btnSave.disabled = true;
+    btnSave.textContent = 'Creazione…';
+
+    const res = await chiamaGestioneAccount({
+      azione: 'crea', email, password: pwd, nome: u.nome,
+    });
+    if (res.error) {
+      btnSave.disabled = false;
+      btnSave.textContent = 'Crea account';
+      return toast(res.error, 'err');
+    }
+
+    // Account creato → collega alla scheda utente
+    const nuovoAccountId = res.user.id;
+    const { error: linkErr } = await sb.from('utenti')
+      .update({ account_id: nuovoAccountId })
+      .eq('id', u.id);
+    if (linkErr) {
+      toast('Account creato ma errore nel collegamento: '+linkErr.message, 'err');
+    } else {
+      // Aggiorna cache locale
+      u.account_id = nuovoAccountId;
+      state.utenti = state.utenti.map(x => x.id === u.id ? {...x, account_id:nuovoAccountId} : x);
+      // Il profilo verrà creato dal trigger handle_new_user; lo aggiungiamo in cache se manca
+      if (!state.profiliById[nuovoAccountId]) {
+        state.profiliById[nuovoAccountId] = {
+          id: nuovoAccountId, email: email, nome: u.nome, ruolo: 'user',
+        };
+      }
+    }
+    closeModal();
+    toast('Account creato per '+u.nome);
+    // Mostra un riepilogo con le credenziali
+    showConfirmCredenziali(u.nome, email, pwd);
+    renderTab('operatori');
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+}
+
+// Piccola finestra che ricorda le credenziali appena create
+function showConfirmCredenziali(nome, email, pwd) {
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, '✓ Account creato'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+  body.append(el('div', { class:'sub', style:'margin-bottom:12px;' },
+    `Comunica queste credenziali a `, el('strong', {}, nome),
+    `. Annotale ora: la password non sarà più visibile.`));
+  body.append(el('div', {
+    style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:12px 14px;font-family:DM Mono,monospace;font-size:13px;line-height:1.9;'
+  },
+    el('div', {}, el('span', { style:'color:var(--mut);' }, 'Email:  '),
+      el('strong', { style:'color:var(--acc);' }, email)),
+    el('div', {}, el('span', { style:'color:var(--mut);' }, 'Password: '),
+      el('strong', { style:'color:var(--acc);' }, pwd)),
+  ));
+  modal.append(body);
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btnp', onclick:closeModal }, 'Ho annotato'));
+  modal.append(foot);
+  openModal(modal);
+}
+
+// ─── Modal: reset password di un account esistente ───
+function openResetPasswordModal(u, account) {
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Reset password'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  body.append(el('div', { class:'sub', style:'margin-bottom:14px;line-height:1.6;' },
+    `Imposta una nuova password per l'account di `, el('strong', {}, u.nome),
+    ` (`, el('span', { class:'mono' }, account.email), `).`));
+
+  const inPwd = el('input', { type:'text', value:'', placeholder:'almeno 6 caratteri' });
+  const btnGen = el('button', { type:'button', class:'btng', style:'font-size:11px;' }, '🎲 Genera');
+  btnGen.onclick = () => {
+    const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+    let p = '';
+    for (let i=0;i<8;i++) p += chars[Math.floor(Math.random()*chars.length)];
+    inPwd.value = p;
+  };
+
+  body.append(
+    el('div', { class:'field' }, el('label', {}, 'Nuova password *'),
+      el('div', { style:'display:flex;gap:6px;' }, inPwd, btnGen)),
+    el('div', { class:'sub', style:'margin-top:4px;' },
+      'La vecchia password verrà sostituita. Comunica la nuova all\'utente.'),
+  );
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
+  const btnSave = el('button', { class:'btnp' }, 'Imposta password');
+  btnSave.onclick = async () => {
+    const pwd = (inPwd.value||'').trim();
+    if (pwd.length < 6) return toast('La password deve avere almeno 6 caratteri', 'err');
+
+    btnSave.disabled = true;
+    btnSave.textContent = 'Aggiornamento…';
+
+    const res = await chiamaGestioneAccount({
+      azione: 'reset_password', user_id: account.id, password: pwd,
+    });
+    if (res.error) {
+      btnSave.disabled = false;
+      btnSave.textContent = 'Imposta password';
+      return toast(res.error, 'err');
+    }
+    closeModal();
+    toast('Password aggiornata');
+    showConfirmCredenziali(u.nome, account.email, pwd);
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+}
+
 function openOperatoreModal(u) {
   const isNew = !u;
   u = u || { nome:'', numero_badge:'', email:'', account_id:null, attivo:true, esterno:false, note:'' };
@@ -1980,9 +2199,6 @@ function openOperatoreModal(u) {
       el('div', { class:'field' }, el('label', {}, 'Numero Badge NFC'),
         el('input', { type:'text', name:'numero_badge', value:u.numero_badge||'',
                       placeholder:'es. 0001234567' })),
-      el('div', { class:'field' }, el('label', {}, 'Email (opz.)'),
-        el('input', { type:'email', name:'email', value:u.email||'',
-                      placeholder:'mario@azienda.it' })),
     ),
     el('div', { class:'field' }, el('label', {}, 'Account login collegato (opz.)'),
       selAccount,
@@ -2014,7 +2230,6 @@ function openOperatoreModal(u) {
       const payload = {
         nome: (fd.get('nome')||'').trim(),
         numero_badge: (fd.get('numero_badge')||'').trim() || null,
-        email: (fd.get('email')||'').trim() || null,
         account_id: fd.get('account_id') || null,
         note: (fd.get('note')||'').trim() || null,
         attivo: fd.get('attivo') === 'true',
@@ -2027,7 +2242,6 @@ function openOperatoreModal(u) {
       const { data, error } = await q;
       if (error) {
         if (error.message.includes('badge_uniq')) return toast('Numero badge già in uso', 'err');
-        if (error.message.includes('email_uniq')) return toast('Email già in uso', 'err');
         if (error.message.includes('account_uniq')) return toast('Account già collegato a un altro utente', 'err');
         return toast(error.message, 'err');
       }
@@ -6081,13 +6295,11 @@ function kioskRenderAttiva() {
   );
   root.append(card);
 
-  // Bottoni azione
+  // Bottone azione (uno solo: termina la sessione)
   const actions = el('div', { class:'kiosk-attiva-actions' });
   actions.append(
     el('button', { class:'kiosk-attiva-btn pause', onclick: () => kioskStopSessione(sess, 'pause') },
-      '⏸ Sospendi'),
-    el('button', { class:'kiosk-attiva-btn switch', onclick: () => kioskStopSessione(sess, 'switch') },
-      '⏹ Cambia lavoro'),
+      '⏹ Termina lavoro'),
   );
   root.append(actions);
 }
