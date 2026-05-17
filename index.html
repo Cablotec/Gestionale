@@ -656,6 +656,7 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
 
 <script>
 let sb = null;
+let realtimeChannel = null;
 const state = {
   session: null, profile: null, profiliById: {}, mezzi: [],
   utenti: [], utentiById: {},
@@ -761,72 +762,168 @@ function toast(msg, kind='ok') {
 }
 
 // ═══════════════════════════════════════════════════════════
-// SALVATAGGIO SICURO — risolve il bug "salva bloccato"
+// RESILIENZA CONNESSIONE — riconnessione automatica + retry
 // ═══════════════════════════════════════════════════════════
-// Causa: se il token sta per scadere, la libreria Supabase fa un refresh
-// "in mezzo" all'operazione, e in certe versioni l'operazione resta appesa.
-// Soluzione: rinnoviamo il token PRIMA (in un momento sicuro), poi eseguiamo
-// l'operazione con un timeout di sicurezza.
+// Problema: dopo un periodo di inattività, il client Supabase può entrare
+// in uno stato in cui le operazioni di scrittura restano "appese" e non
+// tornano mai. Soluzione (stile webapp moderne):
+//  A. ricreaConnessione()  → butta il client morto, ne crea uno fresco
+//  B. eseguiConRetry()     → timeout + ricrea + riprova automaticamente
+//  C. recovery preventivo  → ricrea quando la pagina torna attiva
 
-// Rinnova la sessione se il token scade entro i prossimi 5 minuti.
-// Non fa nulla se il token è ancora ben valido.
+let _tokenKeepAliveTimer = null;
+let _ricreazioneInCorso = null; // promise condivisa per evitare ricreazioni doppie
+
+// ─── PEZZO A: ricrea il client Supabase da zero ───
+// Conserva la sessione di login (token) e la reinstalla nel nuovo client.
+async function ricreaConnessione() {
+  // Se una ricreazione è già in corso, aspetta quella (no doppioni)
+  if (_ricreazioneInCorso) return _ricreazioneInCorso;
+
+  _ricreazioneInCorso = (async () => {
+    try {
+      // 1. Recupera la sessione corrente dal client vecchio (prima che muoia del tutto)
+      let sessioneSalvata = null;
+      try {
+        const { data } = await sb.auth.getSession();
+        sessioneSalvata = data?.session || null;
+      } catch (e) { /* il client vecchio è già morto: pazienza */ }
+
+      // 2. Chiudi il realtime del client vecchio per non lasciare connessioni zombie
+      try { await sb.removeAllChannels(); } catch (e) {}
+      realtimeChannel = null; // così startRealtime ricreerà il canale
+
+      // 3. Crea un client NUOVO
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+      });
+
+      // 4. Reinstalla la sessione di login sul nuovo client
+      if (sessioneSalvata) {
+        try {
+          await sb.auth.setSession({
+            access_token: sessioneSalvata.access_token,
+            refresh_token: sessioneSalvata.refresh_token,
+          });
+        } catch (e) {
+          console.warn('[recovery] impossibile ripristinare sessione:', e?.message || e);
+        }
+      }
+
+      // 5. Riattiva il realtime sul nuovo client (se eravamo loggati e non kiosk)
+      if (!IS_KIOSK && typeof startRealtime === 'function') {
+        try { startRealtime(); } catch (e) {}
+      }
+
+      console.info('[recovery] connessione ricreata');
+    } finally {
+      _ricreazioneInCorso = null;
+    }
+  })();
+
+  return _ricreazioneInCorso;
+}
+
+// ─── PEZZO B: esegue un'operazione con timeout + retry automatico ───
+// fn: funzione che RITORNA la promise/query da eseguire (es. () => sb.from(...).insert(...))
+//     deve essere una funzione, non la query già avviata, perché al retry va rifatta.
+// Ritorna { data, error }. error._timeout=true se ha fallito anche dopo il retry.
+async function eseguiConRetry(fn, opts) {
+  const TIMEOUT = (opts && opts.timeout) || 10000;
+  const etichetta = (opts && opts.label) || 'operazione';
+
+  function conTimeout(promise) {
+    return new Promise((resolve) => {
+      let fatto = false;
+      const t = setTimeout(() => {
+        if (!fatto) { fatto = true; resolve({ __timeout: true }); }
+      }, TIMEOUT);
+      Promise.resolve(promise).then(
+        (res) => { if (!fatto) { fatto = true; clearTimeout(t); resolve(res); } },
+        (err) => { if (!fatto) { fatto = true; clearTimeout(t); resolve({ error: { message: err?.message || String(err) } }); } }
+      );
+    });
+  }
+
+  // Tentativo 1
+  let res = await conTimeout(fn());
+  if (!res || !res.__timeout) return res;
+
+  // Timeout → la connessione è probabilmente morta. Ricreala e riprova.
+  console.warn('[recovery] timeout su', etichetta, '— ricreo la connessione e riprovo');
+  await ricreaConnessione();
+
+  // Tentativo 2 (sulla connessione fresca)
+  res = await conTimeout(fn());
+  if (!res || !res.__timeout) return res;
+
+  // Anche il retry è andato in timeout: arrendiamoci con un errore chiaro
+  return { data: null, error: {
+    message: 'Connessione non disponibile. Controlla la rete e riprova.',
+    _timeout: true,
+  }};
+}
+
+// Rinnova la sessione se il token sta per scadere (entro 5 min).
 async function assicuraSessioneValida() {
   try {
     const { data } = await sb.auth.getSession();
     const sess = data?.session;
-    if (!sess) return; // non loggato (es. kiosk pre-login): lasciamo fare al flusso normale
-    const expiresAt = (sess.expires_at || 0) * 1000; // in ms
-    const margine = 5 * 60 * 1000; // 5 minuti
-    if (Date.now() > expiresAt - margine) {
-      // Token scaduto o in scadenza: rinnova ORA, in un momento sicuro
+    if (!sess) return;
+    const expiresAt = (sess.expires_at || 0) * 1000;
+    if (Date.now() > expiresAt - 5 * 60 * 1000) {
       await sb.auth.refreshSession();
     }
   } catch (e) {
-    // Se il refresh fallisce, non blocchiamo: l'operazione proverà comunque
     console.warn('[sessione] refresh preventivo fallito:', e?.message || e);
   }
 }
 
-// Protezione anti-blocco: il bug nasce quando la libreria fa il refresh del
-// token "in mezzo" a una scrittura. Invece di toccare i builder (fragile per
-// via del concatenamento .eq/.select/.single), agiamo a monte:
-//  1. un timer periodico mantiene il token sempre fresco (refresh preventivo)
-//  2. un controllo alla riattivazione della pagina (focus/visibilità)
-// Così quando parte un salvataggio il token è già valido e non serve il
-// refresh intermedio che causa il blocco.
-let _tokenKeepAliveTimer = null;
-
+// ─── PEZZO C: recovery preventivo + keep-alive ───
 function installaProtezioneSalvataggi() {
-  if (sb && sb.__protezioneAttiva) return;
-  if (sb) sb.__protezioneAttiva = true;
+  if (window.__protezioneInstallata) return;
+  window.__protezioneInstallata = true;
 
-  // 1. Keep-alive periodico: ogni 4 minuti controlla e rinnova se serve
+  // Keep-alive token ogni 4 minuti
   clearInterval(_tokenKeepAliveTimer);
-  _tokenKeepAliveTimer = setInterval(() => {
-    assicuraSessioneValida();
-  }, 4 * 60 * 1000);
+  _tokenKeepAliveTimer = setInterval(() => { assicuraSessioneValida(); }, 4 * 60 * 1000);
 
-  // 2. Quando la pagina torna in primo piano o riceve focus, rinnova subito.
-  //    Copre il caso "scheda lasciata in background / PC in standby".
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') assicuraSessioneValida();
+  // Quando la pagina torna attiva dopo essere stata in background:
+  // ricrea preventivamente la connessione (potrebbe essersi addormentata).
+  let ultimaAttivita = Date.now();
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible') {
+      const inattivaDa = Date.now() - ultimaAttivita;
+      // Se è stata in background più di 60 secondi, ricrea per sicurezza
+      if (inattivaDa > 60000) {
+        await ricreaConnessione();
+      } else {
+        assicuraSessioneValida();
+      }
+    } else {
+      ultimaAttivita = Date.now();
+    }
   });
   window.addEventListener('focus', () => { assicuraSessioneValida(); });
+
+  // Quando la rete torna disponibile dopo una caduta
+  window.addEventListener('online', async () => {
+    console.info('[recovery] rete tornata online — ricreo la connessione');
+    await ricreaConnessione();
+  });
 }
 
-// Rete di sicurezza: avvia un "watchdog" su un bottone di salvataggio.
-// Se dopo 15s il bottone è ancora in stato "in corso", lo sblocca e avvisa.
-// Va chiamato subito dopo aver disabilitato il bottone.
-// Ritorna una funzione da chiamare quando il salvataggio è andato a buon fine
-// (per annullare il watchdog).
-function avviaWatchdog(btn, testoOriginale) {
+// Watchdog visivo: se dopo N secondi un bottone è ancora "in corso", lo sblocca.
+// Usato come ultima rete di sicurezza nelle modal.
+function avviaWatchdog(btn, testoOriginale, secondi) {
+  const ms = (secondi || 20) * 1000;
   const timer = setTimeout(() => {
     if (btn && btn.disabled) {
       btn.disabled = false;
       if (testoOriginale) btn.textContent = testoOriginale;
-      toast('Salvataggio non riuscito: la connessione sembra lenta o assente. Riprova.', 'err');
+      toast('Salvataggio non riuscito: connessione non disponibile. Riprova.', 'err');
     }
-  }, 15000);
+  }, ms);
   return () => clearTimeout(timer);
 }
 
@@ -1080,7 +1177,6 @@ async function loadAllData() {
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
-let realtimeChannel = null;
 function startRealtime() {
   if (realtimeChannel) return; // già attivo
   realtimeChannel = sb.channel('app-changes')
@@ -2324,10 +2420,10 @@ function openOperatoreModal(u) {
         esterno: fd.get('esterno') === 'true',
       };
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
-      const q = isNew
-        ? sb.from('utenti').insert(payload).select().single()
-        : sb.from('utenti').update(payload).eq('id', u.id).select().single();
-      const { data, error } = await q;
+      const { data, error } = await eseguiConRetry(
+        () => isNew ? sb.from('utenti').insert(payload).select().single() : sb.from('utenti').update(payload).eq('id', u.id).select().single(),
+        { label: 'salvataggio utenti' }
+      );
       if (error) {
         if (error.message.includes('badge_uniq')) return toast('Numero badge già in uso', 'err');
         if (error.message.includes('account_uniq')) return toast('Account già collegato a un altro utente', 'err');
@@ -2545,10 +2641,10 @@ function openClienteModal(c) {
       btnSave.disabled = true;
       btnSave.textContent = 'Salvataggio…';
       try {
-        const q = isNew
-          ? sb.from('clienti').insert(payload).select().single()
-          : sb.from('clienti').update(payload).eq('id', c.id).select().single();
-        const { data, error } = await q;
+        const { data, error } = await eseguiConRetry(
+        () => isNew ? sb.from('clienti').insert(payload).select().single() : sb.from('clienti').update(payload).eq('id', c.id).select().single(),
+        { label: 'salvataggio clienti' }
+      );
         if (error) {
           btnSave.disabled = false;
           btnSave.textContent = 'Salva';
@@ -2961,10 +3057,10 @@ function openArticoloModal(a) {
       btnSave.disabled = true;
       btnSave.textContent = 'Salvataggio…';
       try {
-        const q = isNew
-          ? sb.from('articoli').insert(payload).select().single()
-          : sb.from('articoli').update(payload).eq('id', a.id).select().single();
-        const { data, error } = await q;
+        const { data, error } = await eseguiConRetry(
+        () => isNew ? sb.from('articoli').insert(payload).select().single() : sb.from('articoli').update(payload).eq('id', a.id).select().single(),
+        { label: 'salvataggio articoli' }
+      );
         if (error) {
           btnSave.disabled = false;
           btnSave.textContent = 'Salva';
@@ -3336,10 +3432,10 @@ function openTipoLavModal(t) {
     btnSave.disabled = true;
     btnSave.textContent = 'Salvataggio…';
     try {
-      const q = isNew
-        ? sb.from('tipi_lavorazione').insert(payload).select().single()
-        : sb.from('tipi_lavorazione').update(payload).eq('id', t.id).select().single();
-      const { data, error } = await q;
+      const { data, error } = await eseguiConRetry(
+        () => isNew ? sb.from('tipi_lavorazione').insert(payload).select().single() : sb.from('tipi_lavorazione').update(payload).eq('id', t.id).select().single(),
+        { label: 'salvataggio tipi_lavorazione' }
+      );
       if (error) {
         btnSave.disabled = false;
         btnSave.textContent = 'Salva';
@@ -3653,10 +3749,10 @@ function openChiusuraModal(c) {
     btnSave.disabled = true;
     btnSave.textContent = 'Salvataggio…';
     try {
-      const q = isNew
-        ? sb.from('chiusure_aziendali').insert(payload).select().single()
-        : sb.from('chiusure_aziendali').update(payload).eq('id', c.id).select().single();
-      const { data, error } = await q;
+      const { data, error } = await eseguiConRetry(
+        () => isNew ? sb.from('chiusure_aziendali').insert(payload).select().single() : sb.from('chiusure_aziendali').update(payload).eq('id', c.id).select().single(),
+        { label: 'salvataggio chiusure_aziendali' }
+      );
       if (error) {
         btnSave.disabled = false;
         btnSave.textContent = 'Salva';
@@ -4588,10 +4684,12 @@ function openOperazioneModal(o) {
       }
 
       try {
-        const q = isNew
-          ? sb.from('operazioni').insert(payload).select().single()
-          : sb.from('operazioni').update(payload).eq('id', o.id).select().single();
-        const { data, error } = await q;
+        const { data, error } = await eseguiConRetry(
+          () => isNew
+            ? sb.from('operazioni').insert(payload).select().single()
+            : sb.from('operazioni').update(payload).eq('id', o.id).select().single(),
+          { label: 'salvataggio operazione' }
+        );
         if (error) {
           stopWatchdog();
           btnSave.disabled = false;
@@ -5072,10 +5170,10 @@ function openMezzoModal(m) {
         attivo: fd.get('attivo') === 'true',
       };
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
-      const q = isNew
-        ? sb.from('mezzi').insert(payload).select().single()
-        : sb.from('mezzi').update(payload).eq('id', m.id).select().single();
-      const { data, error } = await q;
+      const { data, error } = await eseguiConRetry(
+        () => isNew ? sb.from('mezzi').insert(payload).select().single() : sb.from('mezzi').update(payload).eq('id', m.id).select().single(),
+        { label: 'salvataggio mezzi' }
+      );
       if (error) return toast(error.message, 'err');
       // Aggiorna cache locale
       if (isNew) state.mezzi.push(data);
@@ -5413,7 +5511,10 @@ async function openPrenotazioneModal(p) {
     let prenRow = null;
     if (isNew) {
       payload.utente_id = state.profile.id;
-      const { data, error } = await sb.from('prenotazioni').insert(payload).select().single();
+      const { data, error } = await eseguiConRetry(
+        () => sb.from('prenotazioni').insert(payload).select().single(),
+        { label: 'salvataggio prenotazione' }
+      );
       if (error) {
         if (error.message && error.message.includes('exclusion')) {
           return toast('Mezzo già prenotato in quel periodo', 'err');
@@ -5423,7 +5524,10 @@ async function openPrenotazioneModal(p) {
       prenId = data.id;
       prenRow = data;
     } else {
-      const { data, error } = await sb.from('prenotazioni').update(payload).eq('id', p.id).select().single();
+      const { data, error } = await eseguiConRetry(
+        () => sb.from('prenotazioni').update(payload).eq('id', p.id).select().single(),
+        { label: 'aggiornamento prenotazione' }
+      );
       if (error) {
         if (error.message && error.message.includes('exclusion')) {
           return toast('Mezzo già prenotato in quel periodo', 'err');
@@ -7621,7 +7725,6 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
           creato_da: state.profile.id,
         }).select().single();
       }
-      const { data, error } = await q;
       if (error) {
         btnSave.disabled = false;
         btnSave.textContent = 'Salva';
@@ -7937,10 +8040,10 @@ function openTipoAssenzaModal(t) {
     btnSave.disabled = true;
     btnSave.textContent = 'Salvataggio…';
     try {
-      const q = isNew
-        ? sb.from('tipi_assenza').insert(payload).select().single()
-        : sb.from('tipi_assenza').update(payload).eq('id', t.id).select().single();
-      const { data, error } = await q;
+      const { data, error } = await eseguiConRetry(
+        () => isNew ? sb.from('tipi_assenza').insert(payload).select().single() : sb.from('tipi_assenza').update(payload).eq('id', t.id).select().single(),
+        { label: 'salvataggio tipi_assenza' }
+      );
       if (error) {
         btnSave.disabled = false;
         btnSave.textContent = 'Salva';
