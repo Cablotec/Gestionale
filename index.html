@@ -764,15 +764,39 @@ function toast(msg, kind='ok') {
 // ═══════════════════════════════════════════════════════════
 // RESILIENZA CONNESSIONE — riconnessione automatica + retry
 // ═══════════════════════════════════════════════════════════
-// Problema: dopo un periodo di inattività, il client Supabase può entrare
-// in uno stato in cui le operazioni di scrittura restano "appese" e non
-// tornano mai. Soluzione (stile webapp moderne):
-//  A. ricreaConnessione()  → butta il client morto, ne crea uno fresco
-//  B. eseguiConRetry()     → timeout + ricrea + riprova automaticamente
-//  C. recovery preventivo  → ricrea quando la pagina torna attiva
+// Problema: dopo un periodo di inattività (tab in background, sleep, ecc.)
+// il client Supabase v2 può entrare in uno stato bloccato a causa del bug
+// di _acquireLock in gotrue-js: il lock per il refresh del token non viene
+// rilasciato e tutte le chiamate (auth + scritture) restano appese per sempre.
+//
+// Soluzione a tre livelli:
+//  A. lock no-op nel createClient   → previene il deadlock alla radice
+//  B. conTimeoutAuth()              → timeout su ogni chiamata sb.auth.*
+//  C. ricreaConnessione()           → ricostruisce il client se necessario
+//  D. eseguiConRetry()              → timeout+retry sulle scritture sb.from()
+//  E. visibilitychange unificato    → un solo handler che orchestra il recovery
 
 let _tokenKeepAliveTimer = null;
 let _ricreazioneInCorso = null; // promise condivisa per evitare ricreazioni doppie
+
+// Storage key univoca: se per qualche motivo coesistono client vecchi e nuovi
+// per qualche istante, non si calpestano sul localStorage.
+const SB_STORAGE_KEY = 'sb-cablotec-auth';
+
+// Lock no-op: il bug di supabase-js v2 nasce dal lock interno per il refresh
+// del token che, dopo un freeze della tab, non viene mai rilasciato.
+// Disattivandolo, eventuali refresh concorrenti sono comunque innocui
+// (il refresh token è valido finché non viene consumato).
+const SB_NOOP_LOCK = (_name, _acquireTimeout, fn) => fn();
+
+// Esegue una promise di sb.auth.* con un timeout duro.
+// Se scade, la promise rifiuta con Error('auth timeout') invece di restare appesa.
+function conTimeoutAuth(promise, ms = 5000) {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('auth timeout')), ms))
+  ]);
+}
 
 // ─── PEZZO A: ricrea il client Supabase da zero ───
 // Conserva la sessione di login (token) e la reinstalla nel nuovo client.
@@ -783,28 +807,63 @@ async function ricreaConnessione() {
   _ricreazioneInCorso = (async () => {
     try {
       // 1. Recupera la sessione corrente dal client vecchio (prima che muoia del tutto)
+      //    Timeout duro: se il client vecchio è già bloccato, NON aspettare per sempre.
       let sessioneSalvata = null;
       try {
-        const { data } = await sb.auth.getSession();
+        const { data } = await conTimeoutAuth(sb.auth.getSession(), 3000);
         sessioneSalvata = data?.session || null;
-      } catch (e) { /* il client vecchio è già morto: pazienza */ }
+      } catch (e) { /* il client vecchio è già morto o appeso: pazienza */ }
+
+      // Fallback: se non siamo riusciti a leggere la sessione dal client vecchio,
+      // proviamo a recuperarla dal localStorage (è lì che persistSession la salva).
+      if (!sessioneSalvata) {
+        try {
+          const raw = localStorage.getItem(SB_STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed?.access_token && parsed?.refresh_token) {
+              sessioneSalvata = parsed;
+            } else if (parsed?.currentSession?.access_token) {
+              sessioneSalvata = parsed.currentSession;
+            }
+          }
+        } catch (e) {}
+      }
 
       // 2. Chiudi il realtime del client vecchio per non lasciare connessioni zombie
       try { await sb.removeAllChannels(); } catch (e) {}
       realtimeChannel = null; // così startRealtime ricreerà il canale
 
-      // 3. Crea un client NUOVO
+      // 2b. Smonta il client vecchio: ferma i timer di auto-refresh interni
+      //     così non resta un'istanza GoTrueClient viva in parallelo
+      //     (evita il warning "Multiple GoTrueClient instances detected").
+      try {
+        if (typeof sb?.auth?.stopAutoRefresh === 'function') {
+          await sb.auth.stopAutoRefresh();
+        }
+      } catch (e) {}
+      // Drop del riferimento globale al vecchio client prima della creazione del nuovo,
+      // così non resta accessibile da altre parti del codice durante la transizione.
+      sb = null;
+
+      // 3. Crea un client NUOVO con lock no-op (cura del bug)
       sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          storageKey: SB_STORAGE_KEY,
+          lock: SB_NOOP_LOCK,
+        },
       });
 
-      // 4. Reinstalla la sessione di login sul nuovo client
+      // 4. Reinstalla la sessione di login sul nuovo client (con timeout)
       if (sessioneSalvata) {
         try {
-          await sb.auth.setSession({
+          await conTimeoutAuth(sb.auth.setSession({
             access_token: sessioneSalvata.access_token,
             refresh_token: sessioneSalvata.refresh_token,
-          });
+          }), 5000);
         } catch (e) {
           console.warn('[recovery] impossibile ripristinare sessione:', e?.message || e);
         }
@@ -815,7 +874,7 @@ async function ricreaConnessione() {
         try { startRealtime(); } catch (e) {}
       }
 
-      console.info('[recovery] connessione ricreata');
+      console.log('[recovery] connessione ricreata');
     } finally {
       _ricreazioneInCorso = null;
     }
@@ -867,15 +926,21 @@ async function eseguiConRetry(fn, opts) {
 // Rinnova la sessione se il token sta per scadere (entro 5 min).
 async function assicuraSessioneValida() {
   try {
-    const { data } = await sb.auth.getSession();
+    const { data } = await conTimeoutAuth(sb.auth.getSession(), 4000);
     const sess = data?.session;
     if (!sess) return;
     const expiresAt = (sess.expires_at || 0) * 1000;
     if (Date.now() > expiresAt - 5 * 60 * 1000) {
-      await sb.auth.refreshSession();
+      await conTimeoutAuth(sb.auth.refreshSession(), 6000);
     }
   } catch (e) {
     console.warn('[sessione] refresh preventivo fallito:', e?.message || e);
+    // Se la chiamata auth si è bloccata, il client è probabilmente "morto":
+    // forziamo una ricreazione preventiva così le scritture successive
+    // non resteranno appese.
+    if (e?.message === 'auth timeout') {
+      ricreaConnessione().catch(() => {});
+    }
   }
 }
 
@@ -889,16 +954,30 @@ function installaProtezioneSalvataggi() {
   _tokenKeepAliveTimer = setInterval(() => { assicuraSessioneValida(); }, 4 * 60 * 1000);
 
   // Quando la pagina torna attiva dopo essere stata in background:
-  // ricrea preventivamente la connessione (potrebbe essersi addormentata).
+  // - se è stata in background a lungo, ricrea preventivamente la connessione
+  //   (potrebbe essersi addormentata e creare il deadlock dei salvataggi)
+  // - poi ricarica i dati per riallineare la UI con eventuali modifiche remote.
   let ultimaAttivita = Date.now();
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'visible') {
       const inattivaDa = Date.now() - ultimaAttivita;
-      // Se è stata in background più di 60 secondi, ricrea per sicurezza
-      if (inattivaDa > 60000) {
-        await ricreaConnessione();
-      } else {
-        assicuraSessioneValida();
+      try {
+        // Se è stata in background più di 30 secondi, ricrea per sicurezza.
+        // Sopra i 30s il rischio del deadlock di gotrue-js diventa concreto.
+        if (inattivaDa > 30000) {
+          await ricreaConnessione();
+        } else {
+          await assicuraSessioneValida();
+        }
+        // Ricarica dati solo se siamo loggati e in modalità normale.
+        if (sb && state.profile && !IS_KIOSK && typeof loadAllData === 'function') {
+          await loadAllData();
+          if (typeof renderTab === 'function' && state.currentTab) {
+            renderTab(state.currentTab);
+          }
+        }
+      } catch (e) {
+        console.warn('[recovery] errore al ritorno in foreground:', e?.message || e);
       }
     } else {
       ultimaAttivita = Date.now();
@@ -908,8 +987,16 @@ function installaProtezioneSalvataggi() {
 
   // Quando la rete torna disponibile dopo una caduta
   window.addEventListener('online', async () => {
-    console.info('[recovery] rete tornata online — ricreo la connessione');
+    console.log('[recovery] rete tornata online — ricreo la connessione');
     await ricreaConnessione();
+    if (sb && state.profile && !IS_KIOSK && typeof loadAllData === 'function') {
+      try {
+        await loadAllData();
+        if (typeof renderTab === 'function' && state.currentTab) {
+          renderTab(state.currentTab);
+        }
+      } catch (e) { console.warn('Reload online fallito:', e); }
+    }
   });
 }
 
@@ -962,6 +1049,8 @@ async function init() {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+      storageKey: SB_STORAGE_KEY,
+      lock: SB_NOOP_LOCK,
     },
   });
 
@@ -990,7 +1079,13 @@ async function init() {
   }
 
   // ─── MODALITÀ NORMALE ───
-  const { data: { session } } = await sb.auth.getSession();
+  let session = null;
+  try {
+    const { data } = await conTimeoutAuth(sb.auth.getSession(), 6000);
+    session = data?.session || null;
+  } catch (e) {
+    console.warn('[init] getSession timeout, proseguo senza sessione:', e?.message || e);
+  }
   state.session = session;
   if (session) await afterLogin();
   else renderAuth();
@@ -1095,31 +1190,9 @@ document.addEventListener('change', (e) => {
   }
 });
 
-// Quando la scheda torna visibile dopo un'assenza prolungata, ricarico i dati
-let lastVisibilityCheck = Date.now();
-document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState !== 'visible') return;
-  if (!sb || !state.profile) return;
-  const elapsed = Date.now() - lastVisibilityCheck;
-  lastVisibilityCheck = Date.now();
-  if (elapsed < 30000) return;
-  try {
-    await sb.auth.refreshSession();
-    await loadAllData();
-    renderTab(state.currentTab);
-  } catch (e) {
-    console.warn('Riconnessione fallita:', e);
-  }
-});
-
-// Anche quando la connessione torna online
-window.addEventListener('online', async () => {
-  if (!state.profile) return;
-  try {
-    await loadAllData();
-    renderTab(state.currentTab);
-  } catch (e) { console.warn('Reload online fallito:', e); }
-});
+// NOTA: gli handler 'visibilitychange' e 'online' sono ora gestiti centralmente
+// dentro installaProtezioneSalvataggi() — vedi sezione RESILIENZA CONNESSIONE.
+// Avere un solo handler evita race condition tra ricreazione client e refresh.
 
 async function loadAllData() {
   const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti] = await Promise.all([
@@ -2040,7 +2113,16 @@ async function deleteMezzo(m) {
 // azione: 'crea' | 'reset_password'. Ritorna {ok, ...} o {error}
 async function chiamaGestioneAccount(payload) {
   try {
-    const { data: sessData } = await sb.auth.getSession();
+    let sessData = null;
+    try {
+      const r = await conTimeoutAuth(sb.auth.getSession(), 4000);
+      sessData = r?.data || null;
+    } catch (e) {
+      // Se il client è bloccato, ricreiamo e riproviamo una volta
+      await ricreaConnessione();
+      const r2 = await conTimeoutAuth(sb.auth.getSession(), 4000).catch(() => null);
+      sessData = r2?.data || null;
+    }
     const token = sessData?.session?.access_token;
     if (!token) return { error: 'Sessione scaduta — rifai il login' };
 
@@ -5751,7 +5833,7 @@ async function kioskInit() {
   // usa quella sessione invece di forzare il login kiosk.
   let sessioneEsistente = null;
   try {
-    const { data } = await sb.auth.getSession();
+    const { data } = await conTimeoutAuth(sb.auth.getSession(), 4000);
     sessioneEsistente = data?.session || null;
   } catch (e) {
     // ignora, andiamo al fallback con autologin
