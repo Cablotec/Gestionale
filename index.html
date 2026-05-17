@@ -7787,26 +7787,24 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     btnSave.textContent = 'Salvataggio…';
     const note = (document.getElementById('ass-note').value || '').trim() || null;
     try {
-      let q;
-      if (assEsistente) {
-        // Update
-        q = sb.from('assenze').update({
-          tipo_assenza_id: tipoSel,
-          ore: oreSel,
-          note,
-        }).eq('id', assEsistente.id).select().single();
-      } else {
-        // Insert
-        q = sb.from('assenze').insert({
-          utente_id: utente.id,
-          tipo_assenza_id: tipoSel,
-          data: iso,
-          ore: oreSel,
-          stato: 'valida',
-          note,
-          creato_da: state.profile.id,
-        }).select().single();
-      }
+      const { data, error } = await eseguiConRetry(
+        () => assEsistente
+          ? sb.from('assenze').update({
+              tipo_assenza_id: tipoSel,
+              ore: oreSel,
+              note,
+            }).eq('id', assEsistente.id).select().single()
+          : sb.from('assenze').insert({
+              utente_id: utente.id,
+              tipo_assenza_id: tipoSel,
+              data: iso,
+              ore: oreSel,
+              stato: 'valida',
+              note,
+              creato_da: state.profile.id,
+            }).select().single(),
+        { label: 'salvataggio assenza' }
+      );
       if (error) {
         btnSave.disabled = false;
         btnSave.textContent = 'Salva';
