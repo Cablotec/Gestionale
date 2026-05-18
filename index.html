@@ -721,7 +721,7 @@ const state = {
   kioskOp: null,           // operazione selezionata nel flusso commesse
   kioskMode: null,         // 'menu' | 'mezzi' | 'commesse-list' | 'commesse-tipo' | 'commesse-attiva'
   kioskTimer: null,        // setInterval handle per refresh durata
-  calCursor: new Date(), currentTab: 'calendario', currentArea: 'mezzi',
+  calCursor: new Date(), currentTab: 'generale', currentArea: 'calendari',
   loaded: false,
 };
 
@@ -991,7 +991,12 @@ function installaProtezioneSalvataggi() {
         // Ricarica dati solo se siamo loggati e in modalità normale.
         if (sb && state.profile && !IS_KIOSK && typeof loadAllData === 'function') {
           await loadAllData();
-          if (typeof renderTab === 'function' && state.currentTab) {
+          // Ripristina la scheda esatta su cui era l'utente: macro-area +
+          // sotto-tab. Usare solo renderTab ridisegnerebbe il contenuto ma
+          // lascerebbe barra di navigazione e sotto-tab disallineate.
+          if (typeof switchToTab === 'function' && state.currentArea && state.currentTab) {
+            switchToTab(state.currentArea, state.currentTab);
+          } else if (typeof renderTab === 'function' && state.currentTab) {
             renderTab(state.currentTab);
           }
         }
@@ -1011,7 +1016,9 @@ function installaProtezioneSalvataggi() {
     if (sb && state.profile && !IS_KIOSK && typeof loadAllData === 'function') {
       try {
         await loadAllData();
-        if (typeof renderTab === 'function' && state.currentTab) {
+        if (typeof switchToTab === 'function' && state.currentArea && state.currentTab) {
+          switchToTab(state.currentArea, state.currentTab);
+        } else if (typeof renderTab === 'function' && state.currentTab) {
           renderTab(state.currentTab);
         }
       } catch (e) { console.warn('Reload online fallito:', e); }
@@ -3690,8 +3697,52 @@ function contaGiorniLavorativi(daIso, aIso) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// CHIUSURE AZIENDALI — UI
+// CAPACITY PLANNING — pianificazione che tiene conto delle
+// ferie degli addetti assegnati a una commessa
 // ═══════════════════════════════════════════════════════════
+const ORE_STANDARD_GIORNO = 8;
+
+// Ore di assenza valida di un singolo utente in un dato giorno (ISO)
+function oreAssenzaUtenteGiorno(utenteId, iso) {
+  let tot = 0;
+  state.assenze.forEach(a => {
+    if (a.stato === 'valida' && a.utente_id === utenteId && a.data === iso) {
+      tot += parseFloat(a.ore) || 0;
+    }
+  });
+  return tot;
+}
+
+// Capacità lavorativa (in ore) di una squadra di addetti in un dato giorno.
+// Weekend / festivi / chiusure aziendali → 0. Altrimenti: addetti × 8 ore
+// meno le ore di assenza di ciascuno (un addetto non scende mai sotto 0).
+function capacitaGiorno(dateObj, addettiIds) {
+  if (isGiornoNonLavorativo(dateObj)) return 0;
+  const iso = toLocalISO(dateObj);
+  let cap = 0;
+  addettiIds.forEach(uid => {
+    const assenti = oreAssenzaUtenteGiorno(uid, iso);
+    cap += Math.max(0, ORE_STANDARD_GIORNO - assenti);
+  });
+  return cap;
+}
+
+// Data di inizio calcolata a ore: parte dalla scadenza e va indietro
+// accumulando la capacità reale di ogni giorno finché copre oreTotali.
+function indietroOreCapacita(scadenzaIso, oreTotali, addettiIds) {
+  const d = parseISODate(scadenzaIso);
+  let rest = oreTotali;
+  let guard = 0; // salvagente: evita loop infiniti (max ~10 anni)
+  while (rest > 0 && guard < 3700) {
+    const cap = capacitaGiorno(d, addettiIds);
+    if (cap > 0) rest -= cap;
+    if (rest > 0) d.setDate(d.getDate() - 1);
+    guard++;
+  }
+  return toLocalISO(d);
+}
+
+
 function renderChiusure(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const annoAttuale = new Date().getFullYear();
@@ -3926,8 +3977,21 @@ function opCalcGiorni(op) {
   const ore = opCalcOre(op);
   return Math.ceil(ore / 8); // 8 ore al giorno, arrotondato per eccesso
 }
-function opCalcInizio(op) {
+function opCalcInizio(op, addettiOverride) {
   if (!op.scadenza) return null;
+  const ore = opCalcOre(op);
+  if (ore <= 0) return op.scadenza;
+  // addettiOverride: usato dal modal di creazione (operazione non ancora
+  // salvata, addetti ancora in stato locale). Altrimenti li cerca dal DB.
+  let addetti = addettiOverride;
+  if (!addetti) {
+    addetti = (typeof getOperazioneAddetti === 'function')
+      ? getOperazioneAddetti(op.id) : [];
+  }
+  if (addetti.length > 0) {
+    return indietroOreCapacita(op.scadenza, ore, addetti);
+  }
+  // Nessun addetto: fallback alla logica classica a giorni (8h standard).
   const giorni = opCalcGiorni(op);
   if (giorni <= 0) return op.scadenza;
   return indietroGiorniLavorativi(op.scadenza, giorni);
@@ -4463,6 +4527,10 @@ function openOperazioneModal(o) {
   addSearchInput.onfocus = () => { addDropList.classList.add('open'); renderAddDropList(); };
   addSearchInput.onblur = () => { setTimeout(() => addDropList.classList.remove('open'), 180); };
 
+  // Riferimento in avanti: assegnato più sotto quando refreshPreview esiste.
+  // Permette di ricalcolare la data inizio quando cambiano gli addetti.
+  let aggiornaPreviewInizio = null;
+
   const renderAddSelected = () => {
     addSelectedWrap.innerHTML = '';
     if (addettiSel.length === 0) {
@@ -4479,6 +4547,7 @@ function openOperazioneModal(o) {
           onclick: () => {
             addettiSel = addettiSel.filter(x => x !== uid);
             renderAddSelected(); renderAddDropList();
+            if (aggiornaPreviewInizio) aggiornaPreviewInizio();
           },
         }, '✕') : null,
       ));
@@ -4503,6 +4572,7 @@ function openOperazioneModal(o) {
           if (isSel) addettiSel = addettiSel.filter(x => x !== u.id);
           else addettiSel.push(u.id);
           renderAddSelected(); renderAddDropList();
+          if (aggiornaPreviewInizio) aggiornaPreviewInizio();
         },
       },
         el('span', { class:'util-row-chk' }, isSel ? '✓' : ''),
@@ -4673,7 +4743,8 @@ function openOperazioneModal(o) {
     };
     const ore = opCalcOre(tmp);
     const giorni = opCalcGiorni(tmp);
-    const inizio = opCalcInizio(tmp);
+    const inizio = opCalcInizio(tmp, addettiSel);
+    const conAddetti = addettiSel && addettiSel.length > 0;
     previewBox.innerHTML = '';
     previewBox.append(
       el('div', {},
@@ -4684,9 +4755,12 @@ function openOperazioneModal(o) {
         el('span', { style:'color:var(--acc)' }, 'Data inizio calc.: '), inizio ? fmtIT(inizio) : '— (manca scadenza)',
       ),
       el('div', { style:'margin-top:4px;font-size:10px;color:var(--mut);' },
-        'Calcolato come quantità × minuti / 60 ore, divisi in giornate da 8h, escludendo weekend, festivi nazionali e chiusure aziendali.')
+        conAddetti
+          ? 'Inizio calcolato a ritroso dalla scadenza in base alla capacità reale degli addetti assegnati (8h a testa, meno le loro ferie), escludendo weekend, festivi e chiusure aziendali.'
+          : 'Calcolato come quantità × minuti / 60 ore, divisi in giornate da 8h, escludendo weekend, festivi nazionali e chiusure aziendali. Assegna degli addetti per tener conto delle loro ferie.')
     );
   };
+  aggiornaPreviewInizio = refreshPreview;
   refreshPreview();
   ['quantita','minuti_unitari','scadenza'].forEach(name => {
     form.querySelector(`[name=${name}]`).addEventListener('input', refreshPreview);
