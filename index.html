@@ -377,11 +377,11 @@ table.rt tbody tr:hover td{background:var(--hover);}
 
 /* ═══ GANTT ═══ */
 .gantt-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px;}
-.gantt-toolbar .switch-bar{display:flex;gap:0;background:var(--sur);border:1px solid var(--brd);border-radius:4px;overflow:hidden;}
-.gantt-toolbar .switch-bar button{padding:6px 14px;background:transparent;border:none;color:var(--mut);font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border-right:1px solid var(--brd);}
-.gantt-toolbar .switch-bar button:last-child{border-right:none;}
-.gantt-toolbar .switch-bar button.act{background:var(--acc);color:#0f0f0e;font-weight:700;}
-.gantt-toolbar .switch-bar button:hover:not(.act){color:var(--txt);background:var(--sur2);}
+.switch-bar{display:flex;gap:0;background:var(--sur);border:1px solid var(--brd);border-radius:4px;overflow:hidden;}
+.switch-bar button{padding:6px 14px;background:transparent;border:none;color:var(--mut);font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border-right:1px solid var(--brd);}
+.switch-bar button:last-child{border-right:none;}
+.switch-bar button.act{background:var(--acc);color:#0f0f0e;font-weight:700;}
+.switch-bar button:hover:not(.act){color:var(--txt);background:var(--sur2);}
 .gantt-nav{display:flex;gap:4px;align-items:center;}
 .gantt-nav button{padding:6px 10px;background:var(--sur);border:1px solid var(--brd);color:var(--mut);cursor:pointer;border-radius:3px;font-family:'DM Mono',monospace;font-size:11px;}
 .gantt-nav button:hover{color:var(--txt);border-color:var(--mut);}
@@ -445,7 +445,7 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .assv2-legend .leg{display:inline-flex;align-items:center;gap:4px;}
 .assv2-legend .ld{width:14px;height:12px;border:1px solid rgba(255,255,255,.1);flex-shrink:0;border-radius:1px;}
 
-.assv2-cal-wrap{overflow:auto;border:1px solid var(--brd);background:var(--sur);border-radius:4px;margin-bottom:10px;}
+.assv2-cal-wrap{overflow:auto;max-height:calc(100vh - 80px);border:1px solid var(--brd);background:var(--sur);border-radius:4px;margin-bottom:10px;}
 table.assv2-cal{border-collapse:separate;border-spacing:0;table-layout:fixed;width:100%;}
 table.assv2-cal th,table.assv2-cal td{border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);}
 table.assv2-cal tr:first-child th{border-top:1px solid var(--brd);}
@@ -7470,11 +7470,6 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
       `${t.codice || '?'} = ${t.nome}`));
   });
   root.append(legend);
-
-  if (isAdmin) {
-    root.append(el('div', { class:'assv2-hint' },
-      '✎ Clicca su una cella per inserire/modificare un\'assenza — sulla riga "Chiusure" per gestire chiusure aziendali'));
-  }
 
   // Tabella matrice
   const wrap = el('div', { class:'assv2-cal-wrap' });
