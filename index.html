@@ -446,15 +446,34 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .assv2-legend .ld{width:14px;height:12px;border:1px solid rgba(255,255,255,.1);flex-shrink:0;border-radius:1px;}
 
 .assv2-cal-wrap{overflow:auto;border:1px solid var(--brd);background:var(--sur);border-radius:4px;margin-bottom:10px;}
-table.assv2-cal{border-collapse:collapse;width:100%;}
-table.assv2-cal th,table.assv2-cal td{border:1px solid var(--brd);}
-.assv2-th-month{background:var(--sur2);color:var(--acc);font-family:'Syne',sans-serif;font-size:12px;font-weight:800;padding:5px 8px;text-align:center;letter-spacing:.05em;text-transform:uppercase;}
-.assv2-col-name{width:1%;white-space:nowrap;position:sticky;left:0;z-index:3;}
+table.assv2-cal{border-collapse:separate;border-spacing:0;table-layout:fixed;width:100%;}
+table.assv2-cal th,table.assv2-cal td{border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);}
+table.assv2-cal tr:first-child th{border-top:1px solid var(--brd);}
+table.assv2-cal th:first-child,table.assv2-cal td:first-child{border-left:1px solid var(--brd);}
+/* Colonne giorno: tutte uguali tra loro, riempiono la larghezza disponibile.
+   table-layout:fixed + width:100% senza width sui <col> giorno → lo spazio
+   residuo (dopo la colonna nome) si divide in parti identiche.
+   Il min-width sulle celle garantisce leggibilità sui mesi lunghi: sotto
+   quella soglia la tabella sfora e compare lo scroll orizzontale. */
+table.assv2-cal col.assv2-colg-name{width:170px;}
+table.assv2-cal th.assv2-th-day,table.assv2-cal td.assv2-td-day{min-width:26px;}
+.assv2-th-month{background:var(--sur2);color:var(--acc);font-family:'Syne',sans-serif;font-size:12px;font-weight:800;padding:5px 8px;text-align:center;letter-spacing:.05em;text-transform:uppercase;
+  position:sticky;top:0;z-index:5;}
+.assv2-col-name{width:170px;white-space:nowrap;position:sticky;left:0;z-index:3;}
 th.assv2-col-name{background:var(--sur2);color:var(--mut);font-family:'DM Mono',monospace;font-size:9px;font-weight:700;padding:4px 10px;text-align:left;letter-spacing:.08em;text-transform:uppercase;}
-td.assv2-col-name{padding:4px 12px 4px 10px;background:var(--sur);color:var(--txt);font-family:'Syne',sans-serif;font-size:11px;font-weight:600;}
+td.assv2-col-name{padding:4px 12px 4px 10px;background:var(--sur);color:var(--txt);font-family:'Syne',sans-serif;font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;}
 td.assv2-col-name.esterno{color:var(--yel);}
+/* Le righe intestazione restano sempre visibili in alto, impilate */
+tr.assv2-tr-days th{position:sticky;top:27px;z-index:4;}
+tr.assv2-tr-days th.assv2-col-name{z-index:6;}
+tr.assv2-tr-dow th{position:sticky;top:48px;z-index:4;}
+tr.assv2-tr-dow th.assv2-col-name{z-index:6;}
 .assv2-th-day{text-align:center;padding:2px 1px;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;background:var(--sur2);color:var(--mut);}
 .assv2-th-dow{text-align:center;padding:1px;font-family:'DM Mono',monospace;font-size:8px;font-weight:700;background:var(--sur2);color:var(--mut);opacity:.7;}
+/* Riga evidenziata al passaggio del mouse */
+tr.assv2-row:hover td.assv2-td-day{background:var(--hover3);}
+tr.assv2-row:hover td.assv2-col-name{background:var(--hover3);}
+tr.assv2-row-mia td.assv2-td-day{background-image:linear-gradient(rgba(212,255,78,.035),rgba(212,255,78,.035));}
 .assv2-td-day{text-align:center;height:30px;user-select:none;background:var(--bg);position:relative;padding:0;}
 .assv2-td-day span{display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;}
 .assv2-td-day.can-edit{cursor:pointer;}
@@ -7461,6 +7480,12 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
   const wrap = el('div', { class:'assv2-cal-wrap' });
   const table = el('table', { class:'assv2-cal' });
 
+  // Colgroup: 1 colonna nome + N colonne giorno tutte uguali
+  const colgroup = el('colgroup');
+  colgroup.append(el('col', { class:'assv2-colg-name' }));
+  giorni.forEach(() => colgroup.append(el('col', { class:'assv2-col-day' })));
+  table.append(colgroup);
+
   // Riga 1: intestazione mese
   const trMonth = el('tr');
   trMonth.append(el('th', { class:'assv2-th-month', colspan: String(numGiorni + 1) },
@@ -7468,7 +7493,7 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
   table.append(trMonth);
 
   // Riga 2: numeri giorni
-  const trDays = el('tr');
+  const trDays = el('tr', { class:'assv2-tr-days' });
   trDays.append(el('th', { class:'assv2-col-name' }, ''));
   giorni.forEach(g => {
     const cls = ['assv2-th-day'];
@@ -7481,7 +7506,7 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
   table.append(trDays);
 
   // Riga 3: giorni della settimana
-  const trDow = el('tr');
+  const trDow = el('tr', { class:'assv2-tr-dow' });
   trDow.append(el('th', { class:'assv2-col-name' }, ''));
   giorni.forEach(g => {
     const cls = ['assv2-th-dow'];
@@ -7510,13 +7535,15 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
 
   utentiOrdinati.forEach(u => {
     const isMia = u.id === mioUtenteId;
-    const tr = el('tr');
-    if (isMia) tr.style.background = 'rgba(212,255,78,.04)';
+    const tr = el('tr', { class: 'assv2-row' });
+    tr.dataset.utenteId = u.id;
+    if (isMia) tr.classList.add('assv2-row-mia');
 
-    tr.append(el('td', {
+    const tdNome = el('td', {
       class: 'assv2-col-name' + (u.esterno ? ' esterno' : ''),
       style: isMia ? 'border-left:3px solid var(--acc);' : '',
-    }, (isMia ? '★ ' : '') + u.nome + (u.esterno ? ' ✦' : '')));
+    }, (isMia ? '★ ' : '') + u.nome + (u.esterno ? ' ✦' : ''));
+    tr.append(tdNome);
 
     giorni.forEach(g => {
       const cls = ['assv2-td-day'];
@@ -7578,6 +7605,15 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
 
   wrap.append(table);
   root.append(wrap);
+
+  // Posiziona dinamicamente le righe-intestazione sticky in base
+  // all'altezza reale resa dal browser (evita sovrapposizioni/buchi)
+  requestAnimationFrame(() => {
+    const hMonth = trMonth.getBoundingClientRect().height;
+    const hDays  = trDays.getBoundingClientRect().height;
+    trDays.querySelectorAll('th').forEach(th => { th.style.top = hMonth + 'px'; });
+    trDow.querySelectorAll('th').forEach(th => { th.style.top = (hMonth + hDays) + 'px'; });
+  });
 }
 
 // Sceglie colore testo bianco/nero in base allo sfondo
