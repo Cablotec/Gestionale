@@ -678,6 +678,7 @@ let sb = null;
 let realtimeChannel = null;
 const state = {
   session: null, profile: null, profiliById: {}, mezzi: [],
+  appInizializzata: false, // true dopo il primo afterLogin completato
   utenti: [], utentiById: {},
   prenotazioni: [],
   consegne: [],            // tutte le consegne in memoria
@@ -1115,10 +1116,22 @@ async function init() {
   state.session = session;
   if (session) await afterLogin();
   else renderAuth();
-  sb.auth.onAuthStateChange(async (_e, sess) => {
+  sb.auth.onAuthStateChange(async (evt, sess) => {
     state.session = sess;
-    if (sess) await afterLogin();
-    else { state.profile = null; renderAuth(); }
+    if (sess) {
+      // afterLogin ricostruisce TUTTA l'interfaccia (bindTabs incluso, che
+      // riporta a Calendari→Generale). Va eseguita solo al primo login.
+      // Eventi come TOKEN_REFRESHED scattano al ritorno in foreground dopo
+      // che la scheda è stata in background: NON devono re-inizializzare
+      // l'app, altrimenti l'utente perde la scheda su cui stava lavorando.
+      if (!state.appInizializzata) {
+        await afterLogin();
+      }
+    } else {
+      state.profile = null;
+      state.appInizializzata = false;
+      renderAuth();
+    }
   });
 }
 
@@ -1193,6 +1206,7 @@ async function afterLogin() {
   try {
     await loadAllData();
     state.loaded = true;
+    state.appInizializzata = true;
     startRealtime();
     renderTab(state.currentTab);
   } catch (e) {
