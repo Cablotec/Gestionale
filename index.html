@@ -383,34 +383,48 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .switch-bar button.act{background:var(--acc);color:#0f0f0e;font-weight:700;}
 .switch-bar button:hover:not(.act){color:var(--txt);background:var(--sur2);}
 .gantt-nav{display:flex;gap:4px;align-items:center;}
-/* ── Vista Carico ── */
-.carico-wrap{overflow-x:auto;border:1px solid var(--brd);border-radius:4px;background:var(--sur);}
-table.carico-tab{border-collapse:separate;border-spacing:0;width:100%;table-layout:fixed;}
-table.carico-tab th,table.carico-tab td{border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);}
-table.carico-tab th{background:var(--sur2);padding:7px 6px;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:var(--txt);text-align:center;}
-.carico-col-name{width:150px;text-align:left !important;position:sticky;left:0;z-index:2;background:var(--sur2);
-  font-family:'Syne',sans-serif;font-size:12px;font-weight:600;color:var(--txt);padding:7px 12px;}
-td.carico-col-name{background:var(--sur);}
-.carico-th-sett{line-height:1.3;}
-.carico-cell{padding:5px 6px;text-align:center;vertical-align:middle;background:var(--bg);}
-.carico-vuoto{background:var(--sur);}
-.carico-dash{color:var(--mut);font-family:'DM Mono',monospace;font-size:13px;}
-.carico-ore{font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:var(--txt);margin-bottom:3px;}
-.carico-perc{font-family:'DM Mono',monospace;font-size:9px;color:var(--mut);margin-top:2px;}
-.carico-barra{height:6px;background:var(--sur2);border-radius:3px;overflow:hidden;}
-.carico-fill{height:100%;border-radius:3px;}
-.carico-fill-ok{background:var(--grn);}
-.carico-fill-full{background:var(--yel);}
-.carico-fill-over{background:var(--red);}
-.carico-ok{background:rgba(78,255,163,.07);}
-.carico-full{background:rgba(255,204,78,.10);}
-.carico-over{background:rgba(255,78,107,.13);}
-.carico-legenda{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;}
+/* ── Vista Carico: matrice a giorni stile assenze, con barre commesse ── */
+.carico-wrap{overflow:auto;max-height:calc(100vh - 90px);border:1px solid var(--brd);background:var(--sur);border-radius:4px;}
+table.carico-cal{border-collapse:separate;border-spacing:0;table-layout:fixed;width:100%;}
+table.carico-cal th,table.carico-cal td{border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);}
+table.carico-cal tr:first-child th{border-top:1px solid var(--brd);}
+table.carico-cal th:first-child,table.carico-cal td:first-child{border-left:1px solid var(--brd);}
+table.carico-cal col.carico-colg-name{width:160px;}
+table.carico-cal th.carico-th-day,table.carico-cal td.carico-td-day{min-width:30px;}
+.carico-th-month{background:var(--sur2);color:var(--acc);font-family:'Syne',sans-serif;font-size:12px;font-weight:800;
+  padding:5px 8px;text-align:center;letter-spacing:.05em;text-transform:uppercase;position:sticky;top:0;z-index:5;}
+.carico-col-name{width:160px;white-space:nowrap;position:sticky;left:0;z-index:3;}
+th.carico-col-name{background:var(--sur2);color:var(--mut);font-family:'DM Mono',monospace;font-size:9px;
+  font-weight:700;padding:4px 10px;text-align:left;letter-spacing:.08em;text-transform:uppercase;}
+td.carico-col-name{padding:5px 12px;background:var(--sur);color:var(--txt);font-family:'Syne',sans-serif;
+  font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;vertical-align:top;}
+td.carico-col-name.esterno{color:var(--yel);}
+tr.carico-tr-days th{position:sticky;top:27px;z-index:4;}
+tr.carico-tr-days th.carico-col-name{z-index:6;}
+tr.carico-tr-dow th{position:sticky;top:48px;z-index:4;}
+tr.carico-tr-dow th.carico-col-name{z-index:6;}
+.carico-th-day{text-align:center;padding:2px 1px;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;
+  background:var(--sur2);color:var(--mut);}
+.carico-th-dow{text-align:center;padding:1px;font-family:'DM Mono',monospace;font-size:8px;font-weight:700;
+  background:var(--sur2);color:var(--mut);opacity:.7;}
+.carico-th-day.we,.carico-th-dow.we{color:var(--red);}
+.carico-td-day{padding:0;background:var(--bg);position:relative;vertical-align:top;height:100%;}
+.carico-td-day.we{background:rgba(255,78,107,.07);}
+.carico-td-day.nonlav{background:rgba(255,255,255,.02);}
+/* Cella di un giorno sovraccarico: l'utente ha più ore del disponibile */
+.carico-td-day.over{background:rgba(255,78,107,.22);}
+.carico-td-day.over.we{background:rgba(255,78,107,.28);}
+.carico-cell-inner{display:flex;flex-direction:column;gap:2px;padding:3px 2px;min-height:34px;}
+/* Barra di una commessa */
+.carico-bar{height:13px;border-radius:3px;font-family:'DM Mono',monospace;font-size:8px;font-weight:700;
+  color:#0f0f0e;display:flex;align-items:center;padding:0 3px;overflow:hidden;white-space:nowrap;cursor:default;}
+.carico-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0;}
+.carico-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0;}
+.carico-legenda{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;align-items:center;}
 .carico-leg-item{display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);}
 .carico-leg-box{width:14px;height:14px;border-radius:3px;border:1px solid var(--brd);}
-.carico-leg-box.carico-ok{background:var(--grn);}
-.carico-leg-box.carico-full{background:var(--yel);}
-.carico-leg-box.carico-over{background:var(--red);}
+.carico-leg-box.over{background:rgba(255,78,107,.5);}
+.carico-leg-bar{width:22px;height:11px;border-radius:3px;background:var(--blu);}
 .carico-nota{margin-top:14px;padding:10px 12px;background:var(--sur);border-left:3px solid var(--brd);
   border-radius:2px;font-family:'DM Mono',monospace;font-size:10px;line-height:1.6;color:var(--mut);}
 .gantt-nav button{padding:6px 10px;background:var(--sur);border:1px solid var(--brd);color:var(--mut);cursor:pointer;border-radius:3px;font-family:'DM Mono',monospace;font-size:11px;}
@@ -6791,23 +6805,215 @@ async function kioskStopSessione(sess, modalita) {
 
 
 // ═══════════════════════════════════════════════════════════
-// CARICO — quanto sono impegnati gli addetti dal lavoro futuro
+// CARICO — matrice a giorni: commesse per addetto, sovraccarico evidenziato
 // ═══════════════════════════════════════════════════════════
 
-// Cursore settimana per la vista Carico (lunedì della prima settimana mostrata)
-let caricoCursore = null;
-// Quante settimane mostrare
-const CARICO_NUM_SETTIMANE = 6;
+// Cursore mese per la vista Carico
+let caricoMese = null;
 
-// Lunedì della settimana che contiene la data passata
-function lunediDellaSettimana(dateObj) {
-  const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  return d;
+// Colore stabile di una commessa, derivato dal suo id (palette tema)
+const CARICO_PALETTE = ['#4eb8ff','#4effa3','#ffcc4e','#b84eff','#ff9d4e','#4edcff','#a3ff4e','#ff4ec1'];
+function coloreCommessa(opId) {
+  let h = 0;
+  const s = String(opId);
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return CARICO_PALETTE[Math.abs(h) % CARICO_PALETTE.length];
 }
 
-// Distribuisce le ore di un addetto su una commessa nei giorni lavorativi
-// dell'intervallo [inizio, scadenza]. Ritorna una mappa { isoData: ore }.
+function renderCarico(root) {
+  root.innerHTML = '';
+  if (!caricoMese) { const n = new Date(); caricoMese = new Date(n.getFullYear(), n.getMonth(), 1); }
+
+  const anno = caricoMese.getFullYear();
+  const mese = caricoMese.getMonth();
+
+  // ---- Intestazione + navigazione mesi ----
+  const header = el('div', { class:'gantt-toolbar' });
+  header.append(el('h2', { style:'flex:1;' }, 'Carico di lavoro'));
+  const nav = el('div', { class:'gantt-nav' });
+  nav.append(el('button', { onclick: () => {
+    caricoMese = new Date(anno, mese - 1, 1); renderCarico(root);
+  } }, '‹'));
+  nav.append(el('span', { class:'label' }, MESI_ESTESI[mese] + ' ' + anno));
+  nav.append(el('button', { onclick: () => {
+    caricoMese = new Date(anno, mese + 1, 1); renderCarico(root);
+  } }, '›'));
+  nav.append(el('button', { onclick: () => {
+    const n = new Date(); caricoMese = new Date(n.getFullYear(), n.getMonth(), 1); renderCarico(root);
+  }, style:'margin-left:6px;' }, 'Oggi'));
+  header.append(nav);
+  root.append(header);
+
+  // ---- Giorni del mese ----
+  const numGiorni = new Date(anno, mese + 1, 0).getDate();
+  const oggiIso = toLocalISO(new Date());
+  const giorni = [];
+  for (let d = 1; d <= numGiorni; d++) {
+    const dObj = new Date(anno, mese, d);
+    const dow = (dObj.getDay() + 6) % 7; // 0=lun
+    giorni.push({
+      d, iso: toLocalISO(dObj), dow,
+      weekend: dow >= 5,
+      nonLav: isGiornoNonLavorativo(dObj),
+      oggi: toLocalISO(dObj) === oggiIso,
+    });
+  }
+  const primoIso = giorni[0].iso;
+  const ultimoIso = giorni[numGiorni - 1].iso;
+
+  // ---- Commesse per addetto ----
+  // caricoByUtente[uid] = [ {op, inizio, scadenza, oreGiorno, colore}, ... ]
+  const caricoByUtente = {};
+  let opSenzaAddetti = 0;
+
+  state.operazioni
+    .filter(o => o.stato === 'aperta' && o.scadenza)
+    .forEach(o => {
+      const addetti = getOperazioneAddetti(o.id);
+      if (addetti.length === 0) { opSenzaAddetti++; return; }
+      const oreTot = opCalcOre(o);
+      if (oreTot <= 0) return;
+      const inizio = opCalcInizio(o);
+      if (!inizio) return;
+      // Salta le commesse che non intersecano il mese mostrato
+      if (o.scadenza < primoIso || inizio > ultimoIso) return;
+      const orePerAddetto = oreTot / addetti.length;
+      // Ore al giorno = ore addetto / giorni lavorativi dell'intervallo
+      const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerAddetto);
+      const isoLavorativi = Object.keys(distrib);
+      const orePerGiorno = isoLavorativi.length > 0 ? distrib[isoLavorativi[0]] : 0;
+      addetti.forEach(uid => {
+        if (!caricoByUtente[uid]) caricoByUtente[uid] = [];
+        caricoByUtente[uid].push({
+          op: o, inizio, scadenza: o.scadenza,
+          oreGiorno: orePerGiorno, oreTot: oreTot, nAddetti: addetti.length,
+          colore: coloreCommessa(o.id),
+          giorniLavSet: new Set(isoLavorativi),
+        });
+      });
+    });
+
+  // ---- Utenti: operatori attivi non kiosk (esterni INCLUSI) ----
+  const operatori = state.utenti
+    .filter(u => u.attivo && !isKioskRecord(u))
+    .sort((a, b) => a.nome.localeCompare(b.nome));
+
+  // ---- Tabella ----
+  const wrap = el('div', { class:'carico-wrap' });
+  const table = el('table', { class:'carico-cal' });
+
+  const colgroup = el('colgroup');
+  colgroup.append(el('col', { class:'carico-colg-name' }));
+  giorni.forEach(() => colgroup.append(el('col', { class:'carico-col-day' })));
+  table.append(colgroup);
+
+  // Riga 1: mese
+  const trMonth = el('tr');
+  trMonth.append(el('th', { class:'carico-th-month', colspan: String(numGiorni + 1) },
+    MESI_ESTESI[mese].toUpperCase() + ' ' + anno));
+  table.append(trMonth);
+
+  // Riga 2: numeri giorno
+  const trDays = el('tr', { class:'carico-tr-days' });
+  trDays.append(el('th', { class:'carico-col-name' }, 'ADDETTO'));
+  giorni.forEach(g => {
+    const cls = ['carico-th-day']; if (g.weekend) cls.push('we');
+    trDays.append(el('th', { class: cls.join(' ') }, String(g.d)));
+  });
+  table.append(trDays);
+
+  // Riga 3: giorni settimana
+  const trDow = el('tr', { class:'carico-tr-dow' });
+  trDow.append(el('th', { class:'carico-col-name' }, ''));
+  giorni.forEach(g => {
+    const cls = ['carico-th-dow']; if (g.weekend) cls.push('we');
+    trDow.append(el('th', { class: cls.join(' ') }, GIORNI_BREVI[g.dow]));
+  });
+  table.append(trDow);
+
+  // ---- Righe addetti ----
+  operatori.forEach(u => {
+    const tr = el('tr');
+    tr.append(el('td', { class: 'carico-col-name' + (u.esterno ? ' esterno' : '') },
+      u.nome + (u.esterno ? ' ✦' : '')));
+
+    const commesse = (caricoByUtente[u.id] || [])
+      .slice()
+      .sort((a, b) => a.inizio < b.inizio ? -1 : 1);
+
+    giorni.forEach(g => {
+      const td = el('td', { class:'carico-td-day' + (g.weekend ? ' we' : '') +
+        (g.nonLav && !g.weekend ? ' nonlav' : '') });
+      const inner = el('div', { class:'carico-cell-inner' });
+
+      // Ore totali dell'addetto in questo giorno + barre attive
+      let oreGiorno = 0;
+      commesse.forEach(c => {
+        const attiva = g.iso >= c.inizio && g.iso <= c.scadenza;
+        if (!attiva) { inner.append(el('div', { style:'height:13px;' })); return; }
+        // conta ore solo nei giorni lavorativi della commessa
+        if (c.giorniLavSet.has(g.iso)) oreGiorno += c.oreGiorno;
+        const contL = g.iso > c.inizio;
+        const contR = g.iso < c.scadenza;
+        const bar = el('div', {
+          class: 'carico-bar' + (contL ? ' cont-l' : '') + (contR ? ' cont-r' : ''),
+          style: 'background:' + c.colore + ';',
+          title: descrizioneCommessa(c.op)
+            + '\nOre totali: ' + Math.round(c.oreTot)
+            + ' · ' + c.nAddetti + ' addett' + (c.nAddetti === 1 ? 'o' : 'i')
+            + '\nScadenza: ' + fmtIT(c.scadenza),
+        }, g.iso === c.inizio ? etichettaCommessa(c.op) : '');
+        inner.append(bar);
+      });
+
+      // Sovraccarico: ore pianificate > capacità del giorno
+      if (!g.nonLav) {
+        const assenti = (typeof oreAssenzaUtenteGiorno === 'function')
+          ? oreAssenzaUtenteGiorno(u.id, g.iso) : 0;
+        const capacita = Math.max(0, ORE_STANDARD_GIORNO - assenti);
+        if (oreGiorno > capacita + 0.05) td.classList.add('over');
+      }
+
+      td.append(inner);
+      tr.append(td);
+    });
+    table.append(tr);
+  });
+
+  wrap.append(table);
+  root.append(wrap);
+
+  // Posizionamento dinamico righe sticky
+  requestAnimationFrame(() => {
+    const hM = trMonth.getBoundingClientRect().height;
+    const hD = trDays.getBoundingClientRect().height;
+    trDays.querySelectorAll('th').forEach(th => { th.style.top = hM + 'px'; });
+    trDow.querySelectorAll('th').forEach(th => { th.style.top = (hM + hD) + 'px'; });
+  });
+
+  // ---- Legenda + nota ----
+  const legenda = el('div', { class:'carico-legenda' });
+  legenda.append(el('span', { class:'carico-leg-item' },
+    el('span', { class:'carico-leg-bar' }), 'Commessa (passa il mouse per i dettagli)'));
+  legenda.append(el('span', { class:'carico-leg-item' },
+    el('span', { class:'carico-leg-box over' }), 'Giorno in sovraccarico (oltre la capacità)'));
+  root.append(legenda);
+
+  root.append(el('div', { class:'carico-nota' },
+    'Ogni barra è una commessa aperta, distesa dalla data di inizio calcolata ' +
+    'alla scadenza. Le ore sono divise in parti uguali tra gli addetti assegnati. ' +
+    'Un giorno si colora di rosso quando le ore pianificate per quell\'addetto ' +
+    'superano la sua capacità (8 ore, meno le ferie). Stima indicativa.'));
+
+  if (opSenzaAddetti > 0) {
+    root.append(el('div', { class:'carico-nota', style:'border-left-color:var(--yel);color:var(--yel);' },
+      '⚠ ' + opSenzaAddetti + ' commess' + (opSenzaAddetti === 1 ? 'a aperta esclusa' : 'e aperte escluse') +
+      ': non ' + (opSenzaAddetti === 1 ? 'ha' : 'hanno') + ' addetti assegnati.'));
+  }
+}
+
+// Distribuisce le ore di un addetto sui giorni lavorativi di [inizio, scadenza].
+// Ritorna { isoData: orePerGiorno }.
 function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
   const giorniLav = [];
   const d = parseISODate(inizioIso);
@@ -6825,173 +7031,25 @@ function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
   return mappa;
 }
 
-// Capacità di un addetto in una settimana: giorni lavorativi × 8h, meno ferie.
-function capacitaSettimanaUtente(utenteId, lunedi) {
-  let cap = 0;
-  for (let i = 0; i < 7; i++) {
-    const g = new Date(lunedi.getFullYear(), lunedi.getMonth(), lunedi.getDate() + i);
-    if (isGiornoNonLavorativo(g)) continue;
-    const iso = toLocalISO(g);
-    const assenti = (typeof oreAssenzaUtenteGiorno === 'function')
-      ? oreAssenzaUtenteGiorno(utenteId, iso) : 0;
-    cap += Math.max(0, ORE_STANDARD_GIORNO - assenti);
-  }
-  return cap;
+// Etichetta breve di una commessa (per la barra)
+function etichettaCommessa(op) {
+  if (!op) return '';
+  const art = state.articoli && state.articoli.find(a => a.id === op.articolo_id);
+  return op.codice_op || (art && art.codice) || ('OP' + op.id);
 }
 
-function renderCarico(root) {
-  root.innerHTML = '';
-  if (!caricoCursore) caricoCursore = lunediDellaSettimana(new Date());
-
-  // ---- Intestazione + navigazione settimane ----
-  const header = el('div', { class:'gantt-toolbar' });
-  header.append(el('h2', { style:'flex:1;' }, 'Carico di lavoro'));
-  const nav = el('div', { class:'switch-bar' });
-  nav.append(el('button', { onclick: () => {
-    caricoCursore.setDate(caricoCursore.getDate() - 7 * CARICO_NUM_SETTIMANE);
-    caricoCursore = new Date(caricoCursore); renderCarico(root);
-  } }, '‹ Prec.'));
-  nav.append(el('button', { onclick: () => {
-    caricoCursore = lunediDellaSettimana(new Date()); renderCarico(root);
-  } }, 'Oggi'));
-  nav.append(el('button', { onclick: () => {
-    caricoCursore.setDate(caricoCursore.getDate() + 7 * CARICO_NUM_SETTIMANE);
-    caricoCursore = new Date(caricoCursore); renderCarico(root);
-  } }, 'Succ. ›'));
-  header.append(nav);
-  root.append(header);
-
-  // ---- Settimane mostrate ----
-  const settimane = [];
-  for (let s = 0; s < CARICO_NUM_SETTIMANE; s++) {
-    const lun = new Date(caricoCursore.getFullYear(), caricoCursore.getMonth(),
-      caricoCursore.getDate() + s * 7);
-    settimane.push(lun);
-  }
-  const primaIso = toLocalISO(settimane[0]);
-  const ultimoGiorno = new Date(settimane[5].getFullYear(), settimane[5].getMonth(),
-    settimane[5].getDate() + 6);
-  const ultimoIso = toLocalISO(ultimoGiorno);
-
-  // ---- Calcolo carico: per ogni operazione aperta, distribuisci le ore ----
-  // oreByUtente[utenteId][isoLunediSettimana] = ore pianificate
-  const oreByUtente = {};
-  const addUtente = (uid) => { if (!oreByUtente[uid]) oreByUtente[uid] = {}; };
-  let opSenzaAddetti = 0;
-
-  state.operazioni
-    .filter(o => o.stato === 'aperta' && o.scadenza)
-    .forEach(o => {
-      const addetti = getOperazioneAddetti(o.id);
-      if (addetti.length === 0) { opSenzaAddetti++; return; } // non si ripartisce
-      const oreTot = opCalcOre(o);
-      if (oreTot <= 0) return;
-      const inizio = opCalcInizio(o);
-      if (!inizio) return;
-      const orePerAddetto = oreTot / addetti.length;
-      addetti.forEach(uid => {
-        addUtente(uid);
-        const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerAddetto);
-        Object.keys(distrib).forEach(iso => {
-          if (iso < primaIso || iso > ultimoIso) return; // fuori finestra
-          const lunIso = toLocalISO(lunediDellaSettimana(parseISODate(iso)));
-          oreByUtente[uid][lunIso] = (oreByUtente[uid][lunIso] || 0) + distrib[iso];
-        });
-      });
-    });
-
-  // ---- Utenti da mostrare: operatori attivi non kiosk/esterni ----
-  const operatori = state.utenti
-    .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
-    .sort((a, b) => a.nome.localeCompare(b.nome));
-
-  // ---- Tabella ----
-  const wrap = el('div', { class:'carico-wrap' });
-  const table = el('table', { class:'carico-tab' });
-
-  const trHead = el('tr');
-  trHead.append(el('th', { class:'carico-col-name' }, 'ADDETTO'));
-  settimane.forEach(lun => {
-    const fine = new Date(lun.getFullYear(), lun.getMonth(), lun.getDate() + 6);
-    trHead.append(el('th', { class:'carico-th-sett' },
-      el('div', {}, 'sett. ' + numeroSettimana(lun)),
-      el('div', { style:'font-size:9px;color:var(--mut);font-weight:400;' },
-        z(lun.getDate()) + '/' + z(lun.getMonth()+1) + ' – ' +
-        z(fine.getDate()) + '/' + z(fine.getMonth()+1))));
-  });
-  table.append(trHead);
-
-  operatori.forEach(u => {
-    const tr = el('tr');
-    tr.append(el('td', { class:'carico-col-name' }, u.nome));
-    settimane.forEach(lun => {
-      const lunIso = toLocalISO(lun);
-      const pianificate = (oreByUtente[u.id] && oreByUtente[u.id][lunIso]) || 0;
-      const capacita = capacitaSettimanaUtente(u.id, lun);
-      const perc = capacita > 0 ? (pianificate / capacita) : (pianificate > 0 ? 99 : 0);
-
-      const td = el('td', { class:'carico-cell' });
-      if (pianificate <= 0.05) {
-        td.classList.add('carico-vuoto');
-        td.append(el('span', { class:'carico-dash' }, '–'));
-      } else {
-        // Livello: ok < 80%, pieno 80-100%, sovraccarico > 100%
-        let liv = 'ok';
-        if (perc > 1.0) liv = 'over';
-        else if (perc >= 0.8) liv = 'full';
-        td.classList.add('carico-' + liv);
-        const barra = el('div', { class:'carico-barra' });
-        const fill = el('div', { class:'carico-fill carico-fill-' + liv });
-        fill.style.width = Math.min(100, perc * 100) + '%';
-        barra.append(fill);
-        td.append(
-          el('div', { class:'carico-ore' },
-            Math.round(pianificate) + ' / ' + Math.round(capacita) + ' h'),
-          barra,
-          el('div', { class:'carico-perc' }, Math.round(perc * 100) + '%')
-        );
-      }
-      tr.append(td);
-    });
-    table.append(tr);
-  });
-
-  wrap.append(table);
-  root.append(wrap);
-
-  // ---- Legenda + nota metodo ----
-  const legenda = el('div', { class:'carico-legenda' });
-  [['carico-ok','Sotto 80% – margine'],
-   ['carico-full','80–100% – pieno'],
-   ['carico-over','Oltre 100% – sovraccarico']].forEach(([cls, txt]) => {
-    legenda.append(el('span', { class:'carico-leg-item' },
-      el('span', { class:'carico-leg-box ' + cls }), txt));
-  });
-  root.append(legenda);
-
-  root.append(el('div', { class:'carico-nota' },
-    'Stima indicativa. Le ore di ogni commessa aperta sono divise in parti uguali ' +
-    'tra gli addetti assegnati e distribuite sui giorni lavorativi tra la data ' +
-    'di inizio calcolata e la scadenza. La capacità settimanale è di 8 ore al ' +
-    'giorno per addetto, meno le ferie. Le commesse senza addetti assegnati non ' +
-    'sono conteggiate.'));
-
-  if (opSenzaAddetti > 0) {
-    root.append(el('div', { class:'carico-nota', style:'border-left-color:var(--yel);color:var(--yel);' },
-      '⚠ ' + opSenzaAddetti + ' commess' + (opSenzaAddetti === 1 ? 'a aperta è esclusa' : 'e aperte sono escluse') +
-      ' da questo conteggio perché non '  + (opSenzaAddetti === 1 ? 'ha' : 'hanno') +
-      ' addetti assegnati. Il carico mostrato è quindi parziale.'));
-  }
-}
-
-// Numero ISO della settimana (1-53)
-function numeroSettimana(dateObj) {
-  const d = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
-  const dayNum = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - dayNum + 3);
-  const primoGiovedi = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
-  const diff = (d - primoGiovedi) / 86400000;
-  return 1 + Math.round((diff - 3 + ((primoGiovedi.getUTCDay() + 6) % 7)) / 7);
+// Descrizione completa di una commessa (per il tooltip)
+function descrizioneCommessa(op) {
+  if (!op) return 'Commessa';
+  const cli = state.clienti && state.clienti.find(c => c.id === op.cliente_id);
+  const art = state.articoli && state.articoli.find(a => a.id === op.articolo_id);
+  const parti = [];
+  if (op.codice_op) parti.push('OP ' + op.codice_op);
+  if (op.numero_ordine) parti.push('Ordine ' + op.numero_ordine);
+  let riga = parti.join(' · ') || 'Commessa';
+  if (cli) riga += '\nCliente: ' + cli.nome;
+  if (art) riga += '\nArticolo: ' + (art.codice || art.descrizione || '');
+  return riga;
 }
 
 // ═══════════════════════════════════════════════════════════
