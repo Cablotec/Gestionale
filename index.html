@@ -383,48 +383,57 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .switch-bar button.act{background:var(--acc);color:#0f0f0e;font-weight:700;}
 .switch-bar button:hover:not(.act){color:var(--txt);background:var(--sur2);}
 .gantt-nav{display:flex;gap:4px;align-items:center;}
-/* ── Vista Carico: matrice a giorni stile assenze, con barre commesse ── */
-.carico-wrap{overflow:auto;max-height:calc(100vh - 90px);border:1px solid var(--brd);background:var(--sur);border-radius:4px;}
-table.carico-cal{border-collapse:separate;border-spacing:0;table-layout:fixed;width:100%;}
-table.carico-cal th,table.carico-cal td{border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);}
-table.carico-cal tr:first-child th{border-top:1px solid var(--brd);}
-table.carico-cal th:first-child,table.carico-cal td:first-child{border-left:1px solid var(--brd);}
-table.carico-cal col.carico-colg-name{width:160px;}
-table.carico-cal th.carico-th-day,table.carico-cal td.carico-td-day{min-width:30px;}
-.carico-th-month{background:var(--sur2);color:var(--acc);font-family:'Syne',sans-serif;font-size:12px;font-weight:800;
-  padding:5px 8px;text-align:center;letter-spacing:.05em;text-transform:uppercase;position:sticky;top:0;z-index:5;}
-.carico-col-name{width:160px;white-space:nowrap;position:sticky;left:0;z-index:3;}
-th.carico-col-name{background:var(--sur2);color:var(--mut);font-family:'DM Mono',monospace;font-size:9px;
-  font-weight:700;padding:4px 10px;text-align:left;letter-spacing:.08em;text-transform:uppercase;}
-td.carico-col-name{padding:5px 12px;background:var(--sur);color:var(--txt);font-family:'Syne',sans-serif;
-  font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;vertical-align:top;}
-td.carico-col-name.esterno{color:var(--yel);}
-tr.carico-tr-days th{position:sticky;top:27px;z-index:4;}
-tr.carico-tr-days th.carico-col-name{z-index:6;}
-tr.carico-tr-dow th{position:sticky;top:48px;z-index:4;}
-tr.carico-tr-dow th.carico-col-name{z-index:6;}
-.carico-th-day{text-align:center;padding:2px 1px;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;
-  background:var(--sur2);color:var(--mut);}
-.carico-th-dow{text-align:center;padding:1px;font-family:'DM Mono',monospace;font-size:8px;font-weight:700;
-  background:var(--sur2);color:var(--mut);opacity:.7;}
-.carico-th-day.we,.carico-th-dow.we{color:var(--red);}
-.carico-td-day{padding:0;background:var(--bg);position:relative;vertical-align:top;height:100%;}
-.carico-td-day.we{background:rgba(255,78,107,.07);}
-.carico-td-day.nonlav{background:rgba(255,255,255,.02);}
-/* Cella di un giorno sovraccarico: l'utente ha più ore del disponibile */
-.carico-td-day.over{background:rgba(255,78,107,.22);}
-.carico-td-day.over.we{background:rgba(255,78,107,.28);}
-.carico-cell-inner{display:flex;flex-direction:column;gap:2px;padding:3px 2px;min-height:34px;}
-/* Barra di una commessa */
-.carico-bar{height:13px;border-radius:3px;font-family:'DM Mono',monospace;font-size:8px;font-weight:700;
-  color:#0f0f0e;display:flex;align-items:center;padding:0 3px;overflow:hidden;white-space:nowrap;cursor:default;}
-.carico-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0;}
-.carico-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0;}
+/* ── Vista Carico: barre continue su calendario leggero ── */
+.carico2-wrap{overflow:auto;max-height:calc(100vh - 110px);border:1px solid var(--brd);
+  background:var(--sur);border-radius:4px;}
+.carico2-grid{min-width:760px;}
+/* riga: nome a sinistra + track a destra */
+.carico2-row{display:flex;align-items:stretch;border-bottom:1px solid var(--brd);}
+.carico2-row:last-child{border-bottom:none;}
+.carico2-name{flex:0 0 168px;width:168px;padding:8px 12px;display:flex;align-items:center;
+  font-family:'Syne',sans-serif;font-size:11px;font-weight:600;color:var(--txt);
+  background:var(--sur);position:sticky;left:0;z-index:3;border-right:1px solid var(--brd);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.carico2-name.esterno{color:var(--yel);}
+.carico2-track{position:relative;flex:1;min-height:34px;}
+/* intestazione */
+.carico2-head{position:sticky;top:0;z-index:5;background:var(--sur2);border-bottom:1px solid var(--brd);}
+.carico2-head .carico2-name{background:var(--sur2);font-family:'Syne',sans-serif;font-size:12px;
+  font-weight:800;color:var(--acc);text-transform:uppercase;letter-spacing:.04em;z-index:6;}
+.carico2-head .carico2-track{min-height:30px;}
+.carico2-name-head{justify-content:flex-start;}
+.carico2-daynum{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;border-left:1px solid var(--brd);}
+.carico2-daynum:first-child{border-left:none;}
+.carico2-daynum-n{font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:var(--mut);}
+.carico2-daynum-w{font-family:'DM Mono',monospace;font-size:7px;font-weight:700;color:var(--mut);opacity:.65;}
+.carico2-daynum.we .carico2-daynum-n,.carico2-daynum.we .carico2-daynum-w{color:var(--red);opacity:.8;}
+.carico2-daynum.oggi{background:rgba(212,255,78,.12);}
+.carico2-daynum.oggi .carico2-daynum-n{color:var(--acc);}
+/* sfondo a colonne: griglia leggera */
+.carico2-sfondo{position:absolute;inset:0;z-index:0;}
+.carico2-col{position:absolute;top:0;bottom:0;border-left:1px solid var(--brd);opacity:.4;}
+.carico2-col:first-child{border-left:none;}
+.carico2-col.we{background:rgba(255,78,107,.05);opacity:1;}
+.carico2-col.nonlav{background:rgba(255,255,255,.03);opacity:1;}
+.carico2-col.oggi{background:rgba(212,255,78,.06);opacity:1;}
+/* striscia rossa sotto le barre per i giorni in sovraccarico */
+.carico2-over-mark{position:absolute;bottom:0;height:3px;background:var(--red);z-index:1;}
+/* contenitore barre: centrato verticalmente nel track */
+.carico2-barre{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);z-index:2;}
+/* barra continua di una commessa */
+.carico2-bar{position:absolute;height:16px;border-radius:8px;cursor:pointer;
+  display:flex;align-items:center;box-shadow:0 1px 2px rgba(0,0,0,.25);
+  transition:filter .1s,box-shadow .1s;}
+.carico2-bar:hover{filter:brightness(1.13);box-shadow:0 0 0 1.5px var(--txt),0 1px 3px rgba(0,0,0,.3);z-index:4;}
+.carico2-bar.cut-l{border-top-left-radius:0;border-bottom-left-radius:0;}
+.carico2-bar.cut-r{border-top-right-radius:0;border-bottom-right-radius:0;}
+.carico2-bar-txt{font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:#10100c;
+  padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .carico-legenda{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;align-items:center;}
 .carico-leg-item{display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);}
-.carico-leg-box{width:14px;height:14px;border-radius:3px;border:1px solid var(--brd);}
-.carico-leg-box.over{background:rgba(255,78,107,.5);}
-.carico-leg-bar{width:22px;height:11px;border-radius:3px;background:var(--blu);}
+.carico-leg-bar{width:24px;height:12px;border-radius:6px;background:var(--blu);}
+.carico-leg-overbox{width:18px;height:3px;background:var(--red);}
 .carico-nota{margin-top:14px;padding:10px 12px;background:var(--sur);border-left:3px solid var(--brd);
   border-radius:2px;font-family:'DM Mono',monospace;font-size:10px;line-height:1.6;color:var(--mut);}
 .gantt-nav button{padding:6px 10px;background:var(--sur);border:1px solid var(--brd);color:var(--mut);cursor:pointer;border-radius:3px;font-family:'DM Mono',monospace;font-size:11px;}
@@ -6805,13 +6814,11 @@ async function kioskStopSessione(sess, modalita) {
 
 
 // ═══════════════════════════════════════════════════════════
-// CARICO — matrice a giorni: commesse per addetto, sovraccarico evidenziato
+// CARICO — vista a barre continue: commesse per addetto sul mese
 // ═══════════════════════════════════════════════════════════
 
-// Cursore mese per la vista Carico
 let caricoMese = null;
 
-// Colore stabile di una commessa, derivato dal suo id (palette tema)
 const CARICO_PALETTE = ['#4eb8ff','#4effa3','#ffcc4e','#b84eff','#ff9d4e','#4edcff','#a3ff4e','#ff4ec1'];
 function coloreCommessa(opId) {
   let h = 0;
@@ -6827,7 +6834,7 @@ function renderCarico(root) {
   const anno = caricoMese.getFullYear();
   const mese = caricoMese.getMonth();
 
-  // ---- Intestazione + navigazione mesi ----
+  // ---- Intestazione + navigazione ----
   const header = el('div', { class:'gantt-toolbar' });
   header.append(el('h2', { style:'flex:1;' }, 'Carico di lavoro'));
   const nav = el('div', { class:'gantt-nav' });
@@ -6850,7 +6857,7 @@ function renderCarico(root) {
   const giorni = [];
   for (let d = 1; d <= numGiorni; d++) {
     const dObj = new Date(anno, mese, d);
-    const dow = (dObj.getDay() + 6) % 7; // 0=lun
+    const dow = (dObj.getDay() + 6) % 7;
     giorni.push({
       d, iso: toLocalISO(dObj), dow,
       weekend: dow >= 5,
@@ -6860,9 +6867,16 @@ function renderCarico(root) {
   }
   const primoIso = giorni[0].iso;
   const ultimoIso = giorni[numGiorni - 1].iso;
+  const colW = 100 / numGiorni; // larghezza di un giorno in %
+
+  // indice 0-based di un giorno ISO nel mese (clamp ai bordi del mese)
+  const indiceGiorno = (iso) => {
+    if (iso < primoIso) return 0;
+    if (iso > ultimoIso) return numGiorni - 1;
+    return parseISODate(iso).getDate() - 1;
+  };
 
   // ---- Commesse per addetto ----
-  // caricoByUtente[uid] = [ {op, inizio, scadenza, oreGiorno, colore}, ... ]
   const caricoByUtente = {};
   let opSenzaAddetti = 0;
 
@@ -6875,135 +6889,154 @@ function renderCarico(root) {
       if (oreTot <= 0) return;
       const inizio = opCalcInizio(o);
       if (!inizio) return;
-      // Salta le commesse che non intersecano il mese mostrato
       if (o.scadenza < primoIso || inizio > ultimoIso) return;
       const orePerAddetto = oreTot / addetti.length;
-      // Ore al giorno = ore addetto / giorni lavorativi dell'intervallo
       const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerAddetto);
-      const isoLavorativi = Object.keys(distrib);
-      const orePerGiorno = isoLavorativi.length > 0 ? distrib[isoLavorativi[0]] : 0;
+      const isoLav = Object.keys(distrib);
+      const orePerGiorno = isoLav.length > 0 ? distrib[isoLav[0]] : 0;
       addetti.forEach(uid => {
         if (!caricoByUtente[uid]) caricoByUtente[uid] = [];
         caricoByUtente[uid].push({
           op: o, inizio, scadenza: o.scadenza,
-          oreGiorno: orePerGiorno, oreTot: oreTot, nAddetti: addetti.length,
-          colore: coloreCommessa(o.id),
-          giorniLavSet: new Set(isoLavorativi),
+          oreGiorno: orePerGiorno, oreTot,
+          nAddetti: addetti.length, colore: coloreCommessa(o.id),
+          giorniLavSet: new Set(isoLav),
         });
       });
     });
 
-  // ---- Utenti: operatori attivi non kiosk (esterni INCLUSI) ----
+  // ---- Utenti ----
   const operatori = state.utenti
     .filter(u => u.attivo && !isKioskRecord(u))
     .sort((a, b) => a.nome.localeCompare(b.nome));
 
-  // ---- Tabella ----
-  const wrap = el('div', { class:'carico-wrap' });
-  const table = el('table', { class:'carico-cal' });
+  // ---- Costruzione vista ----
+  const wrap = el('div', { class:'carico2-wrap' });
+  const grid = el('div', { class:'carico2-grid' });
 
-  const colgroup = el('colgroup');
-  colgroup.append(el('col', { class:'carico-colg-name' }));
-  giorni.forEach(() => colgroup.append(el('col', { class:'carico-col-day' })));
-  table.append(colgroup);
+  // Sfondo a colonne (linee verticali tenui + weekend ombreggiati)
+  const buildSfondo = () => {
+    const sf = el('div', { class:'carico2-sfondo' });
+    giorni.forEach((g, i) => {
+      const col = el('div', {
+        class: 'carico2-col'
+          + (g.weekend ? ' we' : '')
+          + (g.nonLav && !g.weekend ? ' nonlav' : '')
+          + (g.oggi ? ' oggi' : ''),
+        style: 'left:' + (i * colW) + '%;width:' + colW + '%;',
+      });
+      sf.append(col);
+    });
+    return sf;
+  };
 
-  // Riga 1: mese
-  const trMonth = el('tr');
-  trMonth.append(el('th', { class:'carico-th-month', colspan: String(numGiorni + 1) },
-    MESI_ESTESI[mese].toUpperCase() + ' ' + anno));
-  table.append(trMonth);
-
-  // Riga 2: numeri giorno
-  const trDays = el('tr', { class:'carico-tr-days' });
-  trDays.append(el('th', { class:'carico-col-name' }, 'ADDETTO'));
-  giorni.forEach(g => {
-    const cls = ['carico-th-day']; if (g.weekend) cls.push('we');
-    trDays.append(el('th', { class: cls.join(' ') }, String(g.d)));
+  // --- Riga intestazione: giorni del mese ---
+  const headRow = el('div', { class:'carico2-row carico2-head' });
+  headRow.append(el('div', { class:'carico2-name carico2-name-head' },
+    MESI_ESTESI[mese] + ' ' + anno));
+  const headTrack = el('div', { class:'carico2-track' });
+  giorni.forEach((g, i) => {
+    headTrack.append(el('div', {
+      class: 'carico2-daynum' + (g.weekend ? ' we' : '') + (g.oggi ? ' oggi' : ''),
+      style: 'left:' + (i * colW) + '%;width:' + colW + '%;',
+    },
+      el('div', { class:'carico2-daynum-n' }, String(g.d)),
+      el('div', { class:'carico2-daynum-w' }, GIORNI_BREVI[g.dow])));
   });
-  table.append(trDays);
+  headRow.append(headTrack);
+  grid.append(headRow);
 
-  // Riga 3: giorni settimana
-  const trDow = el('tr', { class:'carico-tr-dow' });
-  trDow.append(el('th', { class:'carico-col-name' }, ''));
-  giorni.forEach(g => {
-    const cls = ['carico-th-dow']; if (g.weekend) cls.push('we');
-    trDow.append(el('th', { class: cls.join(' ') }, GIORNI_BREVI[g.dow]));
-  });
-  table.append(trDow);
-
-  // ---- Righe addetti ----
+  // --- Righe addetti ---
   operatori.forEach(u => {
-    const tr = el('tr');
-    tr.append(el('td', { class: 'carico-col-name' + (u.esterno ? ' esterno' : '') },
+    const commesse = (caricoByUtente[u.id] || [])
+      .slice().sort((a, b) => a.inizio < b.inizio ? -1 : 1);
+
+    // Calcolo sovraccarico per giorno
+    const overGiorni = new Set();
+    giorni.forEach(g => {
+      if (g.nonLav) return;
+      let ore = 0;
+      commesse.forEach(c => {
+        if (c.giorniLavSet.has(g.iso)) ore += c.oreGiorno;
+      });
+      const assenti = (typeof oreAssenzaUtenteGiorno === 'function')
+        ? oreAssenzaUtenteGiorno(u.id, g.iso) : 0;
+      const cap = Math.max(0, ORE_STANDARD_GIORNO - assenti);
+      if (ore > cap + 0.05) overGiorni.add(g.iso);
+    });
+
+    const row = el('div', { class:'carico2-row' });
+    row.append(el('div', { class:'carico2-name' + (u.esterno ? ' esterno' : '') },
       u.nome + (u.esterno ? ' ✦' : '')));
 
-    const commesse = (caricoByUtente[u.id] || [])
-      .slice()
-      .sort((a, b) => a.inizio < b.inizio ? -1 : 1);
+    const track = el('div', { class:'carico2-track' });
+    track.append(buildSfondo());
 
-    giorni.forEach(g => {
-      const td = el('td', { class:'carico-td-day' + (g.weekend ? ' we' : '') +
-        (g.nonLav && !g.weekend ? ' nonlav' : '') });
-      const inner = el('div', { class:'carico-cell-inner' });
-
-      // Ore totali dell'addetto in questo giorno + barre attive
-      let oreGiorno = 0;
-      commesse.forEach(c => {
-        const attiva = g.iso >= c.inizio && g.iso <= c.scadenza;
-        if (!attiva) { inner.append(el('div', { style:'height:13px;' })); return; }
-        // conta ore solo nei giorni lavorativi della commessa
-        if (c.giorniLavSet.has(g.iso)) oreGiorno += c.oreGiorno;
-        const contL = g.iso > c.inizio;
-        const contR = g.iso < c.scadenza;
-        const bar = el('div', {
-          class: 'carico-bar' + (contL ? ' cont-l' : '') + (contR ? ' cont-r' : ''),
-          style: 'background:' + c.colore + ';',
-          title: descrizioneCommessa(c.op)
-            + '\nOre totali: ' + Math.round(c.oreTot)
-            + ' · ' + c.nAddetti + ' addett' + (c.nAddetti === 1 ? 'o' : 'i')
-            + '\nScadenza: ' + fmtIT(c.scadenza),
-        }, g.iso === c.inizio ? etichettaCommessa(c.op) : '');
-        inner.append(bar);
-      });
-
-      // Sovraccarico: ore pianificate > capacità del giorno
-      if (!g.nonLav) {
-        const assenti = (typeof oreAssenzaUtenteGiorno === 'function')
-          ? oreAssenzaUtenteGiorno(u.id, g.iso) : 0;
-        const capacita = Math.max(0, ORE_STANDARD_GIORNO - assenti);
-        if (oreGiorno > capacita + 0.05) td.classList.add('over');
-      }
-
-      td.append(inner);
-      tr.append(td);
+    // Marcatori giorni di sovraccarico (striscia rossa sotto le barre)
+    overGiorni.forEach(iso => {
+      const i = indiceGiorno(iso);
+      track.append(el('div', {
+        class:'carico2-over-mark',
+        style:'left:' + (i * colW) + '%;width:' + colW + '%;',
+      }));
     });
-    table.append(tr);
+
+    // Barre commesse (continue). Più commesse → impilate verticalmente.
+    const barre = el('div', { class:'carico2-barre' });
+    const BAR_H = 16, BAR_GAP = 3;
+    const altezzaPila = commesse.length > 0
+      ? commesse.length * BAR_H + (commesse.length - 1) * BAR_GAP
+      : 0;
+    commesse.forEach((c, idx) => {
+      const iStart = indiceGiorno(c.inizio < primoIso ? primoIso : c.inizio);
+      const iEnd = indiceGiorno(c.scadenza > ultimoIso ? ultimoIso : c.scadenza);
+      const left = iStart * colW;
+      const width = (iEnd - iStart + 1) * colW;
+      const tagliataSx = c.inizio < primoIso;
+      const tagliataDx = c.scadenza > ultimoIso;
+      const bar = el('div', {
+        class: 'carico2-bar'
+          + (tagliataSx ? ' cut-l' : '')
+          + (tagliataDx ? ' cut-r' : ''),
+        style: 'left:' + left + '%;width:' + width + '%;'
+          + 'top:' + (idx * (BAR_H + BAR_GAP)) + 'px;'
+          + 'background:' + c.colore + ';',
+        title: descrizioneCommessa(c.op)
+          + '\nOre totali: ' + Math.round(c.oreTot)
+          + ' · ' + c.nAddetti + ' addett' + (c.nAddetti === 1 ? 'o' : 'i')
+          + '\nScadenza: ' + fmtIT(c.scadenza)
+          + '\n(clic per aprire la commessa)',
+        onclick: () => {
+          if (typeof openOperazioneModal === 'function') openOperazioneModal(c.op);
+        },
+      }, el('span', { class:'carico2-bar-txt' }, etichettaCommessa(c.op)));
+      barre.append(bar);
+    });
+    // L'altezza della pila determina l'altezza della riga
+    const trackMinH = Math.max(34, altezzaPila + 10);
+    track.style.minHeight = trackMinH + 'px';
+    barre.style.height = altezzaPila + 'px';
+    track.append(barre);
+    row.append(track);
+    grid.append(row);
   });
 
-  wrap.append(table);
+  wrap.append(grid);
   root.append(wrap);
-
-  // Posizionamento dinamico righe sticky
-  requestAnimationFrame(() => {
-    const hM = trMonth.getBoundingClientRect().height;
-    const hD = trDays.getBoundingClientRect().height;
-    trDays.querySelectorAll('th').forEach(th => { th.style.top = hM + 'px'; });
-    trDow.querySelectorAll('th').forEach(th => { th.style.top = (hM + hD) + 'px'; });
-  });
 
   // ---- Legenda + nota ----
   const legenda = el('div', { class:'carico-legenda' });
   legenda.append(el('span', { class:'carico-leg-item' },
-    el('span', { class:'carico-leg-bar' }), 'Commessa (passa il mouse per i dettagli)'));
+    el('span', { class:'carico-leg-bar' }), 'Commessa (clic per aprirla)'));
   legenda.append(el('span', { class:'carico-leg-item' },
-    el('span', { class:'carico-leg-box over' }), 'Giorno in sovraccarico (oltre la capacità)'));
+    el('span', { class:'carico-leg-overbox' }), 'Giorno in sovraccarico'));
   root.append(legenda);
 
   root.append(el('div', { class:'carico-nota' },
-    'Ogni barra è una commessa aperta, distesa dalla data di inizio calcolata ' +
-    'alla scadenza. Le ore sono divise in parti uguali tra gli addetti assegnati. ' +
-    'Un giorno si colora di rosso quando le ore pianificate per quell\'addetto ' +
-    'superano la sua capacità (8 ore, meno le ferie). Stima indicativa.'));
+    'Ogni barra è una commessa aperta, dalla data di inizio calcolata alla ' +
+    'scadenza. Le ore sono divise in parti uguali tra gli addetti assegnati. ' +
+    'La striscia rossa segnala i giorni in cui le ore pianificate per ' +
+    'quell\'addetto superano la sua capacità (8 ore, meno le ferie). Stima indicativa.'));
 
   if (opSenzaAddetti > 0) {
     root.append(el('div', { class:'carico-nota', style:'border-left-color:var(--yel);color:var(--yel);' },
@@ -7013,7 +7046,6 @@ function renderCarico(root) {
 }
 
 // Distribuisce le ore di un addetto sui giorni lavorativi di [inizio, scadenza].
-// Ritorna { isoData: orePerGiorno }.
 function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
   const giorniLav = [];
   const d = parseISODate(inizioIso);
