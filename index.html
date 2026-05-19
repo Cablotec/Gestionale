@@ -383,6 +383,36 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .switch-bar button.act{background:var(--acc);color:#0f0f0e;font-weight:700;}
 .switch-bar button:hover:not(.act){color:var(--txt);background:var(--sur2);}
 .gantt-nav{display:flex;gap:4px;align-items:center;}
+/* ── Vista Carico ── */
+.carico-wrap{overflow-x:auto;border:1px solid var(--brd);border-radius:4px;background:var(--sur);}
+table.carico-tab{border-collapse:separate;border-spacing:0;width:100%;table-layout:fixed;}
+table.carico-tab th,table.carico-tab td{border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);}
+table.carico-tab th{background:var(--sur2);padding:7px 6px;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:var(--txt);text-align:center;}
+.carico-col-name{width:150px;text-align:left !important;position:sticky;left:0;z-index:2;background:var(--sur2);
+  font-family:'Syne',sans-serif;font-size:12px;font-weight:600;color:var(--txt);padding:7px 12px;}
+td.carico-col-name{background:var(--sur);}
+.carico-th-sett{line-height:1.3;}
+.carico-cell{padding:5px 6px;text-align:center;vertical-align:middle;background:var(--bg);}
+.carico-vuoto{background:var(--sur);}
+.carico-dash{color:var(--mut);font-family:'DM Mono',monospace;font-size:13px;}
+.carico-ore{font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:var(--txt);margin-bottom:3px;}
+.carico-perc{font-family:'DM Mono',monospace;font-size:9px;color:var(--mut);margin-top:2px;}
+.carico-barra{height:6px;background:var(--sur2);border-radius:3px;overflow:hidden;}
+.carico-fill{height:100%;border-radius:3px;}
+.carico-fill-ok{background:var(--grn);}
+.carico-fill-full{background:var(--yel);}
+.carico-fill-over{background:var(--red);}
+.carico-ok{background:rgba(78,255,163,.07);}
+.carico-full{background:rgba(255,204,78,.10);}
+.carico-over{background:rgba(255,78,107,.13);}
+.carico-legenda{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;}
+.carico-leg-item{display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);}
+.carico-leg-box{width:14px;height:14px;border-radius:3px;border:1px solid var(--brd);}
+.carico-leg-box.carico-ok{background:var(--grn);}
+.carico-leg-box.carico-full{background:var(--yel);}
+.carico-leg-box.carico-over{background:var(--red);}
+.carico-nota{margin-top:14px;padding:10px 12px;background:var(--sur);border-left:3px solid var(--brd);
+  border-radius:2px;font-family:'DM Mono',monospace;font-size:10px;line-height:1.6;color:var(--mut);}
 .gantt-nav button{padding:6px 10px;background:var(--sur);border:1px solid var(--brd);color:var(--mut);cursor:pointer;border-radius:3px;font-family:'DM Mono',monospace;font-size:11px;}
 .gantt-nav button:hover{color:var(--txt);border-color:var(--mut);}
 .gantt-nav .label{font-family:'DM Mono',monospace;font-size:12px;color:var(--txt);padding:0 10px;min-width:160px;text-align:center;}
@@ -1545,6 +1575,7 @@ const TAB_STRUCTURE = {
       { id: 'pianificazione', label: 'Pianificazione', adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
       { id: 'gantt',          label: 'Gantt',          adminOnly: true },
+      { id: 'carico',         label: 'Carico',         adminOnly: true },
     ],
   },
   gestione: {
@@ -1635,6 +1666,7 @@ function renderTab(name) {
     else if (name === 'pianificazione') renderPianificazione(root);
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt') renderGantt(root);
+    else if (name === 'carico') renderCarico(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
   } catch (e) {
@@ -6757,6 +6789,210 @@ async function kioskStopSessione(sess, modalita) {
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════
+// CARICO — quanto sono impegnati gli addetti dal lavoro futuro
+// ═══════════════════════════════════════════════════════════
+
+// Cursore settimana per la vista Carico (lunedì della prima settimana mostrata)
+let caricoCursore = null;
+// Quante settimane mostrare
+const CARICO_NUM_SETTIMANE = 6;
+
+// Lunedì della settimana che contiene la data passata
+function lunediDellaSettimana(dateObj) {
+  const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d;
+}
+
+// Distribuisce le ore di un addetto su una commessa nei giorni lavorativi
+// dell'intervallo [inizio, scadenza]. Ritorna una mappa { isoData: ore }.
+function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
+  const giorniLav = [];
+  const d = parseISODate(inizioIso);
+  const fine = parseISODate(scadenzaIso);
+  let guard = 0;
+  while (d <= fine && guard < 1500) {
+    if (!isGiornoNonLavorativo(d)) giorniLav.push(toLocalISO(d));
+    d.setDate(d.getDate() + 1);
+    guard++;
+  }
+  const mappa = {};
+  if (giorniLav.length === 0) return mappa;
+  const orePerGiorno = oreAddetto / giorniLav.length;
+  giorniLav.forEach(iso => { mappa[iso] = orePerGiorno; });
+  return mappa;
+}
+
+// Capacità di un addetto in una settimana: giorni lavorativi × 8h, meno ferie.
+function capacitaSettimanaUtente(utenteId, lunedi) {
+  let cap = 0;
+  for (let i = 0; i < 7; i++) {
+    const g = new Date(lunedi.getFullYear(), lunedi.getMonth(), lunedi.getDate() + i);
+    if (isGiornoNonLavorativo(g)) continue;
+    const iso = toLocalISO(g);
+    const assenti = (typeof oreAssenzaUtenteGiorno === 'function')
+      ? oreAssenzaUtenteGiorno(utenteId, iso) : 0;
+    cap += Math.max(0, ORE_STANDARD_GIORNO - assenti);
+  }
+  return cap;
+}
+
+function renderCarico(root) {
+  root.innerHTML = '';
+  if (!caricoCursore) caricoCursore = lunediDellaSettimana(new Date());
+
+  // ---- Intestazione + navigazione settimane ----
+  const header = el('div', { class:'gantt-toolbar' });
+  header.append(el('h2', { style:'flex:1;' }, 'Carico di lavoro'));
+  const nav = el('div', { class:'switch-bar' });
+  nav.append(el('button', { onclick: () => {
+    caricoCursore.setDate(caricoCursore.getDate() - 7 * CARICO_NUM_SETTIMANE);
+    caricoCursore = new Date(caricoCursore); renderCarico(root);
+  } }, '‹ Prec.'));
+  nav.append(el('button', { onclick: () => {
+    caricoCursore = lunediDellaSettimana(new Date()); renderCarico(root);
+  } }, 'Oggi'));
+  nav.append(el('button', { onclick: () => {
+    caricoCursore.setDate(caricoCursore.getDate() + 7 * CARICO_NUM_SETTIMANE);
+    caricoCursore = new Date(caricoCursore); renderCarico(root);
+  } }, 'Succ. ›'));
+  header.append(nav);
+  root.append(header);
+
+  // ---- Settimane mostrate ----
+  const settimane = [];
+  for (let s = 0; s < CARICO_NUM_SETTIMANE; s++) {
+    const lun = new Date(caricoCursore.getFullYear(), caricoCursore.getMonth(),
+      caricoCursore.getDate() + s * 7);
+    settimane.push(lun);
+  }
+  const primaIso = toLocalISO(settimane[0]);
+  const ultimoGiorno = new Date(settimane[5].getFullYear(), settimane[5].getMonth(),
+    settimane[5].getDate() + 6);
+  const ultimoIso = toLocalISO(ultimoGiorno);
+
+  // ---- Calcolo carico: per ogni operazione aperta, distribuisci le ore ----
+  // oreByUtente[utenteId][isoLunediSettimana] = ore pianificate
+  const oreByUtente = {};
+  const addUtente = (uid) => { if (!oreByUtente[uid]) oreByUtente[uid] = {}; };
+  let opSenzaAddetti = 0;
+
+  state.operazioni
+    .filter(o => o.stato === 'aperta' && o.scadenza)
+    .forEach(o => {
+      const addetti = getOperazioneAddetti(o.id);
+      if (addetti.length === 0) { opSenzaAddetti++; return; } // non si ripartisce
+      const oreTot = opCalcOre(o);
+      if (oreTot <= 0) return;
+      const inizio = opCalcInizio(o);
+      if (!inizio) return;
+      const orePerAddetto = oreTot / addetti.length;
+      addetti.forEach(uid => {
+        addUtente(uid);
+        const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerAddetto);
+        Object.keys(distrib).forEach(iso => {
+          if (iso < primaIso || iso > ultimoIso) return; // fuori finestra
+          const lunIso = toLocalISO(lunediDellaSettimana(parseISODate(iso)));
+          oreByUtente[uid][lunIso] = (oreByUtente[uid][lunIso] || 0) + distrib[iso];
+        });
+      });
+    });
+
+  // ---- Utenti da mostrare: operatori attivi non kiosk/esterni ----
+  const operatori = state.utenti
+    .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
+    .sort((a, b) => a.nome.localeCompare(b.nome));
+
+  // ---- Tabella ----
+  const wrap = el('div', { class:'carico-wrap' });
+  const table = el('table', { class:'carico-tab' });
+
+  const trHead = el('tr');
+  trHead.append(el('th', { class:'carico-col-name' }, 'ADDETTO'));
+  settimane.forEach(lun => {
+    const fine = new Date(lun.getFullYear(), lun.getMonth(), lun.getDate() + 6);
+    trHead.append(el('th', { class:'carico-th-sett' },
+      el('div', {}, 'sett. ' + numeroSettimana(lun)),
+      el('div', { style:'font-size:9px;color:var(--mut);font-weight:400;' },
+        z(lun.getDate()) + '/' + z(lun.getMonth()+1) + ' – ' +
+        z(fine.getDate()) + '/' + z(fine.getMonth()+1))));
+  });
+  table.append(trHead);
+
+  operatori.forEach(u => {
+    const tr = el('tr');
+    tr.append(el('td', { class:'carico-col-name' }, u.nome));
+    settimane.forEach(lun => {
+      const lunIso = toLocalISO(lun);
+      const pianificate = (oreByUtente[u.id] && oreByUtente[u.id][lunIso]) || 0;
+      const capacita = capacitaSettimanaUtente(u.id, lun);
+      const perc = capacita > 0 ? (pianificate / capacita) : (pianificate > 0 ? 99 : 0);
+
+      const td = el('td', { class:'carico-cell' });
+      if (pianificate <= 0.05) {
+        td.classList.add('carico-vuoto');
+        td.append(el('span', { class:'carico-dash' }, '–'));
+      } else {
+        // Livello: ok < 80%, pieno 80-100%, sovraccarico > 100%
+        let liv = 'ok';
+        if (perc > 1.0) liv = 'over';
+        else if (perc >= 0.8) liv = 'full';
+        td.classList.add('carico-' + liv);
+        const barra = el('div', { class:'carico-barra' });
+        const fill = el('div', { class:'carico-fill carico-fill-' + liv });
+        fill.style.width = Math.min(100, perc * 100) + '%';
+        barra.append(fill);
+        td.append(
+          el('div', { class:'carico-ore' },
+            Math.round(pianificate) + ' / ' + Math.round(capacita) + ' h'),
+          barra,
+          el('div', { class:'carico-perc' }, Math.round(perc * 100) + '%')
+        );
+      }
+      tr.append(td);
+    });
+    table.append(tr);
+  });
+
+  wrap.append(table);
+  root.append(wrap);
+
+  // ---- Legenda + nota metodo ----
+  const legenda = el('div', { class:'carico-legenda' });
+  [['carico-ok','Sotto 80% – margine'],
+   ['carico-full','80–100% – pieno'],
+   ['carico-over','Oltre 100% – sovraccarico']].forEach(([cls, txt]) => {
+    legenda.append(el('span', { class:'carico-leg-item' },
+      el('span', { class:'carico-leg-box ' + cls }), txt));
+  });
+  root.append(legenda);
+
+  root.append(el('div', { class:'carico-nota' },
+    'Stima indicativa. Le ore di ogni commessa aperta sono divise in parti uguali ' +
+    'tra gli addetti assegnati e distribuite sui giorni lavorativi tra la data ' +
+    'di inizio calcolata e la scadenza. La capacità settimanale è di 8 ore al ' +
+    'giorno per addetto, meno le ferie. Le commesse senza addetti assegnati non ' +
+    'sono conteggiate.'));
+
+  if (opSenzaAddetti > 0) {
+    root.append(el('div', { class:'carico-nota', style:'border-left-color:var(--yel);color:var(--yel);' },
+      '⚠ ' + opSenzaAddetti + ' commess' + (opSenzaAddetti === 1 ? 'a aperta è esclusa' : 'e aperte sono escluse') +
+      ' da questo conteggio perché non '  + (opSenzaAddetti === 1 ? 'ha' : 'hanno') +
+      ' addetti assegnati. Il carico mostrato è quindi parziale.'));
+  }
+}
+
+// Numero ISO della settimana (1-53)
+function numeroSettimana(dateObj) {
+  const d = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dayNum + 3);
+  const primoGiovedi = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const diff = (d - primoGiovedi) / 86400000;
+  return 1 + Math.round((diff - 3 + ((primoGiovedi.getUTCDay() + 6) % 7)) / 7);
+}
 
 // ═══════════════════════════════════════════════════════════
 // GANTT — vista live + storico timeline sessioni di lavoro
