@@ -1830,10 +1830,11 @@ function renderCalendar(root) {
       (byDay[k] = byDay[k] || []).push({ kind:'uso', data:u, aperto: !u.data_rientro });
     }
   }
-  // Assenze valide nel range (modello giornaliero: una riga per giorno)
-  const assenzeInRange = state.assenze.filter(a =>
-    a.stato === 'valida' && a.data >= startISO && a.data <= endISO
-  );
+  // Assenze valide nel range (modello giornaliero: una riga per giorno).
+  // Mostrate solo nel calendario "Generale", non nel calendario "Mezzi".
+  const assenzeInRange = isGenerale
+    ? state.assenze.filter(a => a.stato === 'valida' && a.data >= startISO && a.data <= endISO)
+    : [];
   for (const ass of assenzeInRange) {
     const k = ass.data;
     (byDay[k] = byDay[k] || []).push({ kind:'assenza', data:ass });
@@ -1861,10 +1862,10 @@ function renderCalendar(root) {
     legend.append(el('span', { class:'lg' },
       el('span', { class:'swatch swatch-uso-chiuso' }), 'Uso chiuso'));
   }
-  // Assenze + chiusure + festivi: mostrate in entrambe le modalità
-  legend.append(el('span', { class:'lg' },
-    el('span', { class:'swatch', style:'background:rgba(78,255,163,.4);border-color:var(--grn);' }), 'Assenza'));
+  // Assenza: solo nel "Generale". Chiusure e festività: solo nel "Generale".
   if (isGenerale) {
+    legend.append(el('span', { class:'lg' },
+      el('span', { class:'swatch', style:'background:rgba(78,255,163,.4);border-color:var(--grn);' }), 'Assenza'));
     legend.append(el('span', { class:'lg' },
       el('span', { class:'swatch', style:'background:rgba(255,107,53,.4);border-color:var(--or);' }), '🔒 Chiusura azienda'));
     legend.append(el('span', { class:'lg' },
@@ -7530,14 +7531,14 @@ function renderGanttCommesse(root) {
   );
 
   const opChoices = state.utenti
-    .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
+    .filter(u => u.attivo && !isKioskRecord(u))
     .sort((a,b) => a.nome.localeCompare(b.nome));
   const selOper = el('select', {
     style:'background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:5px 10px;border-radius:3px;font-family:DM Mono,monospace;font-size:11px;',
     onchange: (e) => { state.ganttFiltroOperatore = e.target.value; renderTab('gantt_commesse'); }
   },
     el('option', { value:'' }, '— Tutti gli operatori —'),
-    ...opChoices.map(u => el('option', { value:u.id }, u.nome))
+    ...opChoices.map(u => el('option', { value:u.id }, u.nome + (u.esterno ? ' ✦' : '')))
   );
   selOper.value = state.ganttFiltroOperatore || '';
   navToolbar.append(selOper);
@@ -7563,7 +7564,11 @@ function renderGanttCommesse(root) {
 
   const wrap = el('div', { class:'gantt-wrap' });
   const slots = range.slots;
-  const slotWidth = zoom === 'giorno' ? 60 : (zoom === 'settimana' ? 100 : 30);
+  // Larghezza slot: minima per leggibilità, ma si espande per riempire la pagina.
+  // root.clientWidth = spazio disponibile; 160 = colonna nomi; -2 per i bordi.
+  const minSlot = zoom === 'giorno' ? 60 : (zoom === 'settimana' ? 100 : 30);
+  const dispW = (root.clientWidth || 1100) - 160 - 4;
+  const slotWidth = Math.max(minSlot, Math.floor(dispW / slots.length));
   const grid = el('div', { class:'gantt-grid',
     style: `grid-template-columns: 160px repeat(${slots.length}, ${slotWidth}px);`,
   });
@@ -7590,7 +7595,8 @@ function renderGanttCommesse(root) {
 
   // RIGHE OPERATORI
   operatori.forEach(u => {
-    grid.append(el('div', { class:'gantt-row-nome' }, u.nome));
+    grid.append(el('div', { class:'gantt-row-nome' + (u.esterno ? ' esterno' : '') },
+      u.nome + (u.esterno ? ' ✦' : '')));
 
     // Commesse assegnate all'operatore che intersecano il range
     const commesse = [];
