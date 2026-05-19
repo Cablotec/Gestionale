@@ -481,6 +481,11 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .gantt-cmcol{position:absolute;top:0;bottom:0;border-right:1px solid var(--brd);opacity:.35;z-index:0;}
 .gantt-cmcol.weekend{background:rgba(255,78,107,.05);opacity:1;}
 .gantt-cmcol.oggi{background:rgba(212,255,78,.07);opacity:1;}
+/* overlay assenza (ferie/permessi) sotto le barre */
+.gantt-cmass{position:absolute;top:0;bottom:0;z-index:0;display:flex;align-items:flex-start;
+  justify-content:center;padding-top:2px;
+  background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.08) 0,rgba(255,255,255,.08) 4px,transparent 4px,transparent 8px);}
+.gantt-cmass span{font-family:'DM Mono',monospace;font-size:8px;font-weight:700;color:var(--txt);opacity:.85;}
 .gantt-cmbar{position:absolute;height:17px;border-radius:5px;cursor:pointer;overflow:hidden;
   background:#3a6c8f;border:1px solid transparent;z-index:1;display:flex;align-items:center;
   transition:filter .1s,box-shadow .1s;}
@@ -493,6 +498,8 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .gantt-cmbar-fill.sfora{background:var(--red);opacity:.9;}
 .gantt-cmbar-txt{position:relative;z-index:1;font-family:'DM Mono',monospace;font-size:9px;
   font-weight:700;color:#0f0f0e;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sess-row-clic{transition:background .1s;}
+.sess-row-clic:hover{background:var(--sur2) !important;}
 
 /* Overlay assenza sul gantt — strato sotto le barre, non interattivo per il clic */
 .gantt-ass-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:#0f0f0e;letter-spacing:.05em;pointer-events:none;z-index:0;}
@@ -1614,7 +1621,8 @@ const TAB_STRUCTURE = {
     tabs: [
       { id: 'pianificazione', label: 'Pianificazione', adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
-      { id: 'gantt',          label: 'Gantt',          adminOnly: true },
+      { id: 'gantt_live',     label: 'Live',           adminOnly: true },
+      { id: 'gantt_commesse', label: 'Commesse',       adminOnly: true },
       { id: 'carico',         label: 'Carico',         adminOnly: true },
     ],
   },
@@ -1691,6 +1699,8 @@ function switchToTab(areaId, tabId) {
 
 // renderTab ora è SINCRONO: legge solo dalla cache in memoria
 function renderTab(name) {
+  // Compatibilità: la vecchia scheda unica 'gantt' è ora divisa in due
+  if (name === 'gantt') name = 'gantt_commesse';
   state.currentTab = name;
   const root = $('#tab-content');
   if (!state.loaded) { root.innerHTML = '<div class="empty">Caricamento…</div>'; return; }
@@ -1705,7 +1715,8 @@ function renderTab(name) {
     else if (name === 'operatori')    renderOperatori(root);
     else if (name === 'pianificazione') renderPianificazione(root);
     else if (name === 'storico') renderStorico(root);
-    else if (name === 'gantt') renderGantt(root);
+    else if (name === 'gantt_live') renderGanttLiveTab(root);
+    else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
     else if (name === 'carico') renderCarico(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
@@ -5022,7 +5033,10 @@ function openOperazioneModal(o) {
           : Math.floor((Date.now() - ini.getTime()) / 1000);
 
         const row = el('div', {
-          style: 'display:grid;grid-template-columns:14px 1fr 1fr auto auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--brd);'+(s.fine?'':'background:rgba(78,255,163,.04);')
+          class: 'sess-row-clic',
+          style: 'display:grid;grid-template-columns:14px 1fr 1fr auto auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--brd);cursor:pointer;'+(s.fine?'':'background:rgba(78,255,163,.04);'),
+          title: 'Clic per modificare questa timbratura',
+          onclick: () => { if (typeof openSessioneModal === 'function') openSessioneModal(s); },
         },
           el('div', { style:'width:6px;height:6px;border-radius:50%;background:'+(tipo?.colore||'#6b6b64')+';' }),
           el('div', {}, oper?.nome || '—'),
@@ -7323,40 +7337,23 @@ function descrizioneCommessa(op) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// GANTT — vista live + storico timeline sessioni di lavoro
+// GANTT — schede separate: Live e Commesse
 // ═══════════════════════════════════════════════════════════
 
 let ganttLiveTimer = null;
 
-function renderGantt(root) {
-  // Stop eventuale timer del refresh live precedente
+// Scheda "Live": dashboard chi sta lavorando ora
+function renderGanttLiveTab(root) {
   if (ganttLiveTimer) { clearInterval(ganttLiveTimer); ganttLiveTimer = null; }
-
   root.innerHTML = '';
+  renderGanttLive(root);
+}
 
-  // Compatibilità: il vecchio valore 'storico' diventa 'commesse'
-  if (state.ganttView === 'storico') state.ganttView = 'commesse';
-
-  // Toolbar superiore: switch Live / Commesse
-  const toolbar = el('div', { class:'gantt-toolbar' },
-    el('div', { class:'switch-bar' },
-      el('button', {
-        class: state.ganttView === 'live' ? 'act' : '',
-        onclick: () => { state.ganttView = 'live'; renderTab('gantt'); }
-      }, '● Live'),
-      el('button', {
-        class: state.ganttView === 'commesse' ? 'act' : '',
-        onclick: () => { state.ganttView = 'commesse'; renderTab('gantt'); }
-      }, 'Commesse'),
-    ),
-  );
-  root.append(toolbar);
-
-  if (state.ganttView === 'live') {
-    renderGanttLive(root);
-  } else {
-    renderGanttCommesse(root);
-  }
+// Scheda "Commesse": griglia operatori × tempo con barre commessa
+function renderGanttCommesseTab(root) {
+  if (ganttLiveTimer) { clearInterval(ganttLiveTimer); ganttLiveTimer = null; }
+  root.innerHTML = '';
+  renderGanttCommesse(root);
 }
 
 // ─── VISTA LIVE: dashboard chi-sta-facendo-cosa ───
@@ -7520,14 +7517,14 @@ function renderGanttCommesse(root) {
 
   const navToolbar = el('div', { class:'gantt-toolbar' },
     el('div', { class:'switch-bar' },
-      el('button', { class: zoom === 'giorno' ? 'act' : '', onclick:() => { state.ganttZoom='giorno'; renderTab('gantt'); } }, 'Giorno'),
-      el('button', { class: zoom === 'settimana' ? 'act' : '', onclick:() => { state.ganttZoom='settimana'; renderTab('gantt'); } }, 'Settimana'),
-      el('button', { class: zoom === 'mese' ? 'act' : '', onclick:() => { state.ganttZoom='mese'; renderTab('gantt'); } }, 'Mese'),
+      el('button', { class: zoom === 'giorno' ? 'act' : '', onclick:() => { state.ganttZoom='giorno'; renderTab('gantt_commesse'); } }, 'Giorno'),
+      el('button', { class: zoom === 'settimana' ? 'act' : '', onclick:() => { state.ganttZoom='settimana'; renderTab('gantt_commesse'); } }, 'Settimana'),
+      el('button', { class: zoom === 'mese' ? 'act' : '', onclick:() => { state.ganttZoom='mese'; renderTab('gantt_commesse'); } }, 'Mese'),
     ),
     el('div', { class:'gantt-nav' },
-      el('button', { onclick: () => { state.ganttCursor = ganttShift(cursor, zoom, -1); renderTab('gantt'); }, title:'Indietro' }, '◀'),
-      el('button', { onclick: () => { state.ganttCursor = new Date(); renderTab('gantt'); } }, 'Oggi'),
-      el('button', { onclick: () => { state.ganttCursor = ganttShift(cursor, zoom, +1); renderTab('gantt'); }, title:'Avanti' }, '▶'),
+      el('button', { onclick: () => { state.ganttCursor = ganttShift(cursor, zoom, -1); renderTab('gantt_commesse'); }, title:'Indietro' }, '◀'),
+      el('button', { onclick: () => { state.ganttCursor = new Date(); renderTab('gantt_commesse'); } }, 'Oggi'),
+      el('button', { onclick: () => { state.ganttCursor = ganttShift(cursor, zoom, +1); renderTab('gantt_commesse'); }, title:'Avanti' }, '▶'),
       el('div', { class:'label' }, ganttRangeLabel(range, zoom)),
     ),
   );
@@ -7537,7 +7534,7 @@ function renderGanttCommesse(root) {
     .sort((a,b) => a.nome.localeCompare(b.nome));
   const selOper = el('select', {
     style:'background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:5px 10px;border-radius:3px;font-family:DM Mono,monospace;font-size:11px;',
-    onchange: (e) => { state.ganttFiltroOperatore = e.target.value; renderTab('gantt'); }
+    onchange: (e) => { state.ganttFiltroOperatore = e.target.value; renderTab('gantt_commesse'); }
   },
     el('option', { value:'' }, '— Tutti gli operatori —'),
     ...opChoices.map(u => el('option', { value:u.id }, u.nome))
@@ -7612,7 +7609,13 @@ function renderGanttCommesse(root) {
       style:`grid-column: 2 / span ${slots.length}; position:relative;`,
     });
 
-    // sfondo: ricalca weekend/oggi con sottili colonne
+    // Mappa data ISO → assenza valida dell'operatore
+    const assByDate = {};
+    state.assenze.forEach(a => {
+      if (a.utente_id === u.id && a.stato === 'valida') assByDate[a.data] = a;
+    });
+
+    // sfondo: weekend/oggi + assenze (ferie/permessi) dell'operatore
     slots.forEach((slot, i) => {
       const c = el('div', {
         class:'gantt-cmcol'
@@ -7621,6 +7624,20 @@ function renderGanttCommesse(root) {
         style:`left:${i*slotWidth}px;width:${slotWidth}px;`,
       });
       track.append(c);
+      // Overlay assenza
+      const ass = assByDate[slot.dateISO];
+      if (ass) {
+        const tipo = state.tipiAssenza.find(t => t.id === ass.tipo_assenza_id);
+        const ore = parseFloat(ass.ore) || 0;
+        const colA = (tipo && tipo.colore) || '#6b6b64';
+        const ov = el('div', {
+          class:'gantt-cmass',
+          style:`left:${i*slotWidth}px;width:${slotWidth}px;background:${colA}2e;`,
+          title:`${u.nome} — ${(tipo&&tipo.nome)||'Assenza'} (${ore}h)`
+            + (ass.note ? '\n'+ass.note : ''),
+        }, el('span', {}, ((tipo&&tipo.codice)||'?') + (ore < 8 ? String(ore) : '')));
+        track.append(ov);
+      }
     });
 
     // barre commesse, impilate
@@ -7692,6 +7709,9 @@ function renderGanttCommesse(root) {
   leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
     el('span', { style:'display:inline-block;width:22px;height:13px;border-radius:3px;border:2px solid var(--grn);' }),
     'Lavorazione in corso'));
+  leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
+    el('span', { style:'display:inline-block;width:22px;height:13px;border-radius:3px;background:repeating-linear-gradient(135deg,rgba(150,150,150,.5) 0,rgba(150,150,150,.5) 4px,transparent 4px,transparent 8px);' }),
+    'Assenza / ferie'));
   root.append(leg);
 }
 
@@ -7854,7 +7874,7 @@ function openSessioneModal(s) {
     if (error) return toast(error.message, 'err');
     if (!data || data.length === 0) return toast('Eliminazione bloccata (verifica policy)', 'err');
     state.sessioni = state.sessioni.filter(x => x.id !== s.id);
-    toast('Sessione eliminata'); closeModal(); renderTab('gantt');
+    toast('Sessione eliminata'); closeModal(); renderTab(state.currentTab);
   } }, '🗑 Elimina'));
   foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
 
@@ -7880,7 +7900,7 @@ function openSessioneModal(s) {
       }
       state.sessioni = state.sessioni.map(x => x.id === s.id ? data : x);
       toast('Sessione aggiornata');
-      closeModal(); renderTab('gantt');
+      closeModal(); renderTab(state.currentTab);
     } catch (e) {
       btnSave.disabled = false; btnSave.textContent = 'Salva';
       toast('Errore di rete: '+(e.message||e), 'err');
