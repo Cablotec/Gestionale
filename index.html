@@ -476,6 +476,23 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .gantt-bar-cod{font-family:'DM Mono',monospace;font-size:9px;opacity:.85;}
 .gantt-bar-dur{font-family:'DM Mono',monospace;font-size:9px;opacity:.8;}
 .gantt-empty-row{padding:30px;text-align:center;color:var(--mut);font-family:'DM Mono',monospace;font-size:11px;grid-column:1/-1;border-bottom:1px solid var(--brd);}
+/* ── Vista Commesse: track per riga-operatore + barre commessa ── */
+.gantt-cmrow{border-bottom:1px solid var(--brd);padding:4px 0;}
+.gantt-cmcol{position:absolute;top:0;bottom:0;border-right:1px solid var(--brd);opacity:.35;z-index:0;}
+.gantt-cmcol.weekend{background:rgba(255,78,107,.05);opacity:1;}
+.gantt-cmcol.oggi{background:rgba(212,255,78,.07);opacity:1;}
+.gantt-cmbar{position:absolute;height:17px;border-radius:5px;cursor:pointer;overflow:hidden;
+  background:#3a6c8f;border:1px solid transparent;z-index:1;display:flex;align-items:center;
+  transition:filter .1s,box-shadow .1s;}
+.gantt-cmbar:hover{filter:brightness(1.15);box-shadow:0 0 0 1.5px var(--txt);z-index:5;}
+.gantt-cmbar.sfora{background:#5c2a35;}
+.gantt-cmbar.attiva{box-shadow:0 0 0 2px var(--grn);}
+.gantt-cmbar.attiva:hover{box-shadow:0 0 0 2px var(--grn),0 0 0 3px var(--txt);}
+/* riempimento = ore consuntivate sul preventivo */
+.gantt-cmbar-fill{position:absolute;left:0;top:0;bottom:0;background:var(--blu);opacity:.85;z-index:0;}
+.gantt-cmbar-fill.sfora{background:var(--red);opacity:.9;}
+.gantt-cmbar-txt{position:relative;z-index:1;font-family:'DM Mono',monospace;font-size:9px;
+  font-weight:700;color:#0f0f0e;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
 /* Overlay assenza sul gantt — strato sotto le barre, non interattivo per il clic */
 .gantt-ass-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:#0f0f0e;letter-spacing:.05em;pointer-events:none;z-index:0;}
@@ -7317,7 +7334,10 @@ function renderGantt(root) {
 
   root.innerHTML = '';
 
-  // Toolbar superiore: switch Live/Storico
+  // Compatibilità: il vecchio valore 'storico' diventa 'commesse'
+  if (state.ganttView === 'storico') state.ganttView = 'commesse';
+
+  // Toolbar superiore: switch Live / Commesse
   const toolbar = el('div', { class:'gantt-toolbar' },
     el('div', { class:'switch-bar' },
       el('button', {
@@ -7325,9 +7345,9 @@ function renderGantt(root) {
         onclick: () => { state.ganttView = 'live'; renderTab('gantt'); }
       }, '● Live'),
       el('button', {
-        class: state.ganttView === 'storico' ? 'act' : '',
-        onclick: () => { state.ganttView = 'storico'; renderTab('gantt'); }
-      }, 'Storico'),
+        class: state.ganttView === 'commesse' ? 'act' : '',
+        onclick: () => { state.ganttView = 'commesse'; renderTab('gantt'); }
+      }, 'Commesse'),
     ),
   );
   root.append(toolbar);
@@ -7335,7 +7355,7 @@ function renderGantt(root) {
   if (state.ganttView === 'live') {
     renderGanttLive(root);
   } else {
-    renderGanttStorico(root);
+    renderGanttCommesse(root);
   }
 }
 
@@ -7489,13 +7509,13 @@ function formatSecondsHuman(sec) {
   return h + 'h ' + (m ? m+'m' : '');
 }
 
-// ─── VISTA STORICO: Gantt classico operatori×tempo ───
-function renderGanttStorico(root) {
-  // Toolbar: switch zoom + nav data
+// ─── VISTA COMMESSE: griglia operatori×tempo con barre commessa ───
+// Mostra le commesse assegnate a ogni operatore (passate, presenti, future).
+// Ogni barra confronta preventivo e consuntivo: rossa se sfora.
+function renderGanttCommesse(root) {
   const cursor = state.ganttCursor instanceof Date ? state.ganttCursor : new Date();
-  const zoom = state.ganttZoom || 'giorno';
+  const zoom = state.ganttZoom || 'mese';
 
-  // Calcola range visualizzato
   const range = ganttCalcRange(cursor, zoom);
 
   const navToolbar = el('div', { class:'gantt-toolbar' },
@@ -7512,7 +7532,6 @@ function renderGanttStorico(root) {
     ),
   );
 
-  // Select operatore (filtro opzionale) — esclude esterni dal Gantt
   const opChoices = state.utenti
     .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
     .sort((a,b) => a.nome.localeCompare(b.nome));
@@ -7525,21 +7544,26 @@ function renderGanttStorico(root) {
   );
   selOper.value = state.ganttFiltroOperatore || '';
   navToolbar.append(selOper);
-
   root.append(navToolbar);
 
-  // Lista operatori in Y
   let operatori = opChoices;
   if (state.ganttFiltroOperatore) {
     operatori = operatori.filter(u => u.id === state.ganttFiltroOperatore);
   }
-
   if (operatori.length === 0) {
     root.append(el('div', { class:'empty' }, 'Nessun utente'));
     return;
   }
 
-  // Costruisci griglia
+  // Set delle operazioni con almeno una sessione aperta adesso
+  const opConSessioneAperta = new Set();
+  state.sessioni.forEach(s => { if (!s.fine) opConSessioneAperta.add(s.operazione_id); });
+
+  // Range come ISO per intersezione
+  const rangeStartIso = toLocalISO(range.start);
+  const rangeEndDate = new Date(range.end); rangeEndDate.setDate(rangeEndDate.getDate() - 1);
+  const rangeEndIso = toLocalISO(rangeEndDate);
+
   const wrap = el('div', { class:'gantt-wrap' });
   const slots = range.slots;
   const slotWidth = zoom === 'giorno' ? 60 : (zoom === 'settimana' ? 100 : 30);
@@ -7547,144 +7571,128 @@ function renderGanttStorico(root) {
     style: `grid-template-columns: 160px repeat(${slots.length}, ${slotWidth}px);`,
   });
 
-  // HEADER ROW
+  // HEADER
   grid.append(el('div', { class:'gantt-hd-corner' }, 'Operatore'));
   const oggiISO = toLocalISO(new Date());
   slots.forEach(slot => {
     const cls = ['gantt-hd-time'];
     if (slot.weekend) cls.push('weekend');
-    if (slot.dateISO === oggiISO || (slot.isOggi)) cls.push('oggi');
+    if (slot.dateISO === oggiISO || slot.isOggi) cls.push('oggi');
     grid.append(el('div', { class:cls.join(' ') }, slot.label));
   });
 
-  // BODY ROWS
+  // larghezza totale area-tempo, per posizionare le barre in %
+  const totW = slots.length * slotWidth;
+  // mappa: indice slot di una data ISO (per zoom giorno usa il giorno)
+  const slotIndexOfIso = (iso) => {
+    for (let i = 0; i < slots.length; i++) {
+      if (slots[i].dateISO === iso) return i;
+    }
+    return -1;
+  };
+
+  // RIGHE OPERATORI
   operatori.forEach(u => {
-    grid.append(el('div', { class:'gantt-row-nome' + (u.esterno ? ' esterno' : '') }, u.nome));
+    grid.append(el('div', { class:'gantt-row-nome' }, u.nome));
 
-    // Calcola sessioni nel range per questo operatore
-    const sessUtente = state.sessioni.filter(s =>
-      s.utente_id === u.id &&
-      sessIntersectsRange(s, range.start, range.end)
-    );
-
-    // Mappa data → assenza valida per questo operatore (lookup O(1) per slot)
-    const assByDate = {};
-    state.assenze.forEach(a => {
-      if (a.utente_id === u.id && a.stato === 'valida') {
-        assByDate[a.data] = a;
-      }
+    // Commesse assegnate all'operatore che intersecano il range
+    const commesse = [];
+    state.operazioni.forEach(o => {
+      if (!o.scadenza) return;
+      const addetti = getOperazioneAddetti(o.id);
+      if (!addetti.includes(u.id)) return;
+      const inizio = opCalcInizio(o) || o.scadenza;
+      if (o.scadenza < rangeStartIso || inizio > rangeEndIso) return;
+      commesse.push({ op:o, inizio, scadenza:o.scadenza });
     });
 
-    // Una cella per slot
-    slots.forEach((slot, slotIdx) => {
-      const cellCls = ['gantt-cell'];
-      if (slot.weekend) cellCls.push('weekend');
-      if (slot.dateISO === oggiISO || slot.isOggi) cellCls.push('oggi');
+    // Una cella unica che copre tutti gli slot (track per le barre)
+    const track = el('div', {
+      class:'gantt-cmrow',
+      style:`grid-column: 2 / span ${slots.length}; position:relative;`,
+    });
 
-      // Verifica se in questo slot c'è un'assenza per l'operatore
-      const ass = assByDate[slot.dateISO];
-      if (ass) cellCls.push('has-ass');
-
-      const cell = el('div', { class: cellCls.join(' ') });
-
-      // Overlay assenza (sotto le barre, non interattivo)
-      if (ass) {
-        const tipo = state.tipiAssenza.find(t => t.id === ass.tipo_assenza_id);
-        const codice = tipo?.codice || '?';
-        const ore = parseFloat(ass.ore) || 0;
-        const isPiena = ore >= 8;
-        // Etichetta: in zoom giorno mostriamo il codice solo nel primo slot del giorno (slot 0:00)
-        // In settimana/mese, l'etichetta è una sola per slot/cella
-        let showLabel = '';
-        if (zoom === 'giorno') {
-          // In modalità giorno: cella di ogni ora. Mostro il codice solo nello slot 8 (orario lavorativo tipico)
-          // così non si ripete 24 volte; il pattern hatched copre tutta la giornata
-          if (slot.start.getHours() === 8) showLabel = isPiena ? codice : codice + ore;
-        } else {
-          showLabel = isPiena ? codice : codice + ore;
-        }
-
-        if (showLabel) {
-          cell.append(el('div', {
-            class: 'gantt-ass-overlay' + (isPiena ? '' : ' partial'),
-            style: `background:${(tipo?.colore || '#6b6b64')}33;`,  // 33 = 20% alpha
-            title: `${u.nome} — ${tipo?.nome || 'Assenza'} (${ore}h)${ass.note ? '\n'+ass.note : ''}`,
-          }, showLabel));
-        } else {
-          // Solo sfondo tinto, nessuna etichetta
-          cell.style.background = (tipo?.colore || '#6b6b64') + '22';
-        }
-      }
-
-      // Trova sessioni che cadono in questo slot ("ancorate" al loro slot di inizio)
-      sessUtente.forEach(s => {
-        const inizio = new Date(s.inizio);
-        const fine = s.fine ? new Date(s.fine) : new Date();
-        // L'inizio della sessione cade in questo slot?
-        if (inizio < slot.start || inizio >= slot.end) return;
-
-        const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
-        const colore = tipo?.colore || '#4eb8ff';
-
-        // Calcola larghezza in pixel
-        // (slotWidth / durata_slot_ms) × durata_sessione_ms
-        const slotMs = slot.end - slot.start;
-        const inizioOffsetMs = inizio - slot.start;
-        const durataMs = fine - inizio;
-        const leftPx = (inizioOffsetMs / slotMs) * slotWidth;
-        // Larghezza che si estende oltre il bordo cella se necessario (CSS overflow:visible)
-        const widthPx = Math.max(20, (durataMs / slotMs) * slotWidth);
-
-        const op = state.operazioni.find(o => o.id === s.operazione_id);
-        const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
-        const cli = op ? state.clienti.find(c => c.id === op.cliente_id) : null;
-        const durSec = Math.floor((fine - inizio) / 1000);
-
-        const bar = el('div', {
-          class: 'gantt-bar' + (s.fine ? '' : ' aperta'),
-          style: `left:${leftPx}px; width:${widthPx}px; background:${colore};`,
-          title: `${u.nome} su ${art?.codice || '—'} (${cli?.nome || '—'})\n${fmtIT(toLocalISO(inizio))} ${z(inizio.getHours())}:${z(inizio.getMinutes())} → ${s.fine ? (z(fine.getHours())+':'+z(fine.getMinutes())) : 'in corso'}\nDurata: ${formatSecondsHuman(durSec)}\nTipo: ${tipo?.nome || '—'}\n\nClick per modificare`,
-          onclick: (e) => { e.stopPropagation(); openSessioneModal(s); },
-        });
-        // Mostra codice articolo dentro la barra se c'è spazio
-        if (widthPx > 60) {
-          bar.append(el('div', { class:'gantt-bar-cod' }, art?.codice || '—'));
-        }
-        if (widthPx > 90) {
-          bar.append(el('div', { class:'gantt-bar-dur' }, formatSecondsHuman(durSec)));
-        }
-        // Permetti overflow visibile per le barre lunghe
-        cell.style.overflow = 'visible';
-        cell.append(bar);
+    // sfondo: ricalca weekend/oggi con sottili colonne
+    slots.forEach((slot, i) => {
+      const c = el('div', {
+        class:'gantt-cmcol'
+          + (slot.weekend ? ' weekend' : '')
+          + ((slot.dateISO === oggiISO || slot.isOggi) ? ' oggi' : ''),
+        style:`left:${i*slotWidth}px;width:${slotWidth}px;`,
       });
-
-      grid.append(cell);
+      track.append(c);
     });
+
+    // barre commesse, impilate
+    const BAR_H = 17, GAP = 3;
+    commesse.sort((a,b) => a.inizio < b.inizio ? -1 : 1);
+    commesse.forEach((c, idx) => {
+      let iStart = slotIndexOfIso(c.inizio < rangeStartIso ? rangeStartIso : c.inizio);
+      let iEnd = slotIndexOfIso(c.scadenza > rangeEndIso ? rangeEndIso : c.scadenza);
+      if (iStart < 0) iStart = 0;
+      if (iEnd < 0) iEnd = slots.length - 1;
+      const left = iStart * slotWidth;
+      const width = Math.max(slotWidth, (iEnd - iStart + 1) * slotWidth);
+
+      const prev = opCalcOre(c.op);
+      const cons = opCalcOreReali(c.op);
+      const perc = prev > 0 ? cons / prev : 0;
+      const sfora = prev > 0 && cons > prev + 0.05;
+      const attiva = opConSessioneAperta.has(c.op.id);
+
+      const art = state.articoli.find(a => a.id === c.op.articolo_id);
+      const cli = state.clienti.find(x => x.id === c.op.cliente_id);
+
+      const bar = el('div', {
+        class: 'gantt-cmbar' + (sfora ? ' sfora' : '') + (attiva ? ' attiva' : ''),
+        style: `left:${left}px;width:${width}px;top:${idx*(BAR_H+GAP)}px;`,
+        title:
+          (c.op.codice_op ? 'OP ' + c.op.codice_op : 'Commessa')
+          + (cli ? '\nCliente: ' + cli.nome : '')
+          + (art ? '\nArticolo: ' + (art.codice || '') : '')
+          + '\nPreventivo: ' + prev.toFixed(1) + ' h'
+          + '\nConsuntivo: ' + cons.toFixed(1) + ' h'
+          + (prev > 0 ? '  (' + Math.round(perc*100) + '%)' : '')
+          + (sfora ? '\n⚠ SFORAMENTO: +' + (cons-prev).toFixed(1) + ' h' : '')
+          + (attiva ? '\n● lavorazione in corso' : '')
+          + '\nScadenza: ' + fmtIT(c.scadenza)
+          + '\n(clic per aprire la commessa)',
+        onclick: () => { if (typeof openOperazioneModal === 'function') openOperazioneModal(c.op); },
+      });
+      // riempimento consuntivo
+      const fill = el('div', {
+        class:'gantt-cmbar-fill' + (sfora ? ' sfora' : ''),
+        style:`width:${Math.min(100, perc*100)}%;`,
+      });
+      bar.append(fill);
+      // etichetta
+      bar.append(el('div', { class:'gantt-cmbar-txt' },
+        (art && art.codice ? art.codice : (c.op.codice_op || 'OP'))
+        + '  ' + Math.round(cons) + '/' + Math.round(prev) + 'h'));
+      track.append(bar);
+    });
+
+    // altezza riga in base al numero di barre
+    const hRiga = Math.max(38, commesse.length * (BAR_H+GAP) + 8);
+    track.style.minHeight = hRiga + 'px';
+    grid.append(track);
   });
 
   wrap.append(grid);
   root.append(wrap);
 
-  // Legenda tipi lavorazione
-  if (state.tipiLav.length > 0) {
-    const leg = el('div', { style:'margin-top:14px;display:flex;gap:14px;flex-wrap:wrap;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);' });
-    leg.append(el('span', { style:'text-transform:uppercase;letter-spacing:.08em;font-size:10px;' }, 'Tipi:'));
-    state.tipiLav.filter(t => t.attivo).forEach(t => {
-      leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
-        el('span', { style:`display:inline-block;width:18px;height:5px;border-radius:2px;background:${t.colore||'#6b6b64'};` }),
-        t.nome,
-      ));
-    });
-    leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
-      el('span', { style:'display:inline-block;width:18px;height:14px;border-radius:2px;border:2px solid var(--grn);' }),
-      'In corso',
-    ));
-    leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
-      el('span', { style:'display:inline-block;width:18px;height:14px;border-radius:2px;background:repeating-linear-gradient(135deg,rgba(107,107,100,.4) 0,rgba(107,107,100,.4) 4px,transparent 4px,transparent 8px);' }),
-      'Assenza',
-    ));
-    root.append(leg);
-  }
+  // Legenda
+  const leg = el('div', { style:'margin-top:14px;display:flex;gap:16px;flex-wrap:wrap;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);align-items:center;' });
+  leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
+    el('span', { style:'display:inline-block;width:22px;height:13px;border-radius:3px;background:var(--blu);' }),
+    'Commessa (riempimento = ore consuntivate)'));
+  leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
+    el('span', { style:'display:inline-block;width:22px;height:13px;border-radius:3px;background:var(--red);' }),
+    'Sforamento (consuntivo oltre il preventivo)'));
+  leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
+    el('span', { style:'display:inline-block;width:22px;height:13px;border-radius:3px;border:2px solid var(--grn);' }),
+    'Lavorazione in corso'));
+  root.append(leg);
 }
 
 // ─── Calcola range visualizzato in base a cursor + zoom ───
