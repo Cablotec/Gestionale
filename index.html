@@ -3441,6 +3441,221 @@ async function articoliImportEsegui(nuovi, aggiornamenti) {
   renderTab('articoli');
 }
 
+// ─── Import Excel commesse (Pianificazione) ───
+async function operazioniImportExcel(file) {
+  if (!file) return;
+  if (typeof XLSX === 'undefined') {
+    toast('Libreria Excel non caricata, ricarica la pagina', 'err');
+    return;
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array', cellDates:true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval:'', raw:true });
+    if (!rows.length) { toast('File vuoto', 'err'); return; }
+    openOperazioniImportPreviewModal(rows);
+  } catch (e) {
+    toast('Errore lettura file: '+(e.message||e), 'err');
+  }
+}
+
+// Converte un valore data (Date, stringa, seriale Excel) in ISO yyyy-mm-dd
+function valoreAData(v) {
+  if (!v && v !== 0) return null;
+  if (v instanceof Date && !isNaN(v)) return toLocalISO(v);
+  if (typeof v === 'number') {
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    return isNaN(d) ? null : toLocalISO(d);
+  }
+  const s = String(v).trim();
+  if (!s) return null;
+  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (m) return m[3] + '-' + z(+m[2]) + '-' + z(+m[1]);
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return m[1] + '-' + z(+m[2]) + '-' + z(+m[3]);
+  return null;
+}
+
+function openOperazioniImportPreviewModal(rows) {
+  const headers = Object.keys(rows[0]);
+  const findCol = (...candidati) => {
+    for (const c of candidati) {
+      const found = headers.find(h => h.toLowerCase().trim() === c.toLowerCase());
+      if (found) return found;
+    }
+    return null;
+  };
+  const colEser = findCol('eser','esercizio','anno');
+  const colSz   = findCol('sz cl','sz','sigla');
+  const colOrd  = findCol('ord/off cliente','ord','ordine','numero');
+  const colRiga = findCol('riga','pos','posizione');
+  const colCod  = findCol('codice articolo','codice','articolo','art');
+  const colScad = findCol('scadenza','data','consegna');
+  const colQta  = findCol('quantità','quantita','qta','qty');
+  const colRif1 = findCol('rifer. cliente','rifer cliente','rifer.cliente');
+  const colCli  = findCol('cliente','nome cliente');
+  const colRif2 = findCol('riferimento cliente','riferimento');
+
+  const artByCod = {};
+  state.articoli.forEach(a => { if (a.codice) artByCod[String(a.codice).toLowerCase().trim()] = a; });
+  const cliByNome = {};
+  state.clienti.forEach(c => { if (c.nome) cliByNome[String(c.nome).toLowerCase().trim()] = c; });
+
+  const parsed = rows.map((r, idx) => {
+    const eser = colEser ? String(r[colEser]||'').trim() : '';
+    const sz   = colSz   ? String(r[colSz]||'').trim()   : '';
+    const ord  = colOrd  ? String(r[colOrd]||'').trim()  : '';
+    const numeroOrdine = [eser, sz, ord].filter(Boolean).join('/');
+    const codArt = colCod ? String(r[colCod]||'').trim() : '';
+    const nomeCli = colCli ? String(r[colCli]||'').trim() : '';
+    const rif1 = colRif1 ? String(r[colRif1]||'').trim() : '';
+    const rif2 = colRif2 ? String(r[colRif2]||'').trim() : '';
+    const noteRighe = [];
+    if (rif1) noteRighe.push('Rifer. Cliente: ' + rif1);
+    if (rif2) noteRighe.push('Riferimento Cliente: ' + rif2);
+    const qta = parseInt(colQta ? r[colQta] : '', 10);
+    return {
+      _row: idx + 2,
+      numeroOrdine,
+      pos: colRiga ? String(r[colRiga]||'').trim() : '',
+      codArt,
+      art: artByCod[codArt.toLowerCase()] || null,
+      nomeCli,
+      cli: cliByNome[nomeCli.toLowerCase()] || null,
+      scadenza: valoreAData(colScad ? r[colScad] : null),
+      quantita: (Number.isFinite(qta) && qta > 0) ? qta : null,
+      note: noteRighe.join('\n') || null,
+    };
+  });
+
+  const errors = [];
+  parsed.forEach(p => {
+    const probl = [];
+    if (!p.codArt) probl.push('codice articolo mancante');
+    else if (!p.art) probl.push('articolo "' + p.codArt + '" non in anagrafica');
+    if (!p.nomeCli) probl.push('cliente mancante');
+    else if (!p.cli) probl.push('cliente "' + p.nomeCli + '" non in anagrafica');
+    if (!p.scadenza) probl.push('scadenza mancante o non valida');
+    if (!p.quantita) probl.push('quantità mancante o non valida');
+    p._ok = probl.length === 0;
+    if (!p._ok) errors.push('Riga ' + p._row + ': ' + probl.join(', '));
+  });
+  const validi = parsed.filter(p => p._ok);
+
+  const modal = el('div', { class:'modal', style:'max-width:720px' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Anteprima import commesse'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+
+  body.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Righe lette'), el('div', { class:'kv' }, String(rows.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Pronte'), el('div', { class:'kv kg' }, String(validi.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Da correggere'), el('div', { class:'kv kr' }, String(errors.length))),
+  ));
+
+  body.append(el('div', { class:'sub', style:'margin:16px 0 8px;' }, 'Mappatura colonne riconosciute:'));
+  const mapBox = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;font-family:monospace;font-size:11px;line-height:1.8;' });
+  [
+    ['n° ordine (Eser)', colEser], ['n° ordine (Sz Cl)', colSz], ['n° ordine (Ord)', colOrd],
+    ['pos (Riga)', colRiga], ['codice articolo', colCod], ['scadenza', colScad],
+    ['quantità', colQta], ['cliente', colCli],
+    ['note (Rifer. Cliente)', colRif1], ['note (Riferimento Cliente)', colRif2],
+  ].forEach(([campo, col]) => {
+    mapBox.append(el('div', {},
+      el('span', { style:'color:var(--mut)' }, campo+': '),
+      el('span', { style: col ? 'color:var(--grn)' : 'color:var(--red)' },
+        col ? '"'+col+'"' : '— non trovata —')));
+  });
+  body.append(mapBox);
+
+  if (errors.length) {
+    body.append(el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--red);' },
+      'Righe che verranno saltate:'));
+    const errBox = el('div', { style:'max-height:140px;overflow:auto;background:rgba(255,78,107,.08);border:1px solid var(--red);border-radius:4px;padding:10px;font-family:monospace;font-size:11px;' });
+    errors.slice(0, 30).forEach(e => errBox.append(el('div', {}, e)));
+    if (errors.length > 30) errBox.append(el('div', { style:'color:var(--mut);margin-top:4px;' }, '... e altri ' + (errors.length-30)));
+    body.append(errBox);
+  }
+
+  if (validi.length) {
+    body.append(el('div', { class:'sub', style:'margin:14px 0 6px;' },
+      'Anteprima (prime ' + Math.min(5, validi.length) + ' righe pronte):'));
+    const tbl = el('table', { class:'rt', style:'font-size:11px;' });
+    tbl.append(el('thead', {}, el('tr', {},
+      el('th', {}, 'N° Ordine'), el('th', {}, 'Pos'), el('th', {}, 'Articolo'),
+      el('th', {}, 'Cliente'), el('th', {}, 'Scad.'), el('th', { class:'tr' }, 'Qtà'))));
+    const tb = el('tbody');
+    validi.slice(0, 5).forEach(p => tb.append(el('tr', {},
+      el('td', {}, p.numeroOrdine),
+      el('td', {}, p.pos),
+      el('td', { class:'cod-cell' }, p.codArt),
+      el('td', {}, p.nomeCli),
+      el('td', {}, fmtIT(p.scadenza)),
+      el('td', { class:'tr' }, String(p.quantita)))));
+    tbl.append(tb);
+    body.append(tbl);
+  }
+
+  body.append(el('div', { class:'sub', style:'margin:14px 0 0;color:var(--mut);font-size:10px;' },
+    'Le commesse saranno create con stato "aperta" e minuti unitari a 0 ' +
+    '(da impostare poi). Le righe con errori non vengono importate.'));
+
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
+  if (validi.length) {
+    foot.append(el('button', {
+      class:'btnp',
+      onclick: () => operazioniImportEsegui(validi),
+    }, 'Importa ' + validi.length + ' commess' + (validi.length === 1 ? 'a' : 'e')));
+  }
+  modal.append(foot);
+  openModal(modal);
+}
+
+async function operazioniImportEsegui(validi) {
+  closeModal();
+  let ok = 0, err = 0;
+  const batchSize = 200;
+  for (let i = 0; i < validi.length; i += batchSize) {
+    const batch = validi.slice(i, i + batchSize).map(p => ({
+      cliente_id: p.cli.id,
+      articolo_id: p.art.id,
+      numero_ordine: p.numeroOrdine || null,
+      pos: p.pos || null,
+      quantita: p.quantita,
+      minuti_unitari: 0,
+      scadenza: p.scadenza,
+      stato: 'aperta',
+      stato_preparazione: 'vuoto',
+      note: p.note,
+    }));
+    try {
+      const { data, error } = await eseguiConRetry(
+        () => sb.from('operazioni').insert(batch).select(),
+        { label: 'import commesse' }
+      );
+      if (error) { err += batch.length; toast('Errore insert: '+error.message, 'err'); }
+      else {
+        ok += data.length;
+        data.forEach(d => {
+          if (!state.operazioni.find(x => x.id === d.id)) state.operazioni.push(d);
+        });
+      }
+    } catch (e) {
+      err += batch.length;
+      toast('Errore: '+(e.message||e), 'err');
+    }
+  }
+  toast('Import completato: ' + ok + ' commesse create' + (err ? ', ' + err + ' errori' : ''),
+        err ? 'err' : 'ok');
+  renderTab('pianificazione');
+}
+
 function articoliExportExcel() {
   if (typeof XLSX === 'undefined') {
     toast('Libreria Excel non caricata', 'err');
@@ -4162,6 +4377,12 @@ function renderPianificazione(root) {
   );
   if (isAdmin) {
     toolbar.append(el('button', { class:'btnp', onclick:()=>openOperazioneModal() }, '+ Nuova Operazione'));
+    const fileImp = el('input', {
+      type:'file', accept:'.xlsx,.xls', style:'display:none;',
+      onchange: (e) => { if (e.target.files[0]) operazioniImportExcel(e.target.files[0]); e.target.value=''; },
+    });
+    toolbar.append(fileImp);
+    toolbar.append(el('button', { class:'btng', onclick:()=>fileImp.click() }, '↑ Importa da Excel'));
   }
   root.append(toolbar);
 
