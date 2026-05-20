@@ -2127,7 +2127,11 @@ function renderCalendar(root) {
   root.append(grid);
 }
 
-// Popup col dettaglio completo dei eventi/usi di un giorno
+// Popup col dettaglio completo degli eventi/usi/assenze di un giorno.
+// Gestisce tutti i tipi di entry possibili in byDay: pren, uso, assenza,
+// festa, chiusura. Prima la funzione assumeva ciecamente "pren o uso" e
+// nel calendario Generale finiva per renderizzare assenze come fossero usi
+// mezzo, producendo dati e orari sballati (NaN:NaN, badge "chiuso", ecc.).
 function openDayDetailModal(iso, evs) {
   const mezziById = Object.fromEntries(state.mezzi.map(m=>[m.id,m]));
   const modal = el('div', { class:'modal' });
@@ -2137,9 +2141,10 @@ function openDayDetailModal(iso, evs) {
   ));
   const body = el('div', { class:'mbody' });
   body.append(el('div', { class:'sub', style:'margin-bottom:10px;' },
-    `${evs.length} elementi in questa giornata`));
+    `${evs.length} ${evs.length === 1 ? 'elemento' : 'elementi'} in questa giornata`));
 
   evs.forEach(entry => {
+    // ── Prenotazione mezzo ─────────────────────────────────
     if (entry.kind === 'pren') {
       const p = entry.data;
       const m = mezziById[p.mezzo_id];
@@ -2162,7 +2167,11 @@ function openDayDetailModal(iso, evs) {
           ' ',
           utilNomi.length ? utilNomi.join(', ') : '—'),
       ));
-    } else {
+      return;
+    }
+
+    // ── Uso mezzo ──────────────────────────────────────────
+    if (entry.kind === 'uso') {
       const u = entry.data;
       const m = mezziById[u.mezzo_id];
       const utz = state.utentiById[u.utente_id];
@@ -2183,6 +2192,52 @@ function openDayDetailModal(iso, evs) {
           ' · uscita ', z(oraUscita.getHours())+':'+z(oraUscita.getMinutes()),
           oraRientro ? ' · rientro '+z(oraRientro.getHours())+':'+z(oraRientro.getMinutes()) : ''),
       ));
+      return;
+    }
+
+    // ── Assenza ────────────────────────────────────────────
+    if (entry.kind === 'assenza') {
+      const a = entry.data;
+      const utz = state.utentiById[a.utente_id];
+      const tipo = state.tipiAssenza.find(t => t.id === a.tipo_assenza_id);
+      const color = (tipo && tipo.colore) || '#4effa3';
+      body.append(el('div', {
+        class:'day-row',
+        style:`border-left-color:${color};`,
+      },
+        el('div', { class:'day-row-title' },
+          (utz?.nome || '—') + ' · ' + (tipo?.nome || 'Assenza')),
+        el('div', { class:'day-row-sub' },
+          (a.ore ? a.ore + 'h' : '8h'),
+          a.note ? ' · ' + a.note : ''),
+      ));
+      return;
+    }
+
+    // ── Festività ──────────────────────────────────────────
+    if (entry.kind === 'festa') {
+      const f = entry.data;
+      body.append(el('div', {
+        class:'day-row',
+        style:'border-left-color:var(--blu);',
+      },
+        el('div', { class:'day-row-title' }, '🎉 ' + (f.nome || 'Festività')),
+        el('div', { class:'day-row-sub' }, 'Festività nazionale'),
+      ));
+      return;
+    }
+
+    // ── Chiusura aziendale ─────────────────────────────────
+    if (entry.kind === 'chiusura') {
+      const c = entry.data;
+      body.append(el('div', {
+        class:'day-row',
+        style:'border-left-color:var(--or);',
+      },
+        el('div', { class:'day-row-title' }, '🔒 ' + (c.nome || 'Chiusura azienda')),
+        c.note ? el('div', { class:'day-row-sub' }, c.note) : null,
+      ));
+      return;
     }
   });
 
@@ -6852,12 +6907,24 @@ function kioskResetInactivity() {
   clearTimeout(kioskState.inactivityTimer);
   kioskState.inactivityTimer = setTimeout(kioskGoToId, KIOSK_INACTIVITY_MS);
 }
+// True se l'utente è in una schermata "attiva" del kiosk dove ha senso
+// che il timer di inattività sia in funzione e venga resettato dagli eventi.
+// Escludiamo la schermata identificazione (non c'è nulla da resettare) e
+// quella di conferma "done" (ha già il suo timer di 2s).
+function kioskInSchermataAttiva() {
+  const ids = ['kiosk-step-action','kiosk-step-op-list','kiosk-step-menu',
+               'kiosk-step-tipo','kiosk-step-attiva'];
+  return ids.some(id => {
+    const e = document.getElementById(id);
+    return e && e.style.display !== 'none';
+  });
+}
 // Eventi che "tengono viva" la sessione: click, tasti, e anche solo il
 // movimento del mouse o del dito. Così basta scuotere il mouse per restare
-// nella schermata commesse mentre si legge.
+// nella schermata corrente del kiosk mentre si legge.
 ['click','keydown','mousemove','touchstart','touchmove'].forEach(ev => {
   document.addEventListener(ev, () => {
-    if ($('#kiosk-step-action').style.display !== 'none') kioskResetInactivity();
+    if (kioskInSchermataAttiva()) kioskResetInactivity();
   });
 });
 
