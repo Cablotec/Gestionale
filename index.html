@@ -555,6 +555,12 @@ tr.assv2-row-mia td.assv2-td-day{background-image:linear-gradient(rgba(212,255,7
 .assv2-td-day span{display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;}
 .assv2-td-day.can-edit{cursor:pointer;}
 .assv2-td-day.can-edit:hover{outline:2px solid var(--acc);outline-offset:-2px;}
+/* Cella bloccata dal preavviso minimo: striscia diagonale + opacità */
+.assv2-td-day.bloccato-preavviso{
+  cursor:not-allowed;
+  background-image:repeating-linear-gradient(135deg,rgba(120,120,120,.18) 0,rgba(120,120,120,.18) 3px,transparent 3px,transparent 7px);
+}
+.assv2-td-day.bloccato-preavviso span{opacity:.55;}
 .assv2-td-day.we{background:rgba(255,78,107,.18);}
 .assv2-td-day.we span{color:var(--red);}
 .assv2-td-day.fes{background:rgba(78,184,255,.18);}
@@ -1146,6 +1152,84 @@ function getImpostazioneInt(chiave, defaultVal) {
   const v = getImpostazione(chiave, defaultVal);
   const n = parseInt(v, 10);
   return Number.isFinite(n) ? n : defaultVal;
+}
+
+// ── Finestre di apertura assenze ─────────────────────────────
+// Ogni finestra ha 4 date in formato 'gg-mm' (giorno-mese, ricorrenti
+// ogni anno): apertura_da/a = quando l'utente può inserire,
+// periodo_da/a = su quale arco di tempo può inserire.
+// Per i periodi a cavallo dell'anno (es. inverno 01-10 → 31-03), se la
+// fine "gg-mm" risulta minore dell'inizio, il periodo attraversa l'anno.
+
+// Parsing di una stringa 'gg-mm' → {giorno, mese}. Restituisce null se invalida.
+function parseGGMM(s) {
+  if (!s) return null;
+  const m = String(s).match(/^(\d{1,2})-(\d{1,2})$/);
+  if (!m) return null;
+  const g = +m[1], me = +m[2];
+  if (g < 1 || g > 31 || me < 1 || me > 12) return null;
+  return { giorno: g, mese: me };
+}
+
+// True se la data ISO 'iso' cade dentro un intervallo definito da due 'gg-mm'.
+// Gestisce intervalli a cavallo d'anno.
+function isoDentroIntervallo(iso, ggmmDa, ggmmA) {
+  const da = parseGGMM(ggmmDa), a = parseGGMM(ggmmA);
+  if (!da || !a) return false;
+  const d = parseISODate(iso);
+  const g = d.getDate(), m = d.getMonth() + 1;
+  // Trasformo gg-mm in numero "mmgg" comparabile (es. 15 marzo → 0315)
+  const k = (mm, gg) => mm * 100 + gg;
+  const kd = k(m, g), kDa = k(da.mese, da.giorno), kA = k(a.mese, a.giorno);
+  if (kDa <= kA) return kd >= kDa && kd <= kA;          // intervallo normale
+  return kd >= kDa || kd <= kA;                          // a cavallo d'anno
+}
+
+// Restituisce le due finestre (estiva e invernale) lette dalle impostazioni.
+function getFinestreAssenze() {
+  return [
+    {
+      nome: 'estiva',
+      aperturaDa: getImpostazione('finestra_estiva_apertura_da', '01-03'),
+      aperturaA:  getImpostazione('finestra_estiva_apertura_a',  '31-03'),
+      periodoDa:  getImpostazione('finestra_estiva_periodo_da',  '01-04'),
+      periodoA:   getImpostazione('finestra_estiva_periodo_a',   '30-09'),
+    },
+    {
+      nome: 'invernale',
+      aperturaDa: getImpostazione('finestra_invernale_apertura_da', '01-09'),
+      aperturaA:  getImpostazione('finestra_invernale_apertura_a',  '30-09'),
+      periodoDa:  getImpostazione('finestra_invernale_periodo_da',  '01-10'),
+      periodoA:   getImpostazione('finestra_invernale_periodo_a',   '31-03'),
+    },
+  ];
+}
+
+// Decide se un utente non-admin può oggi inserire/modificare un'assenza sulla
+// data 'iso'. Regola: oggi deve cadere nella finestra di apertura associata
+// al periodo a cui appartiene 'iso'. Restituisce { ok, motivo, finestra }.
+function verificaAccessoAssenza(iso) {
+  const oggiIso = toLocalISO(new Date());
+  // Le date passate non sono mai accessibili agli utenti
+  if (iso < oggiIso) {
+    return { ok: false, motivo: 'date passate non modificabili dagli utenti' };
+  }
+  const finestre = getFinestreAssenze();
+  // A quale finestra appartiene 'iso'?
+  const finestra = finestre.find(f => isoDentroIntervallo(iso, f.periodoDa, f.periodoA));
+  if (!finestra) {
+    return { ok: false, motivo: 'questa data non rientra in nessuna finestra di apertura assenze' };
+  }
+  // Oggi è dentro la finestra di apertura?
+  const aperta = isoDentroIntervallo(oggiIso, finestra.aperturaDa, finestra.aperturaA);
+  if (!aperta) {
+    return {
+      ok: false,
+      motivo: `le assenze per il periodo ${finestra.nome} si possono inserire dal ${finestra.aperturaDa} al ${finestra.aperturaA}`,
+      finestra,
+    };
+  }
+  return { ok: true, finestra };
 }
 
 async function init() {
@@ -8301,13 +8385,26 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
 
       if (g.oggi) cls.push('oggi');
 
-      const canEdit = (isAdmin || (mioUtenteId && u.id === mioUtenteId))
-        && !g.weekend && !g.festivo && !g.chiusura;
+      // Giorno bloccato per i non-admin? (data fuori da una finestra aperta)
+      // Vale solo per la propria riga, e gli admin non sono mai bloccati.
+      const isMiaRiga = mioUtenteId && u.id === mioUtenteId;
+      let bloccatoFinestra = false, motivoBlocco = '';
+      if (!isAdmin && isMiaRiga) {
+        const v = verificaAccessoAssenza(g.iso);
+        if (!v.ok) { bloccatoFinestra = true; motivoBlocco = v.motivo; }
+      }
+      if (bloccatoFinestra) cls.push('bloccato-preavviso');
+
+      const canEdit = (isAdmin || isMiaRiga)
+        && !g.weekend && !g.festivo && !g.chiusura
+        && !bloccatoFinestra;
       if (canEdit) cls.push('can-edit');
 
       const td = el('td', {
         class: cls.join(' '),
-        title: ass ? `${ass.ore}h - ${state.tipiAssenza.find(t=>t.id===ass.tipo_assenza_id)?.nome || ''}${ass.note ? '\nNote: '+ass.note : ''}` : '',
+        title: bloccatoFinestra
+          ? 'Bloccato: ' + motivoBlocco + '. Per modifiche contatta un amministratore.'
+          : (ass ? `${ass.ore}h - ${state.tipiAssenza.find(t=>t.id===ass.tipo_assenza_id)?.nome || ''}${ass.note ? '\nNote: '+ass.note : ''}` : ''),
       });
       const span = el('span', {}, label);
       if (bgInline) {
@@ -8531,22 +8628,14 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     foot.append(el('button', {
       class: 'btnd',
       onclick: async () => {
-        // Stessa regola del salvataggio: non-admin non può toccare assenze
-        // proprie con data dentro la finestra di preavviso.
+        // Stessa regola del salvataggio: la data deve essere in una
+        // finestra di apertura attiva per i non-admin.
         const sonoAdmin = state.profile?.ruolo === 'admin';
-        const perMeStesso = utente.id === state.profile?.id;
+        const perMeStesso = utente.account_id === state.profile?.id;
         if (!sonoAdmin && perMeStesso) {
-          const preavviso = getImpostazioneInt('preavviso_assenze_giorni', 30);
-          if (preavviso > 0) {
-            const oggi = new Date(); oggi.setHours(0,0,0,0);
-            const soglia = new Date(oggi);
-            soglia.setDate(soglia.getDate() + preavviso);
-            if (iso < toLocalISO(soglia)) {
-              return toast(
-                `Le assenze entro ${preavviso} giorni da oggi non sono modificabili. Per interventi su questa data contatta un amministratore.`,
-                'err'
-              );
-            }
+          const verifica = verificaAccessoAssenza(iso);
+          if (!verifica.ok) {
+            return toast('Eliminazione non consentita: ' + verifica.motivo + '.', 'err');
           }
         }
         if (!confirm(`Eliminare l'assenza di ${utente.nome} del ${fmtIT(iso)}?`)) return;
@@ -8560,27 +8649,15 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     if (!tipoSel) return toast('Seleziona il tipo', 'err');
     if (oreSel === null || oreSel < 0) return toast('Inserisci le ore', 'err');
 
-    // ── Controllo preavviso minimo ───────────────────────────
-    // Vale per utenti non-admin che operano su una propria assenza la cui
-    // data cade DENTRO la finestra di preavviso. Sia per inserimento sia
-    // per modifica: una volta che la data è "vicina", l'utente non può più
-    // toccare la riga (né crearla, né modificarla). Gli admin sono esenti.
+    // ── Controllo finestra di apertura ───────────────────────
+    // Per i non-admin: la data deve cadere in un periodo aperto oggi.
+    // Vale per inserimento, modifica ed eliminazione. Gli admin sono esenti.
     const sonoAdmin = state.profile?.ruolo === 'admin';
-    const perMeStesso = utente.id === state.profile?.id;
+    const perMeStesso = utente.account_id === state.profile?.id;
     if (!sonoAdmin && perMeStesso) {
-      const preavviso = getImpostazioneInt('preavviso_assenze_giorni', 30);
-      if (preavviso > 0) {
-        const oggi = new Date();
-        oggi.setHours(0, 0, 0, 0);
-        const sogliaDate = new Date(oggi);
-        sogliaDate.setDate(sogliaDate.getDate() + preavviso);
-        const sogliaIso = toLocalISO(sogliaDate);
-        if (iso < sogliaIso) {
-          return toast(
-            `Le assenze entro ${preavviso} giorni da oggi non sono modificabili. Per interventi su questa data contatta un amministratore.`,
-            'err'
-          );
-        }
+      const verifica = verificaAccessoAssenza(iso);
+      if (!verifica.ok) {
+        return toast('Inserimento non consentito: ' + verifica.motivo + '.', 'err');
       }
     }
 
@@ -8786,54 +8863,111 @@ function renderImpostazioni(root) {
     return;
   }
 
-  const box = el('div', { style:'background:var(--sur);border:1px solid var(--brd);border-radius:6px;padding:20px;max-width:640px;' });
+  const box = el('div', { style:'background:var(--sur);border:1px solid var(--brd);border-radius:6px;padding:20px;max-width:760px;' });
 
-  // ── Preavviso ferie/permessi ───────────────────────────────
   box.append(el('h3', { style:'margin:0 0 6px;font-family:Syne,sans-serif;font-size:14px;font-weight:700;color:var(--acc);' },
-    'Ferie e permessi'));
-  box.append(el('div', { style:'font-size:11px;color:var(--mut);margin-bottom:12px;line-height:1.5;' },
-    'Numero minimo di giorni di preavviso richiesti agli utenti non amministratori per inserire ferie o permessi futuri. Gli amministratori non sono mai soggetti a questo limite.'));
+    'Apertura inserimento assenze'));
+  box.append(el('div', { style:'font-size:11px;color:var(--mut);margin-bottom:18px;line-height:1.6;' },
+    'Definisce quando gli utenti non amministratori possono inserire le proprie assenze (ferie e permessi). Ogni finestra ha due parametri: il ',
+    el('strong', {}, 'periodo di apertura'),
+    ' (le date in cui possono inserire) e il ',
+    el('strong', {}, 'periodo coperto'),
+    ' (su quale arco di tempo possono inserire). Le date sono ricorrenti ogni anno (formato gg-mm).'));
 
-  const valoreAttuale = getImpostazioneInt('preavviso_assenze_giorni', 30);
-  const inputPreavviso = el('input', {
-    type:'number', min:'0', max:'365', step:'1',
-    value: String(valoreAttuale),
-    style:'width:120px;padding:6px 10px;background:var(--sur2);border:1px solid var(--brd);border-radius:3px;color:var(--txt);font-family:DM Mono,monospace;',
+  // Genera una riga "Etichetta: [input gg-mm]"
+  const inputs = {};
+  function fieldGGMM(chiave, label, defaultVal) {
+    const wrap = el('div', { style:'display:flex;gap:8px;align-items:center;margin-bottom:8px;' });
+    const inp = el('input', {
+      type:'text', placeholder:'gg-mm', maxlength:'5',
+      value: getImpostazione(chiave, defaultVal),
+      style:'width:80px;padding:5px 8px;background:var(--sur2);border:1px solid var(--brd);border-radius:3px;color:var(--txt);font-family:DM Mono,monospace;font-size:12px;text-align:center;',
+    });
+    inputs[chiave] = inp;
+    wrap.append(el('label', { style:'font-size:11px;font-family:Syne,sans-serif;font-weight:600;min-width:220px;' }, label), inp);
+    return wrap;
+  }
+
+  // ── Finestra estiva ────────────────────────────────────────
+  const blocchiEstivi = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:14px;margin-bottom:14px;' });
+  blocchiEstivi.append(el('div', { style:'font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--txt);margin-bottom:10px;' },
+    '☀ Finestra ESTIVA'));
+  blocchiEstivi.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;' },
+    'Quando si possono inserire (apertura):'));
+  blocchiEstivi.append(fieldGGMM('finestra_estiva_apertura_da', 'Apertura dal:', '01-03'));
+  blocchiEstivi.append(fieldGGMM('finestra_estiva_apertura_a',  'Apertura al:',  '31-03'));
+  blocchiEstivi.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.05em;' },
+    'Su quale periodo si possono inserire:'));
+  blocchiEstivi.append(fieldGGMM('finestra_estiva_periodo_da', 'Periodo coperto dal:', '01-04'));
+  blocchiEstivi.append(fieldGGMM('finestra_estiva_periodo_a',  'Periodo coperto al:',  '30-09'));
+  box.append(blocchiEstivi);
+
+  // ── Finestra invernale ─────────────────────────────────────
+  const blocchiInvernali = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:14px;margin-bottom:14px;' });
+  blocchiInvernali.append(el('div', { style:'font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--txt);margin-bottom:10px;' },
+    '❄ Finestra INVERNALE'));
+  blocchiInvernali.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;' },
+    'Quando si possono inserire (apertura):'));
+  blocchiInvernali.append(fieldGGMM('finestra_invernale_apertura_da', 'Apertura dal:', '01-09'));
+  blocchiInvernali.append(fieldGGMM('finestra_invernale_apertura_a',  'Apertura al:',  '30-09'));
+  blocchiInvernali.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.05em;' },
+    'Su quale periodo si possono inserire:'));
+  blocchiInvernali.append(fieldGGMM('finestra_invernale_periodo_da', 'Periodo coperto dal:', '01-10'));
+  blocchiInvernali.append(fieldGGMM('finestra_invernale_periodo_a',  'Periodo coperto al:',  '31-03'));
+  box.append(blocchiInvernali);
+
+  // ── Anteprima dello stato corrente ─────────────────────────
+  const oggiIso = toLocalISO(new Date());
+  const finestreCorrenti = getFinestreAssenze();
+  const stati = finestreCorrenti.map(f => {
+    const aperta = isoDentroIntervallo(oggiIso, f.aperturaDa, f.aperturaA);
+    return { nome:f.nome, aperta };
   });
+  const statoBox = el('div', { style:'background:var(--sur2);border-left:3px solid var(--acc);border-radius:2px;padding:10px 14px;margin-bottom:18px;font-family:DM Mono,monospace;font-size:11px;' });
+  statoBox.append(el('div', { style:'color:var(--mut);margin-bottom:4px;' }, 'Stato oggi:'));
+  stati.forEach(s => {
+    statoBox.append(el('div', {},
+      el('span', { style:'color:' + (s.aperta ? 'var(--grn)' : 'var(--mut)') + ';font-weight:700;' },
+        (s.aperta ? '● aperta' : '○ chiusa')),
+      el('span', {}, '  Finestra ' + s.nome)));
+  });
+  box.append(statoBox);
 
-  box.append(el('div', { style:'display:flex;gap:10px;align-items:center;' },
-    el('label', { style:'font-size:12px;font-family:Syne,sans-serif;font-weight:600;' },
-      'Giorni di preavviso minimo:'),
-    inputPreavviso,
-    el('span', { style:'font-size:11px;color:var(--mut);' }, 'giorni'),
-  ));
-
-  const msgArea = el('div', { style:'min-height:18px;margin-top:10px;font-size:11px;font-family:DM Mono,monospace;' });
-  const btnSalva = el('button', { class:'btnp', style:'margin-top:14px;' }, 'Salva impostazioni');
+  const msgArea = el('div', { style:'min-height:18px;margin-bottom:10px;font-size:11px;font-family:DM Mono,monospace;' });
+  const btnSalva = el('button', { class:'btnp' }, 'Salva impostazioni');
   btnSalva.onclick = async () => {
-    const n = parseInt(inputPreavviso.value, 10);
-    if (!Number.isFinite(n) || n < 0 || n > 365) {
-      msgArea.style.color = 'var(--red)';
-      msgArea.textContent = '⚠ Inserisci un numero tra 0 e 365.';
-      return;
+    // Validazione: tutte le coppie devono essere gg-mm valide
+    const chiavi = Object.keys(inputs);
+    const valoriDaSalvare = {};
+    for (const k of chiavi) {
+      const v = (inputs[k].value || '').trim();
+      const parsed = parseGGMM(v);
+      if (!parsed) {
+        msgArea.style.color = 'var(--red)';
+        msgArea.textContent = '⚠ Valore non valido per "' + k + '": serve formato gg-mm (es. 15-03).';
+        return;
+      }
+      // Riscrivo in forma canonica zero-padded
+      valoriDaSalvare[k] = z(parsed.giorno) + '-' + z(parsed.mese);
     }
     btnSalva.disabled = true;
     btnSalva.textContent = 'Salvataggio…';
     try {
+      const rows = Object.entries(valoriDaSalvare).map(([chiave, valore]) => ({
+        chiave, valore, aggiornato_il: new Date().toISOString(),
+      }));
       const { error } = await eseguiConRetry(
-        () => sb.from('impostazioni').upsert({
-          chiave: 'preavviso_assenze_giorni',
-          valore: String(n),
-          descrizione: 'Giorni minimi di preavviso richiesti agli utenti non admin per inserire ferie/permessi futuri',
-          aggiornato_il: new Date().toISOString(),
-        }, { onConflict: 'chiave' }),
-        { label: 'salva impostazioni' }
+        () => sb.from('impostazioni').upsert(rows, { onConflict: 'chiave' }),
+        { label: 'salva impostazioni assenze' }
       );
       if (error) throw error;
-      state.impostazioni['preavviso_assenze_giorni'] = String(n);
+      // Aggiorno lo state locale
+      Object.entries(valoriDaSalvare).forEach(([k, v]) => { state.impostazioni[k] = v; });
       msgArea.style.color = 'var(--grn)';
       msgArea.textContent = '✓ Salvato.';
       toast('Impostazioni aggiornate', 'ok');
+      // Ridisegno per aggiornare lo stato "aperto/chiuso"
+      setTimeout(() => renderImpostazioni(root), 800);
     } catch (e) {
       msgArea.style.color = 'var(--red)';
       msgArea.textContent = '⚠ Errore: ' + (e.message || e);
@@ -8842,7 +8976,7 @@ function renderImpostazioni(root) {
       btnSalva.textContent = 'Salva impostazioni';
     }
   };
-  box.append(btnSalva, msgArea);
+  box.append(msgArea, btnSalva);
 
   root.append(box);
 }
