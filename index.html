@@ -4309,6 +4309,14 @@ function opCalcInizio(op, addettiOverride) {
   if (giorni <= 0) return op.scadenza;
   return indietroGiorniLavorativi(op.scadenza, giorni);
 }
+
+// Data di inizio EFFETTIVA di una commessa:
+// se è stata impostata una data manuale, vale quella; altrimenti il calcolo.
+// È questa la funzione da usare ovunque serva "quando inizia davvero".
+function opInizio(op) {
+  if (op && op.inizio_manuale) return op.inizio_manuale;
+  return opCalcInizio(op);
+}
 function opIsRitardo(op) {
   if (op.stato === 'consegnata') return false;
   if (!op.scadenza) return false;
@@ -4478,7 +4486,7 @@ function renderPianificazione(root) {
       .filter(Boolean);
     const ore = opCalcOre(o);
     const giorni = opCalcGiorni(o);
-    const inizio = opCalcInizio(o);
+    const inizio = opInizio(o);
     const ritardo = opIsRitardo(o);
 
     let rowClass = '';
@@ -4944,8 +4952,15 @@ function openOperazioneModal(o) {
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Scadenza'),
         el('input', { type:'date', name:'scadenza', value:o.scadenza||'' })),
+      el('div', { class:'field' }, el('label', {}, 'Inizio manuale'),
+        el('input', { type:'date', name:'inizio_manuale', value:o.inizio_manuale||'' }),
+        el('div', { class:'sub', style:'margin-top:4px;' },
+          'Lascia vuoto per usare la data calcolata automaticamente.')),
+    ),
+    el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Consegna materiali entro'),
         el('input', { type:'date', name:'cl_consegna_materiali', value:o.cl_consegna_materiali||'' })),
+      el('div', { class:'field' }),
     ),
     el('div', { class:'field' }, el('label', {}, 'Addetti previsti'),
       addSelectedWrap, addDropWrap,
@@ -5065,8 +5080,9 @@ function openOperazioneModal(o) {
     };
     const ore = opCalcOre(tmp);
     const giorni = opCalcGiorni(tmp);
-    const inizio = opCalcInizio(tmp, addettiSel);
+    const inizioCalc = opCalcInizio(tmp, addettiSel);
     const conAddetti = addettiSel && addettiSel.length > 0;
+    const inizioManuale = fd.get('inizio_manuale') || '';
     previewBox.innerHTML = '';
     previewBox.append(
       el('div', {},
@@ -5074,18 +5090,39 @@ function openOperazioneModal(o) {
         el('span', { style:'margin:0 10px;color:var(--brd)' }, '·'),
         el('span', { style:'color:var(--acc)' }, 'Giorni lavorativi: '), String(giorni),
         el('span', { style:'margin:0 10px;color:var(--brd)' }, '·'),
-        el('span', { style:'color:var(--acc)' }, 'Data inizio calc.: '), inizio ? fmtIT(inizio) : '— (manca scadenza)',
+        el('span', { style:'color:var(--acc)' }, 'Inizio calcolato: '),
+        inizioCalc ? fmtIT(inizioCalc) : '— (manca scadenza)',
       ),
       el('div', { style:'margin-top:4px;font-size:10px;color:var(--mut);' },
         conAddetti
           ? 'Inizio calcolato a ritroso dalla scadenza in base alla capacità reale degli addetti assegnati (8h a testa, meno le loro ferie), escludendo weekend, festivi e chiusure aziendali.'
           : 'Calcolato come quantità × minuti / 60 ore, divisi in giornate da 8h, escludendo weekend, festivi nazionali e chiusure aziendali. Assegna degli addetti per tener conto delle loro ferie.')
     );
+    // Se è stata impostata una data manuale: mostrala e avvisa se troppo stretta
+    if (inizioManuale) {
+      previewBox.append(el('div', { style:'margin-top:6px;color:var(--acc);font-weight:600;' },
+        '➜ Inizio impostato manualmente: ' + fmtIT(inizioManuale) +
+        ' (sovrascrive quello calcolato)'));
+      // Avviso: la data manuale lascia abbastanza tempo per le ore previste?
+      if (inizioCalc && tmp.scadenza && inizioManuale > inizioCalc) {
+        previewBox.append(el('div', {
+          style:'margin-top:4px;font-size:10px;color:var(--yel);' },
+          '⚠ La data manuale è più tardi di quella calcolata: il tempo ' +
+          'tra inizio e scadenza potrebbe non bastare per le ore previste. ' +
+          'Valuta se aggiungere addetti.'));
+      }
+      if (tmp.scadenza && inizioManuale > tmp.scadenza) {
+        previewBox.append(el('div', {
+          style:'margin-top:4px;font-size:10px;color:var(--red);' },
+          '⚠ La data di inizio manuale è successiva alla scadenza.'));
+      }
+    }
   };
   aggiornaPreviewInizio = refreshPreview;
   refreshPreview();
-  ['quantita','minuti_unitari','scadenza'].forEach(name => {
-    form.querySelector(`[name=${name}]`).addEventListener('input', refreshPreview);
+  ['quantita','minuti_unitari','scadenza','inizio_manuale'].forEach(name => {
+    const f = form.querySelector(`[name=${name}]`);
+    if (f) f.addEventListener('input', refreshPreview);
   });
 
   form.appendChild(previewBox);
@@ -5162,6 +5199,7 @@ function openOperazioneModal(o) {
         quantita: parseInt(fd.get('quantita')) || 1,
         minuti_unitari: parseInt(fd.get('minuti_unitari')) || 0,
         scadenza: fd.get('scadenza') || null,
+        inizio_manuale: fd.get('inizio_manuale') || null,
         cl_consegna_materiali: fd.get('cl_consegna_materiali') || null,
         esterno_descrizione: (fd.get('esterno_descrizione')||'').trim() || null,
         stato: fd.get('stato') || 'aperta',
@@ -7140,7 +7178,7 @@ function renderCarico(root) {
       if (addetti.length === 0) { opSenzaAddetti++; return; }
       const oreTot = opCalcOre(o);
       if (oreTot <= 0) return;
-      const inizio = opCalcInizio(o);
+      const inizio = opInizio(o);
       if (!inizio) return;
       if (o.scadenza < primoIso || inizio > ultimoIso) return;
       const orePerAddetto = oreTot / addetti.length;
@@ -7604,7 +7642,7 @@ function renderGanttCommesse(root) {
       if (!o.scadenza) return;
       const addetti = getOperazioneAddetti(o.id);
       if (!addetti.includes(u.id)) return;
-      const inizio = opCalcInizio(o) || o.scadenza;
+      const inizio = opInizio(o) || o.scadenza;
       if (o.scadenza < rangeStartIso || inizio > rangeEndIso) return;
       commesse.push({ op:o, inizio, scadenza:o.scadenza });
     });
