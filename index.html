@@ -333,14 +333,28 @@ table.rt tbody tr:hover td{background:var(--hover);}
 /* Lista operazioni nel kiosk */
 .kiosk-op-section{margin-bottom:18px;}
 .kiosk-op-section-hd{font-family:'DM Mono',monospace;font-size:11px;color:var(--acc);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--acc);}
-.kiosk-op-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
-.kiosk-op-card{background:var(--sur);border:2px solid var(--brd);border-radius:8px;padding:16px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:6px;transition:all .15s;color:var(--txt);font-family:inherit;}
-.kiosk-op-card:hover,.kiosk-op-card:active{border-color:var(--acc);background:rgba(212,255,78,.04);}
-.kiosk-op-card-cliente{font-size:13px;font-weight:700;color:var(--txt);}
-.kiosk-op-card-cod{font-family:'DM Mono',monospace;font-size:14px;color:var(--or);font-weight:600;}
-.kiosk-op-card-info{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.04em;display:flex;justify-content:space-between;margin-top:4px;}
-.kiosk-op-card-scad.passata{color:var(--red);font-weight:600;}
-.kiosk-op-card-scad.vicina{color:var(--yel);}
+/* Griglia commesse: card più larghe (min 340px) e più alte */
+.kiosk-op-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;}
+.kiosk-op-card{background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:18px 20px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:8px;transition:all .12s;color:var(--txt);font-family:inherit;min-height:130px;}
+.kiosk-op-card:hover,.kiosk-op-card:active{border-color:var(--acc);background:rgba(212,255,78,.05);transform:translateY(-1px);}
+/* Cliente: la cosa più grande e prominente */
+.kop-cliente{font-family:'Syne',sans-serif;font-size:17px;font-weight:700;color:var(--txt);line-height:1.2;}
+/* Riga meta: OP · ordine · scadenza */
+.kop-meta{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.04em;}
+.kop-op{color:var(--acc);font-weight:700;}
+.kop-ord{color:var(--mut);}
+.kop-scad{font-weight:700;color:var(--mut);}
+.kop-scad.vicina{color:var(--yel);}
+.kop-scad.passata{color:var(--red);}
+/* Articolo: codice grande, descrizione sotto */
+.kop-articolo{margin-top:2px;}
+.kop-cod{font-family:'DM Mono',monospace;font-size:14px;color:var(--or);font-weight:700;letter-spacing:.02em;}
+.kop-desc{font-size:11px;color:var(--mut);margin-top:2px;line-height:1.3;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+/* Riga in basso: quantità + note */
+.kop-bottom{display:flex;gap:10px;align-items:baseline;font-family:'DM Mono',monospace;font-size:11px;margin-top:auto;padding-top:6px;border-top:1px solid var(--brd);}
+.kop-qta{color:var(--txt);font-weight:700;}
+.kop-note{color:var(--mut);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;}
 
 .kiosk-op-search-box{margin:14px 0;display:flex;gap:10px;align-items:center;}
 .kiosk-op-search-box input{flex:1;background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:14px 18px;border-radius:6px;font-family:'DM Mono',monospace;font-size:14px;outline:none;}
@@ -6361,7 +6375,7 @@ const kioskState = {
   rfidBufferTimer: null,
 };
 
-const KIOSK_INACTIVITY_MS = 15000;     // torna alla schermata 1 dopo 15s
+const KIOSK_INACTIVITY_MS = 30000;     // torna alla schermata 1 dopo 30s di inattività (mouse fermo, niente tasti)
 const KIOSK_DONE_MS = 2000;             // schermata conferma resta 2s
 
 function setupKioskExitButton() {
@@ -6838,7 +6852,10 @@ function kioskResetInactivity() {
   clearTimeout(kioskState.inactivityTimer);
   kioskState.inactivityTimer = setTimeout(kioskGoToId, KIOSK_INACTIVITY_MS);
 }
-['click','touchstart','keydown'].forEach(ev => {
+// Eventi che "tengono viva" la sessione: click, tasti, e anche solo il
+// movimento del mouse o del dito. Così basta scuotere il mouse per restare
+// nella schermata commesse mentre si legge.
+['click','keydown','mousemove','touchstart','touchmove'].forEach(ev => {
   document.addEventListener(ev, () => {
     if ($('#kiosk-step-action').style.display !== 'none') kioskResetInactivity();
   });
@@ -6890,7 +6907,17 @@ function kioskRenderOpList() {
   root.innerHTML = '';
 
   // Operazioni aperte = non consegnate
-  const aperte = state.operazioni.filter(o => o.stato !== 'consegnata');
+  // Ordinamento: scadenza crescente (le più urgenti in cima),
+  // commesse senza scadenza in fondo
+  const aperte = state.operazioni
+    .filter(o => o.stato !== 'consegnata')
+    .slice()
+    .sort((a, b) => {
+      if (!a.scadenza && !b.scadenza) return 0;
+      if (!a.scadenza) return 1;
+      if (!b.scadenza) return -1;
+      return a.scadenza < b.scadenza ? -1 : (a.scadenza > b.scadenza ? 1 : 0);
+    });
   // Set degli id operazione dove questo utente è tra gli addetti previsti
   const mieIds = new Set(
     state.opAddetti.filter(r => r.utente_id === u.id).map(r => r.operazione_id)
@@ -6977,17 +7004,31 @@ function kioskOpCard(o) {
     const diff = (parseISODate(o.scadenza) - new Date()) / 86400000;
     if (diff <= 3) scadCls = 'vicina';
   }
+  // Riga "meta" in alto: OP · n° ordine · scadenza
+  const metaParts = [];
+  if (o.codice_op) metaParts.push(el('span', { class:'kop-op' }, 'OP ' + o.codice_op));
+  if (o.numero_ordine) metaParts.push(el('span', { class:'kop-ord' }, o.numero_ordine));
+  if (o.scadenza) metaParts.push(el('span', { class:'kop-scad ' + scadCls }, '📅 ' + fmtIT(o.scadenza)));
+
+  // Riga inferiore: quantità + note (se presenti)
+  const bottomParts = [];
+  bottomParts.push(el('span', { class:'kop-qta' }, (o.quantita || 0) + ' pz'));
+  if (o.note) {
+    // Le note possono essere lunghe: limito a una riga, troncata
+    bottomParts.push(el('span', { class:'kop-note', title: o.note }, '✎ ' + o.note));
+  }
+
   return el('button', {
     class:'kiosk-op-card',
     onclick: () => kioskSelectOperazione(o),
   },
-    el('div', { class:'kiosk-op-card-cliente' }, cli?.nome || '— senza cliente —'),
-    el('div', { class:'kiosk-op-card-cod' }, art?.codice || '—'),
-    el('div', { class:'kiosk-op-card-info' },
-      el('span', {}, (o.numero_ordine || o.codice_op || '') + ' · ' + (o.quantita||0) + ' pz'),
-      el('span', { class:'kiosk-op-card-scad '+scadCls },
-        o.scadenza ? fmtIT(o.scadenza) : '—'),
+    el('div', { class:'kop-cliente' }, cli?.nome || '— senza cliente —'),
+    metaParts.length > 0 ? el('div', { class:'kop-meta' }, ...metaParts) : null,
+    el('div', { class:'kop-articolo' },
+      el('div', { class:'kop-cod' }, art?.codice || '—'),
+      art?.descrizione ? el('div', { class:'kop-desc' }, art.descrizione) : null,
     ),
+    el('div', { class:'kop-bottom' }, ...bottomParts),
   );
 }
 
