@@ -756,6 +756,7 @@ let realtimeChannel = null;
 const state = {
   session: null, profile: null, profiliById: {}, mezzi: [],
   appInizializzata: false, // true dopo il primo afterLogin completato
+  impostazioni: {}, // mappa chiave→valore caricata da Supabase
   utenti: [], utentiById: {},
   prenotazioni: [],
   consegne: [],            // tutte le consegne in memoria
@@ -1134,6 +1135,19 @@ function isKioskRecord(rec) {
   return (rec.email || '').toLowerCase() === KIOSK_EMAIL.toLowerCase();
 }
 
+// Legge un'impostazione globale con fallback. Le impostazioni sono salvate
+// come testo nel DB; il secondo argomento è il default usato se la chiave
+// non c'è. Se serve un numero, parsalo dal chiamante.
+function getImpostazione(chiave, defaultVal) {
+  const v = state.impostazioni && state.impostazioni[chiave];
+  return (v === undefined || v === null) ? defaultVal : v;
+}
+function getImpostazioneInt(chiave, defaultVal) {
+  const v = getImpostazione(chiave, defaultVal);
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : defaultVal;
+}
+
 async function init() {
   if (SUPABASE_URL.includes('XXXX') || SUPABASE_ANON_KEY.includes('INSERISCI')) {
     document.body.innerHTML = `
@@ -1312,7 +1326,7 @@ document.addEventListener('change', (e) => {
 // Avere un solo handler evita race condition tra ricreazione client e refresh.
 
 async function loadAllData() {
-  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti, impostazioni] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('utenti').select('*').order('nome'),
@@ -1329,6 +1343,7 @@ async function loadAllData() {
     sb.from('tipi_assenza').select('*').order('ordine'),
     sb.from('assenze').select('*').order('data', { ascending:false }),
     sb.from('operazioni_addetti').select('*'),
+    sb.from('impostazioni').select('*'),
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
@@ -1346,6 +1361,7 @@ async function loadAllData() {
   if (tipiAssenza.error) throw tipiAssenza.error;
   if (assenze.error) throw assenze.error;
   if (opAddetti.error) throw opAddetti.error;
+  if (impostazioni.error) throw impostazioni.error;
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
@@ -1364,6 +1380,8 @@ async function loadAllData() {
   state.tipiAssenza = tipiAssenza.data || [];
   state.assenze = assenze.data || [];
   state.opAddetti = opAddetti.data || [];
+  // Impostazioni: oggetto chiave→valore, comodo da consultare
+  state.impostazioni = Object.fromEntries((impostazioni.data||[]).map(r=>[r.chiave, r.valore]));
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -1637,6 +1655,7 @@ const TAB_STRUCTURE = {
       { id: 'operatori',      label: 'Utenti',            adminOnly: true },
       { id: 'chiusure',       label: 'Chiusure aziendali', adminOnly: true },
       { id: 'tipi_assenza',   label: 'Tipi assenza',      adminOnly: true },
+      { id: 'impostazioni',   label: 'Impostazioni',      adminOnly: true },
     ],
   },
 };
@@ -1720,6 +1739,7 @@ function renderTab(name) {
     else if (name === 'carico') renderCarico(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
+    else if (name === 'impostazioni') renderImpostazioni(root);
   } catch (e) {
     console.error('Errore rendering tab '+name+':', e);
     root.innerHTML = '';
@@ -8511,6 +8531,24 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     foot.append(el('button', {
       class: 'btnd',
       onclick: async () => {
+        // Stessa regola del salvataggio: non-admin non può toccare assenze
+        // proprie con data dentro la finestra di preavviso.
+        const sonoAdmin = state.profile?.ruolo === 'admin';
+        const perMeStesso = utente.id === state.profile?.id;
+        if (!sonoAdmin && perMeStesso) {
+          const preavviso = getImpostazioneInt('preavviso_assenze_giorni', 30);
+          if (preavviso > 0) {
+            const oggi = new Date(); oggi.setHours(0,0,0,0);
+            const soglia = new Date(oggi);
+            soglia.setDate(soglia.getDate() + preavviso);
+            if (iso < toLocalISO(soglia)) {
+              return toast(
+                `Le assenze entro ${preavviso} giorni da oggi non sono modificabili. Per interventi su questa data contatta un amministratore.`,
+                'err'
+              );
+            }
+          }
+        }
         if (!confirm(`Eliminare l'assenza di ${utente.nome} del ${fmtIT(iso)}?`)) return;
         await eliminaAssenza(assEsistente);
       },
@@ -8521,6 +8559,31 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
   btnSave.onclick = async () => {
     if (!tipoSel) return toast('Seleziona il tipo', 'err');
     if (oreSel === null || oreSel < 0) return toast('Inserisci le ore', 'err');
+
+    // ── Controllo preavviso minimo ───────────────────────────
+    // Vale per utenti non-admin che operano su una propria assenza la cui
+    // data cade DENTRO la finestra di preavviso. Sia per inserimento sia
+    // per modifica: una volta che la data è "vicina", l'utente non può più
+    // toccare la riga (né crearla, né modificarla). Gli admin sono esenti.
+    const sonoAdmin = state.profile?.ruolo === 'admin';
+    const perMeStesso = utente.id === state.profile?.id;
+    if (!sonoAdmin && perMeStesso) {
+      const preavviso = getImpostazioneInt('preavviso_assenze_giorni', 30);
+      if (preavviso > 0) {
+        const oggi = new Date();
+        oggi.setHours(0, 0, 0, 0);
+        const sogliaDate = new Date(oggi);
+        sogliaDate.setDate(sogliaDate.getDate() + preavviso);
+        const sogliaIso = toLocalISO(sogliaDate);
+        if (iso < sogliaIso) {
+          return toast(
+            `Le assenze entro ${preavviso} giorni da oggi non sono modificabili. Per interventi su questa data contatta un amministratore.`,
+            'err'
+          );
+        }
+      }
+    }
+
     btnSave.disabled = true;
     btnSave.textContent = 'Salvataggio…';
     const note = (document.getElementById('ass-note').value || '').trim() || null;
@@ -8707,6 +8770,81 @@ function renderRiepilogoAssenze(root) {
   tblTipi.append(tbT);
   wrapTipi.append(tblTipi);
   root.append(wrapTipi);
+}
+
+// ═══════════════════════════════════════════════════════════
+// IMPOSTAZIONI — configurazioni globali del gestionale
+// ═══════════════════════════════════════════════════════════
+
+function renderImpostazioni(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Impostazioni')));
+
+  if (!isAdmin) {
+    root.append(el('div', { class:'empty' }, 'Solo gli amministratori possono modificare le impostazioni.'));
+    return;
+  }
+
+  const box = el('div', { style:'background:var(--sur);border:1px solid var(--brd);border-radius:6px;padding:20px;max-width:640px;' });
+
+  // ── Preavviso ferie/permessi ───────────────────────────────
+  box.append(el('h3', { style:'margin:0 0 6px;font-family:Syne,sans-serif;font-size:14px;font-weight:700;color:var(--acc);' },
+    'Ferie e permessi'));
+  box.append(el('div', { style:'font-size:11px;color:var(--mut);margin-bottom:12px;line-height:1.5;' },
+    'Numero minimo di giorni di preavviso richiesti agli utenti non amministratori per inserire ferie o permessi futuri. Gli amministratori non sono mai soggetti a questo limite.'));
+
+  const valoreAttuale = getImpostazioneInt('preavviso_assenze_giorni', 30);
+  const inputPreavviso = el('input', {
+    type:'number', min:'0', max:'365', step:'1',
+    value: String(valoreAttuale),
+    style:'width:120px;padding:6px 10px;background:var(--sur2);border:1px solid var(--brd);border-radius:3px;color:var(--txt);font-family:DM Mono,monospace;',
+  });
+
+  box.append(el('div', { style:'display:flex;gap:10px;align-items:center;' },
+    el('label', { style:'font-size:12px;font-family:Syne,sans-serif;font-weight:600;' },
+      'Giorni di preavviso minimo:'),
+    inputPreavviso,
+    el('span', { style:'font-size:11px;color:var(--mut);' }, 'giorni'),
+  ));
+
+  const msgArea = el('div', { style:'min-height:18px;margin-top:10px;font-size:11px;font-family:DM Mono,monospace;' });
+  const btnSalva = el('button', { class:'btnp', style:'margin-top:14px;' }, 'Salva impostazioni');
+  btnSalva.onclick = async () => {
+    const n = parseInt(inputPreavviso.value, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 365) {
+      msgArea.style.color = 'var(--red)';
+      msgArea.textContent = '⚠ Inserisci un numero tra 0 e 365.';
+      return;
+    }
+    btnSalva.disabled = true;
+    btnSalva.textContent = 'Salvataggio…';
+    try {
+      const { error } = await eseguiConRetry(
+        () => sb.from('impostazioni').upsert({
+          chiave: 'preavviso_assenze_giorni',
+          valore: String(n),
+          descrizione: 'Giorni minimi di preavviso richiesti agli utenti non admin per inserire ferie/permessi futuri',
+          aggiornato_il: new Date().toISOString(),
+        }, { onConflict: 'chiave' }),
+        { label: 'salva impostazioni' }
+      );
+      if (error) throw error;
+      state.impostazioni['preavviso_assenze_giorni'] = String(n);
+      msgArea.style.color = 'var(--grn)';
+      msgArea.textContent = '✓ Salvato.';
+      toast('Impostazioni aggiornate', 'ok');
+    } catch (e) {
+      msgArea.style.color = 'var(--red)';
+      msgArea.textContent = '⚠ Errore: ' + (e.message || e);
+    } finally {
+      btnSalva.disabled = false;
+      btnSalva.textContent = 'Salva impostazioni';
+    }
+  };
+  box.append(btnSalva, msgArea);
+
+  root.append(box);
 }
 
 // ═══════════════════════════════════════════════════════════
