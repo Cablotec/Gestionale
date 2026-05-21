@@ -73,16 +73,15 @@ table.rt th{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.08em;
 table.rt th.tc{text-align:center;}
 table.rt td{padding:8px 10px;border-bottom:1px solid var(--brd);vertical-align:middle;}
 table.rt tbody tr:hover td{background:var(--hover);}
-/* Pulsanti rapidi di cambio stato: nascosti a riposo, visibili al passaggio del mouse */
-.op-stato-azioni{display:none;margin-top:4px;}
-tr.op-row:hover .op-stato-azioni{display:inline-flex;}
-tr.op-row:hover .stato-badge{display:none;}
-.op-stato-cell{min-width:160px;white-space:nowrap;}
 .mono{font-family:'DM Mono',monospace;}
 .cod-cell{font-family:'DM Mono',monospace;font-size:11px;color:var(--or);}
 
 /* Badges */
 .badge{display:inline-block;padding:2px 7px;border-radius:2px;font-family:'DM Mono',monospace;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.04em;}
+/* Stato come <select> dentro la cella tabella: stesso aspetto del badge ma cliccabile */
+select.badge{border:1px solid transparent;outline:none;-webkit-appearance:menulist;appearance:auto;}
+select.badge:hover{filter:brightness(1.15);}
+select.badge:focus{border-color:var(--acc);}
 .bok{background:rgba(78,255,163,.12);color:var(--grn);}
 .berr{background:rgba(255,78,107,.12);color:var(--red);}
 .byel{background:rgba(255,204,78,.12);color:var(--yel);}
@@ -4579,12 +4578,10 @@ function renderPianificazione(root) {
     list = list.filter(o => {
       const cli = state.clienti.find(c => c.id === o.cliente_id);
       const art = state.articoli.find(a => a.id === o.articolo_id);
-      return (o.codice_op||'').toLowerCase().includes(search)
-          || (o.numero_ordine||'').toLowerCase().includes(search)
+      return (o.numero_ordine||'').toLowerCase().includes(search)
           || (o.pos||'').toLowerCase().includes(search)
           || (cli?.nome||'').toLowerCase().includes(search)
           || (art?.codice||'').toLowerCase().includes(search)
-          || (o.descrizione_extra||'').toLowerCase().includes(search)
           || (o.note||'').toLowerCase().includes(search);
     });
   }
@@ -4709,6 +4706,7 @@ function renderPianificazione(root) {
     el('th', {}, 'Inizio'),
     el('th', {}, 'Note'),
     sortHead('stato',           'Stato', {tc:true}),
+    el('th', { class:'tc' }, 'Azioni'),
   )));
 
   const tb = el('tbody');
@@ -4754,7 +4752,7 @@ function renderPianificazione(root) {
     // Descrizione articolo (troncata su 1 riga, tooltip pieno al passaggio del mouse)
     const desc = art?.descrizione || '';
     tr.append(el('td', {
-      style: 'max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mut);',
+      style: 'max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
       title: desc,
     }, desc || '—'));
 
@@ -4777,42 +4775,59 @@ function renderPianificazione(root) {
       title: o.note || '',
     }, o.note || '—'));
 
-    // Stato — badge + pulsanti hover per cambio rapido
-    const statoCell = el('td', { class:'tc op-stato-cell' });
-    statoCell.append(el('span', {
-      class:'badge stato-badge '+(OP_STATI[o.stato]?.badge||'bgry'),
-      style:'font-size:11px;',
-    }, OP_STATI[o.stato]?.label||o.stato));
+    // Stato — menu a tendina (cambio immediato) per gli admin, badge in sola lettura per gli utenti
+    const statoCell = el('td', { class:'tc' });
     if (isAdmin) {
-      const azioni = el('div', { class:'op-stato-azioni' });
-      // Le azioni mostrate dipendono dallo stato corrente
-      if (o.stato === 'aperta') {
-        azioni.append(el('button', {
-          class:'btnsm', style:'background:rgba(255,204,78,.15);color:var(--yel);border-color:var(--yel);',
-          title:'Sospendi (click secco, reversibile)',
-          onclick:(e)=>{ e.stopPropagation(); quickStato(o, 'sospesa'); }
-        }, '⏸ Sospendi'));
-        azioni.append(el('button', {
-          class:'btnsm', style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);margin-left:4px;',
-          title:'Segna come consegnata (chiede conferma)',
-          onclick:(e)=>{ e.stopPropagation(); quickConsegna(o); }
-        }, '✓ Consegna'));
-      } else if (o.stato === 'sospesa') {
-        azioni.append(el('button', {
-          class:'btnsm', style:'background:rgba(78,184,255,.15);color:var(--blu);border-color:var(--blu);',
-          title:'Riapri (click secco)',
-          onclick:(e)=>{ e.stopPropagation(); quickStato(o, 'aperta'); }
-        }, '▶ Riapri'));
-      } else if (o.stato === 'consegnata') {
-        azioni.append(el('button', {
-          class:'btnsm', style:'background:rgba(78,184,255,.15);color:var(--blu);border-color:var(--blu);',
-          title:'Riapri (click secco, disfa la consegna)',
-          onclick:(e)=>{ e.stopPropagation(); quickStato(o, 'aperta'); }
-        }, '▶ Riapri'));
-      }
-      statoCell.append(azioni);
+      const sel = el('select', {
+        class: 'badge ' + (OP_STATI[o.stato]?.badge||'bgry'),
+        style: 'font-size:11px;padding:3px 6px;border-radius:3px;cursor:pointer;font-family:inherit;font-weight:600;',
+        onclick: (e) => e.stopPropagation(),
+        onchange: (e) => {
+          e.stopPropagation();
+          const nuovo = e.target.value;
+          if (nuovo === o.stato) return;
+          // Per "consegnata" passo dal modal completo (data + giustificazione)
+          if (nuovo === 'consegnata') {
+            e.target.value = o.stato; // ripristino temporaneamente
+            quickConsegna(o);
+            return;
+          }
+          // Altri cambi: immediati
+          quickStato(o, nuovo);
+        },
+      },
+        el('option', { value:'aperta' }, 'Aperta'),
+        el('option', { value:'sospesa' }, 'Sospesa'),
+        el('option', { value:'consegnata' }, 'Consegnata'),
+      );
+      sel.value = o.stato; // imposto il valore corrente in modo affidabile
+      statoCell.append(sel);
+    } else {
+      statoCell.append(el('span', {
+        class:'badge '+(OP_STATI[o.stato]?.badge||'bgry'),
+        style:'font-size:11px;',
+      }, OP_STATI[o.stato]?.label||o.stato));
     }
     tr.append(statoCell);
+
+    // Azioni: ✓ consegna rapida + ✕ elimina (solo admin, stopPropagation per non aprire il modal)
+    const azioniCell = el('td', { class:'tc' });
+    if (isAdmin) {
+      if (o.stato !== 'consegnata') {
+        azioniCell.append(el('button', {
+          class:'btnsm',
+          style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
+          title:'Segna come consegnata (modale di conferma)',
+          onclick:(e)=>{ e.stopPropagation(); quickConsegna(o); },
+        }, '✓'));
+      }
+      azioniCell.append(' ', el('button', {
+        class:'btnd',
+        title:'Elimina commessa',
+        onclick:(e)=>{ e.stopPropagation(); deleteOperazione(o); },
+      }, '✕'));
+    }
+    tr.append(azioniCell);
 
     tb.append(tr);
   });
@@ -5017,8 +5032,8 @@ function openOperazioneModal(o) {
   const isNew = !o;
   const isAdmin = state.profile?.ruolo === 'admin';
   o = o || {
-    cliente_id:'', articolo_id:'', numero_ordine:'', pos:'', codice_op:'',
-    descrizione_extra:'', quantita:1, minuti_unitari:0,
+    cliente_id:'', articolo_id:'', numero_ordine:'', pos:'',
+    quantita:1, minuti_unitari:0,
     scadenza:'', cl_consegna_materiali:'',
     esterno_descrizione:'',
     stato:'aperta', stato_preparazione:'vuoto', note:'',
@@ -5148,16 +5163,14 @@ function openOperazioneModal(o) {
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Numero ordine'),
         el('input', { type:'text', name:'numero_ordine', value:o.numero_ordine||'',
-          placeholder:'es. 26CL-00074' })),
+          placeholder:'es. 2026/OC/00388',
+          pattern:'\\d{4}/OC/\\d{5}',
+          title:'Formato richiesto: AAAA/OC/NNNNN (numero a 5 cifre, es. 2026/OC/00388)',
+        })),
       el('div', { class:'field' }, el('label', {}, 'POS'),
         el('input', { type:'text', name:'pos', value:o.pos||'',
           placeholder:'es. 0010' })),
-      el('div', { class:'field' }, el('label', {}, 'Codice OP / ODP'),
-        el('input', { type:'text', name:'codice_op', value:o.codice_op||'',
-          placeholder:'es. 2026OP0000209' })),
     ),
-    el('div', { class:'field' }, el('label', {}, 'Descrizione extra (specifica per questo lavoro)'),
-      el('input', { type:'text', name:'descrizione_extra', value:o.descrizione_extra||'' })),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Quantità *'),
         el('input', { type:'number', name:'quantita', value:String(o.quantita||1), min:'1', required:'true' })),
@@ -5415,6 +5428,13 @@ function openOperazioneModal(o) {
       if (cliVal.mode === 'empty') return toast('Cliente obbligatorio', 'err');
       if (artVal.mode === 'empty') return toast('Articolo obbligatorio', 'err');
 
+      // Validazione numero ordine: formato AAAA/OC/NNNNN (NNNNN = 5 cifre).
+      // Vuoto è ammesso (campo facoltativo).
+      const numOrd = (fd.get('numero_ordine')||'').trim();
+      if (numOrd && !/^\d{4}\/OC\/\d{5}$/.test(numOrd)) {
+        return toast('Numero ordine non valido. Usa il formato AAAA/OC/NNNNN (es. 2026/OC/00388).', 'err');
+      }
+
       btnSave.disabled = true;
       btnSave.textContent = 'Salvataggio…';
       const stopWatchdog = avviaWatchdog(btnSave, 'Salva');
@@ -5460,8 +5480,6 @@ function openOperazioneModal(o) {
         articolo_id: articoloId,
         numero_ordine: (fd.get('numero_ordine')||'').trim() || null,
         pos: (fd.get('pos')||'').trim() || null,
-        codice_op: (fd.get('codice_op')||'').trim() || null,
-        descrizione_extra: (fd.get('descrizione_extra')||'').trim() || null,
         quantita: parseInt(fd.get('quantita')) || 1,
         minuti_unitari: parseInt(fd.get('minuti_unitari')) || 0,
         scadenza: fd.get('scadenza') || null,
@@ -5529,7 +5547,7 @@ function openOperazioneModal(o) {
 }
 
 async function deleteOperazione(o) {
-  if (!confirm(`Eliminare questa operazione?\n${o.codice_op || ''} ${o.numero_ordine || ''}`)) return;
+  if (!confirm(`Eliminare questa operazione?\n${o.numero_ordine || ''}`)) return;
   const { data, error } = await sb.from('operazioni').delete().eq('id', o.id).select();
   if (error) return toast(error.message, 'err');
   if (!data || data.length === 0) return toast('Eliminazione bloccata', 'err');
@@ -5575,8 +5593,7 @@ function renderStorico(root) {
     list = list.filter(o => {
       const cli = state.clienti.find(c => c.id === o.cliente_id);
       const art = state.articoli.find(a => a.id === o.articolo_id);
-      return (o.codice_op||'').toLowerCase().includes(search)
-          || (o.numero_ordine||'').toLowerCase().includes(search)
+      return (o.numero_ordine||'').toLowerCase().includes(search)
           || (cli?.nome||'').toLowerCase().includes(search)
           || (art?.codice||'').toLowerCase().includes(search)
           || (o.giustificazione_ritardo||'').toLowerCase().includes(search)
@@ -5742,7 +5759,7 @@ function renderStorico(root) {
       : el('td', {}, '');
 
     tb.append(el('tr', { class:'consegnata' },
-      el('td', { class:'mono', style:'color:var(--or);' }, o.codice_op || '—'),
+      el('td', { class:'mono', style:'color:var(--or);' }, o.numero_ordine || '—'),
       el('td', { class:'mono' }, o.numero_ordine || '—'),
       el('td', {}, cli?.nome || '—'),
       el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
@@ -5767,7 +5784,7 @@ function renderStorico(root) {
 
 // Bottone per riaprire un'operazione (consegnata → aperta, svuota i campi consegna)
 async function riaperturaOperazione(o) {
-  if (!confirm(`Riaprire l'operazione ${o.codice_op || ''} ${o.numero_ordine || ''}?\nVerranno azzerati: data consegna, giustificazione, NC, responsabilità.`)) return;
+  if (!confirm(`Riaprire l'operazione ${o.numero_ordine || ''}?\nVerranno azzerati: data consegna, giustificazione, NC, responsabilità.`)) return;
   const { data, error } = await sb.from('operazioni').update({
     stato: 'aperta',
     consegnato_il: null,
@@ -5814,7 +5831,7 @@ function quickConsegna(o) {
   const cli = state.clienti.find(c => c.id === o.cliente_id);
   const art = state.articoli.find(a => a.id === o.articolo_id);
   body.append(el('div', { class:'sub', style:'margin-bottom:14px;padding:10px;background:var(--sur2);border-radius:4px;font-family:monospace;font-size:11px;line-height:1.6;' },
-    el('div', {}, 'OP: ', el('span', { style:'color:var(--or)' }, o.codice_op || '—'), ' · ',
+    el('div', {}, 'Ordine: ', el('span', { style:'color:var(--or)' }, o.numero_ordine || '—'), ' · ',
       'Ordine: ', el('span', { style:'color:var(--txt)' }, o.numero_ordine || '—')),
     el('div', {}, cli?.nome || '—', ' · ', art?.codice || '—', ' · ', (o.quantita||0)+' pz'),
     el('div', {}, 'Scadenza: ', el('span', { style:'color:'+(ritardo?'var(--red)':'var(--txt)') }, o.scadenza ? fmtIT(o.scadenza) : '—')),
@@ -5887,7 +5904,7 @@ function storicoExportExcel() {
       .filter(Boolean);
     const ritardo = calcRitardoGiorni(o);
     return {
-      'OP': o.codice_op || '',
+      
       'POS': o.pos || '',
       'Ordine': o.numero_ordine || '',
       'Cliente': cli?.nome || '',
@@ -7137,8 +7154,7 @@ function kioskRenderOpList() {
     return lista.filter(o => {
       const cli = state.clienti.find(c => c.id === o.cliente_id);
       const art = state.articoli.find(a => a.id === o.articolo_id);
-      return (o.codice_op||'').toLowerCase().includes(q)
-          || (o.numero_ordine||'').toLowerCase().includes(q)
+      return (o.numero_ordine||'').toLowerCase().includes(q)
           || (o.pos||'').toLowerCase().includes(q)
           || (cli?.nome||'').toLowerCase().includes(q)
           || (art?.codice||'').toLowerCase().includes(q)
@@ -7191,8 +7207,7 @@ function kioskOpCard(o) {
   }
   // Riga "meta" in alto: OP · n° ordine · scadenza
   const metaParts = [];
-  if (o.codice_op) metaParts.push(el('span', { class:'kop-op' }, 'OP ' + o.codice_op));
-  if (o.numero_ordine) metaParts.push(el('span', { class:'kop-ord' }, o.numero_ordine));
+    if (o.numero_ordine) metaParts.push(el('span', { class:'kop-ord' }, o.numero_ordine));
   if (o.scadenza) metaParts.push(el('span', { class:'kop-scad ' + scadCls }, '📅 ' + fmtIT(o.scadenza)));
 
   // Riga inferiore: quantità + note (se presenti)
@@ -7244,7 +7259,7 @@ function kioskRenderTipo() {
     el('div', { style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;' }, 'Operazione selezionata'),
     el('div', { style:'font-size:18px;font-weight:700;margin-bottom:4px;' }, cli?.nome || '—'),
     el('div', { style:'font-family:DM Mono,monospace;font-size:13px;color:var(--or);' },
-      (art?.codice || '—') + ' · ' + (o.numero_ordine || o.codice_op || '')),
+      (art?.codice || '—') + ' · ' + (o.numero_ordine || '')),
   ));
 
   // Griglia tipi attivi
@@ -7351,7 +7366,7 @@ function kioskRenderAttiva() {
       el('div', { class:'ktipo-color-bar', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
       tipo?.nome || '— tipo sconosciuto —',
       ' · ',
-      o?.numero_ordine || o?.codice_op || '—',
+      o?.numero_ordine || '—',
     ),
     el('div', { class:'kiosk-attiva-stats' },
       el('div', { class:'kas-block' },
@@ -7688,7 +7703,7 @@ function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
 function etichettaCommessa(op) {
   if (!op) return '';
   const art = state.articoli && state.articoli.find(a => a.id === op.articolo_id);
-  return op.codice_op || (art && art.codice) || ('OP' + op.id);
+  return (art && art.codice) || ('OP' + op.id);
 }
 
 // Descrizione completa di una commessa (per il tooltip)
@@ -7697,7 +7712,6 @@ function descrizioneCommessa(op) {
   const cli = state.clienti && state.clienti.find(c => c.id === op.cliente_id);
   const art = state.articoli && state.articoli.find(a => a.id === op.articolo_id);
   const parti = [];
-  if (op.codice_op) parti.push('OP ' + op.codice_op);
   if (op.numero_ordine) parti.push('Ordine ' + op.numero_ordine);
   let riga = parti.join(' · ') || 'Commessa';
   if (cli) riga += '\nCliente: ' + cli.nome;
@@ -7807,7 +7821,7 @@ function renderGanttLive(root) {
       const tipo = state.tipiLav.find(t => t.id === sess.tipo_lavorazione_id);
 
       card.append(
-        el('div', { class:'live-card-cliente' }, (cli?.nome || '—') + ' · ' + (op?.numero_ordine || op?.codice_op || '—')),
+        el('div', { class:'live-card-cliente' }, (cli?.nome || '—') + ' · ' + (op?.numero_ordine || '—')),
         el('div', { class:'live-card-cod' }, art?.codice || '—'),
         el('div', { class:'live-card-tipo' },
           el('div', { class:'live-card-tipo-dot', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
@@ -8038,7 +8052,7 @@ function renderGanttCommesse(root) {
         class: 'gantt-cmbar' + (sfora ? ' sfora' : '') + (attiva ? ' attiva' : ''),
         style: `left:${left}px;width:${width}px;top:${idx*(BAR_H+GAP)}px;`,
         title:
-          (c.op.codice_op ? 'OP ' + c.op.codice_op : 'Commessa')
+          'Commessa ' + (c.op.numero_ordine || '')
           + (cli ? '\nCliente: ' + cli.nome : '')
           + (art ? '\nArticolo: ' + (art.codice || '') : '')
           + '\nPreventivo: ' + prev.toFixed(1) + ' h'
@@ -8058,7 +8072,7 @@ function renderGanttCommesse(root) {
       bar.append(fill);
       // etichetta
       bar.append(el('div', { class:'gantt-cmbar-txt' },
-        (art && art.codice ? art.codice : (c.op.codice_op || 'OP'))
+        (art && art.codice ? art.codice : 'OP')
         + '  ' + Math.round(cons) + '/' + Math.round(prev) + 'h'));
       track.append(bar);
     });
@@ -8215,7 +8229,7 @@ function openSessioneModal(s) {
     el('div', {}, el('span', { style:'color:var(--mut)' }, 'Operatore: '), operatore?.nome || '—'),
     el('div', {}, el('span', { style:'color:var(--mut)' }, 'Cliente: '), cli?.nome || '—'),
     el('div', {}, el('span', { style:'color:var(--mut)' }, 'Articolo: '), el('span', { style:'color:var(--or)' }, art?.codice || '—')),
-    el('div', {}, el('span', { style:'color:var(--mut)' }, 'OP / Ordine: '), (op?.codice_op || op?.numero_ordine || '—')),
+    el('div', {}, el('span', { style:'color:var(--mut)' }, 'OP / Ordine: '), (op?.numero_ordine || '—')),
     el('div', {}, el('span', { style:'color:var(--mut)' }, 'Tipo: '), tipo?.nome || '—'),
   ));
 
