@@ -73,6 +73,11 @@ table.rt th{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.08em;
 table.rt th.tc{text-align:center;}
 table.rt td{padding:8px 10px;border-bottom:1px solid var(--brd);vertical-align:middle;}
 table.rt tbody tr:hover td{background:var(--hover);}
+/* Pulsanti rapidi di cambio stato: nascosti a riposo, visibili al passaggio del mouse */
+.op-stato-azioni{display:none;margin-top:4px;}
+tr.op-row:hover .op-stato-azioni{display:inline-flex;}
+tr.op-row:hover .stato-badge{display:none;}
+.op-stato-cell{min-width:160px;white-space:nowrap;}
 .mono{font-family:'DM Mono',monospace;}
 .cod-cell{font-family:'DM Mono',monospace;font-size:11px;color:var(--or);}
 
@@ -4636,7 +4641,7 @@ function renderPianificazione(root) {
   // Toolbar
   const inputSearch = el('input', {
     type:'text', class:'search', id:'pian-search',
-    placeholder:'Cerca OP, ordine, cliente, codice…',
+    placeholder:'Cerca OP, ordine, cliente, codice, note…',
     value: state.opSearch || '',
     oninput: (e) => {
       state.opSearch = e.target.value;
@@ -4694,34 +4699,22 @@ function renderPianificazione(root) {
   };
 
   tbl.append(el('thead', {}, el('tr', {},
-    sortHead('codice_op',       'OP'),
-    sortHead('pos',             'POS'),
     sortHead('numero_ordine',   'Ordine'),
+    sortHead('pos',             'Pos'),
     sortHead('cliente',         'Cliente'),
-    sortHead('articolo',        'Codice Art.'),
+    sortHead('articolo',        'Codice'),
+    el('th', {}, 'Descrizione'),
     sortHead('quantita',        'Qtà', {tr:true}),
-    sortHead('minuti_unitari',  'Min.', {tr:true}),
-    el('th', { class:'tr' }, 'Ore'),
-    el('th', { class:'tr' }, 'Reali'),
-    el('th', { class:'tr' }, 'Giorni'),
-    el('th', {}, 'Addetto'),
     sortHead('scadenza',        'Scadenza'),
     el('th', {}, 'Inizio'),
-    el('th', { class:'tc' }, 'Prep.'),
+    el('th', {}, 'Note'),
     sortHead('stato',           'Stato', {tc:true}),
-    el('th', { class:'tc' }, 'Azioni'),
   )));
 
   const tb = el('tbody');
   list.forEach(o => {
     const cli = state.clienti.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
-    const addettiIds = getOperazioneAddetti(o.id);
-    const addettiNomi = addettiIds
-      .map(id => state.utenti.find(u => u.id === id)?.nome)
-      .filter(Boolean);
-    const ore = opCalcOre(o);
-    const giorni = opCalcGiorni(o);
     const inizio = opInizio(o);
     const ritardo = opIsRitardo(o);
 
@@ -4740,20 +4733,17 @@ function renderPianificazione(root) {
     }
 
     const tr = el('tr', {
-      class: rowClass,
+      class: rowClass + ' op-row',
       style: 'cursor:pointer;',
       onclick: () => openOperazioneModal(o),
       title: 'Click per aprire la scheda',
     });
 
-    // OP
-    tr.append(el('td', { class:'mono', style:'color:var(--or);' }, o.codice_op || '—'));
-
-    // POS
-    tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.pos || '—'));
-
     // Ordine
     tr.append(el('td', { class:'mono' }, o.numero_ordine || '—'));
+
+    // Pos
+    tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.pos || '—'));
 
     // Cliente
     tr.append(el('td', {}, cli?.nome || '—'));
@@ -4761,79 +4751,68 @@ function renderPianificazione(root) {
     // Codice articolo
     tr.append(el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'));
 
+    // Descrizione articolo (troncata su 1 riga, tooltip pieno al passaggio del mouse)
+    const desc = art?.descrizione || '';
+    tr.append(el('td', {
+      style: 'max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mut);',
+      title: desc,
+    }, desc || '—'));
+
     // Quantità
     tr.append(el('td', { class:'tr mono' }, String(o.quantita || 0)));
-
-    // Min unit
-    tr.append(el('td', { class:'tr mono' }, String(o.minuti_unitari || 0)));
-
-    // Ore (calc)
-    tr.append(el('td', { class:'tr calc-cell' }, ore.toFixed(1)));
-
-    // Ore reali (consuntivate dalle sessioni)
-    const oreReali = opCalcOreReali(o);
-    let realiCell;
-    if (oreReali === 0) {
-      realiCell = el('td', { class:'tr calc-cell', style:'color:var(--mut);' }, '—');
-    } else {
-      const perc = ore > 0 ? Math.round((oreReali / ore) * 100) : 0;
-      const overBudget = ore > 0 && oreReali > ore;
-      const txt = oreReali.toFixed(1) + (ore > 0 ? ' ('+perc+'%)' : '');
-      realiCell = el('td', {
-        class: 'tr calc-cell' + (overBudget ? ' over-budget' : ''),
-        title: 'Ore consuntivate dalle sessioni di lavoro' + (overBudget ? '\nOLTRE le ore previste!' : '')
-      }, txt);
-    }
-    tr.append(realiCell);
-
-    // Giorni (calc)
-    tr.append(el('td', { class:'tr calc-cell' }, String(giorni)));
-
-    // Addetti previsti
-    let addettiLbl, addettiTooltip;
-    if (addettiNomi.length === 0) { addettiLbl = '—'; addettiTooltip = 'Nessun addetto previsto'; }
-    else if (addettiNomi.length === 1) { addettiLbl = addettiNomi[0]; addettiTooltip = addettiNomi[0]; }
-    else {
-      const primo = addettiNomi[0].split(' ')[0];
-      addettiLbl = `${primo} +${addettiNomi.length - 1}`;
-      addettiTooltip = addettiNomi.join('\n');
-    }
-    tr.append(el('td', { style:'font-size:11px;', title: addettiTooltip }, addettiLbl));
 
     // Scadenza
     tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
 
-    // Data inizio (calc)
-    tr.append(el('td', { class:'mono calc-cell' }, inizio ? fmtIT(inizio) : '—'));
+    // Inizio (in grassetto, come richiesto)
+    tr.append(el('td', {
+      class:'mono',
+      style: 'font-weight:700;' + (o.inizio_manuale ? 'color:var(--acc);' : ''),
+      title: o.inizio_manuale ? 'Data inizio impostata manualmente' : 'Data inizio calcolata automaticamente',
+    }, inizio ? fmtIT(inizio) : '—'));
 
-    // Stato preparazione
-    const prepCls = OP_PREP[o.stato_preparazione]?.classe || 'vuoto';
-    tr.append(el('td', { class:'tc', style:'font-size:11px;' },
-      el('span', {},
-        el('span', { class:'prep-dot '+prepCls }),
-        OP_PREP[o.stato_preparazione]?.label || '—'
-      )));
+    // Note (troncate su 1 riga, tooltip pieno)
+    tr.append(el('td', {
+      style: 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
+      title: o.note || '',
+    }, o.note || '—'));
 
-    // Stato
-    tr.append(el('td', { class:'tc', style:'font-size:11px;' },
-      el('span', { class:'badge '+(OP_STATI[o.stato]?.badge||'bgry') }, OP_STATI[o.stato]?.label||o.stato)));
-
-    // Azioni (✓ consegna rapida + ✕ elimina) — stopPropagation per non aprire la modal
-    const azioniCell = el('td', { class:'tc' });
-    if (o.stato !== 'consegnata' && isAdmin) {
-      azioniCell.append(el('button', {
-        class:'btnsm', style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
-        title:'Segna come consegnata',
-        onclick:(e)=>{ e.stopPropagation(); quickConsegna(o); }
-      }, '✓'));
-    }
+    // Stato — badge + pulsanti hover per cambio rapido
+    const statoCell = el('td', { class:'tc op-stato-cell' });
+    statoCell.append(el('span', {
+      class:'badge stato-badge '+(OP_STATI[o.stato]?.badge||'bgry'),
+      style:'font-size:11px;',
+    }, OP_STATI[o.stato]?.label||o.stato));
     if (isAdmin) {
-      azioniCell.append(' ', el('button', {
-        class:'btnd',
-        onclick:(e)=>{ e.stopPropagation(); deleteOperazione(o); }
-      }, '✕'));
+      const azioni = el('div', { class:'op-stato-azioni' });
+      // Le azioni mostrate dipendono dallo stato corrente
+      if (o.stato === 'aperta') {
+        azioni.append(el('button', {
+          class:'btnsm', style:'background:rgba(255,204,78,.15);color:var(--yel);border-color:var(--yel);',
+          title:'Sospendi (click secco, reversibile)',
+          onclick:(e)=>{ e.stopPropagation(); quickStato(o, 'sospesa'); }
+        }, '⏸ Sospendi'));
+        azioni.append(el('button', {
+          class:'btnsm', style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);margin-left:4px;',
+          title:'Segna come consegnata (chiede conferma)',
+          onclick:(e)=>{ e.stopPropagation(); quickConsegna(o); }
+        }, '✓ Consegna'));
+      } else if (o.stato === 'sospesa') {
+        azioni.append(el('button', {
+          class:'btnsm', style:'background:rgba(78,184,255,.15);color:var(--blu);border-color:var(--blu);',
+          title:'Riapri (click secco)',
+          onclick:(e)=>{ e.stopPropagation(); quickStato(o, 'aperta'); }
+        }, '▶ Riapri'));
+      } else if (o.stato === 'consegnata') {
+        azioni.append(el('button', {
+          class:'btnsm', style:'background:rgba(78,184,255,.15);color:var(--blu);border-color:var(--blu);',
+          title:'Riapri (click secco, disfa la consegna)',
+          onclick:(e)=>{ e.stopPropagation(); quickStato(o, 'aperta'); }
+        }, '▶ Riapri'));
+      }
+      statoCell.append(azioni);
     }
-    tr.append(azioniCell);
+    tr.append(statoCell);
 
     tb.append(tr);
   });
@@ -5188,10 +5167,21 @@ function openOperazioneModal(o) {
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Scadenza'),
         el('input', { type:'date', name:'scadenza', value:o.scadenza||'' })),
-      el('div', { class:'field' }, el('label', {}, 'Inizio manuale'),
-        el('input', { type:'date', name:'inizio_manuale', value:o.inizio_manuale||'' }),
-        el('div', { class:'sub', style:'margin-top:4px;' },
-          'Lascia vuoto per usare la data calcolata automaticamente.')),
+      el('div', { class:'field' },
+        el('label', { style:'display:flex;align-items:center;gap:6px;' },
+          'Inizio',
+          el('button', {
+            type:'button',
+            id:'inizio-lock-btn',
+            title:'Lucchetto: aperto = data calcolata automaticamente. Chiuso = data fissa, non si ricalcola.',
+            style:'background:transparent;border:none;cursor:pointer;font-size:13px;padding:0;color:var(--mut);',
+          }, o.inizio_manuale ? '🔒' : '🔓'),
+        ),
+        el('input', { type:'date', name:'inizio', id:'inizio-input', value:(o.inizio_manuale || opCalcInizio(o) || '') }),
+        el('div', { class:'sub', id:'inizio-hint', style:'margin-top:4px;' },
+          o.inizio_manuale
+            ? 'Data fissa: non si ricalcola se cambi quantità o addetti.'
+            : 'Data calcolata automaticamente. Clicca il lucchetto per forzarla.')),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Consegna materiali entro'),
@@ -5307,6 +5297,12 @@ function openOperazioneModal(o) {
 
   // Preview calcoli
   const previewBox = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;margin-top:12px;font-family:monospace;font-size:11px;color:var(--mut);' });
+
+  // Stato lucchetto: true = data fissa (forzata), false = data calcolata.
+  // Inizializzato in base ai dati: se la commessa ha già un inizio_manuale,
+  // il lucchetto parte chiuso (forzato).
+  let inizioBloccato = !!o.inizio_manuale;
+
   const refreshPreview = () => {
     const fd = new FormData(form);
     const tmp = {
@@ -5318,48 +5314,82 @@ function openOperazioneModal(o) {
     const giorni = opCalcGiorni(tmp);
     const inizioCalc = opCalcInizio(tmp, addettiSel);
     const conAddetti = addettiSel && addettiSel.length > 0;
-    const inizioManuale = fd.get('inizio_manuale') || '';
+
+    // Se il lucchetto è APERTO, aggiorno il campo Inizio col calcolo "live".
+    // Se è CHIUSO, lascio quello che c'è (decisione dell'utente).
+    const inizioInput = form.querySelector('[name=inizio]');
+    if (inizioInput && !inizioBloccato) {
+      inizioInput.value = inizioCalc || '';
+    }
+
+    // Lo stato del lucchetto controlla anche l'aspetto del campo
+    if (inizioInput) {
+      inizioInput.readOnly = !inizioBloccato;
+      inizioInput.style.opacity = inizioBloccato ? '1' : '0.85';
+      inizioInput.style.color = inizioBloccato ? 'var(--acc)' : 'var(--mut)';
+      inizioInput.style.fontWeight = inizioBloccato ? '700' : '400';
+    }
+    const lockBtn = form.querySelector('#inizio-lock-btn');
+    if (lockBtn) lockBtn.textContent = inizioBloccato ? '🔒' : '🔓';
+    const hint = form.querySelector('#inizio-hint');
+    if (hint) {
+      hint.textContent = inizioBloccato
+        ? 'Data fissa: non si ricalcola se cambi quantità o addetti.'
+        : 'Data calcolata automaticamente. Clicca il lucchetto per forzarla.';
+    }
+
     previewBox.innerHTML = '';
     previewBox.append(
       el('div', {},
         el('span', { style:'color:var(--acc)' }, 'Ore stimate: '), ore.toFixed(2),
         el('span', { style:'margin:0 10px;color:var(--brd)' }, '·'),
         el('span', { style:'color:var(--acc)' }, 'Giorni lavorativi: '), String(giorni),
-        el('span', { style:'margin:0 10px;color:var(--brd)' }, '·'),
-        el('span', { style:'color:var(--acc)' }, 'Inizio calcolato: '),
-        inizioCalc ? fmtIT(inizioCalc) : '— (manca scadenza)',
       ),
       el('div', { style:'margin-top:4px;font-size:10px;color:var(--mut);' },
         conAddetti
           ? 'Inizio calcolato a ritroso dalla scadenza in base alla capacità reale degli addetti assegnati (8h a testa, meno le loro ferie), escludendo weekend, festivi e chiusure aziendali.'
           : 'Calcolato come quantità × minuti / 60 ore, divisi in giornate da 8h, escludendo weekend, festivi nazionali e chiusure aziendali. Assegna degli addetti per tener conto delle loro ferie.')
     );
-    // Se è stata impostata una data manuale: mostrala e avvisa se troppo stretta
-    if (inizioManuale) {
-      previewBox.append(el('div', { style:'margin-top:6px;color:var(--acc);font-weight:600;' },
-        '➜ Inizio impostato manualmente: ' + fmtIT(inizioManuale) +
-        ' (sovrascrive quello calcolato)'));
-      // Avviso: la data manuale lascia abbastanza tempo per le ore previste?
-      if (inizioCalc && tmp.scadenza && inizioManuale > inizioCalc) {
+
+    // Se l'utente ha forzato l'inizio (lucchetto chiuso): avvisi su tempistiche
+    if (inizioBloccato) {
+      const inizioForzato = inizioInput?.value || '';
+      if (inizioForzato && inizioCalc && tmp.scadenza && inizioForzato > inizioCalc) {
         previewBox.append(el('div', {
-          style:'margin-top:4px;font-size:10px;color:var(--yel);' },
-          '⚠ La data manuale è più tardi di quella calcolata: il tempo ' +
+          style:'margin-top:6px;font-size:10px;color:var(--yel);' },
+          '⚠ La data forzata è più tardi del calcolo automatico: il tempo ' +
           'tra inizio e scadenza potrebbe non bastare per le ore previste. ' +
           'Valuta se aggiungere addetti.'));
       }
-      if (tmp.scadenza && inizioManuale > tmp.scadenza) {
+      if (inizioForzato && tmp.scadenza && inizioForzato > tmp.scadenza) {
         previewBox.append(el('div', {
           style:'margin-top:4px;font-size:10px;color:var(--red);' },
-          '⚠ La data di inizio manuale è successiva alla scadenza.'));
+          '⚠ La data di inizio è successiva alla scadenza.'));
       }
     }
   };
   aggiornaPreviewInizio = refreshPreview;
+
+  // Click sul lucchetto: alterna fra calcolato e forzato
+  const lockBtn = form.querySelector('#inizio-lock-btn');
+  if (lockBtn) {
+    lockBtn.onclick = (e) => {
+      e.preventDefault();
+      inizioBloccato = !inizioBloccato;
+      refreshPreview();
+      // Se appena bloccato, focus sul campo per facilitare l'edit
+      if (inizioBloccato) form.querySelector('[name=inizio]')?.focus();
+    };
+  }
+
   refreshPreview();
-  ['quantita','minuti_unitari','scadenza','inizio_manuale'].forEach(name => {
+  ['quantita','minuti_unitari','scadenza','inizio'].forEach(name => {
     const f = form.querySelector(`[name=${name}]`);
     if (f) f.addEventListener('input', refreshPreview);
   });
+
+  // Espongo lo stato del lucchetto al salvataggio
+  form._inizioBloccato = () => inizioBloccato;
 
   form.appendChild(previewBox);
 
@@ -5435,7 +5465,9 @@ function openOperazioneModal(o) {
         quantita: parseInt(fd.get('quantita')) || 1,
         minuti_unitari: parseInt(fd.get('minuti_unitari')) || 0,
         scadenza: fd.get('scadenza') || null,
-        inizio_manuale: fd.get('inizio_manuale') || null,
+        inizio_manuale: (form._inizioBloccato && form._inizioBloccato())
+          ? (fd.get('inizio') || null)
+          : null,
         cl_consegna_materiali: fd.get('cl_consegna_materiali') || null,
         esterno_descrizione: (fd.get('esterno_descrizione')||'').trim() || null,
         stato: fd.get('stato') || 'aperta',
@@ -5749,6 +5781,26 @@ async function riaperturaOperazione(o) {
 }
 
 // Apri il quick-dialog di consegna da Pianificazione
+// Cambio stato rapido per le azioni reversibili (aperta ↔ sospesa, riapri da consegnata).
+// Click secco senza conferma: la commessa non viene "distrutta", il cambio è
+// sempre annullabile cliccando di nuovo. Per la consegna definitiva resta
+// quickConsegna() che chiede conferma e data, perché è un passaggio chiave.
+async function quickStato(op, nuovoStato) {
+  if (!['aperta','sospesa','consegnata'].includes(nuovoStato)) return;
+  try {
+    const { data, error } = await eseguiConRetry(
+      () => sb.from('operazioni').update({ stato: nuovoStato }).eq('id', op.id).select().single(),
+      { label: 'cambia stato op' }
+    );
+    if (error) throw error;
+    Object.assign(op, data); // aggiorno l'oggetto in state in place
+    toast('Stato aggiornato: ' + (OP_STATI[nuovoStato]?.label || nuovoStato), 'ok');
+    renderTab('pianificazione');
+  } catch (e) {
+    toast('Errore: ' + (e.message||e), 'err');
+  }
+}
+
 function quickConsegna(o) {
   const oggi = toLocalISO(new Date());
   const ritardo = o.scadenza && o.scadenza < oggi;
@@ -7058,7 +7110,7 @@ function kioskRenderOpList() {
   // Box ricerca
   const searchBox = el('div', { class:'kiosk-op-search-box' });
   const inp = el('input', {
-    type:'text', placeholder:'🔍 Cerca operazione (codice, ordine, cliente)…',
+    type:'text', placeholder:'🔍 Cerca operazione (codice, ordine, cliente, note)…',
     value: kCom.search,
     oninput: (e) => {
       kCom.search = e.target.value;
@@ -7087,8 +7139,11 @@ function kioskRenderOpList() {
       const art = state.articoli.find(a => a.id === o.articolo_id);
       return (o.codice_op||'').toLowerCase().includes(q)
           || (o.numero_ordine||'').toLowerCase().includes(q)
+          || (o.pos||'').toLowerCase().includes(q)
           || (cli?.nome||'').toLowerCase().includes(q)
-          || (art?.codice||'').toLowerCase().includes(q);
+          || (art?.codice||'').toLowerCase().includes(q)
+          || (art?.descrizione||'').toLowerCase().includes(q)
+          || (o.note||'').toLowerCase().includes(q);
     });
   };
 
