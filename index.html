@@ -861,6 +861,19 @@ const TIPI = [
 const TIPO_COLOR = Object.fromEntries(TIPI.map(t=>[t.id,t.color]));
 const TIPO_BADGE = { trasferta:'bok', consegna:'berr', manutenzione:'bor', altro:'bvio' };
 
+// Gruppi utenti — etichette per categorizzare le persone (lista fissa).
+// Il valore tecnico (chiave) sta nel DB; l'etichetta è ciò che si vede.
+// Per aggiungere/togliere un gruppo: estendere questo array, e poi rifare
+// il CHECK constraint su Supabase (utenti_gruppo_check).
+const GRUPPI_UTENTI = [
+  { key: 'trasfertisti', label: 'Trasfertisti' },
+  { key: 'cablotec_1',   label: 'Cablotec 1' },
+  { key: 'cablotec_2',   label: 'Cablotec 2' },
+  { key: 'laboratorio',  label: 'Laboratorio' },
+  { key: 'ufficio',      label: 'Ufficio' },
+];
+const GRUPPO_LABEL = Object.fromEntries(GRUPPI_UTENTI.map(g => [g.key, g.label]));
+
 const $ = s => document.querySelector(s);
 const el = (tag, attrs={}, ...children) => {
   const e = document.createElement(tag);
@@ -2523,6 +2536,7 @@ function renderOperatori(root) {
     el('th', {}, 'Nome'),
     el('th', {}, 'Badge NFC'),
     el('th', {}, 'Tipo'),
+    el('th', {}, 'Gruppo'),
     el('th', {}, 'Account login'),
     el('th', {}, 'Stato'),
     el('th', { class:'tc' }, 'Azioni'),
@@ -2559,12 +2573,42 @@ function renderOperatori(root) {
     }
     azioniCell.append(' ', el('button', { class:'btnd', onclick:()=>deleteOperatore(u) }, 'Elimina'));
 
+    // Menu a tendina inline per cambio rapido del gruppo
+    const selGruppo = el('select', {
+      style:'background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:3px 6px;border-radius:3px;font-size:11px;font-family:inherit;cursor:pointer;',
+      onchange: async (e) => {
+        const nuovo = e.target.value || null;
+        const precedente = u.gruppo || null;
+        if (nuovo === precedente) return;
+        e.target.disabled = true;
+        try {
+          const { data, error } = await eseguiConRetry(
+            () => sb.from('utenti').update({ gruppo: nuovo }).eq('id', u.id).select().single(),
+            { label: 'cambia gruppo utente' }
+          );
+          if (error) throw error;
+          Object.assign(u, data);
+          toast('Gruppo aggiornato', 'ok');
+        } catch (err) {
+          toast('Errore: ' + (err.message || err), 'err');
+          e.target.value = precedente || '';
+        } finally {
+          e.target.disabled = false;
+        }
+      },
+    },
+      el('option', { value:'' }, '— nessuno —'),
+      ...GRUPPI_UTENTI.map(g => el('option', { value: g.key }, g.label)),
+    );
+    selGruppo.value = u.gruppo || '';
+
     tb.append(el('tr', {},
       el('td', {}, u.nome),
       el('td', { class:'mono' }, u.numero_badge || '—'),
       el('td', {}, u.esterno
         ? el('span', { class:'badge byel' }, 'esterno')
         : el('span', { class:'badge bblu' }, 'interno')),
+      el('td', {}, selGruppo),
       el('td', {}, accountCell),
       el('td', {}, u.attivo ? el('span', { class:'badge bok' }, 'attivo') : el('span', { class:'badge bgry' }, 'disatt.')),
       azioniCell,
@@ -5035,7 +5079,6 @@ function openOperazioneModal(o) {
     cliente_id:'', articolo_id:'', numero_ordine:'', pos:'',
     quantita:1, minuti_unitari:0,
     scadenza:'', cl_consegna_materiali:'',
-    esterno_descrizione:'',
     stato:'aperta', stato_preparazione:'vuoto', note:'',
     consegnato_il:'', giustificazione_ritardo:'', nc_post_consegna:'', responsabilita:'',
   };
@@ -5205,9 +5248,6 @@ function openOperazioneModal(o) {
       addSelectedWrap, addDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Puoi assegnare più persone. Il lavoro verrà ripartito tra loro.')),
-    el('div', { class:'field' }, el('label', {}, 'Lavorazione esterna'),
-      el('input', { type:'text', name:'esterno_descrizione', value:o.esterno_descrizione||'',
-        placeholder:'es. OL 4 TEKNINA' })),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Stato'), selStato),
       el('div', { class:'field' }, el('label', {}, 'Preparazione'), selPrep),
@@ -5487,7 +5527,6 @@ function openOperazioneModal(o) {
           ? (fd.get('inizio') || null)
           : null,
         cl_consegna_materiali: fd.get('cl_consegna_materiali') || null,
-        esterno_descrizione: (fd.get('esterno_descrizione')||'').trim() || null,
         stato: fd.get('stato') || 'aperta',
         stato_preparazione: fd.get('stato_preparazione') || 'vuoto',
         note: (fd.get('note')||'').trim() || null,
