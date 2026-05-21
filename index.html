@@ -493,6 +493,16 @@ select.badge:focus{border-color:var(--acc);}
 .gantt-hd-time.weekend{background:rgba(255,107,53,.05);color:var(--or);}
 .gantt-hd-time.oggi{background:rgba(212,255,78,.1);color:var(--acc);font-weight:700;}
 .gantt-row-nome{background:var(--sur);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);padding:8px 12px;font-size:12px;font-weight:600;position:sticky;left:0;z-index:1;display:flex;align-items:center;}
+/* Riga di intestazione di un gruppo (usata nelle viste raggruppate per gruppo) */
+.gruppo-hd{background:var(--sur2);color:var(--acc);font-family:'DM Mono',monospace;font-size:10px;
+  font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:8px 12px;
+  border-top:1px solid var(--acc);border-bottom:1px solid var(--brd);}
+.gruppo-hd.nogroup{color:var(--mut);border-top-color:var(--mut);}
+/* Per le matrici a tabella (calendario assenze): intestazione su una riga sticky */
+tr.gruppo-hd-row td{background:var(--sur2);color:var(--acc);font-family:'DM Mono',monospace;
+  font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  padding:7px 12px;border-top:1px solid var(--acc);position:sticky;left:0;}
+tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .gantt-row-nome.esterno{color:var(--yel);}
 .gantt-cell{background:var(--bg);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);position:relative;min-height:42px;}
 .gantt-cell.weekend{background:rgba(255,107,53,.03);}
@@ -873,6 +883,23 @@ const GRUPPI_UTENTI = [
   { key: 'ufficio',      label: 'Ufficio' },
 ];
 const GRUPPO_LABEL = Object.fromEntries(GRUPPI_UTENTI.map(g => [g.key, g.label]));
+
+// Raggruppa una lista di utenti per gruppo, nell'ordine canonico di GRUPPI_UTENTI.
+// Restituisce un array di { key, label, utenti }, includendo solo i gruppi
+// che hanno almeno un utente. Gli utenti senza gruppo finiscono in una
+// sezione finale con key '__nogroup__' e label 'Senza gruppo'.
+function raggruppaUtenti(lista) {
+  const sezioni = [];
+  GRUPPI_UTENTI.forEach(g => {
+    const utenti = lista.filter(u => u.gruppo === g.key);
+    if (utenti.length > 0) sezioni.push({ key: g.key, label: g.label, utenti });
+  });
+  const senzaGruppo = lista.filter(u => !u.gruppo);
+  if (senzaGruppo.length > 0) {
+    sezioni.push({ key: '__nogroup__', label: 'Senza gruppo', utenti: senzaGruppo });
+  }
+  return sezioni;
+}
 
 const $ = s => document.querySelector(s);
 const el = (tag, attrs={}, ...children) => {
@@ -7621,8 +7648,12 @@ function renderCarico(root) {
   headRow.append(headTrack);
   grid.append(headRow);
 
-  // --- Righe addetti ---
-  operatori.forEach(u => {
+  // --- Righe addetti raggruppate per gruppo ---
+  const sezioni = raggruppaUtenti(operatori);
+
+  // Estraggo la costruzione della riga utente in una funzione: la richiamo
+  // dentro ogni sezione di gruppo, mantenendo lo stesso identico contenuto.
+  const buildRigaUtente = (u) => {
     const commesse = (caricoByUtente[u.id] || [])
       .slice().sort((a, b) => a.inizio < b.inizio ? -1 : 1);
 
@@ -7694,6 +7725,19 @@ function renderCarico(root) {
     track.append(barre);
     row.append(track);
     grid.append(row);
+  };
+
+  // Per ogni sezione: intestazione di gruppo + righe utenti
+  sezioni.forEach(sez => {
+    const hdRow = el('div', {
+      class: 'carico2-row carico2-gruppo-row' + (sez.key === '__nogroup__' ? ' nogroup' : ''),
+    });
+    hdRow.append(el('div', {
+      class: 'gruppo-hd' + (sez.key === '__nogroup__' ? ' nogroup' : ''),
+      style: 'flex:1;',
+    }, sez.label));
+    grid.append(hdRow);
+    sez.utenti.forEach(buildRigaUtente);
   });
 
   wrap.append(grid);
