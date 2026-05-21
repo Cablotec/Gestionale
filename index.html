@@ -82,6 +82,25 @@ table.rt tbody tr:hover td{background:var(--hover);}
 select.badge{border:1px solid transparent;outline:none;-webkit-appearance:menulist;appearance:auto;}
 select.badge:hover{filter:brightness(1.15);}
 select.badge:focus{border-color:var(--acc);}
+/* Forziamo sfondo scuro sulle opzioni quando il menu si apre.
+   Funziona su Firefox e Chromium su Linux/Windows; macOS/iOS Safari
+   ignora queste regole per le option (limitazione browser). */
+select.badge option{background:var(--sur);color:var(--txt);font-weight:600;}
+/* Campo di ricerca — stesso linguaggio visivo dei campi del modal */
+input.search{
+  background:var(--sur);
+  border:1px solid var(--brd);
+  color:var(--txt);
+  font-family:'DM Mono',monospace;
+  font-size:12px;
+  padding:7px 12px;
+  border-radius:4px;
+  outline:none;
+  min-width:280px;
+  transition:border-color .12s;
+}
+input.search::placeholder{color:var(--mut);font-style:italic;}
+input.search:focus{border-color:var(--acc);}
 .bok{background:rgba(78,255,163,.12);color:var(--grn);}
 .berr{background:rgba(255,78,107,.12);color:var(--red);}
 .byel{background:rgba(255,204,78,.12);color:var(--yel);}
@@ -4630,7 +4649,7 @@ function opInizio(op) {
   return opCalcInizio(op);
 }
 function opIsRitardo(op) {
-  if (op.stato === 'consegnata') return false;
+  if (op.stato === 'consegnata' || op.stato === 'completata') return false;
   if (!op.scadenza) return false;
   const oggi = toLocalISO(new Date());
   return op.scadenza < oggi;
@@ -4644,6 +4663,7 @@ function renderPianificazione(root) {
   let list = state.operazioni.slice();
   if (filter === 'aperte')     list = list.filter(o => o.stato === 'aperta');
   else if (filter === 'sospese')    list = list.filter(o => o.stato === 'sospesa');
+  else if (filter === 'completate') list = list.filter(o => o.stato === 'completata');
   else if (filter === 'consegnate') list = list.filter(o => o.stato === 'consegnata');
 
   if (search) {
@@ -4683,6 +4703,7 @@ function renderPianificazione(root) {
   const aperte = state.operazioni.filter(o => o.stato === 'aperta').length;
   const inRitardo = state.operazioni.filter(opIsRitardo).length;
   const sospese = state.operazioni.filter(o => o.stato === 'sospesa').length;
+  const completate = state.operazioni.filter(o => o.stato === 'completata').length;
 
   root.innerHTML = '';
   root.append(el('div', { class:'kpis' },
@@ -4690,6 +4711,7 @@ function renderPianificazione(root) {
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Aperte'),        el('div', { class:'kv kg' }, String(aperte))),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'In ritardo'),    el('div', { class:'kv kr' }, String(inRitardo))),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Sospese'),       el('div', { class:'kv ky' }, String(sospese))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Completate'),    el('div', { class:'kv kb' }, String(completate))),
   ));
 
   // Chips filtro
@@ -4698,6 +4720,7 @@ function renderPianificazione(root) {
     { id:'all',        label:'Tutte' },
     { id:'aperte',     label:'Aperte' },
     { id:'sospese',    label:'Sospese' },
+    { id:'completate', label:'Completate' },
     { id:'consegnate', label:'Consegnate' },
   ].forEach(opt => {
     chips.append(el('div', {
@@ -4794,7 +4817,7 @@ function renderPianificazione(root) {
 
     // Scadenza con colore secondo prossimità
     let scadCls = '';
-    if (o.scadenza && o.stato !== 'consegnata') {
+    if (o.scadenza && o.stato !== 'consegnata' && o.stato !== 'completata') {
       const oggi = new Date(); oggi.setHours(0,0,0,0);
       const scad = parseISODate(o.scadenza);
       const diff = (scad - oggi) / 86400000;
@@ -6731,7 +6754,7 @@ async function kioskLoadAll() {
     sb.from('clienti').select('*').eq('attivo', true).order('nome'),
     sb.from('articoli').select('*').eq('attivo', true).order('codice'),
     sb.from('tipi_lavorazione').select('*').eq('attivo', true).order('ordine'),
-    sb.from('operazioni').select('*').neq('stato', 'consegnata').order('scadenza'),
+    sb.from('operazioni').select('*').neq('stato', 'consegnata').neq('stato', 'completata').order('scadenza'),
     sb.from('sessioni_lavoro').select('*').is('fine', null),
     sb.from('operazioni_addetti').select('*'),
   ]);
@@ -7174,11 +7197,12 @@ function kioskRenderOpList() {
   const root = $('#kiosk-op-list-content');
   root.innerHTML = '';
 
-  // Operazioni aperte = non consegnate
+  // Operazioni aperte = non consegnate e non completate
+  // (al kiosk si timbra solo su quelle ancora in lavorazione).
   // Ordinamento: scadenza crescente (le più urgenti in cima),
   // commesse senza scadenza in fondo
   const aperte = state.operazioni
-    .filter(o => o.stato !== 'consegnata')
+    .filter(o => o.stato !== 'consegnata' && o.stato !== 'completata')
     .slice()
     .sort((a, b) => {
       if (!a.scadenza && !b.scadenza) return 0;
