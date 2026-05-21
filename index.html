@@ -131,6 +131,8 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .cal-head{display:flex;align-items:center;gap:8px;padding:10px 0 14px;flex-wrap:wrap;}
 .cal-head h2{font-size:18px;font-weight:700;text-transform:capitalize;letter-spacing:-.01em;}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);border-top:1px solid var(--brd);border-left:1px solid var(--brd);}
+/* In vista settimanale ho solo 7 celle invece di 35-42: celle alte. */
+.cal-grid.zoom-settimana .cal-cell{min-height:380px;}
 .cal-dow{padding:6px 8px;font-family:'DM Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--acc);background:var(--sur);border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);}
 .cal-cell{min-height:110px;padding:4px;background:var(--sur);border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);cursor:pointer;position:relative;overflow:hidden;transition:background .12s;}
 .cal-cell:hover{background:var(--sur2);}
@@ -334,7 +336,14 @@ table.rt tbody tr:hover td{background:var(--hover);}
 .kiosk-op-section{margin-bottom:18px;}
 .kiosk-op-section-hd{font-family:'DM Mono',monospace;font-size:11px;color:var(--acc);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--acc);}
 /* Griglia commesse: card più larghe (min 340px) e più alte */
-.kiosk-op-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;}
+/* Schermata kiosk per lista commesse: il contenuto scorre se è più alto della pagina */
+#kiosk-step-op-list{overflow:hidden;}
+#kiosk-op-list-content{flex:1;overflow-y:auto;padding-right:6px;}
+/* Griglia commesse: fino a 3 colonne, scende a 2 o 1 se non c'è spazio.
+   minmax(320px,1fr) garantisce che ogni card sia di almeno 320px;
+   auto-fit + 'fr' fa sì che si distribuiscano sulla larghezza disponibile. */
+.kiosk-op-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;
+  max-width:1320px;margin:0 auto;}
 .kiosk-op-card{background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:18px 20px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:8px;transition:all .12s;color:var(--txt);font-family:inherit;min-height:130px;}
 .kiosk-op-card:hover,.kiosk-op-card:active{border-color:var(--acc);background:rgba(212,255,78,.05);transform:translateY(-1px);}
 /* Cliente: la cosa più grande e prominente */
@@ -820,7 +829,7 @@ const state = {
   kioskOp: null,           // operazione selezionata nel flusso commesse
   kioskMode: null,         // 'menu' | 'mezzi' | 'commesse-list' | 'commesse-tipo' | 'commesse-attiva'
   kioskTimer: null,        // setInterval handle per refresh durata
-  calCursor: new Date(), currentTab: 'generale', currentArea: 'calendari',
+  calCursor: new Date(), calZoom: 'settimana', currentTab: 'generale', currentArea: 'calendari',
   loaded: false,
 };
 
@@ -1902,12 +1911,24 @@ function renderCalendar(root) {
   const targetTab = isGenerale ? 'generale' : 'cal_mezzi';
 
   const cur = state.calCursor;
-  const first = new Date(cur.getFullYear(), cur.getMonth(), 1);
-  const last  = new Date(cur.getFullYear(), cur.getMonth()+1, 0);
-  const startGrid = new Date(first);
-  startGrid.setDate(first.getDate() - ((first.getDay()+6)%7));
-  const endGrid = new Date(last);
-  endGrid.setDate(last.getDate() + (6 - ((last.getDay()+6)%7)));
+  const zoom = state.calZoom || 'settimana';
+
+  // Calcolo range: in settimana → 7 giorni Lun-Dom della settimana del cursore.
+  // In mese → griglia da Lun (prima settimana) a Dom (ultima settimana) del mese.
+  let startGrid, endGrid;
+  if (zoom === 'settimana') {
+    startGrid = new Date(cur);
+    startGrid.setDate(cur.getDate() - ((cur.getDay()+6)%7));
+    endGrid = new Date(startGrid);
+    endGrid.setDate(startGrid.getDate() + 6);
+  } else {
+    const first = new Date(cur.getFullYear(), cur.getMonth(), 1);
+    const last  = new Date(cur.getFullYear(), cur.getMonth()+1, 0);
+    startGrid = new Date(first);
+    startGrid.setDate(first.getDate() - ((first.getDay()+6)%7));
+    endGrid = new Date(last);
+    endGrid.setDate(last.getDate() + (6 - ((last.getDay()+6)%7)));
+  }
 
   const startISO = toLocalISO(startGrid);
   const endISO = toLocalISO(endGrid);
@@ -1959,11 +1980,48 @@ function renderCalendar(root) {
   }
 
   root.innerHTML = '';
+
+  // Funzione per spostarsi avanti/indietro nel calendario
+  function spostaCursore(dir) {
+    const nc = new Date(cur);
+    if (zoom === 'settimana') {
+      nc.setDate(nc.getDate() + dir * 7);
+    } else {
+      nc.setMonth(nc.getMonth() + dir);
+      // se vista mese, posiziono il cursore al 1° del nuovo mese
+      nc.setDate(1);
+    }
+    state.calCursor = nc;
+    renderTab(targetTab);
+  }
+
+  // Label intestazione coerente con lo zoom
+  let calLabel;
+  if (zoom === 'settimana') {
+    // "10 — 16 marzo 2026" (o "29 mar — 4 apr 2026" se attraversa due mesi)
+    const a = startGrid, b = endGrid;
+    if (a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()) {
+      calLabel = `${a.getDate()} — ${b.getDate()} ${monthName(a)}`;
+    } else if (a.getFullYear() === b.getFullYear()) {
+      calLabel = `${a.getDate()} ${MESI_BREVI[a.getMonth()]} — ${b.getDate()} ${MESI_BREVI[b.getMonth()]} ${a.getFullYear()}`;
+    } else {
+      calLabel = `${a.getDate()} ${MESI_BREVI[a.getMonth()]} ${a.getFullYear()} — ${b.getDate()} ${MESI_BREVI[b.getMonth()]} ${b.getFullYear()}`;
+    }
+  } else {
+    calLabel = monthName(cur);
+  }
+
   const headChildren = [
-    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()-1,1); renderTab(targetTab); }}, '← Prec'),
+    el('div', { class:'switch-bar', style:'margin-right:8px;' },
+      el('button', { class: zoom === 'settimana' ? 'act' : '',
+        onclick:()=>{ state.calZoom = 'settimana'; renderTab(targetTab); } }, 'Settimana'),
+      el('button', { class: zoom === 'mese' ? 'act' : '',
+        onclick:()=>{ state.calZoom = 'mese'; renderTab(targetTab); } }, 'Mese'),
+    ),
+    el('button', { class:'btng', onclick:()=>spostaCursore(-1) }, '← Prec'),
     el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(); renderTab(targetTab); }}, 'Oggi'),
-    el('button', { class:'btng', onclick:()=>{ state.calCursor = new Date(cur.getFullYear(),cur.getMonth()+1,1); renderTab(targetTab); }}, 'Succ →'),
-    el('h2', { style:'flex:1' }, monthName(cur)),
+    el('button', { class:'btng', onclick:()=>spostaCursore(+1) }, 'Succ →'),
+    el('h2', { style:'flex:1' }, calLabel),
   ];
   if (!isGenerale) {
     headChildren.push(el('button', { class:'btnp', onclick:()=>openPrenotazioneModal() }, '+ Nuova Prenotazione'));
@@ -1991,7 +2049,7 @@ function renderCalendar(root) {
   }
   root.append(legend);
 
-  const grid = el('div', { class:'cal-grid' });
+  const grid = el('div', { class: 'cal-grid zoom-' + zoom });
   ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].forEach(d => grid.append(el('div', { class:'cal-dow' }, d)));
 
   // Calcola festività dell'anno e dell'anno seguente (per griglie a cavallo di anni)
@@ -2012,7 +2070,9 @@ function renderCalendar(root) {
 
   for (let d = new Date(startGrid); d <= endGrid; d.setDate(d.getDate()+1)) {
     const iso = toLocalISO(d);
-    const inMonth = d.getMonth() === cur.getMonth();
+    // In vista settimana tutte le celle sono "questa settimana" — non dimmiamo
+    // in base al mese; in vista mese sì.
+    const inMonth = zoom === 'mese' ? d.getMonth() === cur.getMonth() : true;
     const dow = (d.getDay()+6)%7;
     const isWeekend = dow >= 5;
     const isFestivo = festSet.has(iso);
@@ -2051,7 +2111,10 @@ function renderCalendar(root) {
       }, '🔒 ' + (chiusura.descrizione || 'Chiusura')));
     }
     const evs = byDay[iso] || [];
-    const max = window.innerWidth < 640 ? 2 : 3;
+    // In vista settimanale c'è molto più spazio verticale: mostro più voci.
+    const max = zoom === 'settimana'
+      ? (window.innerWidth < 640 ? 6 : 12)
+      : (window.innerWidth < 640 ? 2 : 3);
     const box = el('div', { class:'cal-events' });
     evs.slice(0, max).forEach(entry => {
       if (entry.kind === 'pren') {
@@ -8180,6 +8243,7 @@ const TIPI_ASSENZA_COLORI = [
 
 const MESI_NOMI = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
 const MESI_ESTESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+const MESI_BREVI = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
 const GIORNI_BREVI = ['L','M','M','G','V','S','D']; // lun-dom (0=lun)
 
 // Festività nazionali italiane (Set di stringhe ISO YYYY-MM-DD)
