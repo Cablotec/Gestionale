@@ -4570,6 +4570,7 @@ async function deleteChiusura(c) {
 const OP_STATI = {
   aperta:     { label:'Aperta',     badge:'bok',  color:'var(--grn)' },
   sospesa:    { label:'Sospesa',    badge:'byel', color:'var(--yel)' },
+  completata: { label:'Completata', badge:'bblu', color:'var(--blu)' },
   consegnata: { label:'Consegnata', badge:'bgry', color:'var(--mut)' },
 };
 const OP_PREP = {
@@ -4869,6 +4870,7 @@ function renderPianificazione(root) {
       },
         el('option', { value:'aperta' }, 'Aperta'),
         el('option', { value:'sospesa' }, 'Sospesa'),
+        el('option', { value:'completata' }, 'Completata'),
         el('option', { value:'consegnata' }, 'Consegnata'),
       );
       sel.value = o.stato; // imposto il valore corrente in modo affidabile
@@ -5214,6 +5216,7 @@ function openOperazioneModal(o) {
   const selStato = el('select', { name:'stato' },
     el('option', { value:'aperta' }, 'Aperta'),
     el('option', { value:'sospesa' }, 'Sospesa'),
+    el('option', { value:'completata' }, 'Completata'),
     el('option', { value:'consegnata' }, 'Consegnata'),
   );
   selStato.value = o.stato || 'aperta';
@@ -5869,7 +5872,7 @@ async function riaperturaOperazione(o) {
 // sempre annullabile cliccando di nuovo. Per la consegna definitiva resta
 // quickConsegna() che chiede conferma e data, perché è un passaggio chiave.
 async function quickStato(op, nuovoStato) {
-  if (!['aperta','sospesa','consegnata'].includes(nuovoStato)) return;
+  if (!['aperta','sospesa','completata','consegnata'].includes(nuovoStato)) return;
   try {
     const { data, error } = await eseguiConRetry(
       () => sb.from('operazioni').update({ stato: nuovoStato }).eq('id', op.id).select().single(),
@@ -7856,9 +7859,11 @@ function renderGanttLive(root) {
       el('div', { class:'kv' }, String(totOggi))),
   ));
 
-  // Griglia card operatori
+  // Griglia card operatori, raggruppata per gruppo utenti
   const grid = el('div', { class:'live-grid' });
-  operatori.forEach(u => {
+  const sezioniLive = raggruppaUtenti(operatori);
+
+  const buildCardUtente = (u) => {
     const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
     const assOggi = assOggiByUtente[u.id];
 
@@ -7937,6 +7942,16 @@ function renderGanttLive(root) {
       }
     }
     grid.append(card);
+  };
+
+  // Per ogni gruppo con utenti: emetto un separatore a tutta larghezza,
+  // poi le card del gruppo. "Senza gruppo" è automaticamente l'ultima sezione.
+  sezioniLive.forEach(sez => {
+    grid.append(el('div', {
+      class: 'live-gruppo-hd gruppo-hd' + (sez.key === '__nogroup__' ? ' nogroup' : ''),
+      style: 'grid-column:1/-1;',
+    }, sez.label));
+    sez.utenti.forEach(buildCardUtente);
   });
 
   if (operatori.length === 0) {
@@ -8058,8 +8073,10 @@ function renderGanttCommesse(root) {
     return -1;
   };
 
-  // RIGHE OPERATORI
-  operatori.forEach(u => {
+  // RIGHE OPERATORI raggruppate per gruppo utenti
+  const sezioniCom = raggruppaUtenti(operatori);
+
+  const buildRigaCom = (u) => {
     grid.append(el('div', { class:'gantt-row-nome' + (u.esterno ? ' esterno' : '') },
       u.nome + (u.esterno ? ' ✦' : '')));
 
@@ -8164,6 +8181,16 @@ function renderGanttCommesse(root) {
     const hRiga = Math.max(38, commesse.length * (BAR_H+GAP) + 8);
     track.style.minHeight = hRiga + 'px';
     grid.append(track);
+  };
+
+  // Per ogni gruppo: intestazione che copre tutta la larghezza della griglia,
+  // poi le righe degli utenti del gruppo.
+  sezioniCom.forEach(sez => {
+    grid.append(el('div', {
+      class: 'gruppo-hd' + (sez.key === '__nogroup__' ? ' nogroup' : ''),
+      style: 'grid-column:1 / -1;',
+    }, sez.label));
+    sez.utenti.forEach(buildRigaCom);
   });
 
   wrap.append(grid);
@@ -8663,7 +8690,8 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
     ];
   }
 
-  utentiOrdinati.forEach(u => {
+  // Costruzione di una riga utente, riusata sia con sia senza raggruppamento
+  const buildRigaUtente = (u) => {
     const isMia = u.id === mioUtenteId;
     const tr = el('tr', { class: 'assv2-row' });
     tr.dataset.utenteId = u.id;
@@ -8744,7 +8772,22 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
       tr.append(td);
     });
     table.append(tr);
-  });
+  };
+
+  // Per gli admin: raggruppo per gruppo utenti (riga-intestazione + utenti del gruppo).
+  // Per i non-admin: tengo il vecchio comportamento (riga propria in cima, niente
+  // intestazioni di gruppo) — è un aiuto pensato per loro che voglio preservare.
+  if (isAdmin) {
+    const sezioniAss = raggruppaUtenti(utentiOrdinati);
+    sezioniAss.forEach(sez => {
+      const trHd = el('tr', { class: 'gruppo-hd-row' + (sez.key === '__nogroup__' ? ' nogroup' : '') });
+      trHd.append(el('td', { colspan: String(giorni.length + 1) }, sez.label));
+      table.append(trHd);
+      sez.utenti.forEach(buildRigaUtente);
+    });
+  } else {
+    utentiOrdinati.forEach(buildRigaUtente);
+  }
 
   wrap.append(table);
   root.append(wrap);
