@@ -204,7 +204,7 @@ input.search:focus{border-color:var(--acc);}
 .op-table td{padding:4px 8px;vertical-align:middle;}
 .op-table tr.in-ritardo td{background:rgba(255,78,107,.06);}
 .op-table tr.in-ritardo td:first-child{box-shadow:inset 3px 0 0 var(--red);}
-.op-table tr.consegnata td{opacity:.55;}
+.op-table tr.spedita td{opacity:.55;text-decoration:line-through;text-decoration-thickness:1px;}
 .op-cell-inline{cursor:pointer;padding:3px 6px;border-radius:2px;transition:background .1s;}
 .op-cell-inline:hover{background:rgba(212,255,78,.08);}
 .op-cell-inline.editing{padding:0;background:transparent;}
@@ -833,7 +833,7 @@ const state = {
   tipiLav: [],             // anagrafica tipi di lavorazione
   chiusure: [],            // chiusure aziendali (festivi non nazionali)
   operazioni: [],          // operazioni di pianificazione
-  opFilter: 'aperte',      // 'all' | 'aperte' | 'sospese' | 'consegnate'
+  opFilter: 'aperte',      // 'all' | 'aperte' | 'sospese' | 'spedite'
   opSearch: '',
   opSortKey: 'scadenza',
   opSortDir: 'asc',
@@ -1808,6 +1808,7 @@ const TAB_STRUCTURE = {
     adminOnly: false,
     tabs: [
       { id: 'pianificazione', label: 'Pianificazione', adminOnly: false },
+      { id: 'magazzino',      label: 'Magazzino',      adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
       { id: 'gantt_live',     label: 'Live',           adminOnly: true },
       { id: 'gantt_commesse', label: 'Commesse',       adminOnly: true },
@@ -1903,6 +1904,7 @@ function renderTab(name) {
     else if (name === 'tipi_lav')     renderTipiLavorazione(root);
     else if (name === 'operatori')    renderOperatori(root);
     else if (name === 'pianificazione') renderPianificazione(root);
+    else if (name === 'magazzino') renderMagazzino(root);
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt_live') renderGanttLiveTab(root);
     else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
@@ -4590,7 +4592,7 @@ const OP_STATI = {
   aperta:     { label:'Aperta',     badge:'bok',  color:'var(--grn)' },
   sospesa:    { label:'Sospesa',    badge:'byel', color:'var(--yel)' },
   completata: { label:'Completata', badge:'bblu', color:'var(--blu)' },
-  consegnata: { label:'Consegnata', badge:'bgry', color:'var(--mut)' },
+  spedita: { label:'Spedita', badge:'bgry', color:'var(--mut)' },
 };
 const OP_PREP = {
   vuoto:    { label:'Vuoto',    classe:'vuoto' },
@@ -4649,10 +4651,137 @@ function opInizio(op) {
   return opCalcInizio(op);
 }
 function opIsRitardo(op) {
-  if (op.stato === 'consegnata' || op.stato === 'completata') return false;
+  if (op.stato === 'spedita' || op.stato === 'completata') return false;
   if (!op.scadenza) return false;
   const oggi = toLocalISO(new Date());
   return op.scadenza < oggi;
+}
+
+// ─── MAGAZZINO ─────────────────────────────────────────────────────
+// Vista delle commesse in stato "completata": il lavoro è finito,
+// il pezzo è pronto in magazzino, in attesa di essere consegnato al cliente.
+// Visibile a tutti, ma le azioni (consegna, modifica) sono solo per admin.
+function renderMagazzino(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  root.innerHTML = '';
+
+  // Lista: solo commesse completate, ordinate per scadenza crescente
+  // (le più urgenti da spedire in cima). Senza scadenza in fondo.
+  const list = state.operazioni
+    .filter(o => o.stato === 'completata')
+    .slice()
+    .sort((a, b) => {
+      if (!a.scadenza && !b.scadenza) return 0;
+      if (!a.scadenza) return 1;
+      if (!b.scadenza) return -1;
+      return a.scadenza < b.scadenza ? -1 : (a.scadenza > b.scadenza ? 1 : 0);
+    });
+
+  // KPI in alto
+  const oggiIso = toLocalISO(new Date());
+  const totale = list.length;
+  const scadute = list.filter(o => o.scadenza && o.scadenza < oggiIso).length;
+  const inGiornata = list.filter(o => o.scadenza === oggiIso).length;
+
+  root.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' },
+      el('div', { class:'kl' }, 'Pronte da spedire'),
+      el('div', { class:'kv kb' }, String(totale))),
+    el('div', { class:'kpi' },
+      el('div', { class:'kl' }, 'Scadute'),
+      el('div', { class:'kv kr' }, String(scadute))),
+    el('div', { class:'kpi' },
+      el('div', { class:'kl' }, 'Scadenza oggi'),
+      el('div', { class:'kv ky' }, String(inGiornata))),
+  ));
+
+  // Toolbar minima (solo titolo per ora)
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Magazzino — commesse pronte da consegnare')));
+
+  // Stato vuoto
+  if (list.length === 0) {
+    root.append(el('div', { class:'empty', style:'padding:40px;text-align:center;color:var(--mut);' },
+      el('div', { style:'font-size:32px;margin-bottom:10px;' }, '📦'),
+      el('div', {}, 'Nessuna commessa in magazzino al momento.'),
+      el('div', { style:'font-size:11px;margin-top:6px;' },
+        'Le commesse marcate come "Completata" appariranno qui, in attesa di essere consegnate al cliente.'),
+    ));
+    return;
+  }
+
+  // Tabella
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Ordine'),
+    el('th', {}, 'Pos'),
+    el('th', {}, 'Cliente'),
+    el('th', {}, 'Codice'),
+    el('th', {}, 'Descrizione'),
+    el('th', { class:'tr' }, 'Qtà'),
+    el('th', {}, 'Scadenza'),
+    el('th', {}, 'Note'),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+
+  const tb = el('tbody');
+  list.forEach(o => {
+    const cli = state.clienti.find(c => c.id === o.cliente_id);
+    const art = state.articoli.find(a => a.id === o.articolo_id);
+
+    // Colore scadenza: rosso se passata, giallo se entro 3 giorni
+    let scadCls = '';
+    if (o.scadenza) {
+      if (o.scadenza < oggiIso) scadCls = 'scadenza-passata';
+      else {
+        const diff = (parseISODate(o.scadenza) - new Date()) / 86400000;
+        if (diff <= 3) scadCls = 'scadenza-vicina';
+      }
+    }
+
+    const tr = el('tr', {
+      class: 'op-row',
+      style: 'cursor:pointer;',
+      onclick: () => openOperazioneModal(o),
+      title: 'Click per aprire la scheda',
+    });
+
+    tr.append(el('td', { class:'mono' }, o.numero_ordine || '—'));
+    tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.pos || '—'));
+    tr.append(el('td', {}, cli?.nome || '—'));
+    tr.append(el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'));
+
+    // Descrizione articolo (troncata 1 riga)
+    const desc = art?.descrizione || '';
+    tr.append(el('td', {
+      style: 'max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
+      title: desc,
+    }, desc || '—'));
+
+    tr.append(el('td', { class:'tr mono' }, String(o.quantita || 0)));
+    tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
+
+    // Note
+    tr.append(el('td', {
+      style: 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
+      title: o.note || '',
+    }, o.note || '—'));
+
+    // Azioni: ✓ Consegna (solo admin)
+    const azioniCell = el('td', { class:'tc' });
+    if (isAdmin) {
+      azioniCell.append(el('button', {
+        class:'btnsm',
+        style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
+        title:'Consegna definitiva al cliente (apre modal con data e giustificazione)',
+        onclick: (e) => { e.stopPropagation(); quickSpedizione(o); },
+      }, '✓ Consegna'));
+    }
+    tr.append(azioniCell);
+
+    tb.append(tr);
+  });
+  tbl.append(tb);
+  root.append(tbl);
 }
 
 function renderPianificazione(root) {
@@ -4664,7 +4793,7 @@ function renderPianificazione(root) {
   if (filter === 'aperte')     list = list.filter(o => o.stato === 'aperta');
   else if (filter === 'sospese')    list = list.filter(o => o.stato === 'sospesa');
   else if (filter === 'completate') list = list.filter(o => o.stato === 'completata');
-  else if (filter === 'consegnate') list = list.filter(o => o.stato === 'consegnata');
+  else if (filter === 'spedite') list = list.filter(o => o.stato === 'spedita');
 
   if (search) {
     list = list.filter(o => {
@@ -4674,6 +4803,7 @@ function renderPianificazione(root) {
           || (o.pos||'').toLowerCase().includes(search)
           || (cli?.nome||'').toLowerCase().includes(search)
           || (art?.codice||'').toLowerCase().includes(search)
+          || (art?.descrizione||'').toLowerCase().includes(search)
           || (o.note||'').toLowerCase().includes(search);
     });
   }
@@ -4721,7 +4851,7 @@ function renderPianificazione(root) {
     { id:'aperte',     label:'Aperte' },
     { id:'sospese',    label:'Sospese' },
     { id:'completate', label:'Completate' },
-    { id:'consegnate', label:'Consegnate' },
+    { id:'spedite', label:'Spedite' },
   ].forEach(opt => {
     chips.append(el('div', {
       class: 'chip' + (filter === opt.id ? ' act' : ''),
@@ -4733,7 +4863,7 @@ function renderPianificazione(root) {
   // Toolbar
   const inputSearch = el('input', {
     type:'text', class:'search', id:'pian-search',
-    placeholder:'Cerca OP, ordine, cliente, codice, note…',
+    placeholder:'Cerca OP, ordine, cliente, codice, descrizione, note…',
     value: state.opSearch || '',
     oninput: (e) => {
       state.opSearch = e.target.value;
@@ -4813,11 +4943,11 @@ function renderPianificazione(root) {
 
     let rowClass = '';
     if (ritardo) rowClass = 'in-ritardo';
-    else if (o.stato === 'consegnata') rowClass = 'consegnata';
+    else if (o.stato === 'spedita') rowClass = 'spedita';
 
     // Scadenza con colore secondo prossimità
     let scadCls = '';
-    if (o.scadenza && o.stato !== 'consegnata' && o.stato !== 'completata') {
+    if (o.scadenza && o.stato !== 'spedita' && o.stato !== 'completata') {
       const oggi = new Date(); oggi.setHours(0,0,0,0);
       const scad = parseISODate(o.scadenza);
       const diff = (scad - oggi) / 86400000;
@@ -4881,10 +5011,10 @@ function renderPianificazione(root) {
           e.stopPropagation();
           const nuovo = e.target.value;
           if (nuovo === o.stato) return;
-          // Per "consegnata" passo dal modal completo (data + giustificazione)
-          if (nuovo === 'consegnata') {
+          // Per "spedita" passo dal modal completo (data + giustificazione)
+          if (nuovo === 'spedita') {
             e.target.value = o.stato; // ripristino temporaneamente
-            quickConsegna(o);
+            quickSpedizione(o);
             return;
           }
           // Altri cambi: immediati
@@ -4894,7 +5024,7 @@ function renderPianificazione(root) {
         el('option', { value:'aperta' }, 'Aperta'),
         el('option', { value:'sospesa' }, 'Sospesa'),
         el('option', { value:'completata' }, 'Completata'),
-        el('option', { value:'consegnata' }, 'Consegnata'),
+        el('option', { value:'spedita' }, 'Spedita'),
       );
       sel.value = o.stato; // imposto il valore corrente in modo affidabile
       statoCell.append(sel);
@@ -4909,12 +5039,12 @@ function renderPianificazione(root) {
     // Azioni: ✓ consegna rapida + ✕ elimina (solo admin, stopPropagation per non aprire il modal)
     const azioniCell = el('td', { class:'tc' });
     if (isAdmin) {
-      if (o.stato !== 'consegnata') {
+      if (o.stato !== 'spedita') {
         azioniCell.append(el('button', {
           class:'btnsm',
           style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
-          title:'Segna come consegnata (modale di conferma)',
-          onclick:(e)=>{ e.stopPropagation(); quickConsegna(o); },
+          title:'Segna come spedita (modale di conferma)',
+          onclick:(e)=>{ e.stopPropagation(); quickSpedizione(o); },
         }, '✓'));
       }
       azioniCell.append(' ', el('button', {
@@ -5240,7 +5370,7 @@ function openOperazioneModal(o) {
     el('option', { value:'aperta' }, 'Aperta'),
     el('option', { value:'sospesa' }, 'Sospesa'),
     el('option', { value:'completata' }, 'Completata'),
-    el('option', { value:'consegnata' }, 'Consegnata'),
+    el('option', { value:'spedita' }, 'Spedita'),
   );
   selStato.value = o.stato || 'aperta';
 
@@ -5309,8 +5439,8 @@ function openOperazioneModal(o) {
       el('textarea', { name:'note', rows:'2' }, o.note||'')),
   );
 
-  // Sezione storico (solo se consegnata)
-  if (!isNew && o.stato === 'consegnata') {
+  // Sezione storico (solo se spedita)
+  if (!isNew && o.stato === 'spedita') {
     form.append(
       el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
         '── Dati consegna ──'),
@@ -5584,7 +5714,7 @@ function openOperazioneModal(o) {
         stato_preparazione: fd.get('stato_preparazione') || 'vuoto',
         note: (fd.get('note')||'').trim() || null,
       };
-      if (!isNew && o.stato === 'consegnata') {
+      if (!isNew && o.stato === 'spedita') {
         payload.consegnato_il = fd.get('consegnato_il') || null;
         payload.giustificazione_ritardo = (fd.get('giustificazione_ritardo')||'').trim() || null;
         payload.nc_post_consegna = (fd.get('nc_post_consegna')||'').trim() || null;
@@ -5648,7 +5778,7 @@ async function deleteOperazione(o) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// STORICO — operazioni consegnate, KPI puntualità
+// STORICO — operazioni spedite, KPI puntualità
 // ═══════════════════════════════════════════════════════════
 
 // Calcola giorni di ritardo tra scadenza e consegna (negativo = anticipo, 0 = in tempo, positivo = ritardo)
@@ -5667,8 +5797,8 @@ function renderStorico(root) {
   const filtroAddetto = state.stoAddetto || '';
   const filtroPunt = state.stoPunt || 'all';
 
-  // Solo consegnate
-  let list = state.operazioni.filter(o => o.stato === 'consegnata' && o.consegnato_il);
+  // Solo spedite
+  let list = state.operazioni.filter(o => o.stato === 'spedita' && o.consegnato_il);
 
   if (filtroMese) {
     list = list.filter(o => (o.consegnato_il||'').startsWith(filtroMese));
@@ -5714,7 +5844,7 @@ function renderStorico(root) {
   // KPI
   const kpiClass = percPunt >= 90 ? 'kg' : (percPunt >= 70 ? 'ky' : 'kr');
   root.append(el('div', { class:'kpis' },
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Consegnate'),       el('div', { class:'kv' }, String(tot))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Spedite'),       el('div', { class:'kv' }, String(tot))),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Puntualità'),       el('div', { class:'kv '+kpiClass }, percPunt+'%')),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'In ritardo'),       el('div', { class:'kv kr' }, String(inRitardo))),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Ritardo medio (gg)'), el('div', { class:'kv' }, ritardoMedio)),
@@ -5725,7 +5855,7 @@ function renderStorico(root) {
   // Filtri mese (chips dei mesi presenti)
   const mesiDist = new Set();
   state.operazioni.forEach(o => {
-    if (o.stato === 'consegnata' && o.consegnato_il)
+    if (o.stato === 'spedita' && o.consegnato_il)
       mesiDist.add(o.consegnato_il.substring(0,7));
   });
   const mesiArr = Array.from(mesiDist).sort().reverse();
@@ -5795,8 +5925,8 @@ function renderStorico(root) {
 
   if (list.length === 0) {
     root.append(el('div', { class:'empty' },
-      state.operazioni.filter(o => o.stato === 'consegnata').length === 0
-        ? 'Nessuna operazione consegnata. Le operazioni passano qui quando vengono marcate come "consegnata" nella Pianificazione.'
+      state.operazioni.filter(o => o.stato === 'spedita').length === 0
+        ? 'Nessuna operazione spedita. Le operazioni passano qui quando vengono marcate come "spedita" nella Pianificazione.'
         : 'Nessuna operazione corrisponde ai filtri.'
     ));
     return;
@@ -5850,7 +5980,7 @@ function renderStorico(root) {
       ? el('td', { style:'max-width:280px;font-size:10px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: noteText.join('\n') }, noteText.join(' · '))
       : el('td', {}, '');
 
-    tb.append(el('tr', { class:'consegnata' },
+    tb.append(el('tr', { class:'spedita' },
       el('td', { class:'mono', style:'color:var(--or);' }, o.numero_ordine || '—'),
       el('td', { class:'mono' }, o.numero_ordine || '—'),
       el('td', {}, cli?.nome || '—'),
@@ -5874,7 +6004,7 @@ function renderStorico(root) {
   root.append(tw);
 }
 
-// Bottone per riaprire un'operazione (consegnata → aperta, svuota i campi consegna)
+// Bottone per riaprire un'operazione (spedita → aperta, svuota i campi spedizione)
 async function riaperturaOperazione(o) {
   if (!confirm(`Riaprire l'operazione ${o.numero_ordine || ''}?\nVerranno azzerati: data consegna, giustificazione, NC, responsabilità.`)) return;
   const { data, error } = await sb.from('operazioni').update({
@@ -5890,12 +6020,12 @@ async function riaperturaOperazione(o) {
 }
 
 // Apri il quick-dialog di consegna da Pianificazione
-// Cambio stato rapido per le azioni reversibili (aperta ↔ sospesa, riapri da consegnata).
+// Cambio stato rapido per le azioni reversibili (aperta ↔ sospesa, riapri da spedita).
 // Click secco senza conferma: la commessa non viene "distrutta", il cambio è
 // sempre annullabile cliccando di nuovo. Per la consegna definitiva resta
-// quickConsegna() che chiede conferma e data, perché è un passaggio chiave.
+// quickSpedizione() che chiede conferma e data, perché è un passaggio chiave.
 async function quickStato(op, nuovoStato) {
-  if (!['aperta','sospesa','completata','consegnata'].includes(nuovoStato)) return;
+  if (!['aperta','sospesa','completata','spedita'].includes(nuovoStato)) return;
   try {
     const { data, error } = await eseguiConRetry(
       () => sb.from('operazioni').update({ stato: nuovoStato }).eq('id', op.id).select().single(),
@@ -5910,12 +6040,12 @@ async function quickStato(op, nuovoStato) {
   }
 }
 
-function quickConsegna(o) {
+function quickSpedizione(o) {
   const oggi = toLocalISO(new Date());
   const ritardo = o.scadenza && o.scadenza < oggi;
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
-    el('h2', {}, 'Segna come consegnata'),
+    el('h2', {}, 'Segna come spedita'),
     el('button', { class:'mclose', onclick:closeModal }, '✕'),
   ));
   const body = el('div', { class:'mbody' });
@@ -5956,7 +6086,7 @@ function quickConsegna(o) {
     btnOk.disabled = true; btnOk.textContent = 'Salvataggio…';
     try {
       const { data, error } = await sb.from('operazioni').update({
-        stato: 'consegnata',
+        stato: 'spedita',
         consegnato_il: fd.get('consegnato_il'),
         giustificazione_ritardo: (fd.get('giustificazione_ritardo')||'').trim() || null,
         nc_post_consegna: (fd.get('nc_post_consegna')||'').trim() || null,
@@ -5967,7 +6097,7 @@ function quickConsegna(o) {
         return toast(error.message, 'err');
       }
       state.operazioni = state.operazioni.map(x => x.id === o.id ? data : x);
-      toast('Operazione consegnata');
+      toast('Operazione spedita');
       closeModal(); renderTab(state.currentTab);
     } catch (e) {
       btnOk.disabled = false; btnOk.textContent = '✓ Conferma consegna';
@@ -5985,10 +6115,10 @@ function storicoExportExcel() {
     toast('Libreria Excel non caricata', 'err');
     return;
   }
-  const consegnate = state.operazioni.filter(o => o.stato === 'consegnata' && o.consegnato_il);
-  if (consegnate.length === 0) return toast('Nessuna consegna da esportare', 'err');
+  const spedite = state.operazioni.filter(o => o.stato === 'spedita' && o.consegnato_il);
+  if (spedite.length === 0) return toast('Nessuna spedsegna da esportare', 'err');
 
-  const rows = consegnate.map(o => {
+  const rows = spedite.map(o => {
     const cli = state.clienti.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
     const addettiNomi = getOperazioneAddetti(o.id)
@@ -6657,6 +6787,14 @@ const kioskState = {
 const KIOSK_INACTIVITY_MS = 30000;     // torna alla schermata 1 dopo 30s di inattività (mouse fermo, niente tasti)
 const KIOSK_DONE_MS = 2000;             // schermata conferma resta 2s
 
+// ── Pausa pranzo automatica ────────────────────────────────────────
+// Ogni sessione di lavoro iniziata prima delle 12:30 di un giorno viene
+// chiusa automaticamente con fine = 12:30 dello stesso giorno.
+// Il check viene fatto all'avvio del kiosk e ogni PAUSA_CHECK_MS.
+const PAUSA_PRANZO_ORA = 12;
+const PAUSA_PRANZO_MIN = 30;
+const PAUSA_CHECK_MS = 60 * 1000;  // controllo ogni minuto
+
 function setupKioskExitButton() {
   const btn = document.getElementById('kiosk-exit-btn');
   if (!btn) return;
@@ -6673,6 +6811,66 @@ function setupKioskExitButton() {
     };
   }
   // Altrimenti: lascia comportamento default (href="./" porta all'app)
+}
+
+// Chiude automaticamente le sessioni di lavoro per la pausa pranzo.
+// Logica: per ogni sessione aperta (fine = NULL), se è iniziata prima
+// delle 12:30 di un certo giorno *passato* (es. oggi alle 9, o ieri alle 11),
+// scrive fine = 12:30 di quel giorno.
+//
+// Funziona anche su sessioni rimaste aperte da giorni precedenti
+// (es. operatore che ha dimenticato di chiudere ieri sera).
+// È idempotente: se già chiuse, non trova nulla da fare.
+async function chiudiSessioniPausaPranzo() {
+  try {
+    // Leggo TUTTE le sessioni aperte (potrebbero essercene di giorni passati)
+    const { data: sessioniAperte, error: errLoad } = await sb
+      .from('sessioni_lavoro')
+      .select('id, inizio, utente_id, operazione_id')
+      .is('fine', null);
+    if (errLoad) throw errLoad;
+    if (!sessioniAperte || sessioniAperte.length === 0) return 0;
+
+    const adesso = new Date();
+    const updates = [];
+
+    for (const s of sessioniAperte) {
+      const inizio = new Date(s.inizio);
+      // Costruisco "le 12:30 dello stesso giorno dell'inizio sessione"
+      const pausaQuelGiorno = new Date(
+        inizio.getFullYear(), inizio.getMonth(), inizio.getDate(),
+        PAUSA_PRANZO_ORA, PAUSA_PRANZO_MIN, 0, 0
+      );
+      // Condizioni per chiudere:
+      // 1. La sessione è iniziata PRIMA delle 12:30 di quel giorno
+      // 2. Le 12:30 di quel giorno sono già passate (rispetto ad adesso)
+      if (inizio < pausaQuelGiorno && pausaQuelGiorno <= adesso) {
+        updates.push({ id: s.id, fine: pausaQuelGiorno.toISOString() });
+      }
+    }
+
+    if (updates.length === 0) return 0;
+
+    // Eseguo gli update uno per uno (sono pochi, non vale la pena un batch raffinato)
+    let chiuse = 0;
+    for (const u of updates) {
+      const { error } = await sb
+        .from('sessioni_lavoro')
+        .update({ fine: u.fine })
+        .eq('id', u.id)
+        .is('fine', null);  // doppia sicurezza: non sovrascrive se già chiusa
+      if (!error) chiuse++;
+    }
+
+    if (chiuse > 0) {
+      console.log(`[pausa pranzo] chiuse ${chiuse} sessioni automaticamente`);
+    }
+    return chiuse;
+  } catch (e) {
+    // Non bloccante: se fallisce, riproveremo al prossimo check
+    console.warn('[pausa pranzo] errore:', e.message || e);
+    return 0;
+  }
 }
 
 async function kioskInit() {
@@ -6733,6 +6931,10 @@ async function kioskInit() {
     }
   }, 1000);
 
+  // Pausa pranzo automatica: check iniziale + ricorrente ogni minuto
+  chiudiSessioniPausaPranzo();
+  setInterval(chiudiSessioniPausaPranzo, PAUSA_CHECK_MS);
+
   kioskGoToId();
 }
 
@@ -6754,7 +6956,7 @@ async function kioskLoadAll() {
     sb.from('clienti').select('*').eq('attivo', true).order('nome'),
     sb.from('articoli').select('*').eq('attivo', true).order('codice'),
     sb.from('tipi_lavorazione').select('*').eq('attivo', true).order('ordine'),
-    sb.from('operazioni').select('*').neq('stato', 'consegnata').neq('stato', 'completata').order('scadenza'),
+    sb.from('operazioni').select('*').neq('stato', 'spedita').neq('stato', 'completata').order('scadenza'),
     sb.from('sessioni_lavoro').select('*').is('fine', null),
     sb.from('operazioni_addetti').select('*'),
   ]);
@@ -7197,12 +7399,12 @@ function kioskRenderOpList() {
   const root = $('#kiosk-op-list-content');
   root.innerHTML = '';
 
-  // Operazioni aperte = non consegnate e non completate
+  // Operazioni aperte = non spedite e non completate
   // (al kiosk si timbra solo su quelle ancora in lavorazione).
   // Ordinamento: scadenza crescente (le più urgenti in cima),
   // commesse senza scadenza in fondo
   const aperte = state.operazioni
-    .filter(o => o.stato !== 'consegnata' && o.stato !== 'completata')
+    .filter(o => o.stato !== 'spedita' && o.stato !== 'completata')
     .slice()
     .sort((a, b) => {
       if (!a.scadenza && !b.scadenza) return 0;
