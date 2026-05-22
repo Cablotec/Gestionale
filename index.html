@@ -4790,10 +4790,11 @@ function renderPianificazione(root) {
   const filter = state.opFilter || 'aperte';
 
   let list = state.operazioni.slice();
+  // Le commesse 'spedita' sono nello Storico — non si vedono nella Pianificazione
+  list = list.filter(o => o.stato !== 'spedita');
   if (filter === 'aperte')     list = list.filter(o => o.stato === 'aperta');
   else if (filter === 'sospese')    list = list.filter(o => o.stato === 'sospesa');
   else if (filter === 'completate') list = list.filter(o => o.stato === 'completata');
-  else if (filter === 'spedite') list = list.filter(o => o.stato === 'spedita');
 
   if (search) {
     list = list.filter(o => {
@@ -4851,7 +4852,6 @@ function renderPianificazione(root) {
     { id:'aperte',     label:'Aperte' },
     { id:'sospese',    label:'Sospese' },
     { id:'completate', label:'Completate' },
-    { id:'spedite', label:'Spedite' },
   ].forEach(opt => {
     chips.append(el('div', {
       class: 'chip' + (filter === opt.id ? ' act' : ''),
@@ -5024,7 +5024,6 @@ function renderPianificazione(root) {
         el('option', { value:'aperta' }, 'Aperta'),
         el('option', { value:'sospesa' }, 'Sospesa'),
         el('option', { value:'completata' }, 'Completata'),
-        el('option', { value:'spedita' }, 'Spedita'),
       );
       sel.value = o.stato; // imposto il valore corrente in modo affidabile
       statoCell.append(sel);
@@ -6183,7 +6182,10 @@ async function toggleRuolo(u) {
 
 function openModal(content) {
   closeModal();
-  const bg = el('div', { class:'modal-bg', onclick:(e)=>{ if(e.target===bg) closeModal(); } });
+  // I modal si chiudono solo dal tasto Chiudi/✕ (e da Esc, vedi sotto).
+  // Niente "click fuori = chiudi": un click sbagliato durante la compilazione
+  // di un modal lungo (es. Nuova Operazione) costava troppo.
+  const bg = el('div', { class:'modal-bg' });
   bg.append(content);
   $('#modal-root').append(bg);
 }
