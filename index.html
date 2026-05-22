@@ -834,6 +834,7 @@ const state = {
   chiusure: [],            // chiusure aziendali (festivi non nazionali)
   operazioni: [],          // operazioni di pianificazione
   opFilter: 'aperte',      // 'all' | 'aperte' | 'sospese' | 'spedite'
+  opCliente: '',           // id cliente per filtro, '' = tutti
   opSearch: '',
   opSortKey: 'scadenza',
   opSortDir: 'asc',
@@ -4796,6 +4797,11 @@ function renderPianificazione(root) {
   else if (filter === 'sospese')    list = list.filter(o => o.stato === 'sospesa');
   else if (filter === 'completate') list = list.filter(o => o.stato === 'completata');
 
+  // Filtro per cliente (se selezionato)
+  if (state.opCliente) {
+    list = list.filter(o => o.cliente_id === state.opCliente);
+  }
+
   if (search) {
     list = list.filter(o => {
       const cli = state.clienti.find(c => c.id === o.cliente_id);
@@ -4820,6 +4826,15 @@ function renderPianificazione(root) {
     } else if (sortKey === 'articolo') {
       av = (state.articoli.find(c => c.id === a.articolo_id)?.codice || '');
       bv = (state.articoli.find(c => c.id === b.articolo_id)?.codice || '');
+    } else if (sortKey === 'inizio') {
+      // Ordina per data inizio effettiva (manuale se presente, altrimenti calcolata)
+      av = opInizio(a) || '';
+      bv = opInizio(b) || '';
+    } else if (sortKey === 'prep') {
+      // Ordino su un valore numerico così "completo" > "parziale" > "vuoto"
+      const rank = { completo: 3, parziale: 2, vuoto: 1 };
+      av = rank[a.stato_preparazione] || 0;
+      bv = rank[b.stato_preparazione] || 0;
     } else {
       av = a[sortKey] || '';
       bv = b[sortKey] || '';
@@ -4871,9 +4886,21 @@ function renderPianificazione(root) {
       renderTab('pianificazione');
     }
   });
+  // Filtro per cliente: tendina con tutti i clienti, "Tutti" come default
+  const selCliFiltro = el('select', {
+    class: 'search', style: 'width:auto;cursor:pointer;',
+    onchange: (e) => { state.opCliente = e.target.value; renderTab('pianificazione'); },
+  },
+    el('option', { value:'' }, '— Tutti i clienti —'),
+    ...state.clienti.slice().sort((a,b)=>a.nome.localeCompare(b.nome))
+      .map(c => el('option', { value: c.id }, c.nome))
+  );
+  selCliFiltro.value = state.opCliente || '';
+
   const toolbar = el('div', { class:'toolbar' },
     el('h2', {}, 'Pianificazione'),
     inputSearch,
+    selCliFiltro,
   );
   if (isAdmin) {
     toolbar.append(el('button', { class:'btnp', onclick:()=>openOperazioneModal() }, '+ Nuova Operazione'));
@@ -4928,8 +4955,9 @@ function renderPianificazione(root) {
     el('th', {}, 'Descrizione'),
     sortHead('quantita',        'Qtà', {tr:true}),
     sortHead('scadenza',        'Scadenza'),
-    el('th', {}, 'Inizio'),
+    sortHead('inizio',          'Inizio'),
     el('th', {}, 'Note'),
+    sortHead('prep',            'Prep. materiale', {tc:true}),
     sortHead('stato',           'Stato', {tc:true}),
     el('th', { class:'tc' }, 'Azioni'),
   )));
@@ -4999,6 +5027,46 @@ function renderPianificazione(root) {
       style: 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
       title: o.note || '',
     }, o.note || '—'));
+
+    // Prep. materiale — menu a tendina inline per gli admin, badge in sola lettura per gli utenti
+    const prepCell = el('td', { class:'tc' });
+    if (isAdmin) {
+      const prepSel = el('select', {
+        class: 'prep-select',
+        style: 'font-size:11px;padding:3px 6px;border-radius:3px;cursor:pointer;font-family:inherit;background:var(--sur);border:1px solid var(--brd);color:var(--txt);',
+        onclick: (e) => e.stopPropagation(),
+        onchange: async (e) => {
+          e.stopPropagation();
+          const nuovo = e.target.value;
+          if (nuovo === (o.stato_preparazione||'vuoto')) return;
+          try {
+            const { data, error } = await eseguiConRetry(
+              () => sb.from('operazioni').update({ stato_preparazione: nuovo }).eq('id', o.id).select().single(),
+              { label: 'cambia prep materiale' }
+            );
+            if (error) throw error;
+            Object.assign(o, data);
+            toast('Preparazione materiale aggiornata', 'ok');
+          } catch (err) {
+            toast('Errore: ' + (err.message || err), 'err');
+            e.target.value = o.stato_preparazione || 'vuoto';
+          }
+        },
+      },
+        el('option', { value:'vuoto' }, 'Vuoto'),
+        el('option', { value:'parziale' }, 'Parziale'),
+        el('option', { value:'completo' }, 'Completo'),
+      );
+      prepSel.value = o.stato_preparazione || 'vuoto';
+      prepCell.append(prepSel);
+    } else {
+      const prepClass = OP_PREP[o.stato_preparazione]?.classe || 'vuoto';
+      prepCell.append(el('span', { style:'font-size:11px;' },
+        el('span', { class:'prep-dot ' + prepClass }),
+        ' ' + (OP_PREP[o.stato_preparazione]?.label || '—')
+      ));
+    }
+    tr.append(prepCell);
 
     // Stato — menu a tendina (cambio immediato) per gli admin, badge in sola lettura per gli utenti
     const statoCell = el('td', { class:'tc' });
@@ -5432,7 +5500,7 @@ function openOperazioneModal(o) {
         'Puoi assegnare più persone. Il lavoro verrà ripartito tra loro.')),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Stato'), selStato),
-      el('div', { class:'field' }, el('label', {}, 'Preparazione'), selPrep),
+      el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
     ),
     el('div', { class:'field' }, el('label', {}, 'Note'),
       el('textarea', { name:'note', rows:'2' }, o.note||'')),
@@ -5935,16 +6003,17 @@ function renderStorico(root) {
   const tw = el('div', { class:'tw' });
   const tbl = el('table', { class:'rt op-table' });
   tbl.append(el('thead', {}, el('tr', {},
-    el('th', {}, 'OP'),
     el('th', {}, 'Ordine'),
     el('th', {}, 'Cliente'),
     el('th', {}, 'Codice Art.'),
+    el('th', {}, 'Descrizione'),
     el('th', { class:'tr' }, 'Qtà'),
+    el('th', {}, 'Note'),
     el('th', {}, 'Addetto'),
     el('th', {}, 'Scadenza'),
     el('th', {}, 'Consegnato'),
     el('th', { class:'tc' }, 'Esito'),
-    el('th', {}, 'Note / NC'),
+    el('th', {}, 'Note consegna / NC'),
     el('th', { class:'tc' }, 'Azioni'),
   )));
   const tb = el('tbody');
@@ -5980,11 +6049,18 @@ function renderStorico(root) {
       : el('td', {}, '');
 
     tb.append(el('tr', { class:'spedita' },
-      el('td', { class:'mono', style:'color:var(--or);' }, o.numero_ordine || '—'),
       el('td', { class:'mono' }, o.numero_ordine || '—'),
       el('td', {}, cli?.nome || '—'),
       el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
+      el('td', {
+        style:'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
+        title: art?.descrizione || '',
+      }, art?.descrizione || '—'),
       el('td', { class:'tr mono' }, String(o.quantita || 0)),
+      el('td', {
+        style:'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
+        title: o.note || '',
+      }, o.note || '—'),
       el('td', {}, addettiLbl),
       el('td', { class:'mono' }, o.scadenza ? fmtIT(o.scadenza) : '—'),
       el('td', { class:'mono' }, fmtIT(o.consegnato_il)),
