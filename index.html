@@ -730,7 +730,7 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
 <div id="kiosk-screen" style="display:none">
   <div class="kiosk-header">
     <div>
-      <div class="kiosk-title">Check-out <span>Mezzi</span></div>
+      <div class="kiosk-title">Cablotec <span>Operatori</span></div>
       <div class="kiosk-sede" id="kiosk-sede-lbl"></div>
     </div>
     <div class="kiosk-header-right">
@@ -822,6 +822,7 @@ const state = {
   utenti: [], utentiById: {},
   prenotazioni: [],
   consegne: [],            // tutte le consegne in memoria
+  consegneCommessa: [],    // consegne parziali di commesse (tabella consegne_commessa)
   prenOp: [],            // pivot prenotazione_id ↔ utente_id
   usiMezzo: [],            // tutti gli usi mezzo (aperti e chiusi)
   clienti: [],             // anagrafica clienti
@@ -1524,7 +1525,7 @@ document.addEventListener('change', (e) => {
 // Avere un solo handler evita race condition tra ricreazione client e refresh.
 
 async function loadAllData() {
-  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti, impostazioni] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti, impostazioni, consegneCommessa] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('utenti').select('*').order('nome'),
@@ -1542,6 +1543,7 @@ async function loadAllData() {
     sb.from('assenze').select('*').order('data', { ascending:false }),
     sb.from('operazioni_addetti').select('*'),
     sb.from('impostazioni').select('*'),
+    sb.from('consegne_commessa').select('*').order('data', { ascending:false }),
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
@@ -1560,6 +1562,7 @@ async function loadAllData() {
   if (assenze.error) throw assenze.error;
   if (opAddetti.error) throw opAddetti.error;
   if (impostazioni.error) throw impostazioni.error;
+  if (consegneCommessa.error) throw consegneCommessa.error;
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
@@ -1580,6 +1583,7 @@ async function loadAllData() {
   state.opAddetti = opAddetti.data || [];
   // Impostazioni: oggetto chiave→valore, comodo da consultare
   state.impostazioni = Object.fromEntries((impostazioni.data||[]).map(r=>[r.chiave, r.valore]));
+  state.consegneCommessa = consegneCommessa.data || [];
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -1618,6 +1622,8 @@ function startRealtime() {
         (p) => applyChange('assenze', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'operazioni_addetti' },
         (p) => applyChange('operazioni_addetti', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'consegne_commessa' },
+        (p) => applyChange('consegne_commessa', p))
     .subscribe();
 }
 
@@ -1744,6 +1750,14 @@ function applyChange(tabella, payload) {
       state.opAddetti = state.opAddetti.filter(x => !matchKey(x, oldRow));
     }
     // UPDATE non dovrebbe mai succedere su una tabella ponte pura
+  } else if (tabella === 'consegne_commessa') {
+    if (ev === 'INSERT') {
+      if (!state.consegneCommessa.find(x => x.id === row.id)) state.consegneCommessa.push(row);
+    } else if (ev === 'UPDATE') {
+      state.consegneCommessa = state.consegneCommessa.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.consegneCommessa = state.consegneCommessa.filter(x => x.id !== oldRow.id);
+    }
   }
 
   // Re-render solo la tab attiva
@@ -1758,6 +1772,30 @@ function loadPrenotazioneOperatori(prenId) {
 // Restituisce gli id degli addetti previsti di un'operazione (dalla cache, sync)
 function getOperazioneAddetti(opId) {
   return state.opAddetti.filter(r => r.operazione_id === opId).map(r => r.utente_id);
+}
+
+// ============================================================
+// CONSEGNE PARZIALI — helper di lettura (cache sync)
+// ============================================================
+// Le consegne parziali sono righe in `consegne_commessa` collegate a un'operazione.
+// Una commessa può essere consegnata in più tranche; la somma delle quantità
+// consegnate va confrontata con `operazioni.quantita` per sapere quanto resta.
+// Tutte le funzioni qui sono pure e leggono solo dalla cache in memoria.
+
+function consegneDiOperazione(opId) {
+  return (state.consegneCommessa || [])
+    .filter(c => c.operazione_id === opId)
+    .sort((a, b) => (a.data || '').localeCompare(b.data || ''));
+}
+
+function quantitaConsegnata(opId) {
+  return consegneDiOperazione(opId)
+    .reduce((sum, c) => sum + Number(c.quantita || 0), 0);
+}
+
+function quantitaResidua(op) {
+  if (!op) return 0;
+  return Number(op.quantita || 0) - quantitaConsegnata(op.id);
 }
 
 // Sincronizza gli addetti previsti di un'operazione: diff tra vecchi e nuovi
@@ -5743,6 +5781,195 @@ function openOperazioneModal(o) {
     }
   }
 
+  // ─── Sezione: consegne parziali ───
+  // Visibile solo per operazioni esistenti (non in creazione).
+  // Mostra storico consegne, residuo, e (per admin) form di registrazione.
+  // Validazioni: data obbligatoria, quantità > 0, quantità <= residuo.
+  // Al raggiungimento del 100% propone di marcare la commessa come 'completata'.
+  if (!isNew) {
+    form.append(
+      el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+        '── Consegne ──'),
+    );
+
+    // Container che ri-renderizza solo la sezione consegne dopo ogni operazione
+    // (insert/delete), senza ricostruire l'intero modal.
+    const consegneBox = el('div');
+    form.append(consegneBox);
+
+    const renderConsegne = () => {
+      consegneBox.innerHTML = '';
+      const cons = consegneDiOperazione(o.id);
+      const tot = quantitaConsegnata(o.id);
+      const qtaOrd = Number(o.quantita || 0);
+      const residuo = qtaOrd - tot;
+      const completo = qtaOrd > 0 && tot >= qtaOrd;
+      const perc = qtaOrd > 0 ? Math.round((tot / qtaOrd) * 100) : 0;
+
+      // Riepilogo (stesso stile delle sessioni di lavoro)
+      consegneBox.append(el('div', {
+        style: 'background:var(--sur2);border:1px solid '+(completo?'var(--grn)':'var(--brd)')+';border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;',
+      },
+        el('div', { style:'display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;' },
+          el('div', {},
+            el('span', { style:'color:var(--mut)' }, 'Ordinata: '),
+            el('span', { style:'color:var(--txt);font-weight:600;' }, qtaOrd + ' pz')),
+          el('div', {},
+            el('span', { style:'color:var(--mut)' }, 'Consegnata: '),
+            el('span', { style:'color:'+(completo?'var(--grn)':'var(--txt)')+';font-weight:600;' }, tot + ' pz')),
+          el('div', {},
+            el('span', { style:'color:var(--mut)' }, 'Residua: '),
+            el('span', { style:'color:'+(residuo<=0?'var(--grn)':'var(--txt)')+';font-weight:600;' }, Math.max(0, residuo) + ' pz')),
+          el('div', {},
+            el('span', { style:'color:var(--mut)' }, 'Avanzamento: '),
+            el('span', { style:'color:'+(completo?'var(--grn)':'var(--txt)')+';font-weight:700;' }, perc + '%')),
+        ),
+      ));
+
+      // Lista consegne registrate
+      if (cons.length === 0) {
+        consegneBox.append(el('div', { style:'color:var(--mut);font-size:11px;padding:6px 0 10px;' },
+          'Nessuna consegna registrata.'));
+      } else {
+        const consList = el('div', { style:'max-height:180px;overflow-y:auto;font-family:monospace;font-size:11px;margin-bottom:10px;' });
+        cons.forEach(c => {
+          const row = el('div', {
+            style: 'display:grid;grid-template-columns:90px 70px 1fr 1fr auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--brd);',
+          },
+            el('div', { style:'color:var(--txt);' }, fmtIT(c.data)),
+            el('div', { style:'color:var(--txt);font-weight:600;text-align:right;' }, c.quantita + ' pz'),
+            el('div', { style:'color:var(--mut);' }, c.ddt ? ('DDT ' + c.ddt) : '—'),
+            el('div', { style:'color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: c.nota || '' }, c.nota || '—'),
+            isAdmin ? el('button', {
+              type:'button',
+              style:'background:transparent;border:1px solid var(--brd);color:var(--mut);padding:2px 8px;font-size:11px;cursor:pointer;border-radius:3px;',
+              title:'Elimina questa consegna',
+              onclick: async () => {
+                if (!confirm(`Eliminare la consegna del ${fmtIT(c.data)} (${c.quantita} pz)?`)) return;
+                const { error } = await sb.from('consegne_commessa').delete().eq('id', c.id);
+                if (error) return toast('Errore eliminazione: '+error.message, 'err');
+                state.consegneCommessa = state.consegneCommessa.filter(x => x.id !== c.id);
+                toast('Consegna eliminata');
+                renderConsegne();
+              },
+            }, '✕') : el('span'),
+          );
+          consList.append(row);
+        });
+        consegneBox.append(consList);
+      }
+
+      // Form di registrazione nuova consegna (solo admin, solo se c'è ancora residuo)
+      if (isAdmin && residuo > 0) {
+        const dataInput = el('input', {
+          type:'date',
+          value: toLocalISO(new Date()),
+          style:'width:100%;',
+        });
+        const qtaInput = el('input', {
+          type:'number',
+          min:'1',
+          max: String(residuo),
+          step:'1',
+          value: String(residuo),
+          style:'width:100%;',
+        });
+        const ddtInput = el('input', {
+          type:'text',
+          placeholder:'opzionale',
+          style:'width:100%;',
+        });
+        const notaInput = el('input', {
+          type:'text',
+          placeholder:'opzionale',
+          style:'width:100%;',
+        });
+        const btnAdd = el('button', {
+          type:'button',
+          class:'btnp',
+          style:'white-space:nowrap;',
+        }, '+ Registra');
+
+        btnAdd.onclick = async () => {
+          const data = dataInput.value;
+          const qta = parseInt(qtaInput.value, 10);
+          const ddt = (ddtInput.value || '').trim();
+          const nota = (notaInput.value || '').trim();
+
+          if (!data) return toast('Data obbligatoria', 'err');
+          if (!Number.isFinite(qta) || qta <= 0) return toast('Quantità deve essere > 0', 'err');
+          // Ricalcolo il residuo qui per evitare race condition (qualcuno potrebbe
+          // aver registrato una consegna in parallelo via realtime).
+          const residuoOra = qtaOrd - quantitaConsegnata(o.id);
+          if (qta > residuoOra) {
+            return toast(`Residuo: ${residuoOra} pz. Non puoi consegnare ${qta} pz.`, 'err');
+          }
+
+          btnAdd.disabled = true; btnAdd.textContent = 'Salvataggio…';
+          const payload = {
+            operazione_id: o.id,
+            data,
+            quantita: qta,
+            ddt: ddt || null,
+            nota: nota || null,
+            creato_da: state.profile?.id || null,
+          };
+          const { data: nuova, error } = await sb.from('consegne_commessa')
+            .insert(payload).select().single();
+          btnAdd.disabled = false; btnAdd.textContent = '+ Registra';
+          if (error) return toast('Errore registrazione: '+error.message, 'err');
+
+          // Aggiorno la cache locale subito (il realtime arriverà comunque)
+          if (!state.consegneCommessa.find(x => x.id === nuova.id)) {
+            state.consegneCommessa.push(nuova);
+          }
+          toast('Consegna registrata');
+
+          // Auto-suggerimento: se ora siamo al 100%, proponi 'completata'
+          const nuovoTot = quantitaConsegnata(o.id);
+          const raggiuntoOra = nuovoTot >= qtaOrd && (tot < qtaOrd);
+          // Solo se la commessa non è già completata/spedita
+          const statoCorrente = (form.querySelector('[name="stato"]')?.value) || o.stato;
+          const giaFinita = (statoCorrente === 'completata' || statoCorrente === 'spedita');
+          if (raggiuntoOra && !giaFinita) {
+            const ok = confirm(
+              `Tutto il materiale è stato consegnato (${nuovoTot} / ${qtaOrd} pz).\n\n` +
+              `Vuoi marcare la commessa come COMPLETATA?\n\n` +
+              `(Ricordati poi di salvare il modal per confermare il cambio di stato.)`
+            );
+            if (ok) {
+              const sel = form.querySelector('[name="stato"]');
+              if (sel) {
+                sel.value = 'completata';
+                // Notifico eventuali listener che lo stato è cambiato
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+            }
+          }
+
+          renderConsegne();
+        };
+
+        const formCons = el('div', {
+          style:'background:var(--sur);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;display:grid;grid-template-columns:130px 100px 1fr 1fr auto;gap:8px;align-items:end;',
+        },
+          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Data'), dataInput),
+          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Quantità'), qtaInput),
+          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'DDT/Bolla'), ddtInput),
+          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Nota'), notaInput),
+          btnAdd,
+        );
+        consegneBox.append(formCons);
+      } else if (isAdmin && residuo <= 0) {
+        consegneBox.append(el('div', {
+          style:'color:var(--grn);font-size:11px;padding:6px 0;font-weight:600;',
+        }, '✓ Tutto il materiale è stato consegnato.'));
+      }
+    };
+
+    renderConsegne();
+  }
+
   // Preview calcoli
   const previewBox = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;margin-top:12px;font-family:monospace;font-size:11px;color:var(--mut);' });
 
@@ -7181,8 +7408,9 @@ function kioskUpdateClock() {
 async function kioskLoadAll() {
   // Carica mezzi, operatori, usi aperti, prenotazioni di oggi
   // + clienti, articoli, tipi_lav, operazioni, sessioni per il flusso commesse
+  // + assenze del giorno e tipi_assenza per mostrare ferie/permessi nelle card
   const oggi = toLocalISO(new Date());
-  const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti] = await Promise.all([
+  const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti, assenze, tipiAss] = await Promise.all([
     sb.from('mezzi').select('*').eq('attivo', true).order('nome'),
     sb.from('utenti').select('*').eq('attivo', true).order('nome'),
     sb.from('usi_mezzo').select('*').is('data_rientro', null),
@@ -7193,6 +7421,8 @@ async function kioskLoadAll() {
     sb.from('operazioni').select('*').neq('stato', 'spedita').neq('stato', 'completata').order('scadenza'),
     sb.from('sessioni_lavoro').select('*').is('fine', null),
     sb.from('operazioni_addetti').select('*'),
+    sb.from('assenze').select('*').eq('data', oggi).eq('stato', 'valida'),
+    sb.from('tipi_assenza').select('*'),
   ]);
   state.mezzi = mezzi.data || [];
   state.utenti = util.data || [];
@@ -7205,6 +7435,8 @@ async function kioskLoadAll() {
   state.operazioni = operazioni.data || [];
   state.sessioni = sessioni.data || [];
   state.opAddetti = opAddetti.data || [];
+  state.assenze = assenze.data || [];
+  state.tipiAssenza = tipiAss.data || [];
   // Log diagnostico (visibile in console)
   console.log('[KIOSK] Loaded:', {
     mezzi: state.mezzi.length,
@@ -7215,6 +7447,7 @@ async function kioskLoadAll() {
     operazioni: state.operazioni.length,
     opAddetti: state.opAddetti.length,
     sessioni_aperte: state.sessioni.length,
+    assenze_oggi: state.assenze.length,
   });
   // Log errori se ci sono
   [['mezzi',mezzi],['operatori',util],['usi',usi],['pren',pren],
