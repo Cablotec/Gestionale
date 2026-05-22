@@ -834,7 +834,9 @@ const state = {
   chiusure: [],            // chiusure aziendali (festivi non nazionali)
   operazioni: [],          // operazioni di pianificazione
   opFilter: 'aperte',      // 'all' | 'aperte' | 'sospese' | 'spedite'
-  opCliente: '',           // id cliente per filtro, '' = tutti
+  // Set degli ID cliente da NASCONDERE nella Pianificazione (filtro stile Excel)
+  // Si carica/salva da localStorage all'avvio della pagina.
+  opClientiEsclusi: new Set(),
   opSearch: '',
   opSortKey: 'scadenza',
   opSortDir: 'asc',
@@ -1241,6 +1243,28 @@ function getImpostazioneInt(chiave, defaultVal) {
   return Number.isFinite(n) ? n : defaultVal;
 }
 
+// ── Persistenza filtro clienti (Pianificazione) ──────────────
+// Salva/carica l'insieme di clienti ESCLUSI in localStorage.
+// Chiave: 'cablotec.opClientiEsclusi.v1' (la v1 ci serve se un giorno cambiamo formato)
+const LS_CLIENTI_ESCLUSI = 'cablotec.opClientiEsclusi.v1';
+function caricaFiltroClienti() {
+  try {
+    const raw = localStorage.getItem(LS_CLIENTI_ESCLUSI);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr) : new Set();
+  } catch (e) {
+    return new Set();
+  }
+}
+function salvaFiltroClienti(set) {
+  try {
+    localStorage.setItem(LS_CLIENTI_ESCLUSI, JSON.stringify([...set]));
+  } catch (e) {
+    console.warn('Impossibile salvare filtro clienti:', e);
+  }
+}
+
 // ── Finestre di apertura assenze ─────────────────────────────
 // Ogni finestra ha 4 date in formato 'gg-mm' (giorno-mese, ricorrenti
 // ogni anno): apertura_da/a = quando l'utente può inserire,
@@ -1459,6 +1483,9 @@ async function afterLogin() {
   $('#area-gestione').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#kiosk-jump').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   applyTheme(localStorage.getItem('theme') || 'dark');
+
+  // Carica filtri persistenti
+  state.opClientiEsclusi = caricaFiltroClienti();
 
   bindTabs();
 
@@ -4785,6 +4812,125 @@ function renderMagazzino(root) {
   root.append(tbl);
 }
 
+// Popup filtro clienti stile Excel: lista a checkbox di tutti i clienti che
+// hanno almeno una commessa, ricerca, e pulsanti "tutti/nessuno".
+// Salvataggio immediato nello state + localStorage, ridisegno della tabella.
+function openFiltroClientiPopup(anchorBtn) {
+  // Solo i clienti che hanno commesse — non ha senso filtrare clienti senza ordini
+  const clientiConCommesse = new Set(state.operazioni.map(o => o.cliente_id).filter(Boolean));
+  const clientiLista = state.clienti
+    .filter(c => clientiConCommesse.has(c.id))
+    .slice()
+    .sort((a, b) => a.nome.localeCompare(b.nome));
+
+  // Chiudi popup esistenti
+  document.querySelectorAll('.filtro-cli-popup').forEach(p => p.remove());
+
+  const popup = el('div', { class: 'filtro-cli-popup' });
+
+  // Posiziono il popup sotto al pulsante che l'ha aperto
+  const rect = anchorBtn.getBoundingClientRect();
+  popup.style.cssText = `
+    position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;
+    background:var(--sur);border:1px solid var(--brd);border-radius:6px;
+    box-shadow:0 8px 20px rgba(0,0,0,.4);padding:12px;
+    width:320px;max-height:480px;display:flex;flex-direction:column;gap:10px;
+    z-index:500;font-family:inherit;
+  `;
+
+  // Intestazione + ricerca
+  popup.append(el('div', { style:'font-size:11px;color:var(--mut);font-family:"DM Mono",monospace;' },
+    'Spunta i clienti da mostrare. Deseleziona quelli da nascondere.'));
+
+  const inputRicerca = el('input', {
+    type:'text', placeholder:'Cerca cliente…',
+    style:'width:100%;background:var(--sur2);border:1px solid var(--brd);color:var(--txt);padding:6px 10px;border-radius:3px;font-family:inherit;font-size:12px;outline:none;',
+  });
+
+  // Pulsanti rapidi tutti/nessuno
+  const btnTutti = el('button', { class:'btnsm', style:'flex:1;' }, 'Tutti');
+  const btnNessuno = el('button', { class:'btnsm', style:'flex:1;' }, 'Nessuno');
+  const rowAzioni = el('div', { style:'display:flex;gap:6px;' }, btnTutti, btnNessuno);
+
+  // Lista checkbox scrollabile
+  const listaCnt = el('div', {
+    style:'flex:1;overflow-y:auto;border:1px solid var(--brd);border-radius:3px;padding:4px;background:var(--sur2);',
+  });
+
+  // Funzione che ridisegna la lista (richiamata al digitare nella ricerca)
+  const ridisegnaLista = () => {
+    const q = (inputRicerca.value || '').toLowerCase();
+    listaCnt.innerHTML = '';
+    const filtrati = q
+      ? clientiLista.filter(c => c.nome.toLowerCase().includes(q))
+      : clientiLista;
+    if (filtrati.length === 0) {
+      listaCnt.append(el('div', { style:'padding:12px;text-align:center;color:var(--mut);font-size:11px;' },
+        'Nessun cliente trovato.'));
+      return;
+    }
+    filtrati.forEach(c => {
+      const inclusoOra = !state.opClientiEsclusi.has(c.id);
+      const lbl = el('label', {
+        style:'display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;border-radius:3px;font-size:12px;user-select:none;',
+        onmouseover: e => e.currentTarget.style.background = 'var(--sur)',
+        onmouseout: e => e.currentTarget.style.background = 'transparent',
+      });
+      const cb = el('input', {
+        type:'checkbox',
+        checked: inclusoOra ? 'true' : null,
+        onchange: e => {
+          if (e.target.checked) state.opClientiEsclusi.delete(c.id);
+          else state.opClientiEsclusi.add(c.id);
+          salvaFiltroClienti(state.opClientiEsclusi);
+          // Ridisegno la tabella della pianificazione (senza chiudere il popup)
+          renderTab('pianificazione');
+          // Riapro il popup riposizionato — perché renderTab ha sostituito il pulsante
+          const btnNuovo = document.querySelector('.toolbar button[title^="Filtro"], .toolbar button[title^="Filtra"]');
+          if (btnNuovo) openFiltroClientiPopup(btnNuovo);
+        },
+      });
+      // Imposto checked nativamente dopo (più affidabile)
+      cb.checked = inclusoOra;
+      lbl.append(cb, el('span', {}, c.nome));
+      listaCnt.append(lbl);
+    });
+  };
+
+  inputRicerca.oninput = ridisegnaLista;
+
+  btnTutti.onclick = () => {
+    state.opClientiEsclusi.clear();
+    salvaFiltroClienti(state.opClientiEsclusi);
+    renderTab('pianificazione');
+    const btnNuovo = document.querySelector('.toolbar button[title^="Filtro"], .toolbar button[title^="Filtra"]');
+    if (btnNuovo) openFiltroClientiPopup(btnNuovo);
+  };
+  btnNessuno.onclick = () => {
+    clientiLista.forEach(c => state.opClientiEsclusi.add(c.id));
+    salvaFiltroClienti(state.opClientiEsclusi);
+    renderTab('pianificazione');
+    const btnNuovo = document.querySelector('.toolbar button[title^="Filtro"], .toolbar button[title^="Filtra"]');
+    if (btnNuovo) openFiltroClientiPopup(btnNuovo);
+  };
+
+  popup.append(inputRicerca, rowAzioni, listaCnt);
+  document.body.append(popup);
+  ridisegnaLista();
+  inputRicerca.focus();
+
+  // Chiusura: clic fuori dal popup
+  setTimeout(() => {  // setTimeout per non beccare il clic che ha aperto il popup
+    const closeOnOutside = (e) => {
+      if (!popup.contains(e.target)) {
+        popup.remove();
+        document.removeEventListener('mousedown', closeOnOutside);
+      }
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+  }, 0);
+}
+
 function renderPianificazione(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.opSearch || '').toLowerCase();
@@ -4797,9 +4943,9 @@ function renderPianificazione(root) {
   else if (filter === 'sospese')    list = list.filter(o => o.stato === 'sospesa');
   else if (filter === 'completate') list = list.filter(o => o.stato === 'completata');
 
-  // Filtro per cliente (se selezionato)
-  if (state.opCliente) {
-    list = list.filter(o => o.cliente_id === state.opCliente);
+  // Filtro clienti esclusi (stile Excel multi-select)
+  if (state.opClientiEsclusi && state.opClientiEsclusi.size > 0) {
+    list = list.filter(o => !state.opClientiEsclusi.has(o.cliente_id));
   }
 
   if (search) {
@@ -4886,21 +5032,20 @@ function renderPianificazione(root) {
       renderTab('pianificazione');
     }
   });
-  // Filtro per cliente: tendina con tutti i clienti, "Tutti" come default
-  const selCliFiltro = el('select', {
-    class: 'search', style: 'width:auto;cursor:pointer;',
-    onchange: (e) => { state.opCliente = e.target.value; renderTab('pianificazione'); },
-  },
-    el('option', { value:'' }, '— Tutti i clienti —'),
-    ...state.clienti.slice().sort((a,b)=>a.nome.localeCompare(b.nome))
-      .map(c => el('option', { value: c.id }, c.nome))
-  );
-  selCliFiltro.value = state.opCliente || '';
+  // Pulsante filtro clienti (popup multi-checkbox in stile Excel)
+  const nEsclusi = state.opClientiEsclusi?.size || 0;
+  const btnFiltroCli = el('button', {
+    class: nEsclusi > 0 ? 'btnp' : 'btng',
+    title: nEsclusi > 0
+      ? `Filtro attivo: ${nEsclusi} cliente${nEsclusi>1?'i':''} nascost${nEsclusi>1?'i':'o'}`
+      : 'Filtra clienti da mostrare',
+    onclick: (e) => openFiltroClientiPopup(e.currentTarget),
+  }, nEsclusi > 0 ? `▼ Filtro clienti (${nEsclusi})` : '▼ Filtra clienti');
 
   const toolbar = el('div', { class:'toolbar' },
     el('h2', {}, 'Pianificazione'),
     inputSearch,
-    selCliFiltro,
+    btnFiltroCli,
   );
   if (isAdmin) {
     toolbar.append(el('button', { class:'btnp', onclick:()=>openOperazioneModal() }, '+ Nuova Operazione'));
@@ -7211,14 +7356,23 @@ function kioskRenderId() {
   // Usa le card "live" come nella scheda Live degli admin, così l'utente
   // vede a colpo d'occhio chi sta lavorando, chi è fermo, chi è in ferie.
   // Click su una card = identifica come quell'utente (comportamento attuale).
+  // Le card sono raggruppate per gruppo utenti (Trasfertisti, Cablotec 1, ecc.).
   const grid = $('#kiosk-utili-grid');
   grid.innerHTML = '';
-  state.utenti
+  const lista = state.utenti
     .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
-    .sort((a,b) => a.nome.localeCompare(b.nome))
-    .forEach(u => {
+    .sort((a,b) => a.nome.localeCompare(b.nome));
+  const sezioni = raggruppaUtenti(lista);
+  sezioni.forEach(sez => {
+    // Intestazione di gruppo a tutta larghezza (occupa l'intera riga della griglia)
+    grid.appendChild(el('div', {
+      class: 'gruppo-hd' + (sez.key === '__nogroup__' ? ' nogroup' : ''),
+      style: 'grid-column:1/-1;',
+    }, sez.label));
+    sez.utenti.forEach(u => {
       grid.appendChild(buildLiveCard(u, () => kioskSelectUtente(u)));
     });
+  });
 
   // Lista "mezzi attualmente fuori"
   const fuori = $('#kiosk-fuori-list');
