@@ -314,7 +314,7 @@ input.search:focus{border-color:var(--acc);}
 .kiosk-prompt-big{font-size:30px;font-weight:700;letter-spacing:-.01em;}
 .kiosk-prompt-sub{font-family:'DM Mono',monospace;font-size:13px;color:var(--mut);margin-top:8px;letter-spacing:.08em;}
 .kiosk-hidden-input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;}
-.kiosk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;overflow-y:auto;padding:4px;flex:1;align-content:start;}
+.kiosk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;overflow-y:auto;padding:4px;flex:1;align-content:start;}
 .kiosk-tile{background:var(--sur);border:2px solid var(--brd);border-radius:8px;padding:18px 14px;cursor:pointer;text-align:center;transition:all .15s;user-select:none;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:90px;}
 .kiosk-tile:hover,.kiosk-tile:active{border-color:var(--acc);background:rgba(212,255,78,.05);transform:scale(.98);}
 .kiosk-tile-name{font-size:16px;font-weight:600;line-height:1.25;}
@@ -678,7 +678,7 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
   .kiosk-title{font-size:22px;}
   .kiosk-clock{font-size:24px;}
   .kiosk-prompt-big{font-size:22px;}
-  .kiosk-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));}
+  .kiosk-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));}
 }
 
 </style>
@@ -6937,6 +6937,17 @@ async function kioskInit() {
   chiudiSessioniPausaPranzo();
   setInterval(chiudiSessioniPausaPranzo, PAUSA_CHECK_MS);
 
+  // Le card live nella schermata identificazione hanno timer di durata
+  // (per chi sta lavorando) che devono aggiornarsi ogni secondo.
+  // Aggiorno SOLO il testo, senza ricreare le card — è sicuro anche se
+  // l'utente sta cliccando proprio in quel momento.
+  setInterval(() => {
+    if ($('#kiosk-step-id').style.display === 'none') return;
+    document.querySelectorAll('#kiosk-utili-grid .live-card-durata[data-inizio]').forEach(d => {
+      d.textContent = formatLiveDuration(d.getAttribute('data-inizio'));
+    });
+  }, 1000);
+
   kioskGoToId();
 }
 
@@ -7120,19 +7131,17 @@ function kioskGoToId() {
 }
 
 function kioskRenderId() {
-  // Griglia operatori: escludi inattivi e l'account tecnico kiosk
+  // Griglia operatori: escludi inattivi e l'account tecnico kiosk.
+  // Usa le card "live" come nella scheda Live degli admin, così l'utente
+  // vede a colpo d'occhio chi sta lavorando, chi è fermo, chi è in ferie.
+  // Click su una card = identifica come quell'utente (comportamento attuale).
   const grid = $('#kiosk-utili-grid');
   grid.innerHTML = '';
   state.utenti
     .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
+    .sort((a,b) => a.nome.localeCompare(b.nome))
     .forEach(u => {
-      grid.appendChild(el('div', {
-        class: 'kiosk-tile',
-        onclick: () => kioskSelectUtente(u),
-      },
-        el('div', { class:'kiosk-tile-name' }, u.nome),
-        u.numero_badge ? el('div', { class:'kiosk-tile-sub' }, '#'+u.numero_badge) : null,
-      ));
+      grid.appendChild(buildLiveCard(u, () => kioskSelectUtente(u)));
     });
 
   // Lista "mezzi attualmente fuori"
@@ -8054,6 +8063,97 @@ function renderGanttCommesseTab(root) {
 }
 
 // ─── VISTA LIVE: dashboard chi-sta-facendo-cosa ───
+// Costruisce una card "live" di un operatore: mostra il suo stato attuale
+// (sessione attiva, assenza, oppure ultima sessione chiusa di oggi).
+// Usata sia dalla scheda Live (admin) sia dalla schermata di identificazione
+// del kiosk. Il parametro onClick è opzionale: se passato, la card diventa
+// cliccabile e invoca quel callback al click.
+function buildLiveCard(u, onClick) {
+  const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
+  const oggiISO = toLocalISO(new Date());
+  const assOggi = state.assenze.find(a =>
+    a.stato === 'valida' && a.data === oggiISO && a.utente_id === u.id);
+
+  let cardClass = 'live-card ';
+  if (sess) cardClass += 'attivo';
+  else if (assOggi) cardClass += 'fermo';
+  else cardClass += 'fermo';
+
+  const card = el('div', {
+    class: cardClass,
+    style: onClick ? 'cursor:pointer;' : '',
+    onclick: onClick || undefined,
+  });
+
+  if (assOggi) {
+    const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
+    card.style.background = `${(tipo?.colore || '#6b6b64')}15`;
+    card.style.borderColor = (tipo?.colore || '#6b6b64');
+  }
+
+  let badgeStato;
+  if (sess) badgeStato = '● attivo';
+  else if (assOggi) {
+    const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
+    const ore = parseFloat(assOggi.ore) || 0;
+    badgeStato = (tipo?.codice || 'A') + (ore >= 8 ? '' : ' ' + ore + 'h');
+  } else badgeStato = 'fermo';
+
+  const hd = el('div', { class:'live-card-hd' },
+    el('div', { class:'live-card-nome' }, u.nome),
+    el('div', {
+      class:'live-card-stato-badge '+(sess?'attivo':'fermo'),
+      style: assOggi ? `color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};border-color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};` : '',
+    }, badgeStato),
+  );
+  card.append(hd);
+
+  if (assOggi) {
+    const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
+    const ore = parseFloat(assOggi.ore) || 0;
+    card.append(el('div', {
+      style: 'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-top:6px;',
+    }, `${tipo?.nome || 'Assenza'} · ${ore}h${assOggi.note ? ' — '+assOggi.note : ''}`));
+  } else if (sess) {
+    const op = state.operazioni.find(o => o.id === sess.operazione_id);
+    const cli = op ? state.clienti.find(c => c.id === op.cliente_id) : null;
+    const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+    const tipo = state.tipiLav.find(t => t.id === sess.tipo_lavorazione_id);
+    card.append(
+      el('div', { class:'live-card-cliente' }, (cli?.nome || '—') + ' · ' + (op?.numero_ordine || '—')),
+      el('div', { class:'live-card-cod' }, art?.codice || '—'),
+      el('div', { class:'live-card-tipo' },
+        el('div', { class:'live-card-tipo-dot', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
+        tipo?.nome || '—',
+      ),
+      el('div', { class:'live-card-durata', 'data-sess-id': sess.id, 'data-inizio': sess.inizio },
+        formatLiveDuration(sess.inizio)),
+    );
+  } else {
+    // Mostra ultima sessione chiusa oggi se c'è
+    const ultime = state.sessioni
+      .filter(s => s.utente_id === u.id && s.fine && (s.inizio||'').substring(0,10) === oggiISO)
+      .sort((a,b) => (b.fine||'').localeCompare(a.fine||''));
+    if (ultime.length) {
+      const ultima = ultime[0];
+      const op = state.operazioni.find(o => o.id === ultima.operazione_id);
+      const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+      const tipo = state.tipiLav.find(t => t.id === ultima.tipo_lavorazione_id);
+      const totSecOggi = ultime.reduce((s,x) => s + (x.durata_secondi||0), 0);
+      card.append(
+        el('div', { class:'live-card-vuoto' },
+          'Ultima sessione: ' + (art?.codice || '—') + ' (' + (tipo?.nome||'') + ')'),
+        el('div', { class:'live-card-vuoto', style:'color:var(--txt);' },
+          'Totale oggi: ' + formatSecondsHuman(totSecOggi)),
+      );
+    } else {
+      card.append(el('div', { class:'live-card-vuoto' }, 'Nessuna sessione oggi'));
+    }
+  }
+
+  return card;
+}
+
 function renderGanttLive(root) {
   // Filtra operatori attivi (no kiosk, no esterni)
   const operatori = state.utenti.filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
@@ -8092,84 +8192,8 @@ function renderGanttLive(root) {
   const sezioniLive = raggruppaUtenti(operatori);
 
   const buildCardUtente = (u) => {
-    const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
-    const assOggi = assOggiByUtente[u.id];
-
-    let cardClass = 'live-card ';
-    if (sess) cardClass += 'attivo';
-    else if (assOggi) cardClass += 'fermo';
-    else cardClass += 'fermo';
-
-    const card = el('div', { class: cardClass });
-    if (assOggi) {
-      const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
-      card.style.background = `${(tipo?.colore || '#6b6b64')}15`;
-      card.style.borderColor = (tipo?.colore || '#6b6b64');
-    }
-
-    let badgeStato;
-    if (sess) badgeStato = '● attivo';
-    else if (assOggi) {
-      const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
-      const ore = parseFloat(assOggi.ore) || 0;
-      badgeStato = (tipo?.codice || 'A') + (ore >= 8 ? '' : ' ' + ore + 'h');
-    } else badgeStato = 'fermo';
-
-    const hd = el('div', { class:'live-card-hd' },
-      el('div', { class:'live-card-nome' }, u.nome),
-      el('div', {
-        class:'live-card-stato-badge '+(sess?'attivo':'fermo'),
-        style: assOggi ? `color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};border-color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};` : '',
-      }, badgeStato),
-    );
-    card.append(hd);
-
-    if (assOggi) {
-      const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
-      const ore = parseFloat(assOggi.ore) || 0;
-      card.append(el('div', {
-        style: 'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-top:6px;',
-      }, `${tipo?.nome || 'Assenza'} · ${ore}h${assOggi.note ? ' — '+assOggi.note : ''}`));
-    } else if (sess) {
-      const op = state.operazioni.find(o => o.id === sess.operazione_id);
-      const cli = op ? state.clienti.find(c => c.id === op.cliente_id) : null;
-      const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
-      const tipo = state.tipiLav.find(t => t.id === sess.tipo_lavorazione_id);
-
-      card.append(
-        el('div', { class:'live-card-cliente' }, (cli?.nome || '—') + ' · ' + (op?.numero_ordine || '—')),
-        el('div', { class:'live-card-cod' }, art?.codice || '—'),
-        el('div', { class:'live-card-tipo' },
-          el('div', { class:'live-card-tipo-dot', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
-          tipo?.nome || '—',
-        ),
-        el('div', { class:'live-card-durata', 'data-sess-id': sess.id, 'data-inizio': sess.inizio },
-          formatLiveDuration(sess.inizio)),
-      );
-    } else {
-      // Mostra ultima sessione chiusa oggi se c'è
-      const oggi = toLocalISO(new Date());
-      const ultime = state.sessioni
-        .filter(s => s.utente_id === u.id && s.fine && (s.inizio||'').substring(0,10) === oggi)
-        .sort((a,b) => (b.fine||'').localeCompare(a.fine||''));
-      if (ultime.length) {
-        const ultima = ultime[0];
-        const op = state.operazioni.find(o => o.id === ultima.operazione_id);
-        const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
-        const tipo = state.tipiLav.find(t => t.id === ultima.tipo_lavorazione_id);
-        const durSec = ultima.durata_secondi || 0;
-        const totSecOggi = ultime.reduce((s,x) => s + (x.durata_secondi||0), 0);
-        card.append(
-          el('div', { class:'live-card-vuoto' },
-            'Ultima sessione: ' + (art?.codice || '—') + ' (' + (tipo?.nome||'') + ')'),
-          el('div', { class:'live-card-vuoto', style:'color:var(--txt);' },
-            'Totale oggi: ' + formatSecondsHuman(totSecOggi)),
-        );
-      } else {
-        card.append(el('div', { class:'live-card-vuoto' }, 'Nessuna sessione oggi'));
-      }
-    }
-    grid.append(card);
+    // Card senza click (vista admin solo informativa)
+    grid.append(buildLiveCard(u));
   };
 
   // Per ogni gruppo con utenti: emetto un separatore a tutta larghezza,
