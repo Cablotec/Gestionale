@@ -825,9 +825,10 @@ const state = {
   consegneCommessa: [],    // consegne parziali di commesse (tabella consegne_commessa)
   prenOp: [],            // pivot prenotazione_id ↔ utente_id
   usiMezzo: [],            // tutti gli usi mezzo (aperti e chiusi)
-  clienti: [],             // anagrafica clienti
-  cliFilter: 'attivi',     // 'all' | 'attivi' | 'disattivi'
-  cliSearch: '',
+  aziende: [],             // anagrafica unificata clienti/fornitori
+  azFilter: 'attivi',      // 'all' | 'attivi' | 'disattivi'
+  azRuoloFilter: 'tutti',  // 'tutti' | 'cliente' | 'fornitore' | 'entrambi'
+  azSearch: '',
   articoli: [],            // anagrafica articoli/codici prodotto
   artFilter: 'attivi',     // 'all' | 'attivi' | 'disattivi'
   artSearch: '',
@@ -1525,7 +1526,7 @@ document.addEventListener('change', (e) => {
 // Avere un solo handler evita race condition tra ricreazione client e refresh.
 
 async function loadAllData() {
-  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, clienti, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti, impostazioni, consegneCommessa] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti, impostazioni, consegneCommessa] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('utenti').select('*').order('nome'),
@@ -1533,7 +1534,7 @@ async function loadAllData() {
     sb.from('consegne').select('*').order('ordine'),
     sb.from('prenotazioni_utenti').select('*'),
     sb.from('usi_mezzo').select('*').order('data_uscita'),
-    sb.from('clienti').select('*').order('nome'),
+    sb.from('aziende').select('*').order('nome'),
     sb.from('articoli').select('*').order('codice'),
     sb.from('tipi_lavorazione').select('*').order('ordine'),
     sb.from('chiusure_aziendali').select('*').order('data'),
@@ -1552,7 +1553,7 @@ async function loadAllData() {
   if (consegne.error) throw consegne.error;
   if (prenOp.error) throw prenOp.error;
   if (usiMezzo.error) throw usiMezzo.error;
-  if (clienti.error) throw clienti.error;
+  if (aziende.error) throw aziende.error;
   if (articoli.error) throw articoli.error;
   if (tipiLav.error) throw tipiLav.error;
   if (chiusure.error) throw chiusure.error;
@@ -1572,7 +1573,7 @@ async function loadAllData() {
   state.consegne = consegne.data || [];
   state.prenOp = prenOp.data || [];
   state.usiMezzo = usiMezzo.data || [];
-  state.clienti = clienti.data || [];
+  state.aziende = aziende.data || [];
   state.articoli = articoli.data || [];
   state.tipiLav = tipiLav.data || [];
   state.chiusure = chiusure.data || [];
@@ -1604,8 +1605,8 @@ function startRealtime() {
         (p) => applyChange('prenotazioni_utenti', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'usi_mezzo' },
         (p) => applyChange('usi_mezzo', p))
-    .on('postgres_changes', { event:'*', schema:'public', table:'clienti' },
-        (p) => applyChange('clienti', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'aziende' },
+        (p) => applyChange('aziende', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'articoli' },
         (p) => applyChange('articoli', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'tipi_lavorazione' },
@@ -1676,13 +1677,13 @@ function applyChange(tabella, payload) {
     } else if (ev === 'DELETE') {
       state.usiMezzo = state.usiMezzo.filter(x => x.id !== oldRow.id);
     }
-  } else if (tabella === 'clienti') {
+  } else if (tabella === 'aziende') {
     if (ev === 'INSERT') {
-      if (!state.clienti.find(x => x.id === row.id)) state.clienti.push(row);
+      if (!state.aziende.find(x => x.id === row.id)) state.aziende.push(row);
     } else if (ev === 'UPDATE') {
-      state.clienti = state.clienti.map(x => x.id === row.id ? row : x);
+      state.aziende = state.aziende.map(x => x.id === row.id ? row : x);
     } else if (ev === 'DELETE') {
-      state.clienti = state.clienti.filter(x => x.id !== oldRow.id);
+      state.aziende = state.aziende.filter(x => x.id !== oldRow.id);
     }
   } else if (tabella === 'articoli') {
     if (ev === 'INSERT') {
@@ -1835,7 +1836,7 @@ function getPrenotazioneDestinazione(prenId) {
   if (cons.length === 0) return { breve: '—', tooltip: 'Nessuna destinazione' };
   const nomi = cons.map(c => {
     if (c.cliente_id) {
-      const cli = state.clienti.find(x => x.id === c.cliente_id);
+      const cli = state.aziende.find(x => x.id === c.cliente_id);
       return cli ? cli.nome : '(cliente eliminato)';
     }
     return c.descrizione || '(senza destinazione)';
@@ -1885,7 +1886,7 @@ const TAB_STRUCTURE = {
     label: 'Gestione',
     adminOnly: true,
     tabs: [
-      { id: 'clienti',        label: 'Clienti',           adminOnly: true },
+      { id: 'clienti',        label: 'Aziende',           adminOnly: true },
       { id: 'articoli',       label: 'Articoli',          adminOnly: true },
       { id: 'tipi_lav',       label: 'Tipi lavorazione',  adminOnly: true },
       { id: 'mezzi',          label: 'Anagrafica mezzi',  adminOnly: true },
@@ -3050,12 +3051,17 @@ function openOperatoreModal(u) {
 
 function renderClienti(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
-  const search = (state.cliSearch || '').toLowerCase();
-  const filter = state.cliFilter || 'attivi';
+  const search = (state.azSearch || '').toLowerCase();
+  const filter = state.azFilter || 'attivi';
+  const ruoloFilter = state.azRuoloFilter || 'tutti';
 
-  let list = state.clienti;
+  let list = state.aziende;
   if (filter === 'attivi')    list = list.filter(c => c.attivo);
   else if (filter === 'disattivi') list = list.filter(c => !c.attivo);
+  // Filtro ruolo
+  if (ruoloFilter === 'cliente')   list = list.filter(c => c.is_cliente && !c.is_fornitore);
+  else if (ruoloFilter === 'fornitore') list = list.filter(c => c.is_fornitore && !c.is_cliente);
+  else if (ruoloFilter === 'entrambi')  list = list.filter(c => c.is_cliente && c.is_fornitore);
   if (search) {
     list = list.filter(c =>
       (c.nome||'').toLowerCase().includes(search) ||
@@ -3067,39 +3073,56 @@ function renderClienti(root) {
   list = list.slice().sort((a,b) => (a.nome||'').localeCompare(b.nome||''));
 
   // KPI
-  const tot = state.clienti.length;
-  const attivi = state.clienti.filter(c => c.attivo).length;
-  const disattivi = tot - attivi;
+  const tot = state.aziende.length;
+  const attivi = state.aziende.filter(c => c.attivo).length;
+  const clienti = state.aziende.filter(c => c.is_cliente).length;
+  const fornitori = state.aziende.filter(c => c.is_fornitore).length;
 
   root.innerHTML = '';
   root.append(el('div', { class:'kpis' },
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Totale'), el('div', { class:'kv ka' }, String(tot))),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Attivi'), el('div', { class:'kv kg' }, String(attivi))),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Disattivati'), el('div', { class:'kv' }, String(disattivi))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Clienti'), el('div', { class:'kv' }, String(clienti))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Fornitori'), el('div', { class:'kv' }, String(fornitori))),
   ));
 
-  // Chips filtro
-  const chips = el('div', { class:'chips' });
+  // Chips filtro stato (attivi / tutti / disattivi)
+  const chipsStato = el('div', { class:'chips' });
   [
     { id:'all',       label:'Tutti' },
     { id:'attivi',    label:'Attivi' },
     { id:'disattivi', label:'Disattivati' },
   ].forEach(opt => {
-    chips.append(el('div', {
+    chipsStato.append(el('div', {
       class: 'chip' + (filter === opt.id ? ' act' : ''),
-      onclick: () => { state.cliFilter = opt.id; renderTab('clienti'); }
+      onclick: () => { state.azFilter = opt.id; renderTab('clienti'); }
     }, opt.label));
   });
-  root.append(chips);
+  root.append(chipsStato);
+
+  // Chips filtro ruolo (tutti / cliente / fornitore / entrambi)
+  const chipsRuolo = el('div', { class:'chips', style:'margin-top:6px;' });
+  [
+    { id:'tutti',     label:'Tutti i ruoli' },
+    { id:'cliente',   label:'Solo clienti' },
+    { id:'fornitore', label:'Solo fornitori' },
+    { id:'entrambi',  label:'Solo entrambi (C+F)' },
+  ].forEach(opt => {
+    chipsRuolo.append(el('div', {
+      class: 'chip' + (ruoloFilter === opt.id ? ' act' : ''),
+      onclick: () => { state.azRuoloFilter = opt.id; renderTab('clienti'); }
+    }, opt.label));
+  });
+  root.append(chipsRuolo);
 
   // Toolbar
   const toolbar = el('div', { class:'toolbar' },
-    el('h2', {}, 'Clienti'),
+    el('h2', {}, 'Aziende'),
     el('input', {
       type:'text', class:'search', id:'cli-search',
       placeholder:'Cerca per nome, indirizzo, città, P.IVA…',
-      value: state.cliSearch || '',
-      oninput: (e) => { state.cliSearch = e.target.value; state._focusSearch = 'cli-search'; renderTab('clienti'); }
+      value: state.azSearch || '',
+      oninput: (e) => { state.azSearch = e.target.value; state._focusSearch = 'cli-search'; renderTab('clienti'); }
     }),
   );
   if (isAdmin) {
@@ -3113,16 +3136,16 @@ function renderClienti(root) {
         }),
       ),
       el('button', { class:'btng', onclick:clientiExportExcel }, '⬇ Esporta Excel'),
-      el('button', { class:'btnp', onclick:()=>openClienteModal() }, '+ Nuovo Cliente'),
+      el('button', { class:'btnp', onclick:()=>openClienteModal() }, '+ Nuova Azienda'),
     );
   }
   root.append(toolbar);
 
   if (list.length === 0) {
     root.append(el('div', { class:'empty' },
-      state.clienti.length === 0
-        ? 'Nessun cliente. Importa un Excel o creane uno nuovo.'
-        : 'Nessun cliente corrisponde ai filtri.'
+      state.aziende.length === 0
+        ? 'Nessuna azienda. Importa un Excel o creane una nuova.'
+        : 'Nessuna azienda corrisponde ai filtri.'
     ));
     return;
   }
@@ -3132,7 +3155,8 @@ function renderClienti(root) {
   const tbl = el('table', { class:'rt' });
   tbl.append(el('thead', {}, el('tr', {},
     el('th', {}, 'Nome'),
-    el('th', {}, 'Indirizzo'),
+    el('th', { class:'tc' }, 'Ruolo'),
+    el('th', { class:'tr' }, 'Coeff.'),
     el('th', {}, 'Città'),
     el('th', {}, 'P. IVA'),
     el('th', {}, 'Email'),
@@ -3141,9 +3165,22 @@ function renderClienti(root) {
   )));
   const tb = el('tbody');
   list.forEach(c => {
+    // Badge ruolo
+    let ruoloBadge;
+    if (c.is_cliente && c.is_fornitore) {
+      ruoloBadge = el('span', { class:'badge', style:'background:rgba(132,73,200,.18);color:#c8b6ff;border:1px solid rgba(132,73,200,.4);' }, 'C + F');
+    } else if (c.is_cliente) {
+      ruoloBadge = el('span', { class:'badge bblu' }, 'Cliente');
+    } else if (c.is_fornitore) {
+      ruoloBadge = el('span', { class:'badge', style:'background:rgba(212,140,40,.18);color:#f0c070;border:1px solid rgba(212,140,40,.4);' }, 'Fornitore');
+    } else {
+      ruoloBadge = el('span', { class:'badge bgry' }, '—');
+    }
     tb.append(el('tr', {},
       el('td', {}, c.nome || '—'),
-      el('td', { style:'font-size:11px;color:var(--mut);' }, c.via || ''),
+      el('td', { class:'tc' }, ruoloBadge),
+      el('td', { class:'tr mono', style:'font-size:11px;' },
+        c.is_fornitore ? Number(c.coefficiente || 1.0).toFixed(2) : '—'),
       el('td', { style:'font-size:11px;' }, c.citta ? c.citta + (c.provincia ? ' ('+c.provincia+')' : '') : ''),
       el('td', { class:'mono', style:'font-size:11px;' }, c.p_iva || ''),
       el('td', { class:'mono', style:'font-size:11px;' }, c.email || ''),
@@ -3169,12 +3206,16 @@ function renderClienti(root) {
 function openClienteModal(c) {
   const isNew = !c;
   const isAdmin = state.profile?.ruolo === 'admin';
-  c = c || { nome:'', via:'', citta:'', cap:'', provincia:'', p_iva:'', email:'', note:'', attivo:true };
+  c = c || {
+    nome:'', via:'', citta:'', cap:'', provincia:'',
+    p_iva:'', email:'', note:'', attivo:true,
+    is_cliente:true, is_fornitore:false, coefficiente:1.0,
+  };
   const readonly = !isAdmin;
 
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
-    el('h2', {}, isNew ? 'Nuovo Cliente' : (readonly ? 'Cliente' : 'Modifica Cliente')),
+    el('h2', {}, isNew ? 'Nuova Azienda' : (readonly ? 'Azienda' : 'Modifica Azienda')),
     el('button', { class:'mclose', onclick:closeModal }, '✕'),
   ));
 
@@ -3194,8 +3235,36 @@ function openClienteModal(c) {
     el('option', { value:'false' }, 'Disattivato'));
   selAttivo.value = String(!!c.attivo);
 
+  // Ruoli (checkbox)
+  const chkCliente = el('input', { type:'checkbox', name:'is_cliente' });
+  chkCliente.checked = !!c.is_cliente;
+  const chkFornitore = el('input', { type:'checkbox', name:'is_fornitore' });
+  chkFornitore.checked = !!c.is_fornitore;
+
+  // Coefficiente (visibile solo se fornitore)
+  const inCoeff = el('input', {
+    type:'number', name:'coefficiente', step:'0.05', min:'0', max:'10',
+    value: String(c.coefficiente != null ? c.coefficiente : 1.0),
+    style:'width:100px;',
+  });
+  const coeffRow = el('div', { class:'field' },
+    el('label', {}, 'Coefficiente fornitore'),
+    el('div', { style:'display:flex;align-items:center;gap:10px;' },
+      inCoeff,
+      el('span', { style:'font-size:11px;color:var(--mut);' },
+        'capacità relativa rispetto a 1 operatore interno (1.0 = uguale)'),
+    ),
+  );
+  // Visibilità coefficiente legata al checkbox fornitore
+  const aggiornaCoeff = () => {
+    coeffRow.style.display = chkFornitore.checked ? '' : 'none';
+  };
+  aggiornaCoeff();
+  chkFornitore.addEventListener('change', aggiornaCoeff);
+
   if (readonly) {
-    [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inEmail, inNote, selAttivo]
+    [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inEmail, inNote, selAttivo,
+     chkCliente, chkFornitore, inCoeff]
       .forEach(i => i.disabled = true);
   }
 
@@ -3203,6 +3272,15 @@ function openClienteModal(c) {
     el('div', { class:'field' }, el('label', {}, 'Nome *'), inNome,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Es. "TEMA SINERGIE" — usato come identificativo veloce nelle operazioni e prenotazioni.')),
+    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+      '── Ruolo (almeno uno) ──'),
+    el('div', { class:'frow' },
+      el('label', { style:'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:8px 12px;border:1px solid var(--brd);border-radius:4px;flex:1;' },
+        chkCliente, 'Cliente'),
+      el('label', { style:'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:8px 12px;border:1px solid var(--brd);border-radius:4px;flex:1;' },
+        chkFornitore, 'Fornitore'),
+    ),
+    coeffRow,
     el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
       '── Indirizzo ──'),
     el('div', { class:'field' }, el('label', {}, 'Via e civico'), inVia),
@@ -3230,6 +3308,16 @@ function openClienteModal(c) {
     const btnSave = el('button', { class:'btnp' }, 'Salva');
     btnSave.onclick = async () => {
       const fd = new FormData(form);
+      const isCliente = chkCliente.checked;
+      const isFornitore = chkFornitore.checked;
+      // Validazione: almeno un ruolo
+      if (!isCliente && !isFornitore) {
+        return toast('Seleziona almeno un ruolo (Cliente o Fornitore)', 'err');
+      }
+      const coeff = Number(fd.get('coefficiente') || 1.0);
+      if (isFornitore && (!Number.isFinite(coeff) || coeff < 0 || coeff > 10)) {
+        return toast('Coefficiente deve essere tra 0 e 10', 'err');
+      }
       const payload = {
         nome: (fd.get('nome')||'').trim(),
         via: (fd.get('via')||'').trim() || null,
@@ -3240,27 +3328,30 @@ function openClienteModal(c) {
         email: (fd.get('email')||'').trim() || null,
         note: (fd.get('note')||'').trim() || null,
         attivo: fd.get('attivo') === 'true',
+        is_cliente: isCliente,
+        is_fornitore: isFornitore,
+        coefficiente: isFornitore ? coeff : 1.0,
       };
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
       btnSave.disabled = true;
       btnSave.textContent = 'Salvataggio…';
       try {
         const { data, error } = await eseguiConRetry(
-        () => isNew ? sb.from('clienti').insert(payload).select().single() : sb.from('clienti').update(payload).eq('id', c.id).select().single(),
-        { label: 'salvataggio clienti' }
+        () => isNew ? sb.from('aziende').insert(payload).select().single() : sb.from('aziende').update(payload).eq('id', c.id).select().single(),
+        { label: 'salvataggio aziende' }
       );
         if (error) {
           btnSave.disabled = false;
           btnSave.textContent = 'Salva';
-          if (error.code === '23505') return toast('Nome cliente già esistente', 'err');
+          if (error.code === '23505') return toast('Nome azienda già esistente', 'err');
           return toast(error.message, 'err');
         }
         if (isNew) {
-          if (!state.clienti.find(x => x.id === data.id)) state.clienti.push(data);
+          if (!state.aziende.find(x => x.id === data.id)) state.aziende.push(data);
         } else {
-          state.clienti = state.clienti.map(x => x.id === c.id ? data : x);
+          state.aziende = state.aziende.map(x => x.id === c.id ? data : x);
         }
-        toast(isNew ? 'Cliente creato' : 'Cliente aggiornato');
+        toast(isNew ? 'Azienda creata' : 'Azienda aggiornata');
         closeModal(); renderTab('clienti');
       } catch (e) {
         btnSave.disabled = false;
@@ -3275,17 +3366,17 @@ function openClienteModal(c) {
 }
 
 async function deleteCliente(c) {
-  if (!confirm(`Eliminare il cliente "${c.nome}"?\nNon sarà possibile se ha operazioni associate.`)) return;
-  const { data, error } = await sb.from('clienti').delete().eq('id', c.id).select();
+  if (!confirm(`Eliminare l'azienda "${c.nome}"?\nNon sarà possibile se ha operazioni associate.`)) return;
+  const { data, error } = await sb.from('aziende').delete().eq('id', c.id).select();
   if (error) {
-    if (error.code === '23503') return toast('Impossibile: ci sono operazioni legate a questo cliente', 'err');
+    if (error.code === '23503') return toast('Impossibile: ci sono operazioni legate a questa azienda', 'err');
     return toast(error.message, 'err');
   }
   if (!data || data.length === 0) {
-    return toast('Eliminazione bloccata: verifica le policy DELETE su clienti', 'err');
+    return toast('Eliminazione bloccata: verifica le policy DELETE su aziende', 'err');
   }
-  state.clienti = state.clienti.filter(x => x.id !== c.id);
-  toast('Cliente eliminato'); renderTab('clienti');
+  state.aziende = state.aziende.filter(x => x.id !== c.id);
+  toast('Azienda eliminata'); renderTab('clienti');
 }
 
 // ─── Import Excel ───
@@ -3347,7 +3438,7 @@ function openClientiImportPreviewModal(rows) {
   });
   const validi = parsed.filter(p => p.nome);
 
-  const nomiInDB = new Set(state.clienti.map(c => (c.nome||'').toLowerCase()));
+  const nomiInDB = new Set(state.aziende.map(c => (c.nome||'').toLowerCase()));
   const nuovi = validi.filter(p => !nomiInDB.has(p.nome.toLowerCase()));
   const aggiornamenti = validi.filter(p => nomiInDB.has(p.nome.toLowerCase()));
 
@@ -3433,29 +3524,29 @@ async function clientiImportEsegui(nuovi, aggiornamenti) {
       nome: p.nome, via: p.via, citta: p.citta, cap: p.cap, provincia: p.provincia,
       p_iva: p.p_iva, email: p.email, note: p.note,
     }));
-    const { data, error } = await sb.from('clienti').insert(batch).select();
+    const { data, error } = await sb.from('aziende').insert(batch).select();
     if (error) {
       errIns = nuovi.length;
       toast('Errore insert: '+error.message, 'err');
     } else {
       okIns = data.length;
       data.forEach(d => {
-        if (!state.clienti.find(x => x.id === d.id)) state.clienti.push(d);
+        if (!state.aziende.find(x => x.id === d.id)) state.aziende.push(d);
       });
     }
   }
 
   for (const p of aggiornamenti) {
-    const existing = state.clienti.find(c => (c.nome||'').toLowerCase() === p.nome.toLowerCase());
+    const existing = state.aziende.find(c => (c.nome||'').toLowerCase() === p.nome.toLowerCase());
     if (!existing) { errUpd++; continue; }
-    const { data, error } = await sb.from('clienti').update({
+    const { data, error } = await sb.from('aziende').update({
       via: p.via, citta: p.citta, cap: p.cap, provincia: p.provincia,
       p_iva: p.p_iva, email: p.email, note: p.note,
     }).eq('id', existing.id).select().single();
     if (error) errUpd++;
     else {
       okUpd++;
-      state.clienti = state.clienti.map(x => x.id === existing.id ? data : x);
+      state.aziende = state.aziende.map(x => x.id === existing.id ? data : x);
     }
   }
 
@@ -3469,7 +3560,7 @@ function clientiExportExcel() {
     toast('Libreria Excel non caricata', 'err');
     return;
   }
-  const rows = state.clienti.map(c => ({
+  const rows = state.aziende.map(c => ({
     nome: c.nome,
     via: c.via || '',
     citta: c.citta || '',
@@ -3927,7 +4018,7 @@ function openOperazioniImportPreviewModal(rows) {
   const artByCod = {};
   state.articoli.forEach(a => { if (a.codice) artByCod[String(a.codice).toLowerCase().trim()] = a; });
   const cliByNome = {};
-  state.clienti.forEach(c => { if (c.nome) cliByNome[String(c.nome).toLowerCase().trim()] = c; });
+  state.aziende.forEach(c => { if (c.nome) cliByNome[String(c.nome).toLowerCase().trim()] = c; });
 
   const parsed = rows.map((r, idx) => {
     const eser = colEser ? String(r[colEser]||'').trim() : '';
@@ -4810,7 +4901,7 @@ function renderMagazzino(root) {
 
   const tb = el('tbody');
   list.forEach(o => {
-    const cli = state.clienti.find(c => c.id === o.cliente_id);
+    const cli = state.aziende.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
 
     // Colore scadenza: rosso se passata, giallo se entro 3 giorni
@@ -4875,7 +4966,7 @@ function renderMagazzino(root) {
 function openFiltroClientiPopup(anchorBtn) {
   // Solo i clienti che hanno commesse — non ha senso filtrare clienti senza ordini
   const clientiConCommesse = new Set(state.operazioni.map(o => o.cliente_id).filter(Boolean));
-  const clientiLista = state.clienti
+  const clientiLista = state.aziende
     .filter(c => clientiConCommesse.has(c.id))
     .slice()
     .sort((a, b) => a.nome.localeCompare(b.nome));
@@ -5007,7 +5098,7 @@ function renderPianificazione(root) {
 
   if (search) {
     list = list.filter(o => {
-      const cli = state.clienti.find(c => c.id === o.cliente_id);
+      const cli = state.aziende.find(c => c.id === o.cliente_id);
       const art = state.articoli.find(a => a.id === o.articolo_id);
       return (o.numero_ordine||'').toLowerCase().includes(search)
           || (o.pos||'').toLowerCase().includes(search)
@@ -5024,8 +5115,8 @@ function renderPianificazione(root) {
   list.sort((a,b) => {
     let av, bv;
     if (sortKey === 'cliente') {
-      av = (state.clienti.find(c => c.id === a.cliente_id)?.nome || '');
-      bv = (state.clienti.find(c => c.id === b.cliente_id)?.nome || '');
+      av = (state.aziende.find(c => c.id === a.cliente_id)?.nome || '');
+      bv = (state.aziende.find(c => c.id === b.cliente_id)?.nome || '');
     } else if (sortKey === 'articolo') {
       av = (state.articoli.find(c => c.id === a.articolo_id)?.codice || '');
       bv = (state.articoli.find(c => c.id === b.articolo_id)?.codice || '');
@@ -5115,7 +5206,7 @@ function renderPianificazione(root) {
   }
   root.append(toolbar);
 
-  if (state.clienti.length === 0 || state.articoli.length === 0) {
+  if (state.aziende.length === 0 || state.articoli.length === 0) {
     root.append(el('div', { class:'empty' },
       el('div', { style:'margin-bottom:8px;' }, '⚠ Per creare operazioni servono prima clienti e articoli.'),
       el('div', { class:'sub' }, 'Vai in Anagrafiche → Clienti e Articoli per aggiungerne.')));
@@ -5166,7 +5257,7 @@ function renderPianificazione(root) {
 
   const tb = el('tbody');
   list.forEach(o => {
-    const cli = state.clienti.find(c => c.id === o.cliente_id);
+    const cli = state.aziende.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
     const inizio = opInizio(o);
     const ritardo = opIsRitardo(o);
@@ -5562,8 +5653,9 @@ function openOperazioneModal(o) {
   const form = el('form');
 
   // Autocomplete cliente — con creazione al volo
+  // Solo aziende attive con is_cliente=true (esclude i fornitori puri)
   const acCliente = makeAutocompleteCreate({
-    items: state.clienti.filter(c => c.attivo),
+    items: state.aziende.filter(c => c.attivo && c.is_cliente !== false),
     getLabel: c => c.nome,
     placeholder: 'Cerca o digita nuovo cliente…',
     initialId: o.cliente_id || null,
@@ -6156,15 +6248,15 @@ function openOperazioneModal(o) {
       try {
         // Crea cliente nuovo se serve
         if (cliVal.mode === 'new') {
-          const { data: nuovoCli, error: errCli } = await sb.from('clienti')
-            .insert({ nome: cliVal.text, attivo: true })
+          const { data: nuovoCli, error: errCli } = await sb.from('aziende')
+            .insert({ nome: cliVal.text, attivo: true, is_cliente: true, is_fornitore: false })
             .select().single();
           if (errCli) {
             stopWatchdog();
             btnSave.disabled = false; btnSave.textContent = 'Salva';
             return toast('Errore creazione cliente: '+errCli.message, 'err');
           }
-          if (!state.clienti.find(x => x.id === nuovoCli.id)) state.clienti.push(nuovoCli);
+          if (!state.aziende.find(x => x.id === nuovoCli.id)) state.aziende.push(nuovoCli);
           clienteId = nuovoCli.id;
         }
         // Crea articolo nuovo se serve
@@ -6304,7 +6396,7 @@ function renderStorico(root) {
 
   if (search) {
     list = list.filter(o => {
-      const cli = state.clienti.find(c => c.id === o.cliente_id);
+      const cli = state.aziende.find(c => c.id === o.cliente_id);
       const art = state.articoli.find(a => a.id === o.articolo_id);
       return (o.numero_ordine||'').toLowerCase().includes(search)
           || (cli?.nome||'').toLowerCase().includes(search)
@@ -6387,8 +6479,10 @@ function renderStorico(root) {
     onchange: (e) => { state.stoCliente = e.target.value; renderTab('storico'); }
   },
     el('option', { value:'' }, '— Tutti i clienti —'),
-    ...state.clienti.sort((a,b)=>a.nome.localeCompare(b.nome)).map(c =>
-      el('option', { value:c.id }, c.nome))
+    ...state.aziende
+      .filter(c => c.is_cliente !== false)
+      .sort((a,b)=>a.nome.localeCompare(b.nome))
+      .map(c => el('option', { value:c.id }, c.nome))
   );
   selCli.value = filtroCliente;
 
@@ -6443,7 +6537,7 @@ function renderStorico(root) {
   const tb = el('tbody');
 
   list.forEach(o => {
-    const cli = state.clienti.find(c => c.id === o.cliente_id);
+    const cli = state.aziende.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
     const addettiIds = getOperazioneAddetti(o.id);
     const addettiNomi = addettiIds
@@ -6550,7 +6644,7 @@ function quickSpedizione(o) {
   ));
   const body = el('div', { class:'mbody' });
 
-  const cli = state.clienti.find(c => c.id === o.cliente_id);
+  const cli = state.aziende.find(c => c.id === o.cliente_id);
   const art = state.articoli.find(a => a.id === o.articolo_id);
   body.append(el('div', { class:'sub', style:'margin-bottom:14px;padding:10px;background:var(--sur2);border-radius:4px;font-family:monospace;font-size:11px;line-height:1.6;' },
     el('div', {}, 'Ordine: ', el('span', { style:'color:var(--or)' }, o.numero_ordine || '—'), ' · ',
@@ -6619,7 +6713,7 @@ function storicoExportExcel() {
   if (spedite.length === 0) return toast('Nessuna spedsegna da esportare', 'err');
 
   const rows = spedite.map(o => {
-    const cli = state.clienti.find(c => c.id === o.cliente_id);
+    const cli = state.aziende.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
     const addettiNomi = getOperazioneAddetti(o.id)
       .map(id => state.utenti.find(u => u.id === id)?.nome)
@@ -6901,7 +6995,7 @@ async function openPrenotazioneModal(p) {
     }
     consegne.forEach((c, i) => {
       // Indirizzo dedotto dal cliente
-      const cli = c.cliente_id ? state.clienti.find(x => x.id === c.cliente_id) : null;
+      const cli = c.cliente_id ? state.aziende.find(x => x.id === c.cliente_id) : null;
       let indirizzoDedotto = '—';
       let indirIsWarn = false;
       if (cli) {
@@ -6933,7 +7027,7 @@ async function openPrenotazioneModal(p) {
       let highlightIdx = -1;
       const refreshList = () => {
         const q = acInput.value.toLowerCase().trim();
-        const filtered = state.clienti
+        const filtered = state.aziende
           .filter(x => x.attivo)
           .filter(x => !q || x.nome.toLowerCase().includes(q) ||
                        (x.citta||'').toLowerCase().includes(q) ||
@@ -7468,7 +7562,7 @@ async function kioskLoadAll() {
     sb.from('utenti').select('*').eq('attivo', true).order('nome'),
     sb.from('usi_mezzo').select('*').is('data_rientro', null),
     sb.from('prenotazioni').select('*').lte('data_inizio', oggi).gte('data_fine', oggi),
-    sb.from('clienti').select('*').eq('attivo', true).order('nome'),
+    sb.from('aziende').select('*').eq('attivo', true).order('nome'),
     sb.from('articoli').select('*').eq('attivo', true).order('codice'),
     sb.from('tipi_lavorazione').select('*').eq('attivo', true).order('ordine'),
     sb.from('operazioni').select('*').neq('stato', 'spedita').neq('stato', 'completata').order('scadenza'),
@@ -7482,7 +7576,7 @@ async function kioskLoadAll() {
   state.utentiById = Object.fromEntries(state.utenti.map(u => [u.id, u]));
   kioskState.mezziInUso = usi.data || [];
   kioskState.prenotazioniOggi = pren.data || [];
-  state.clienti = clienti.data || [];
+  state.aziende = clienti.data || [];
   state.articoli = articoli.data || [];
   state.tipiLav = tipiLav.data || [];
   state.operazioni = operazioni.data || [];
@@ -7494,7 +7588,7 @@ async function kioskLoadAll() {
   console.log('[KIOSK] Loaded:', {
     mezzi: state.mezzi.length,
     operatori: state.utenti.length,
-    clienti: state.clienti.length,
+    clienti: state.aziende.length,
     articoli: state.articoli.length,
     tipiLav: state.tipiLav.length,
     operazioni: state.operazioni.length,
@@ -7541,7 +7635,7 @@ function kioskStartRealtime() {
     .on('postgres_changes', { event:'*', schema:'public', table:'sessioni_lavoro' }, () => {
       kioskLoadAll().then(kioskRefreshActive);
     })
-    .on('postgres_changes', { event:'*', schema:'public', table:'clienti' }, () => {
+    .on('postgres_changes', { event:'*', schema:'public', table:'aziende' }, () => {
       kioskLoadAll().then(kioskRefreshActive);
     })
     .on('postgres_changes', { event:'*', schema:'public', table:'articoli' }, () => {
@@ -7974,7 +8068,7 @@ function kioskRenderOpList() {
   const filtra = (lista) => {
     if (!q) return lista;
     return lista.filter(o => {
-      const cli = state.clienti.find(c => c.id === o.cliente_id);
+      const cli = state.aziende.find(c => c.id === o.cliente_id);
       const art = state.articoli.find(a => a.id === o.articolo_id);
       return (o.numero_ordine||'').toLowerCase().includes(q)
           || (o.pos||'').toLowerCase().includes(q)
@@ -8018,7 +8112,7 @@ function kioskRenderOpList() {
 }
 
 function kioskOpCard(o) {
-  const cli = state.clienti.find(c => c.id === o.cliente_id);
+  const cli = state.aziende.find(c => c.id === o.cliente_id);
   const art = state.articoli.find(a => a.id === o.articolo_id);
   const oggi = toLocalISO(new Date());
   let scadCls = '';
@@ -8075,7 +8169,7 @@ function kioskRenderTipo() {
   root.innerHTML = '';
 
   // Riepilogo operazione
-  const cli = state.clienti.find(c => c.id === o.cliente_id);
+  const cli = state.aziende.find(c => c.id === o.cliente_id);
   const art = state.articoli.find(a => a.id === o.articolo_id);
   root.append(el('div', { style:'background:var(--sur);border:1px solid var(--brd);border-radius:8px;padding:14px 18px;margin-bottom:20px;' },
     el('div', { style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;' }, 'Operazione selezionata'),
@@ -8164,7 +8258,7 @@ function kioskRenderAttiva() {
   root.innerHTML = '';
 
   const o = state.operazioni.find(x => x.id === sess.operazione_id);
-  const cli = o ? state.clienti.find(c => c.id === o.cliente_id) : null;
+  const cli = o ? state.aziende.find(c => c.id === o.cliente_id) : null;
   const art = o ? state.articoli.find(a => a.id === o.articolo_id) : null;
   const tipo = state.tipiLav.find(t => t.id === sess.tipo_lavorazione_id);
 
@@ -8618,7 +8712,7 @@ function etichettaCommessa(op) {
 // Descrizione completa di una commessa (per il tooltip)
 function descrizioneCommessa(op) {
   if (!op) return 'Commessa';
-  const cli = state.clienti && state.clienti.find(c => c.id === op.cliente_id);
+  const cli = state.aziende && state.aziende.find(c => c.id === op.cliente_id);
   const art = state.articoli && state.articoli.find(a => a.id === op.articolo_id);
   const parti = [];
   if (op.numero_ordine) parti.push('Ordine ' + op.numero_ordine);
@@ -8702,7 +8796,7 @@ function buildLiveCard(u, onClick) {
     }, `${tipo?.nome || 'Assenza'} · ${ore}h${assOggi.note ? ' — '+assOggi.note : ''}`));
   } else if (sess) {
     const op = state.operazioni.find(o => o.id === sess.operazione_id);
-    const cli = op ? state.clienti.find(c => c.id === op.cliente_id) : null;
+    const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
     const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
     const tipo = state.tipiLav.find(t => t.id === sess.tipo_lavorazione_id);
     card.append(
@@ -9022,7 +9116,7 @@ function renderGanttCommesse(root) {
       const attiva = opConSessioneAperta.has(c.op.id);
 
       const art = state.articoli.find(a => a.id === c.op.articolo_id);
-      const cli = state.clienti.find(x => x.id === c.op.cliente_id);
+      const cli = state.aziende.find(x => x.id === c.op.cliente_id);
 
       const bar = el('div', {
         class: 'gantt-cmbar' + (sfora ? ' sfora' : '') + (attiva ? ' attiva' : ''),
@@ -9192,7 +9286,7 @@ function openSessioneModal(s) {
   }
 
   const op = state.operazioni.find(o => o.id === s.operazione_id);
-  const cli = op ? state.clienti.find(c => c.id === op.cliente_id) : null;
+  const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
   const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
   const operatore = state.utenti.find(u => u.id === s.utente_id);
   const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
