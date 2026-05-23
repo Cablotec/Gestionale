@@ -5840,9 +5840,12 @@ function openOperazioneModal(o) {
       const perc = qtaOrd > 0 ? Math.round((tot / qtaOrd) * 100) : 0;
 
       // Riepilogo (stesso stile delle sessioni di lavoro)
+      const oreOrd = opCalcOre(o);
+      const oreRes = opCalcOreResidue(o);
       consegneBox.append(el('div', {
         style: 'background:var(--sur2);border:1px solid '+(completo?'var(--grn)':'var(--brd)')+';border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;',
       },
+        // Riga 1: quantità (pezzi)
         el('div', { style:'display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;' },
           el('div', {},
             el('span', { style:'color:var(--mut)' }, 'Ordinata: '),
@@ -5856,6 +5859,19 @@ function openOperazioneModal(o) {
           el('div', {},
             el('span', { style:'color:var(--mut)' }, 'Avanzamento: '),
             el('span', { style:'color:'+(completo?'var(--grn)':'var(--txt)')+';font-weight:700;' }, perc + '%')),
+        ),
+        // Riga 2: ore preventivate / residue (l'effetto sul capacity planning)
+        // Mostrate sempre, anche se uguali (es. 0 consegne) — è informazione di
+        // contesto, aiuta a interpretare le date di inizio calcolate.
+        el('div', {
+          style:'display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:6px;padding-top:6px;border-top:1px dashed var(--brd);font-size:11px;',
+        },
+          el('div', {},
+            el('span', { style:'color:var(--mut)' }, 'Ore preventivate: '),
+            el('span', { style:'color:var(--txt);font-weight:600;' }, oreOrd.toFixed(2) + 'h')),
+          el('div', {},
+            el('span', { style:'color:var(--mut)' }, 'Ore residue: '),
+            el('span', { style:'color:'+(completo?'var(--grn)':(tot>0?'var(--yel)':'var(--txt)'))+';font-weight:600;' }, oreRes.toFixed(2) + 'h')),
         ),
       ));
 
