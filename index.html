@@ -6242,7 +6242,9 @@ function openOperazioneModal(o) {
         }
         stopWatchdog();
         toast(isNew ? 'Operazione creata' : 'Operazione aggiornata');
-        closeModal(); renderTab('pianificazione');
+        // Refresha la tab da cui è stato aperto il modal (Pianificazione, Gantt,
+        // Magazzino, Storico…), non forzare un cambio di vista.
+        closeModal(); renderTab(state.currentTab || 'pianificazione');
       } catch (e) {
         stopWatchdog();
         btnSave.disabled = false;
@@ -6262,7 +6264,8 @@ async function deleteOperazione(o) {
   if (error) return toast(error.message, 'err');
   if (!data || data.length === 0) return toast('Eliminazione bloccata', 'err');
   state.operazioni = state.operazioni.filter(x => x.id !== o.id);
-  toast('Operazione eliminata'); renderTab('pianificazione');
+  // Refresha la tab corrente, non forzare un cambio di vista
+  toast('Operazione eliminata'); renderTab(state.currentTab || 'pianificazione');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -6530,7 +6533,8 @@ async function quickStato(op, nuovoStato) {
     if (error) throw error;
     Object.assign(op, data); // aggiorno l'oggetto in state in place
     toast('Stato aggiornato: ' + (OP_STATI[nuovoStato]?.label || nuovoStato), 'ok');
-    renderTab('pianificazione');
+    // Refresha la tab corrente, non forzare un cambio di vista
+    renderTab(state.currentTab || 'pianificazione');
   } catch (e) {
     toast('Errore: ' + (e.message||e), 'err');
   }
