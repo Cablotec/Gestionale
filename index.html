@@ -4671,6 +4671,20 @@ function opCalcOre(op) {
   return ((op.quantita || 0) * (op.minuti_unitari || 0)) / 60;
 }
 
+// Ore di lavoro RESIDUO: pezzi ancora da fare × minuti_unitari.
+// Usata dove serve "quanto lavoro c'è davanti" (carico, calcolo inizio):
+// se ho già consegnato parte dell'ordine, quel lavoro è fatto.
+// NON usare per confronti preventivo/consuntivo nel modal — lì serve il
+// totale ordinato (vedi opCalcOre). Mai negativa.
+function opCalcOreResidue(op) {
+  if (!op) return 0;
+  const qtaOrd = Number(op.quantita || 0);
+  const qtaConsegnata = (typeof quantitaConsegnata === 'function')
+    ? quantitaConsegnata(op.id) : 0;
+  const residua = Math.max(0, qtaOrd - qtaConsegnata);
+  return (residua * (op.minuti_unitari || 0)) / 60;
+}
+
 // Calcola ore reali consuntivate (somma sessioni chiuse + sessioni aperte stimate)
 function opCalcOreReali(op) {
   let totSec = 0;
@@ -4691,7 +4705,11 @@ function opCalcGiorni(op) {
 }
 function opCalcInizio(op, addettiOverride) {
   if (!op.scadenza) return null;
-  const ore = opCalcOre(op);
+  // Se l'admin ha bloccato manualmente l'inizio, rispettiamo la sua scelta
+  // e calcoliamo sulle ore TOTALI (semantica stabile: lui ha fissato la data
+  // su quel volume di lavoro). Altrimenti usiamo le ore RESIDUE: ha senso
+  // che il calcolo automatico tenga conto del lavoro già fatto/consegnato.
+  const ore = op.inizio_manuale ? opCalcOre(op) : opCalcOreResidue(op);
   if (ore <= 0) return op.scadenza;
   // addettiOverride: usato dal modal di creazione (operazione non ancora
   // salvata, addetti ancora in stato locale). Altrimenti li cerca dal DB.
@@ -4704,7 +4722,8 @@ function opCalcInizio(op, addettiOverride) {
     return indietroOreCapacita(op.scadenza, ore, addetti);
   }
   // Nessun addetto: fallback alla logica classica a giorni (8h standard).
-  const giorni = opCalcGiorni(op);
+  // Anche qui usiamo le stesse "ore" coerenti col blocco sopra.
+  const giorni = Math.ceil(ore / 8);
   if (giorni <= 0) return op.scadenza;
   return indietroGiorniLavorativi(op.scadenza, giorni);
 }
@@ -5192,8 +5211,22 @@ function renderPianificazione(root) {
       title: desc,
     }, desc || '—'));
 
-    // Quantità
-    tr.append(el('td', { class:'tr mono' }, String(o.quantita || 0)));
+    // Quantità — formato dinamico "consegnata/totale" con colore secondo stato:
+    //   0/Tot   → monocromatico (nessuna consegna ancora)
+    //   N/Tot   → giallo (parzialmente consegnata)
+    //   Tot/Tot → verde (tutto consegnato)
+    // Tooltip sempre presente per leggere il dettaglio senza aprire il modal.
+    const qtaTot = Number(o.quantita || 0);
+    const qtaCons = quantitaConsegnata(o.id);
+    const qtaRes = Math.max(0, qtaTot - qtaCons);
+    let qtaColor = '';
+    if (qtaTot > 0 && qtaCons >= qtaTot) qtaColor = 'color:var(--grn);font-weight:700;';
+    else if (qtaCons > 0) qtaColor = 'color:var(--yel);font-weight:600;';
+    tr.append(el('td', {
+      class: 'tr mono',
+      style: qtaColor,
+      title: `${qtaCons} consegnati su ${qtaTot} — residuo ${qtaRes} pz`,
+    }, `${qtaCons}/${qtaTot}`));
 
     // Scadenza
     tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
@@ -8290,7 +8323,9 @@ function renderCarico(root) {
     .forEach(o => {
       const addetti = getOperazioneAddetti(o.id);
       if (addetti.length === 0) { opSenzaAddetti++; return; }
-      const oreTot = opCalcOre(o);
+      // Nel Carico (planning lavoro futuro) usiamo le ore RESIDUE:
+      // il lavoro già consegnato è fatto, non deve pesare sulla capacità.
+      const oreTot = opCalcOreResidue(o);
       if (oreTot <= 0) return;
       const inizio = opInizio(o);
       if (!inizio) return;
