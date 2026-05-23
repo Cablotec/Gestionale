@@ -859,7 +859,7 @@ const state = {
   opAddetti: [],           // [{operazione_id, utente_id}]
   // Gantt
   ganttView: 'live',       // 'live' | 'storico'
-  ganttZoom: 'giorno',     // 'giorno' | 'settimana' | 'mese'
+  ganttZoom: 'mese',       // 'giorno' | 'settimana' | 'mese'
   ganttCursor: new Date(), // data centrale visualizzazione
   ganttFiltroOperatore: '', // id operatore o '' per tutti
   // Stato kiosk runtime
@@ -1877,7 +1877,7 @@ const TAB_STRUCTURE = {
       { id: 'magazzino',      label: 'Magazzino',      adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
       { id: 'gantt_live',     label: 'Live',           adminOnly: true },
-      { id: 'gantt_commesse', label: 'Commesse',       adminOnly: true },
+      { id: 'gantt_commesse', label: 'Gantt',          adminOnly: true },
       { id: 'carico',         label: 'Carico',         adminOnly: true },
     ],
   },
@@ -8536,6 +8536,74 @@ function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
   return mappa;
 }
 
+// ────────────────────────────────────────────────────────────
+// CARICO UTENTE NEL RANGE (helper riutilizzabile)
+// ────────────────────────────────────────────────────────────
+// Calcola il carico % di un utente in una finestra temporale.
+// Usa la stessa logica della scheda Carico (ore residue distribuite sui
+// giorni lavorativi, divise per il numero di addetti). Coerente con
+// opCalcInizio e indietroOreCapacita.
+//
+// Returns: { oreCarico, oreCapacita, perc, livello }
+//   livello: 'libero' | 'normale' | 'pieno' | 'sovraccarico'
+//   perc: 0..N (può superare 1 in caso di sovraccarico)
+function calcolaCaricoUtenteRange(uid, isoStart, isoEnd) {
+  // Capacità: giorni lavorativi nel range × 8h
+  let giorniLav = 0;
+  const d = parseISODate(isoStart);
+  const fine = parseISODate(isoEnd);
+  let guard = 0;
+  while (d <= fine && guard < 1500) {
+    if (!isGiornoNonLavorativo(d)) giorniLav++;
+    d.setDate(d.getDate() + 1);
+    guard++;
+  }
+  const oreCapacita = giorniLav * 8;
+
+  // Sottrai le ore di assenze valide nel range (ferie, permessi, malattia…)
+  let oreAssenze = 0;
+  state.assenze.forEach(a => {
+    if (a.utente_id !== uid) return;
+    if (a.stato !== 'valida') return;
+    if (a.data < isoStart || a.data > isoEnd) return;
+    oreAssenze += Number(a.ore) || 0;
+  });
+  const capacitaNetta = Math.max(0, oreCapacita - oreAssenze);
+
+  // Carico: somma ore residue distribuite sui giorni lavorativi che cadono
+  // nel range, divise per numero addetti (logica della scheda Carico).
+  let oreCarico = 0;
+  state.operazioni
+    .filter(o => o.stato === 'aperta' && o.scadenza)
+    .forEach(o => {
+      const addetti = getOperazioneAddetti(o.id);
+      if (!addetti.includes(uid)) return;
+      const oreTot = opCalcOreResidue(o);
+      if (oreTot <= 0) return;
+      const inizio = opInizio(o);
+      if (!inizio) return;
+      // Se la commessa non interseca affatto il range, salta
+      if (o.scadenza < isoStart || inizio > isoEnd) return;
+      const orePerAddetto = oreTot / addetti.length;
+      const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerAddetto);
+      // Somma solo i giorni della distribuzione che cadono nel range
+      Object.keys(distrib).forEach(iso => {
+        if (iso >= isoStart && iso <= isoEnd) {
+          oreCarico += distrib[iso];
+        }
+      });
+    });
+
+  const perc = capacitaNetta > 0 ? (oreCarico / capacitaNetta) : 0;
+  let livello;
+  if (perc < 0.60) livello = 'libero';
+  else if (perc < 0.95) livello = 'normale';
+  else if (perc < 1.10) livello = 'pieno';
+  else livello = 'sovraccarico';
+
+  return { oreCarico, oreCapacita: capacitaNetta, perc, livello };
+}
+
 // Etichetta breve di una commessa (per la barra)
 function etichettaCommessa(op) {
   if (!op) return '';
@@ -8569,7 +8637,7 @@ function renderGanttLiveTab(root) {
   renderGanttLive(root);
 }
 
-// Scheda "Commesse": griglia operatori × tempo con barre commessa
+// Scheda "Gantt" (ex "Commesse"): griglia operatori × tempo con barre commessa
 function renderGanttCommesseTab(root) {
   if (ganttLiveTimer) { clearInterval(ganttLiveTimer); ganttLiveTimer = null; }
   root.innerHTML = '';
@@ -8843,8 +8911,46 @@ function renderGanttCommesse(root) {
   const sezioniCom = raggruppaUtenti(operatori);
 
   const buildRigaCom = (u) => {
-    grid.append(el('div', { class:'gantt-row-nome' + (u.esterno ? ' esterno' : '') },
-      u.nome + (u.esterno ? ' ✦' : '')));
+    // Calcolo carico % nel range visibile (stesso periodo del Gantt)
+    const carico = calcolaCaricoUtenteRange(u.id, rangeStartIso, rangeEndIso);
+    const percRound = Math.round(carico.perc * 100);
+    const percTxt = percRound + '%';
+    const coloreCarico = {
+      libero: 'var(--grn)',
+      normale: 'var(--blu)',
+      pieno: 'var(--yel)',
+      sovraccarico: 'var(--red)',
+    }[carico.livello];
+    // Larghezza della barra: cap a 100% per la parte "normale", l'eccesso
+    // si vede dal colore rosso (sovraccarico) — non disegnare oltre il box.
+    const barW = Math.min(100, percRound);
+
+    grid.append(el('div', {
+      class:'gantt-row-nome' + (u.esterno ? ' esterno' : ''),
+      // Override del flex orizzontale dal CSS condiviso: qui ci stanno
+      // due righe (nome + barra carico).
+      style:'flex-direction:column;align-items:stretch;justify-content:center;gap:4px;',
+      title: `${u.nome}: ${carico.oreCarico.toFixed(1)}h di lavoro residuo su ${carico.oreCapacita.toFixed(0)}h di capacità nel periodo visibile (${percTxt})`,
+    },
+      el('div', { style:'font-weight:600;line-height:1.1;' }, u.nome + (u.esterno ? ' ✦' : '')),
+      // Mini-barra di carico con % dentro:
+      // - track: contenitore con altezza fissa e bordo
+      // - fill: riempimento colorato (cap a 100% per non sforare)
+      // - label: % centrata, sopra entrambi gli strati, colore scuro
+      //   per restare leggibile sui colori chiari (verde/giallo/rosso)
+      el('div', {
+        style: 'position:relative;height:14px;background:var(--sur2);border-radius:3px;overflow:hidden;border:1px solid var(--brd);',
+      },
+        el('div', {
+          style: `position:absolute;left:0;top:0;bottom:0;width:${barW}%;background:${coloreCarico};transition:width .2s;`,
+        }),
+        el('div', {
+          style: 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
+            + `font-size:10px;font-family:'DM Mono',monospace;font-weight:700;`
+            + 'color:#0a0a0a;letter-spacing:.02em;text-shadow:0 0 2px rgba(255,255,255,.4);',
+        }, percTxt),
+      ),
+    ));
 
     // Commesse assegnate all'operatore che intersecano il range
     const commesse = [];
