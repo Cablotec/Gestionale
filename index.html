@@ -858,6 +858,8 @@ const state = {
   assVistaCal: 'mese',     // 'mese' | 'riepilogo'
   // Operazioni: multi-addetto (tabella ponte)
   opAddetti: [],           // [{operazione_id, utente_id}]
+  // Operazioni: fornitori esterni (aziende con is_fornitore=true)
+  opFornitori: [],         // [{id, operazione_id, azienda_id, allocazione, creato_il}]
   // Gantt
   ganttView: 'live',       // 'live' | 'storico'
   ganttZoom: 'mese',       // 'giorno' | 'settimana' | 'mese'
@@ -1526,7 +1528,7 @@ document.addEventListener('change', (e) => {
 // Avere un solo handler evita race condition tra ricreazione client e refresh.
 
 async function loadAllData() {
-  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti, impostazioni, consegneCommessa] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti, impostazioni, consegneCommessa, opFornitori] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('utenti').select('*').order('nome'),
@@ -1545,6 +1547,7 @@ async function loadAllData() {
     sb.from('operazioni_addetti').select('*'),
     sb.from('impostazioni').select('*'),
     sb.from('consegne_commessa').select('*').order('data', { ascending:false }),
+    sb.from('operazioni_fornitori').select('*'),
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
@@ -1564,6 +1567,7 @@ async function loadAllData() {
   if (opAddetti.error) throw opAddetti.error;
   if (impostazioni.error) throw impostazioni.error;
   if (consegneCommessa.error) throw consegneCommessa.error;
+  if (opFornitori.error) throw opFornitori.error;
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
@@ -1582,6 +1586,7 @@ async function loadAllData() {
   state.tipiAssenza = tipiAssenza.data || [];
   state.assenze = assenze.data || [];
   state.opAddetti = opAddetti.data || [];
+  state.opFornitori = opFornitori.data || [];
   // Impostazioni: oggetto chiave→valore, comodo da consultare
   state.impostazioni = Object.fromEntries((impostazioni.data||[]).map(r=>[r.chiave, r.valore]));
   state.consegneCommessa = consegneCommessa.data || [];
@@ -1623,6 +1628,8 @@ function startRealtime() {
         (p) => applyChange('assenze', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'operazioni_addetti' },
         (p) => applyChange('operazioni_addetti', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'operazioni_fornitori' },
+        (p) => applyChange('operazioni_fornitori', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'consegne_commessa' },
         (p) => applyChange('consegne_commessa', p))
     .subscribe();
@@ -1759,6 +1766,15 @@ function applyChange(tabella, payload) {
     } else if (ev === 'DELETE') {
       state.consegneCommessa = state.consegneCommessa.filter(x => x.id !== oldRow.id);
     }
+  } else if (tabella === 'operazioni_fornitori') {
+    // PK propria 'id' + UNIQUE (operazione_id, azienda_id)
+    if (ev === 'INSERT') {
+      if (!state.opFornitori.find(x => x.id === row.id)) state.opFornitori.push(row);
+    } else if (ev === 'UPDATE') {
+      state.opFornitori = state.opFornitori.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.opFornitori = state.opFornitori.filter(x => x.id !== oldRow.id);
+    }
   }
 
   // Re-render solo la tab attiva
@@ -1773,6 +1789,25 @@ function loadPrenotazioneOperatori(prenId) {
 // Restituisce gli id degli addetti previsti di un'operazione (dalla cache, sync)
 function getOperazioneAddetti(opId) {
   return state.opAddetti.filter(r => r.operazione_id === opId).map(r => r.utente_id);
+}
+
+// ============================================================
+// FORNITORI ESTERNI — helper di lettura (cache sync)
+// ============================================================
+// Le righe di operazioni_fornitori legano un'operazione a un'azienda con
+// is_fornitore=true (vincolato dal trigger SQL). Una commessa può avere
+// 0..N fornitori, indipendenti dagli addetti interni.
+
+// Restituisce gli id delle aziende fornitrici allocate a una commessa
+function getOperazioneFornitori(opId) {
+  return (state.opFornitori || [])
+    .filter(r => r.operazione_id === opId)
+    .map(r => r.azienda_id);
+}
+
+// Restituisce le righe complete (per accedere a allocazione, id, ecc.)
+function getOperazioneFornitoriDettaglio(opId) {
+  return (state.opFornitori || []).filter(r => r.operazione_id === opId);
 }
 
 // ============================================================
@@ -1822,6 +1857,36 @@ async function syncOperazioneAddetti(opId, nuoviIds) {
       .eq('utente_id', uid);
     if (error) return { error };
     state.opAddetti = state.opAddetti.filter(x => !(x.operazione_id===opId && x.utente_id===uid));
+  }
+  return {};
+}
+
+// Sincronizza i fornitori esterni di un'operazione (stesso pattern degli addetti).
+// nuoviIds è array di azienda_id (con is_fornitore=true, vincolato dal trigger SQL).
+async function syncOperazioneFornitori(opId, nuoviIds) {
+  const vecchi = getOperazioneFornitori(opId);
+  const daAggiungere = nuoviIds.filter(id => !vecchi.includes(id));
+  const daRimuovere = vecchi.filter(id => !nuoviIds.includes(id));
+
+  if (daAggiungere.length) {
+    const rows = daAggiungere.map(aid => ({
+      operazione_id: opId, azienda_id: aid, allocazione: 1.0,
+    }));
+    const { data, error } = await sb.from('operazioni_fornitori').insert(rows).select();
+    if (error) return { error };
+    // Aggiorna cache locale subito (id arriva dal DB)
+    (data || []).forEach(r => {
+      if (!state.opFornitori.find(x => x.id === r.id)) state.opFornitori.push(r);
+    });
+  }
+  for (const aid of daRimuovere) {
+    const { error } = await sb.from('operazioni_fornitori')
+      .delete()
+      .eq('operazione_id', opId)
+      .eq('azienda_id', aid);
+    if (error) return { error };
+    state.opFornitori = state.opFornitori.filter(x =>
+      !(x.operazione_id === opId && x.azienda_id === aid));
   }
   return {};
 }
@@ -5740,6 +5805,82 @@ function openOperazioneModal(o) {
   addSearchInput.oninput = renderAddDropList;
   renderAddSelected();
 
+  // ── Fornitori esterni (aziende con is_fornitore=true) ─────────────
+  // Stato locale: array di azienda_id allocati a questa commessa.
+  // Al salvataggio viene comparato con quello in DB e si fanno insert/delete
+  // su operazioni_fornitori (allocazione fissa a 1.0 in questa sessione).
+  let fornitoriSel = isNew ? [] : getOperazioneFornitori(o.id).slice();
+  const aziendeFornitrici = state.aziende.filter(a => a.is_fornitore && a.attivo);
+  const forSelectedWrap = el('div', { class:'util-selected' });
+  const forSearchInput = el('input', {
+    type:'text', class:'util-search',
+    placeholder: aziendeFornitrici.length === 0
+      ? 'Nessun fornitore in anagrafica (aggiungili dalla scheda Aziende)'
+      : 'Aggiungi fornitore esterno (clicca o cerca)…',
+    autocomplete:'off',
+  });
+  if (aziendeFornitrici.length === 0) forSearchInput.disabled = true;
+  const forDropList = el('div', { class:'util-droplist' });
+  const forDropWrap = el('div', { class:'util-dropwrap' }, forSearchInput, forDropList);
+  forSearchInput.onfocus = () => { forDropList.classList.add('open'); renderForDropList(); };
+  forSearchInput.onblur = () => { setTimeout(() => forDropList.classList.remove('open'), 180); };
+
+  const renderForSelected = () => {
+    forSelectedWrap.innerHTML = '';
+    if (fornitoriSel.length === 0) {
+      forSelectedWrap.append(el('span', { class:'util-empty' }, 'Nessun fornitore'));
+      return;
+    }
+    fornitoriSel.forEach(aid => {
+      const a = state.aziende.find(x => x.id === aid);
+      if (!a) return;
+      forSelectedWrap.append(el('span', { class:'util-pill', style:'background:rgba(212,140,40,.18);border-color:rgba(212,140,40,.4);color:#f0c070;' },
+        el('span', {}, a.nome + (a.coefficiente && a.coefficiente !== 1
+          ? ` · coef ${Number(a.coefficiente).toFixed(2)}` : '')),
+        canEdit ? el('button', {
+          type:'button', class:'util-pill-x',
+          onclick: () => {
+            fornitoriSel = fornitoriSel.filter(x => x !== aid);
+            renderForSelected(); renderForDropList();
+            if (aggiornaPreviewInizio) aggiornaPreviewInizio();
+          },
+        }, '✕') : null,
+      ));
+    });
+  };
+  const renderForDropList = () => {
+    const q = forSearchInput.value.trim().toLowerCase();
+    const filtered = aziendeFornitrici.filter(a =>
+      !q || (a.nome || '').toLowerCase().includes(q)
+    );
+    forDropList.innerHTML = '';
+    if (!filtered.length) {
+      forDropList.append(el('div', { class:'util-noresult' },
+        aziendeFornitrici.length === 0 ? 'Nessun fornitore in anagrafica' : 'Nessun fornitore trovato'));
+      return;
+    }
+    filtered.forEach(a => {
+      const isSel = fornitoriSel.includes(a.id);
+      forDropList.append(el('div', {
+        class: 'util-row' + (isSel ? ' selected' : ''),
+        onclick: () => {
+          if (!canEdit) return;
+          if (isSel) fornitoriSel = fornitoriSel.filter(x => x !== a.id);
+          else fornitoriSel.push(a.id);
+          renderForSelected(); renderForDropList();
+          if (aggiornaPreviewInizio) aggiornaPreviewInizio();
+        },
+      },
+        el('span', { class:'util-row-chk' }, isSel ? '✓' : ''),
+        el('span', { class:'util-row-name' }, a.nome
+          + (a.coefficiente && a.coefficiente !== 1
+              ? ` (coef ${Number(a.coefficiente).toFixed(2)})` : '')),
+      ));
+    });
+  };
+  forSearchInput.oninput = renderForDropList;
+  renderForSelected();
+
   // Stato + preparazione
   const selStato = el('select', { name:'stato' },
     el('option', { value:'aperta' }, 'Aperta'),
@@ -5806,6 +5947,10 @@ function openOperazioneModal(o) {
       addSelectedWrap, addDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Puoi assegnare più persone. Il lavoro verrà ripartito tra loro.')),
+    el('div', { class:'field' }, el('label', {}, 'Fornitori esterni'),
+      forSelectedWrap, forDropWrap,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Ditte terze che contribuiscono alla lavorazione (con coefficiente di capacità).')),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Stato'), selStato),
       el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
@@ -6331,6 +6476,14 @@ function openOperazioneModal(o) {
           btnSave.disabled = false;
           btnSave.textContent = 'Salva';
           return toast('Operazione salvata, ma errore addetti: '+syncRes.error.message, 'err');
+        }
+        // Sincronizza i fornitori esterni nella tabella ponte
+        const syncFor = await syncOperazioneFornitori(data.id, fornitoriSel);
+        if (syncFor.error) {
+          stopWatchdog();
+          btnSave.disabled = false;
+          btnSave.textContent = 'Salva';
+          return toast('Operazione salvata, ma errore fornitori: '+syncFor.error.message, 'err');
         }
         stopWatchdog();
         toast(isNew ? 'Operazione creata' : 'Operazione aggiornata');
@@ -8702,6 +8855,70 @@ function calcolaCaricoUtenteRange(uid, isoStart, isoEnd) {
   return { oreCarico, oreCapacita: capacitaNetta, perc, livello };
 }
 
+// Calcola il carico % di un'azienda fornitrice in una finestra temporale.
+// Stessa logica di calcolaCaricoUtenteRange ma:
+//   - capacità: giorni × 8h × coefficiente azienda (1.0 default)
+//   - carico: solo da operazioni_fornitori (non operazioni_addetti)
+//   - allocazione (default 1.0): % di quanto il fornitore è impegnato sulla commessa
+// Niente assenze (le aziende non hanno ferie nel nostro sistema).
+function calcolaCaricoFornitoreRange(aziendaId, isoStart, isoEnd) {
+  const az = state.aziende.find(a => a.id === aziendaId);
+  const coef = Number((az && az.coefficiente != null) ? az.coefficiente : 1.0);
+
+  // Capacità: giorni lavorativi nel range × 8h × coefficiente
+  let giorniLav = 0;
+  const d = parseISODate(isoStart);
+  const fine = parseISODate(isoEnd);
+  let guard = 0;
+  while (d <= fine && guard < 1500) {
+    if (!isGiornoNonLavorativo(d)) giorniLav++;
+    d.setDate(d.getDate() + 1);
+    guard++;
+  }
+  const oreCapacita = giorniLav * 8 * coef;
+
+  // Carico: somma ore residue distribuite sui giorni lavorativi che cadono
+  // nel range, divise per numero TOTALE di entità lavoranti (addetti+fornitori)
+  // per coerenza con la distribuzione del lavoro nel modello.
+  let oreCarico = 0;
+  state.operazioni
+    .filter(o => o.stato === 'aperta' && o.scadenza)
+    .forEach(o => {
+      // Trova la riga di operazioni_fornitori per questa azienda
+      const riga = (state.opFornitori || [])
+        .find(r => r.operazione_id === o.id && r.azienda_id === aziendaId);
+      if (!riga) return;
+      const oreTot = opCalcOreResidue(o);
+      if (oreTot <= 0) return;
+      const inizio = opInizio(o);
+      if (!inizio) return;
+      if (o.scadenza < isoStart || inizio > isoEnd) return;
+      // Numero totale di entità che lavorano sulla commessa (addetti + fornitori)
+      const nAddetti = getOperazioneAddetti(o.id).length;
+      const nFornitori = getOperazioneFornitori(o.id).length;
+      const totEntita = nAddetti + nFornitori;
+      if (totEntita === 0) return;
+      const alloc = Number(riga.allocazione || 1.0);
+      // Quota fornitore = ore_tot * allocazione / totale_entità
+      const orePerFornitore = (oreTot * alloc) / totEntita;
+      const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerFornitore);
+      Object.keys(distrib).forEach(iso => {
+        if (iso >= isoStart && iso <= isoEnd) {
+          oreCarico += distrib[iso];
+        }
+      });
+    });
+
+  const perc = oreCapacita > 0 ? (oreCarico / oreCapacita) : 0;
+  let livello;
+  if (perc < 0.60) livello = 'libero';
+  else if (perc < 0.95) livello = 'normale';
+  else if (perc < 1.10) livello = 'pieno';
+  else livello = 'sovraccarico';
+
+  return { oreCarico, oreCapacita, perc, livello, coefficiente: coef };
+}
+
 // Etichetta breve di una commessa (per la barra)
 function etichettaCommessa(op) {
   if (!op) return '';
@@ -9162,6 +9379,132 @@ function renderGanttCommesse(root) {
     }, sez.label));
     sez.utenti.forEach(buildRigaCom);
   });
+
+  // ── Sezione FORNITORI ESTERNI ──
+  // Costruisco righe per ogni azienda con is_fornitore=true e attiva che ha
+  // almeno una assegnazione in operazioni_fornitori. Le altre non hanno senso
+  // mostrarle qui (sezione vuota se nessuno è coinvolto).
+  const fornitoriCoinvolti = state.aziende
+    .filter(a => a.is_fornitore && a.attivo)
+    .filter(a => state.opFornitori.some(r => r.azienda_id === a.id))
+    .sort((a, b) => a.nome.localeCompare(b.nome));
+
+  if (fornitoriCoinvolti.length > 0) {
+    grid.append(el('div', {
+      class: 'gruppo-hd',
+      style: 'grid-column:1 / -1;',
+    }, 'FORNITORI ESTERNI'));
+
+    const buildRigaForCom = (a) => {
+      // Calcolo carico % del fornitore (considera coefficiente capacità)
+      const carico = calcolaCaricoFornitoreRange(a.id, rangeStartIso, rangeEndIso);
+      const percRound = Math.round(carico.perc * 100);
+      const percTxt = percRound + '%';
+      const coloreCarico = {
+        libero: 'var(--grn)',
+        normale: 'var(--blu)',
+        pieno: 'var(--yel)',
+        sovraccarico: 'var(--red)',
+      }[carico.livello];
+      const barW = Math.min(100, percRound);
+
+      grid.append(el('div', {
+        class:'gantt-row-nome',
+        // Lo stile differenzia visivamente i fornitori (sfondo arancione tenue)
+        style:'flex-direction:column;align-items:stretch;justify-content:center;gap:4px;'
+          + 'background:rgba(212,140,40,.06);border-left:2px solid rgba(212,140,40,.45);',
+        title: `${a.nome} (fornitore, coef ${carico.coefficiente.toFixed(2)}): `
+          + `${carico.oreCarico.toFixed(1)}h di lavoro residuo su `
+          + `${carico.oreCapacita.toFixed(0)}h di capacità nel periodo visibile (${percTxt})`,
+      },
+        el('div', { style:'font-weight:600;line-height:1.1;color:#f0c070;' },
+          a.nome + (carico.coefficiente !== 1
+            ? ` · ${carico.coefficiente.toFixed(2)}` : '')),
+        el('div', {
+          style: 'position:relative;height:14px;background:var(--sur2);border-radius:3px;overflow:hidden;border:1px solid var(--brd);',
+        },
+          el('div', {
+            style: `position:absolute;left:0;top:0;bottom:0;width:${barW}%;background:${coloreCarico};transition:width .2s;`,
+          }),
+          el('div', {
+            style: 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
+              + `font-size:10px;font-family:'DM Mono',monospace;font-weight:700;`
+              + 'color:#0a0a0a;letter-spacing:.02em;text-shadow:0 0 2px rgba(255,255,255,.4);',
+          }, percTxt),
+        ),
+      ));
+
+      // Commesse in cui il fornitore è coinvolto
+      const commesse = [];
+      state.operazioni.forEach(o => {
+        if (!o.scadenza) return;
+        const for_ids = getOperazioneFornitori(o.id);
+        if (!for_ids.includes(a.id)) return;
+        const inizio = opInizio(o) || o.scadenza;
+        if (o.scadenza < rangeStartIso || inizio > rangeEndIso) return;
+        commesse.push({ op:o, inizio, scadenza:o.scadenza });
+      });
+
+      const track = el('div', {
+        class:'gantt-cmrow',
+        style:`grid-column: 2 / span ${slots.length}; position:relative;`
+          + 'background:rgba(212,140,40,.03);',
+      });
+
+      // Colonne sfondo (weekend, oggi)
+      slots.forEach((slot, i) => {
+        const cls = ['gantt-cmcol'];
+        if (slot.weekend) cls.push('weekend');
+        if (slot.dateISO === oggiISO || slot.isOggi) cls.push('oggi');
+        track.append(el('div', {
+          class:cls.join(' '),
+          style:`left:${i*slotWidth}px;width:${slotWidth}px;`,
+        }));
+      });
+
+      const BAR_H = 18;
+      const GAP = 4;
+
+      // Disegno le barre delle commesse (stesso pattern degli utenti)
+      commesse.sort((a, b) => (a.inizio || '').localeCompare(b.inizio || ''));
+      commesse.forEach((c, idx) => {
+        const iIni = slotIndexOfIso(c.inizio);
+        const iFin = slotIndexOfIso(c.scadenza);
+        if (iIni === -1 && iFin === -1) return;
+        const i0 = Math.max(0, iIni === -1 ? 0 : iIni);
+        const i1 = Math.min(slots.length - 1, iFin === -1 ? slots.length - 1 : iFin);
+        const left = i0 * slotWidth;
+        const width = Math.max(slotWidth * 0.6, (i1 - i0 + 1) * slotWidth - 4);
+
+        const art = state.articoli.find(x => x.id === c.op.articolo_id);
+        const cli = state.aziende.find(x => x.id === c.op.cliente_id);
+        const prev = opCalcOre(c.op);
+
+        const bar = el('div', {
+          class: 'gantt-cmbar',
+          style: `left:${left}px;width:${width}px;top:${idx*(BAR_H+GAP)}px;`
+            + 'border-color:rgba(212,140,40,.6);',
+          title:
+            'Commessa ' + (c.op.numero_ordine || '')
+            + (cli ? '\nCliente: ' + cli.nome : '')
+            + (art ? '\nArticolo: ' + (art.codice || '') : '')
+            + '\nPreventivo: ' + prev.toFixed(1) + ' h'
+            + '\nScadenza: ' + fmtIT(c.scadenza)
+            + '\n(clic per aprire la commessa)',
+          onclick: () => { if (typeof openOperazioneModal === 'function') openOperazioneModal(c.op); },
+        });
+        bar.append(el('div', { class:'gantt-cmbar-txt' },
+          (art && art.codice ? art.codice : 'OP') + '  ' + Math.round(prev) + 'h'));
+        track.append(bar);
+      });
+
+      const hRiga = Math.max(38, commesse.length * (BAR_H+GAP) + 8);
+      track.style.minHeight = hRiga + 'px';
+      grid.append(track);
+    };
+
+    fornitoriCoinvolti.forEach(buildRigaForCom);
+  }
 
   wrap.append(grid);
   root.append(wrap);
