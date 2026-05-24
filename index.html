@@ -3730,16 +3730,25 @@ function renderArticoli(root) {
     el('th', {}, 'Codice'),
     el('th', {}, 'Descrizione'),
     el('th', {}, 'Categoria'),
+    el('th', { class:'tr' }, 'Min/pz'),
     el('th', {}, 'Note'),
     el('th', { class:'tc' }, 'Stato'),
     el('th', { class:'tc' }, 'Azioni'),
   )));
   const tb = el('tbody');
   list.forEach(a => {
+    const minutiVal = (a.minuti_unitari != null && a.minuti_unitari !== '')
+      ? Number(a.minuti_unitari) : null;
     tb.append(el('tr', {},
       el('td', { class:'cod-cell' }, a.codice || '—'),
       el('td', {}, a.descrizione || ''),
       el('td', { style:'color:var(--mut);font-size:11px;' }, a.categoria || ''),
+      // Minuti unitari: vuoto in rosso pallido (da compilare), altrimenti verde
+      minutiVal != null
+        ? el('td', { class:'tr mono', style:'font-size:11px;color:var(--grn);font-weight:600;' },
+            minutiVal + " min")
+        : el('td', { class:'tr mono', style:'font-size:10px;color:var(--mut);font-style:italic;' },
+            '— da definire'),
       el('td', { style:'max-width:280px;font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, a.note || ''),
       el('td', { class:'tc' }, a.attivo
         ? el('span', { class:'badge bok' }, 'attivo')
@@ -3763,8 +3772,11 @@ function renderArticoli(root) {
 function openArticoloModal(a) {
   const isNew = !a;
   const isAdmin = state.profile?.ruolo === 'admin';
-  a = a || { codice:'', descrizione:'', categoria:'', note:'', attivo:true };
+  a = a || { codice:'', descrizione:'', categoria:'', note:'', attivo:true, minuti_unitari:null };
   const readonly = !isAdmin;
+  // Valore originale dei minuti, per chiedere conferma se cambia
+  const minutiOrig = (a.minuti_unitari != null && a.minuti_unitari !== '')
+    ? Number(a.minuti_unitari) : null;
 
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
@@ -3778,6 +3790,12 @@ function openArticoloModal(a) {
   const inCodice = el('input', { type:'text', name:'codice', value:a.codice||'', required:'true' });
   const inDesc = el('input', { type:'text', name:'descrizione', value:a.descrizione||'' });
   const inCategoria = el('input', { type:'text', name:'categoria', value:a.categoria||'' });
+  const inMinuti = el('input', {
+    type:'number', name:'minuti_unitari', step:'0.5', min:'0',
+    value: minutiOrig != null ? String(minutiOrig) : '',
+    placeholder: 'es. 8',
+    style:'max-width:140px;',
+  });
   const inNote = el('textarea', { name:'note', rows:'2' }, a.note || '');
   const selAttivo = el('select', { name:'attivo' },
     el('option', { value:'true' }, 'Attivo'),
@@ -3785,7 +3803,7 @@ function openArticoloModal(a) {
   selAttivo.value = String(!!a.attivo);
 
   if (readonly) {
-    [inCodice, inDesc, inCategoria, inNote, selAttivo].forEach(i => i.disabled = true);
+    [inCodice, inDesc, inCategoria, inMinuti, inNote, selAttivo].forEach(i => i.disabled = true);
   }
 
   form.append(
@@ -3797,6 +3815,11 @@ function openArticoloModal(a) {
     el('div', { class:'field' }, el('label', {}, 'Categoria'), inCategoria,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Es. "Elettronica", "Meccanica", "Cablaggi" — utile per raggruppamenti futuri.')),
+    el('div', { class:'field' }, el('label', {}, 'Minuti unitari per pezzo'), inMinuti,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Tempo standard per produrre un singolo pezzo di questo codice. ' +
+        'Verrà pre-compilato in automatico nelle nuove commesse. ' +
+        'Lascia vuoto se ancora non lo conosci.')),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
 
@@ -3809,12 +3832,32 @@ function openArticoloModal(a) {
     const btnSave = el('button', { class:'btnp' }, 'Salva');
     btnSave.onclick = async () => {
       const fd = new FormData(form);
+      const minutiRaw = (fd.get('minuti_unitari') || '').toString().trim();
+      const minutiVal = minutiRaw === '' ? null : Number(minutiRaw);
+      if (minutiRaw !== '' && (!Number.isFinite(minutiVal) || minutiVal < 0)) {
+        return toast('Minuti unitari: valore non valido', 'err');
+      }
+      // Conferma se il valore minuti cambia su un articolo esistente.
+      // Motivo: influenzerà le commesse future create con questo codice.
+      if (!isNew && minutiOrig !== minutiVal) {
+        const prima = minutiOrig != null ? `${minutiOrig} min` : '(vuoto)';
+        const dopo = minutiVal != null ? `${minutiVal} min` : '(vuoto)';
+        const ok = confirm(
+          `Stai cambiando i minuti unitari di questo articolo:\n` +
+          `   ${prima} → ${dopo}\n\n` +
+          `Questo influenzerà le NUOVE commesse create con questo codice.\n` +
+          `Le commesse esistenti non verranno modificate.\n\n` +
+          `Procedere?`
+        );
+        if (!ok) return;
+      }
       const payload = {
         codice: (fd.get('codice')||'').trim(),
         descrizione: (fd.get('descrizione')||'').trim() || null,
         categoria: (fd.get('categoria')||'').trim() || null,
         note: (fd.get('note')||'').trim() || null,
         attivo: fd.get('attivo') === 'true',
+        minuti_unitari: minutiVal,
       };
       if (!payload.codice) return toast('Codice obbligatorio', 'err');
       btnSave.disabled = true;
@@ -3895,14 +3938,27 @@ function openArticoliImportPreviewModal(rows) {
   const colDesc = findCol('descrizione','descr','description','desc');
   const colCategoria = findCol('categoria','category','tipo','famiglia');
   const colNote = findCol('note','notes','annotazioni');
+  const colMinuti = findCol('minuti','minuti_unitari','min/pz','minuti per pezzo','tempo unitario','tempo','minutes');
 
-  const parsed = rows.map((r, idx) => ({
-    _row: idx + 2,
-    codice: (colCodice ? r[colCodice] : '').toString().trim(),
-    descrizione: colDesc ? (r[colDesc]||'').toString().trim() || null : null,
-    categoria: colCategoria ? (r[colCategoria]||'').toString().trim() || null : null,
-    note: colNote ? (r[colNote]||'').toString().trim() || null : null,
-  }));
+  const parsed = rows.map((r, idx) => {
+    // Parsing minuti: accetta numero, vuoto, virgola decimale
+    let minutiVal = null;
+    if (colMinuti) {
+      const raw = (r[colMinuti]||'').toString().trim().replace(',', '.');
+      if (raw !== '') {
+        const n = Number(raw);
+        if (Number.isFinite(n) && n >= 0) minutiVal = n;
+      }
+    }
+    return {
+      _row: idx + 2,
+      codice: (colCodice ? r[colCodice] : '').toString().trim(),
+      descrizione: colDesc ? (r[colDesc]||'').toString().trim() || null : null,
+      categoria: colCategoria ? (r[colCategoria]||'').toString().trim() || null : null,
+      note: colNote ? (r[colNote]||'').toString().trim() || null : null,
+      minuti_unitari: minutiVal,
+    };
+  });
 
   const errors = [];
   const codiciVisti = new Set();
@@ -3996,6 +4052,7 @@ async function articoliImportEsegui(nuovi, aggiornamenti) {
     const batch = nuovi.slice(i, i + batchSize).map(p => ({
       codice: p.codice, descrizione: p.descrizione,
       categoria: p.categoria, note: p.note,
+      minuti_unitari: p.minuti_unitari, // null se vuoto nell'Excel
     }));
     const { data, error } = await sb.from('articoli').insert(batch).select();
     if (error) {
@@ -4012,9 +4069,14 @@ async function articoliImportEsegui(nuovi, aggiornamenti) {
   for (const p of aggiornamenti) {
     const existing = state.articoli.find(a => (a.codice||'').toLowerCase() === p.codice.toLowerCase());
     if (!existing) { errUpd++; continue; }
-    const { data, error } = await sb.from('articoli').update({
+    // Per l'update: i minuti vengono aggiornati SOLO se valorizzati nell'Excel.
+    // Se l'utente lascia vuota la cella, non sovrascrivo il valore esistente.
+    const patch = {
       descrizione: p.descrizione, categoria: p.categoria, note: p.note,
-    }).eq('id', existing.id).select().single();
+    };
+    if (p.minuti_unitari != null) patch.minuti_unitari = p.minuti_unitari;
+    const { data, error } = await sb.from('articoli').update(patch)
+      .eq('id', existing.id).select().single();
     if (error) errUpd++;
     else {
       okUpd++;
@@ -4251,11 +4313,12 @@ function articoliExportExcel() {
     codice: a.codice,
     descrizione: a.descrizione || '',
     categoria: a.categoria || '',
+    minuti: (a.minuti_unitari != null && a.minuti_unitari !== '') ? Number(a.minuti_unitari) : '',
     note: a.note || '',
     attivo: a.attivo ? 'sì' : 'no',
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{wch:24},{wch:40},{wch:18},{wch:30},{wch:8}];
+  ws['!cols'] = [{wch:24},{wch:40},{wch:18},{wch:10},{wch:30},{wch:8}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Articoli');
   XLSX.writeFile(wb, 'articoli_'+new Date().toISOString().substring(0,10)+'.xlsx');
@@ -5636,10 +5699,16 @@ function opInlineSelect(op, field, displayNode, options) {
 // onState: callback({mode:'existing'|'new'|'empty', id, text}) chiamato a ogni cambiamento
 // Ritorna { wrap, getValue } dove getValue() → {mode, id, text}
 function makeAutocompleteCreate(opts) {
-  const { items, getLabel, placeholder, initialId, entityLabel } = opts;
+  const { items, getLabel, placeholder, initialId, entityLabel, onChange } = opts;
   let selMode = 'empty';   // 'empty' | 'existing' | 'new'
   let selId = null;
   let selText = '';
+  // Helper interno: notifica il chiamante quando selezione cambia
+  const notify = () => {
+    if (typeof onChange === 'function') {
+      onChange({ mode: selMode, id: selId, text: selText });
+    }
+  };
 
   // Inizializza con valore esistente
   if (initialId) {
@@ -5676,12 +5745,13 @@ function makeAutocompleteCreate(opts) {
   function recompute() {
     const txt = input.value.trim();
     selText = txt;
-    if (!txt) { selMode = 'empty'; selId = null; updateHint(); return; }
+    if (!txt) { selMode = 'empty'; selId = null; updateHint(); notify(); return; }
     // Match esatto (case-insensitive) con un record esistente?
     const exact = items.find(x => getLabel(x).toLowerCase() === txt.toLowerCase());
     if (exact) { selMode = 'existing'; selId = exact.id; }
     else { selMode = 'new'; selId = null; }
     updateHint();
+    notify();
   }
 
   function renderDrop() {
@@ -5698,6 +5768,7 @@ function makeAutocompleteCreate(opts) {
           selMode = 'existing'; selId = rec.id; selText = getLabel(rec);
           dropList.classList.remove('open');
           updateHint();
+          notify();
         },
       },
         el('span', { class:'util-row-name' }, getLabel(rec)),
@@ -5758,13 +5829,36 @@ function openOperazioneModal(o) {
     entityLabel: 'cliente',
   });
 
-  // Autocomplete articolo — con creazione al volo
+  // Autocomplete articolo — con creazione al volo.
+  // onChange si attiva quando l'utente seleziona un articolo: pre-compila i
+  // minuti unitari dal valore dell'articolo SOLO se il campo è vuoto o = 0
+  // (cioè non già impostato manualmente dall'utente, in tal caso rispetto la
+  // sua scelta). Aggiorna anche l'indicatore di divergenza '*'.
   const acArticolo = makeAutocompleteCreate({
     items: state.articoli.filter(a => a.attivo),
     getLabel: a => a.codice,
     placeholder: 'Cerca o digita nuovo codice…',
     initialId: o.articolo_id || null,
     entityLabel: 'articolo',
+    onChange: (val) => {
+      // Trova il riferimento ai campi DOPO che il form esiste
+      const minInput = form && form.querySelector ? form.querySelector('#minuti-input') : null;
+      if (!minInput) return;
+      if (val.mode === 'existing' && val.id) {
+        const art = state.articoli.find(a => a.id === val.id);
+        if (art && art.minuti_unitari != null && art.minuti_unitari !== '') {
+          const curVal = (minInput.value || '').toString().trim();
+          // Pre-compila se campo vuoto o = 0 (default precedente)
+          if (curVal === '' || curVal === '0' || Number(curVal) === 0) {
+            minInput.value = String(art.minuti_unitari);
+          }
+        }
+      }
+      // Aggiorna indicatore divergenza
+      if (typeof aggiornaIndicatoreMinuti === 'function') aggiornaIndicatoreMinuti();
+      // Trigga il refresh del preview (ore, inizio calcolato…)
+      if (typeof refreshPreview === 'function') refreshPreview();
+    },
   });
 
   // Multi-select addetti (lo stesso pattern di "Chi userà il mezzo")
@@ -5947,8 +6041,16 @@ function openOperazioneModal(o) {
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Quantità *'),
         el('input', { type:'number', name:'quantita', value:String(o.quantita||1), min:'1', required:'true' })),
-      el('div', { class:'field' }, el('label', {}, 'Minuti unitari'),
-        el('input', { type:'number', name:'minuti_unitari', value:String(o.minuti_unitari||0), min:'0' })),
+      el('div', { class:'field' },
+        el('label', { id:'minuti-label' }, 'Minuti unitari',
+          el('span', { id:'minuti-diff', style:'color:var(--yel);margin-left:4px;display:none;', title:'Valore diverso dal default dell\'articolo (clicca per ripristinare)' }, '*')),
+        el('input', {
+          type:'number', name:'minuti_unitari', id:'minuti-input',
+          value: String(o.minuti_unitari != null ? o.minuti_unitari : ''),
+          min:'0', step:'0.5',
+        }),
+        el('div', { class:'sub', id:'minuti-hint', style:'margin-top:4px;font-size:10px;color:var(--mut);' },
+          'Suggerito automaticamente dall\'articolo selezionato.')),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Scadenza'),
@@ -6295,6 +6397,38 @@ function openOperazioneModal(o) {
   // il lucchetto parte chiuso (forzato).
   let inizioBloccato = !!o.inizio_manuale;
 
+  // Aggiorna l'indicatore '*' accanto a "Minuti unitari" e l'hint sottostante
+  // a seconda che il valore della commessa coincida o no col valore dell'articolo.
+  const aggiornaIndicatoreMinuti = () => {
+    const star = form.querySelector('#minuti-diff');
+    const hint = form.querySelector('#minuti-hint');
+    const minInput = form.querySelector('#minuti-input');
+    if (!star || !minInput) return;
+    const artVal = acArticolo.getValue();
+    const art = (artVal.mode === 'existing' && artVal.id)
+      ? state.articoli.find(a => a.id === artVal.id) : null;
+    const artMin = (art && art.minuti_unitari != null && art.minuti_unitari !== '')
+      ? Number(art.minuti_unitari) : null;
+    const curRaw = (minInput.value || '').toString().trim();
+    const curMin = curRaw === '' ? null : Number(curRaw);
+
+    if (artMin == null) {
+      // Articolo senza valore di riferimento: niente confronto
+      star.style.display = 'none';
+      if (hint) hint.textContent = art
+        ? 'L\'articolo selezionato non ha minuti unitari in anagrafica. Impostali una volta nell\'articolo per riutilizzarli.'
+        : 'Suggerito automaticamente dall\'articolo selezionato.';
+    } else if (curMin === artMin) {
+      // Combaciano
+      star.style.display = 'none';
+      if (hint) hint.textContent = `Valore standard dell'articolo (${artMin} min).`;
+    } else {
+      // Divergenza
+      star.style.display = 'inline';
+      if (hint) hint.textContent = `Diverso dallo standard dell'articolo (${artMin} min) — clicca '*' per ripristinarlo.`;
+    }
+  };
+
   const refreshPreview = () => {
     const fd = new FormData(form);
     const tmp = {
@@ -6377,10 +6511,29 @@ function openOperazioneModal(o) {
   }
 
   refreshPreview();
+  aggiornaIndicatoreMinuti();
   ['quantita','minuti_unitari','scadenza','inizio'].forEach(name => {
     const f = form.querySelector(`[name=${name}]`);
     if (f) f.addEventListener('input', refreshPreview);
   });
+  // Bind aggiuntivo: input minuti aggiorna anche l'indicatore di divergenza
+  const minInputEl = form.querySelector('#minuti-input');
+  if (minInputEl) minInputEl.addEventListener('input', aggiornaIndicatoreMinuti);
+  // Click sull'asterisco: ripristina il valore dell'articolo se diverso
+  const starEl = form.querySelector('#minuti-diff');
+  if (starEl) {
+    starEl.style.cursor = 'pointer';
+    starEl.addEventListener('click', () => {
+      const artVal = acArticolo.getValue();
+      const art = (artVal.mode === 'existing' && artVal.id)
+        ? state.articoli.find(a => a.id === artVal.id) : null;
+      if (art && art.minuti_unitari != null && minInputEl) {
+        minInputEl.value = String(art.minuti_unitari);
+        aggiornaIndicatoreMinuti();
+        refreshPreview();
+      }
+    });
+  }
 
   // Espongo lo stato del lucchetto al salvataggio
   form._inizioBloccato = () => inizioBloccato;
