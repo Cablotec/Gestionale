@@ -5703,8 +5703,13 @@ function makeAutocompleteCreate(opts) {
   let selMode = 'empty';   // 'empty' | 'existing' | 'new'
   let selId = null;
   let selText = '';
+  // Guard anti-ricorsione: durante getValue() chiamiamo recompute() per essere
+  // sicuri che selId rifletta l'input attuale, ma NON vogliamo che questo
+  // ri-emetta onChange (sennò un onChange che chiama getValue → loop infinito).
+  let suppressNotify = false;
   // Helper interno: notifica il chiamante quando selezione cambia
   const notify = () => {
+    if (suppressNotify) return;
     if (typeof onChange === 'function') {
       onChange({ mode: selMode, id: selId, text: selText });
     }
@@ -5791,7 +5796,14 @@ function makeAutocompleteCreate(opts) {
 
   return {
     container,
-    getValue: () => { recompute(); return { mode: selMode, id: selId, text: selText }; },
+    getValue: () => {
+      // Sopprimiamo le notifiche: getValue è "lettura" — chi la chiama
+      // sa già che vuole il valore, non vogliamo rimbalzi onChange
+      suppressNotify = true;
+      try { recompute(); }
+      finally { suppressNotify = false; }
+      return { mode: selMode, id: selId, text: selText };
+    },
   };
 }
 
@@ -5841,8 +5853,12 @@ function openOperazioneModal(o) {
     initialId: o.articolo_id || null,
     entityLabel: 'articolo',
     onChange: (val) => {
-      // Trova il riferimento ai campi DOPO che il form esiste
-      const minInput = form && form.querySelector ? form.querySelector('#minuti-input') : null;
+      // Safe-guard: questo callback può essere chiamato durante l'init
+      // dell'autocomplete (recompute iniziale), prima che `form` o le funzioni
+      // helper esistano. In quel caso non facciamo nulla — verrà chiamato
+      // di nuovo dagli eventi reali (input, click) quando tutto è in piedi.
+      if (typeof form === 'undefined' || !form || !form.querySelector) return;
+      const minInput = form.querySelector('#minuti-input');
       if (!minInput) return;
       if (val.mode === 'existing' && val.id) {
         const art = state.articoli.find(a => a.id === val.id);
@@ -5854,9 +5870,9 @@ function openOperazioneModal(o) {
           }
         }
       }
-      // Aggiorna indicatore divergenza
+      // Aggiorna indicatore divergenza (se la funzione è già definita)
       if (typeof aggiornaIndicatoreMinuti === 'function') aggiornaIndicatoreMinuti();
-      // Trigga il refresh del preview (ore, inizio calcolato…)
+      // Trigga il refresh del preview (se la funzione è già definita)
       if (typeof refreshPreview === 'function') refreshPreview();
     },
   });
@@ -6399,33 +6415,39 @@ function openOperazioneModal(o) {
 
   // Aggiorna l'indicatore '*' accanto a "Minuti unitari" e l'hint sottostante
   // a seconda che il valore della commessa coincida o no col valore dell'articolo.
+  // Try/catch difensivo: se per qualunque motivo qualcosa va storto qui, NON
+  // deve rompere l'apertura/uso del modal commessa (che è funzione critica).
   const aggiornaIndicatoreMinuti = () => {
-    const star = form.querySelector('#minuti-diff');
-    const hint = form.querySelector('#minuti-hint');
-    const minInput = form.querySelector('#minuti-input');
-    if (!star || !minInput) return;
-    const artVal = acArticolo.getValue();
-    const art = (artVal.mode === 'existing' && artVal.id)
-      ? state.articoli.find(a => a.id === artVal.id) : null;
-    const artMin = (art && art.minuti_unitari != null && art.minuti_unitari !== '')
-      ? Number(art.minuti_unitari) : null;
-    const curRaw = (minInput.value || '').toString().trim();
-    const curMin = curRaw === '' ? null : Number(curRaw);
+    try {
+      const star = form.querySelector('#minuti-diff');
+      const hint = form.querySelector('#minuti-hint');
+      const minInput = form.querySelector('#minuti-input');
+      if (!star || !minInput) return;
+      const artVal = acArticolo.getValue();
+      const art = (artVal.mode === 'existing' && artVal.id)
+        ? state.articoli.find(a => a.id === artVal.id) : null;
+      const artMin = (art && art.minuti_unitari != null && art.minuti_unitari !== '')
+        ? Number(art.minuti_unitari) : null;
+      const curRaw = (minInput.value || '').toString().trim();
+      const curMin = curRaw === '' ? null : Number(curRaw);
 
-    if (artMin == null) {
-      // Articolo senza valore di riferimento: niente confronto
-      star.style.display = 'none';
-      if (hint) hint.textContent = art
-        ? 'L\'articolo selezionato non ha minuti unitari in anagrafica. Impostali una volta nell\'articolo per riutilizzarli.'
-        : 'Suggerito automaticamente dall\'articolo selezionato.';
-    } else if (curMin === artMin) {
-      // Combaciano
-      star.style.display = 'none';
-      if (hint) hint.textContent = `Valore standard dell'articolo (${artMin} min).`;
-    } else {
-      // Divergenza
-      star.style.display = 'inline';
-      if (hint) hint.textContent = `Diverso dallo standard dell'articolo (${artMin} min) — clicca '*' per ripristinarlo.`;
+      if (artMin == null) {
+        // Articolo senza valore di riferimento: niente confronto
+        star.style.display = 'none';
+        if (hint) hint.textContent = art
+          ? 'L\'articolo selezionato non ha minuti unitari in anagrafica. Impostali una volta nell\'articolo per riutilizzarli.'
+          : 'Suggerito automaticamente dall\'articolo selezionato.';
+      } else if (curMin === artMin) {
+        // Combaciano
+        star.style.display = 'none';
+        if (hint) hint.textContent = `Valore standard dell'articolo (${artMin} min).`;
+      } else {
+        // Divergenza
+        star.style.display = 'inline';
+        if (hint) hint.textContent = `Diverso dallo standard dell'articolo (${artMin} min) — clicca '*' per ripristinarlo.`;
+      }
+    } catch (e) {
+      console.warn('aggiornaIndicatoreMinuti: errore non bloccante:', e);
     }
   };
 
