@@ -4583,25 +4583,39 @@ function oreAssenzaUtenteGiorno(utenteId, iso) {
 // Capacità lavorativa (in ore) di una squadra di addetti in un dato giorno.
 // Weekend / festivi / chiusure aziendali → 0. Altrimenti: addetti × 8 ore
 // meno le ore di assenza di ciascuno (un addetto non scende mai sotto 0).
-function capacitaGiorno(dateObj, addettiIds) {
+function capacitaGiorno(dateObj, addettiIds, fornitoriRows) {
   if (isGiornoNonLavorativo(dateObj)) return 0;
   const iso = toLocalISO(dateObj);
   let cap = 0;
+  // Contributo addetti interni (capacità - assenze valide)
   addettiIds.forEach(uid => {
     const assenti = oreAssenzaUtenteGiorno(uid, iso);
     cap += Math.max(0, ORE_STANDARD_GIORNO - assenti);
   });
+  // Contributo fornitori esterni: 8h × coefficiente × allocazione.
+  // fornitoriRows è array di {azienda_id, allocazione} (formato di state.opFornitori
+  // o equivalente passato dal modal di creazione). Niente assenze per i fornitori.
+  if (fornitoriRows && fornitoriRows.length) {
+    fornitoriRows.forEach(r => {
+      const az = state.aziende.find(a => a.id === r.azienda_id);
+      if (!az || !az.is_fornitore) return;
+      const coef = Number(az.coefficiente != null ? az.coefficiente : 1.0);
+      const alloc = Number(r.allocazione != null ? r.allocazione : 1.0);
+      cap += ORE_STANDARD_GIORNO * coef * alloc;
+    });
+  }
   return cap;
 }
 
 // Data di inizio calcolata a ore: parte dalla scadenza e va indietro
 // accumulando la capacità reale di ogni giorno finché copre oreTotali.
-function indietroOreCapacita(scadenzaIso, oreTotali, addettiIds) {
+// fornitoriRows opzionale: array {azienda_id, allocazione}
+function indietroOreCapacita(scadenzaIso, oreTotali, addettiIds, fornitoriRows) {
   const d = parseISODate(scadenzaIso);
   let rest = oreTotali;
   let guard = 0; // salvagente: evita loop infiniti (max ~10 anni)
   while (rest > 0 && guard < 3700) {
-    const cap = capacitaGiorno(d, addettiIds);
+    const cap = capacitaGiorno(d, addettiIds, fornitoriRows);
     if (cap > 0) rest -= cap;
     if (rest > 0) d.setDate(d.getDate() - 1);
     guard++;
@@ -4859,7 +4873,7 @@ function opCalcGiorni(op) {
   const ore = opCalcOre(op);
   return Math.ceil(ore / 8); // 8 ore al giorno, arrotondato per eccesso
 }
-function opCalcInizio(op, addettiOverride) {
+function opCalcInizio(op, addettiOverride, fornitoriOverride) {
   if (!op.scadenza) return null;
   // Se l'admin ha bloccato manualmente l'inizio, rispettiamo la sua scelta
   // e calcoliamo sulle ore TOTALI (semantica stabile: lui ha fissato la data
@@ -4867,18 +4881,32 @@ function opCalcInizio(op, addettiOverride) {
   // che il calcolo automatico tenga conto del lavoro già fatto/consegnato.
   const ore = op.inizio_manuale ? opCalcOre(op) : opCalcOreResidue(op);
   if (ore <= 0) return op.scadenza;
-  // addettiOverride: usato dal modal di creazione (operazione non ancora
-  // salvata, addetti ancora in stato locale). Altrimenti li cerca dal DB.
+
+  // addetti / fornitori — override permette al modal di creazione di passare
+  // lo stato locale (commessa non ancora salvata). Altrimenti li cerca dalla cache.
   let addetti = addettiOverride;
   if (!addetti) {
     addetti = (typeof getOperazioneAddetti === 'function')
       ? getOperazioneAddetti(op.id) : [];
   }
-  if (addetti.length > 0) {
-    return indietroOreCapacita(op.scadenza, ore, addetti);
+  let fornitori = fornitoriOverride;
+  if (!fornitori) {
+    fornitori = (typeof getOperazioneFornitoriDettaglio === 'function')
+      ? getOperazioneFornitoriDettaglio(op.id) : [];
   }
-  // Nessun addetto: fallback alla logica classica a giorni (8h standard).
-  // Anche qui usiamo le stesse "ore" coerenti col blocco sopra.
+  // Normalizza fornitori al formato {azienda_id, allocazione} se è stato
+  // passato come array di soli id (per comodità delle chiamate dal modal)
+  if (fornitori.length && typeof fornitori[0] === 'string') {
+    fornitori = fornitori.map(id => ({ azienda_id: id, allocazione: 1.0 }));
+  }
+
+  // Se almeno una delle due categorie ha capacità, usa il calcolo a ritroso
+  // con capacità reale. Capacità giornaliera fornitore = 8h × coef × allocazione.
+  if (addetti.length > 0 || fornitori.length > 0) {
+    return indietroOreCapacita(op.scadenza, ore, addetti, fornitori);
+  }
+
+  // Nessuno: fallback alla logica classica a giorni (8h standard).
   const giorni = Math.ceil(ore / 8);
   if (giorni <= 0) return op.scadenza;
   return indietroGiorniLavorativi(op.scadenza, giorni);
@@ -6273,7 +6301,9 @@ function openOperazioneModal(o) {
     };
     const ore = opCalcOre(tmp);
     const giorni = opCalcGiorni(tmp);
-    const inizioCalc = opCalcInizio(tmp, addettiSel);
+    // Passo gli array locali (addettiSel + fornitoriSel) come override per
+    // calcolare il preview senza dipendere dal DB (commessa non ancora salvata)
+    const inizioCalc = opCalcInizio(tmp, addettiSel, fornitoriSel);
     const conAddetti = addettiSel && addettiSel.length > 0;
 
     // Se il lucchetto è APERTO, aggiorno il campo Inizio col calcolo "live".
