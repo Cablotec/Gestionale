@@ -510,6 +510,7 @@ input.search:focus{border-color:var(--acc);}
 .gantt-hd-corner{background:var(--sur2);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);padding:8px 12px;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;position:sticky;left:0;top:0;z-index:3;}
 .gantt-hd-time{background:var(--sur2);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);padding:6px 4px;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);text-align:center;position:sticky;top:0;z-index:2;}
 .gantt-hd-time.weekend{background:rgba(255,107,53,.05);color:var(--or);}
+.gantt-hd-time.nonlav{background:rgba(255,140,40,.1);color:var(--or);font-weight:600;}
 .gantt-hd-time.oggi{background:rgba(212,255,78,.1);color:var(--acc);font-weight:700;}
 .gantt-row-nome{background:var(--sur);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);padding:8px 12px;font-size:12px;font-weight:600;position:sticky;left:0;z-index:1;display:flex;align-items:center;}
 /* Riga di intestazione di un gruppo (usata nelle viste raggruppate per gruppo) */
@@ -536,6 +537,8 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .gantt-cmrow{border-bottom:1px solid var(--brd);padding:4px 0;}
 .gantt-cmcol{position:absolute;top:0;bottom:0;border-right:1px solid var(--brd);opacity:.35;z-index:0;}
 .gantt-cmcol.weekend{background:rgba(255,78,107,.05);opacity:1;}
+.gantt-cmcol.nonlav{background:rgba(255,140,40,.07);opacity:1;
+  background-image:repeating-linear-gradient(135deg,rgba(255,140,40,.05) 0,rgba(255,140,40,.05) 6px,transparent 6px,transparent 12px);}
 .gantt-cmcol.oggi{background:rgba(212,255,78,.07);opacity:1;}
 /* overlay assenza (ferie/permessi) sotto le barre */
 .gantt-cmass{position:absolute;top:0;bottom:0;z-index:0;display:flex;align-items:flex-start;
@@ -8827,6 +8830,36 @@ function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
 //
 // Returns: { oreCarico, oreCapacita, perc, livello }
 //   livello: 'libero' | 'normale' | 'pieno' | 'sovraccarico'
+// Calcola i pesi di ripartizione di una commessa tra addetti e fornitori.
+// Modello: ogni entità riceve quota proporzionale al proprio peso di capacità.
+//   - Addetto interno → peso 1.0 (capacità piena)
+//   - Fornitore → peso (coefficiente × allocazione)
+// Ritorna: { totale, addetti: Map<utente_id, peso>, fornitori: Map<azienda_id, peso> }
+// Usato sia da calcolaCaricoUtenteRange sia da calcolaCaricoFornitoreRange,
+// così la ripartizione è SEMPRE coerente: l'aggiunta di un fornitore alleggerisce
+// gli addetti, e viceversa.
+function pesiEntitaCommessa(opId) {
+  const addetti = getOperazioneAddetti(opId);
+  const fornitoriRows = getOperazioneFornitoriDettaglio(opId);
+  const pesiAdd = new Map();
+  const pesiFor = new Map();
+  let totale = 0;
+  addetti.forEach(uid => {
+    pesiAdd.set(uid, 1.0);
+    totale += 1.0;
+  });
+  fornitoriRows.forEach(r => {
+    const az = state.aziende.find(a => a.id === r.azienda_id);
+    if (!az) return;
+    const coef = Number(az.coefficiente != null ? az.coefficiente : 1.0);
+    const alloc = Number(r.allocazione != null ? r.allocazione : 1.0);
+    const peso = coef * alloc;
+    pesiFor.set(r.azienda_id, peso);
+    totale += peso;
+  });
+  return { totale, addetti: pesiAdd, fornitori: pesiFor };
+}
+
 //   perc: 0..N (può superare 1 in caso di sovraccarico)
 function calcolaCaricoUtenteRange(uid, isoStart, isoEnd) {
   // Capacità: giorni lavorativi nel range × 8h
@@ -8851,23 +8884,24 @@ function calcolaCaricoUtenteRange(uid, isoStart, isoEnd) {
   });
   const capacitaNetta = Math.max(0, oreCapacita - oreAssenze);
 
-  // Carico: somma ore residue distribuite sui giorni lavorativi che cadono
-  // nel range, divise per numero addetti (logica della scheda Carico).
+  // Carico: ore residue ripartite tra addetti+fornitori proporzionalmente
+  // ai loro pesi. Un addetto su una commessa con anche fornitori vede ridurre
+  // la sua quota (perché i fornitori coprono parte del lavoro).
   let oreCarico = 0;
   state.operazioni
     .filter(o => o.stato === 'aperta' && o.scadenza)
     .forEach(o => {
-      const addetti = getOperazioneAddetti(o.id);
-      if (!addetti.includes(uid)) return;
+      const pesi = pesiEntitaCommessa(o.id);
+      const pesoUtente = pesi.addetti.get(uid);
+      if (!pesoUtente || pesi.totale <= 0) return;
       const oreTot = opCalcOreResidue(o);
       if (oreTot <= 0) return;
       const inizio = opInizio(o);
       if (!inizio) return;
-      // Se la commessa non interseca affatto il range, salta
       if (o.scadenza < isoStart || inizio > isoEnd) return;
-      const orePerAddetto = oreTot / addetti.length;
+      // Quota di questo utente sulla commessa = ore_tot × (peso_utente / peso_tot)
+      const orePerAddetto = oreTot * (pesoUtente / pesi.totale);
       const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerAddetto);
-      // Somma solo i giorni della distribuzione che cadono nel range
       Object.keys(distrib).forEach(iso => {
         if (iso >= isoStart && iso <= isoEnd) {
           oreCarico += distrib[iso];
@@ -8886,11 +8920,10 @@ function calcolaCaricoUtenteRange(uid, isoStart, isoEnd) {
 }
 
 // Calcola il carico % di un'azienda fornitrice in una finestra temporale.
-// Stessa logica di calcolaCaricoUtenteRange ma:
-//   - capacità: giorni × 8h × coefficiente azienda (1.0 default)
-//   - carico: solo da operazioni_fornitori (non operazioni_addetti)
-//   - allocazione (default 1.0): % di quanto il fornitore è impegnato sulla commessa
-// Niente assenze (le aziende non hanno ferie nel nostro sistema).
+// Capacità: giorni lavorativi × 8h × coefficiente. Niente assenze (le aziende
+// non hanno ferie nel modello).
+// Carico: usa la stessa ripartizione per pesi di calcolaCaricoUtenteRange,
+// garantendo coerenza (somma quote = ore_totali residue).
 function calcolaCaricoFornitoreRange(aziendaId, isoStart, isoEnd) {
   const az = state.aziende.find(a => a.id === aziendaId);
   const coef = Number((az && az.coefficiente != null) ? az.coefficiente : 1.0);
@@ -8907,30 +8940,20 @@ function calcolaCaricoFornitoreRange(aziendaId, isoStart, isoEnd) {
   }
   const oreCapacita = giorniLav * 8 * coef;
 
-  // Carico: somma ore residue distribuite sui giorni lavorativi che cadono
-  // nel range, divise per numero TOTALE di entità lavoranti (addetti+fornitori)
-  // per coerenza con la distribuzione del lavoro nel modello.
+  // Carico: somma ore residue ripartite per peso (uguale a calcolaCaricoUtenteRange)
   let oreCarico = 0;
   state.operazioni
     .filter(o => o.stato === 'aperta' && o.scadenza)
     .forEach(o => {
-      // Trova la riga di operazioni_fornitori per questa azienda
-      const riga = (state.opFornitori || [])
-        .find(r => r.operazione_id === o.id && r.azienda_id === aziendaId);
-      if (!riga) return;
+      const pesi = pesiEntitaCommessa(o.id);
+      const pesoFornitore = pesi.fornitori.get(aziendaId);
+      if (!pesoFornitore || pesi.totale <= 0) return;
       const oreTot = opCalcOreResidue(o);
       if (oreTot <= 0) return;
       const inizio = opInizio(o);
       if (!inizio) return;
       if (o.scadenza < isoStart || inizio > isoEnd) return;
-      // Numero totale di entità che lavorano sulla commessa (addetti + fornitori)
-      const nAddetti = getOperazioneAddetti(o.id).length;
-      const nFornitori = getOperazioneFornitori(o.id).length;
-      const totEntita = nAddetti + nFornitori;
-      if (totEntita === 0) return;
-      const alloc = Number(riga.allocazione || 1.0);
-      // Quota fornitore = ore_tot * allocazione / totale_entità
-      const orePerFornitore = (oreTot * alloc) / totEntita;
+      const orePerFornitore = oreTot * (pesoFornitore / pesi.totale);
       const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerFornitore);
       Object.keys(distrib).forEach(iso => {
         if (iso >= isoStart && iso <= isoEnd) {
@@ -9221,6 +9244,30 @@ function renderGanttCommesse(root) {
   const rangeEndDate = new Date(range.end); rangeEndDate.setDate(rangeEndDate.getDate() - 1);
   const rangeEndIso = toLocalISO(rangeEndDate);
 
+  // Mappa giorni non lavorativi non-weekend nel range visibile (festivi nazionali
+  // + chiusure aziendali). Usata per evidenziarli visivamente nel Gantt — il
+  // calcolo di capacity li considera già nelle formule. Valore = nome leggibile
+  // per il tooltip.
+  const annoMin = range.start.getFullYear();
+  const annoMax = rangeEndDate.getFullYear();
+  const nonLavMap = {};
+  for (let y = annoMin; y <= annoMax; y++) {
+    festiviNazionali(y).forEach(f => {
+      nonLavMap[toLocalISO(f.data)] = f.nome;
+    });
+  }
+  state.chiusure.forEach(c => {
+    if (!c.data) return;
+    if (c.ricorrente) {
+      const md = c.data.substring(5); // "MM-DD"
+      for (let y = annoMin; y <= annoMax; y++) {
+        nonLavMap[`${y}-${md}`] = c.descrizione || 'Chiusura aziendale';
+      }
+    } else {
+      nonLavMap[c.data] = c.descrizione || 'Chiusura aziendale';
+    }
+  });
+
   const wrap = el('div', { class:'gantt-wrap' });
   const slots = range.slots;
   // Larghezza slot: minima per leggibilità, ma si espande per riempire la pagina.
@@ -9239,7 +9286,12 @@ function renderGanttCommesse(root) {
     const cls = ['gantt-hd-time'];
     if (slot.weekend) cls.push('weekend');
     if (slot.dateISO === oggiISO || slot.isOggi) cls.push('oggi');
-    grid.append(el('div', { class:cls.join(' ') }, slot.label));
+    // Festivi nazionali / chiusure aziendali — visibili anche se non sono weekend
+    const nomeNonLav = !slot.weekend && nonLavMap[slot.dateISO];
+    if (nomeNonLav) cls.push('nonlav');
+    const attrs = { class:cls.join(' ') };
+    if (nomeNonLav) attrs.title = nomeNonLav;
+    grid.append(el('div', attrs, slot.label));
   });
 
   // larghezza totale area-tempo, per posizionare le barre in %
@@ -9322,11 +9374,14 @@ function renderGanttCommesse(root) {
 
     // sfondo: weekend/oggi + assenze (ferie/permessi) dell'operatore
     slots.forEach((slot, i) => {
+      const nomeNonLav = !slot.weekend && nonLavMap[slot.dateISO];
       const c = el('div', {
         class:'gantt-cmcol'
           + (slot.weekend ? ' weekend' : '')
+          + (nomeNonLav ? ' nonlav' : '')
           + ((slot.dateISO === oggiISO || slot.isOggi) ? ' oggi' : ''),
         style:`left:${i*slotWidth}px;width:${slotWidth}px;`,
+        title: nomeNonLav || undefined,
       });
       track.append(c);
       // Overlay assenza
@@ -9481,14 +9536,17 @@ function renderGanttCommesse(root) {
           + 'background:rgba(212,140,40,.03);',
       });
 
-      // Colonne sfondo (weekend, oggi)
+      // Colonne sfondo (weekend, oggi, festivi/chiusure)
       slots.forEach((slot, i) => {
         const cls = ['gantt-cmcol'];
         if (slot.weekend) cls.push('weekend');
+        const nomeNonLav = !slot.weekend && nonLavMap[slot.dateISO];
+        if (nomeNonLav) cls.push('nonlav');
         if (slot.dateISO === oggiISO || slot.isOggi) cls.push('oggi');
         track.append(el('div', {
           class:cls.join(' '),
           style:`left:${i*slotWidth}px;width:${slotWidth}px;`,
+          title: nomeNonLav || undefined,
         }));
       });
 
