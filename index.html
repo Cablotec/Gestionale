@@ -117,7 +117,39 @@ input.search:focus{border-color:var(--acc);}
 
 /* Modal */
 #modal-root .modal-bg{position:fixed;inset:0;background:var(--shadow);z-index:400;display:flex;align-items:center;justify-content:center;padding:12px;overscroll-behavior:contain;}
+#modal-root .modal-bg.side{justify-content:flex-end;padding:0;}
 .modal{background:var(--sur);border:1px solid var(--brd);border-radius:6px;width:100%;max-width:560px;max-height:calc(100vh - 24px);display:flex;flex-direction:column;overflow:hidden;}
+.modal.side{max-width:520px;max-height:100vh;height:100vh;border-radius:0;border-right:none;border-top:none;border-bottom:none;}
+@media (max-width:600px){
+  .modal.side{max-width:100vw;}
+  #modal-root .modal-bg.side{padding:0;}
+}
+/* Storico consuntivi */
+.storico-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
+.storico-kpi{background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:8px 10px;}
+.storico-kpi .l{font-family:'DM Mono',monospace;font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}
+.storico-kpi .v{font-family:Syne,sans-serif;font-size:15px;font-weight:700;color:var(--txt);}
+.storico-toolbar{display:flex;gap:6px;align-items:center;margin-bottom:14px;}
+.storico-toolbar select{background:var(--sur2);border:1px solid var(--brd);border-radius:3px;color:var(--txt);padding:5px 8px;font-family:'DM Mono',monospace;font-size:11px;}
+.storico-empty{padding:30px 12px;text-align:center;color:var(--mut);font-size:12px;}
+.storico-giorno{margin-bottom:10px;border:1px solid var(--brd);border-radius:4px;overflow:hidden;}
+.storico-giorno-hd{display:flex;align-items:center;justify-content:space-between;background:var(--sur2);padding:8px 11px;cursor:pointer;user-select:none;}
+.storico-giorno-hd:hover{background:var(--sur);}
+.storico-giorno-hd .gg-data{font-family:'DM Mono',monospace;font-size:11px;color:var(--txt);font-weight:700;}
+.storico-giorno-hd .gg-data .dow{color:var(--mut);font-weight:400;margin-right:6px;}
+.storico-giorno-hd .gg-info{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);}
+.storico-giorno-hd .gg-info .totore{color:var(--acc);font-weight:700;}
+.storico-giorno-body{padding:6px 11px 8px;background:var(--sur);}
+.storico-sess{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:5px 0;font-size:11px;border-top:1px dashed var(--brd);}
+.storico-sess:first-child{border-top:none;}
+.storico-sess .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.storico-sess .corpo{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.storico-sess .commessa{font-family:'DM Mono',monospace;font-size:11px;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.storico-sess .meta{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.storico-sess .dur{font-family:'DM Mono',monospace;font-size:11px;color:var(--txt);font-weight:700;text-align:right;}
+.storico-sess.aperta .dur{color:var(--grn);}
+.storico-ass{display:flex;align-items:center;gap:8px;padding:6px 11px;font-family:'DM Mono',monospace;font-size:11px;background:var(--sur2);}
+.storico-ass .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .mhd{padding:14px 17px 11px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
 .mhd h2{font-size:14px;font-weight:700;}
 .mclose{background:none;border:none;color:var(--mut);font-size:16px;cursor:pointer;padding:2px 8px;border-radius:3px;}
@@ -429,59 +461,6 @@ input.search:focus{border-color:var(--acc);}
 .switch-bar button.act{background:var(--acc);color:#0f0f0e;font-weight:700;}
 .switch-bar button:hover:not(.act){color:var(--txt);background:var(--sur2);}
 .gantt-nav{display:flex;gap:4px;align-items:center;}
-/* ── Vista Carico: barre continue su calendario leggero ── */
-.carico2-wrap{overflow:auto;max-height:calc(100vh - 110px);border:1px solid var(--brd);
-  background:var(--sur);border-radius:4px;}
-.carico2-grid{min-width:760px;}
-/* riga: nome a sinistra + track a destra */
-.carico2-row{display:flex;align-items:stretch;border-bottom:1px solid var(--brd);}
-.carico2-row:last-child{border-bottom:none;}
-.carico2-name{flex:0 0 168px;width:168px;padding:8px 12px;display:flex;align-items:center;
-  font-family:'Syne',sans-serif;font-size:11px;font-weight:600;color:var(--txt);
-  background:var(--sur);position:sticky;left:0;z-index:3;border-right:1px solid var(--brd);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.carico2-name.esterno{color:var(--yel);}
-.carico2-track{position:relative;flex:1;min-height:34px;}
-/* intestazione */
-.carico2-head{position:sticky;top:0;z-index:5;background:var(--sur2);border-bottom:1px solid var(--brd);}
-.carico2-head .carico2-name{background:var(--sur2);font-family:'Syne',sans-serif;font-size:12px;
-  font-weight:800;color:var(--acc);text-transform:uppercase;letter-spacing:.04em;z-index:6;}
-.carico2-head .carico2-track{min-height:30px;}
-.carico2-name-head{justify-content:flex-start;}
-.carico2-daynum{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;border-left:1px solid var(--brd);}
-.carico2-daynum:first-child{border-left:none;}
-.carico2-daynum-n{font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:var(--mut);}
-.carico2-daynum-w{font-family:'DM Mono',monospace;font-size:7px;font-weight:700;color:var(--mut);opacity:.65;}
-.carico2-daynum.we .carico2-daynum-n,.carico2-daynum.we .carico2-daynum-w{color:var(--red);opacity:.8;}
-.carico2-daynum.oggi{background:rgba(212,255,78,.12);}
-.carico2-daynum.oggi .carico2-daynum-n{color:var(--acc);}
-/* sfondo a colonne: griglia leggera */
-.carico2-sfondo{position:absolute;inset:0;z-index:0;}
-.carico2-col{position:absolute;top:0;bottom:0;border-left:1px solid var(--brd);opacity:.4;}
-.carico2-col:first-child{border-left:none;}
-.carico2-col.we{background:rgba(255,78,107,.05);opacity:1;}
-.carico2-col.nonlav{background:rgba(255,255,255,.03);opacity:1;}
-.carico2-col.oggi{background:rgba(212,255,78,.06);opacity:1;}
-/* striscia rossa sotto le barre per i giorni in sovraccarico */
-.carico2-over-mark{position:absolute;bottom:0;height:3px;background:var(--red);z-index:1;}
-/* contenitore barre: centrato verticalmente nel track */
-.carico2-barre{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);z-index:2;}
-/* barra continua di una commessa */
-.carico2-bar{position:absolute;height:16px;border-radius:8px;cursor:pointer;
-  display:flex;align-items:center;box-shadow:0 1px 2px rgba(0,0,0,.25);
-  transition:filter .1s,box-shadow .1s;}
-.carico2-bar:hover{filter:brightness(1.13);box-shadow:0 0 0 1.5px var(--txt),0 1px 3px rgba(0,0,0,.3);z-index:4;}
-.carico2-bar.cut-l{border-top-left-radius:0;border-bottom-left-radius:0;}
-.carico2-bar.cut-r{border-top-right-radius:0;border-bottom-right-radius:0;}
-.carico2-bar-txt{font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:#10100c;
-  padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.carico-legenda{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;align-items:center;}
-.carico-leg-item{display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);}
-.carico-leg-bar{width:24px;height:12px;border-radius:6px;background:var(--blu);}
-.carico-leg-overbox{width:18px;height:3px;background:var(--red);}
-.carico-nota{margin-top:14px;padding:10px 12px;background:var(--sur);border-left:3px solid var(--brd);
-  border-radius:2px;font-family:'DM Mono',monospace;font-size:10px;line-height:1.6;color:var(--mut);}
 .gantt-nav button{padding:6px 10px;background:var(--sur);border:1px solid var(--brd);color:var(--mut);cursor:pointer;border-radius:3px;font-family:'DM Mono',monospace;font-size:11px;}
 .gantt-nav button:hover{color:var(--txt);border-color:var(--mut);}
 .gantt-nav .label{font-family:'DM Mono',monospace;font-size:12px;color:var(--txt);padding:0 10px;min-width:160px;text-align:center;}
@@ -1973,7 +1952,6 @@ const TAB_STRUCTURE = {
       { id: 'storico',        label: 'Storico',        adminOnly: false },
       { id: 'gantt_live',     label: 'Live',           adminOnly: true },
       { id: 'gantt_commesse', label: 'Gantt',          adminOnly: true },
-      { id: 'carico',         label: 'Carico',         adminOnly: true },
     ],
   },
   gestione: {
@@ -2078,7 +2056,6 @@ function renderTab(name) {
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt_live') renderGanttLiveTab(root);
     else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
-    else if (name === 'carico') renderCarico(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
     else if (name === 'imp_calendari') renderImpostazioni(root);
@@ -7171,12 +7148,14 @@ async function toggleRuolo(u) {
   renderTab('operatori');
 }
 
-function openModal(content) {
+function openModal(content, opts) {
   closeModal();
   // I modal si chiudono solo dal tasto Chiudi/✕ (e da Esc, vedi sotto).
   // Niente "click fuori = chiudi": un click sbagliato durante la compilazione
   // di un modal lungo (es. Nuova Operazione) costava troppo.
-  const bg = el('div', { class:'modal-bg' });
+  // opts.side = true → variante pannello laterale (overlay scuro + contenuto a destra).
+  const bgClass = opts && opts.side ? 'modal-bg side' : 'modal-bg';
+  const bg = el('div', { class: bgClass });
   bg.append(content);
   $('#modal-root').append(bg);
 }
@@ -8760,258 +8739,6 @@ async function kioskStopSessione(sess, modalita) {
   }
 }
 
-
-// ═══════════════════════════════════════════════════════════
-// CARICO — vista a barre continue: commesse per addetto sul mese
-// ═══════════════════════════════════════════════════════════
-
-let caricoMese = null;
-
-const CARICO_PALETTE = ['#4eb8ff','#4effa3','#ffcc4e','#b84eff','#ff9d4e','#4edcff','#a3ff4e','#ff4ec1'];
-function coloreCommessa(opId) {
-  let h = 0;
-  const s = String(opId);
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return CARICO_PALETTE[Math.abs(h) % CARICO_PALETTE.length];
-}
-
-function renderCarico(root) {
-  root.innerHTML = '';
-  if (!caricoMese) { const n = new Date(); caricoMese = new Date(n.getFullYear(), n.getMonth(), 1); }
-
-  const anno = caricoMese.getFullYear();
-  const mese = caricoMese.getMonth();
-
-  // ---- Intestazione + navigazione ----
-  const header = el('div', { class:'gantt-toolbar' });
-  header.append(el('h2', { style:'flex:1;' }, 'Carico di lavoro'));
-  const nav = el('div', { class:'gantt-nav' });
-  nav.append(el('button', { onclick: () => {
-    caricoMese = new Date(anno, mese - 1, 1); renderCarico(root);
-  } }, '‹'));
-  nav.append(el('span', { class:'label' }, MESI_ESTESI[mese] + ' ' + anno));
-  nav.append(el('button', { onclick: () => {
-    caricoMese = new Date(anno, mese + 1, 1); renderCarico(root);
-  } }, '›'));
-  nav.append(el('button', { onclick: () => {
-    const n = new Date(); caricoMese = new Date(n.getFullYear(), n.getMonth(), 1); renderCarico(root);
-  }, style:'margin-left:6px;' }, 'Oggi'));
-  header.append(nav);
-  root.append(header);
-
-  // ---- Giorni del mese ----
-  const numGiorni = new Date(anno, mese + 1, 0).getDate();
-  const oggiIso = toLocalISO(new Date());
-  const giorni = [];
-  for (let d = 1; d <= numGiorni; d++) {
-    const dObj = new Date(anno, mese, d);
-    const dow = (dObj.getDay() + 6) % 7;
-    giorni.push({
-      d, iso: toLocalISO(dObj), dow,
-      weekend: dow >= 5,
-      nonLav: isGiornoNonLavorativo(dObj),
-      oggi: toLocalISO(dObj) === oggiIso,
-    });
-  }
-  const primoIso = giorni[0].iso;
-  const ultimoIso = giorni[numGiorni - 1].iso;
-  const colW = 100 / numGiorni; // larghezza di un giorno in %
-
-  // indice 0-based di un giorno ISO nel mese (clamp ai bordi del mese)
-  const indiceGiorno = (iso) => {
-    if (iso < primoIso) return 0;
-    if (iso > ultimoIso) return numGiorni - 1;
-    return parseISODate(iso).getDate() - 1;
-  };
-
-  // ---- Commesse per addetto ----
-  const caricoByUtente = {};
-  let opSenzaAddetti = 0;
-
-  state.operazioni
-    .filter(o => o.stato === 'aperta' && o.scadenza)
-    .forEach(o => {
-      const addetti = getOperazioneAddetti(o.id);
-      if (addetti.length === 0) { opSenzaAddetti++; return; }
-      // Nel Carico (planning lavoro futuro) usiamo le ore RESIDUE:
-      // il lavoro già consegnato è fatto, non deve pesare sulla capacità.
-      const oreTot = opCalcOreResidue(o);
-      if (oreTot <= 0) return;
-      const inizio = opInizio(o);
-      if (!inizio) return;
-      if (o.scadenza < primoIso || inizio > ultimoIso) return;
-      const orePerAddetto = oreTot / addetti.length;
-      const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerAddetto);
-      const isoLav = Object.keys(distrib);
-      const orePerGiorno = isoLav.length > 0 ? distrib[isoLav[0]] : 0;
-      addetti.forEach(uid => {
-        if (!caricoByUtente[uid]) caricoByUtente[uid] = [];
-        caricoByUtente[uid].push({
-          op: o, inizio, scadenza: o.scadenza,
-          oreGiorno: orePerGiorno, oreTot,
-          nAddetti: addetti.length, colore: coloreCommessa(o.id),
-          giorniLavSet: new Set(isoLav),
-        });
-      });
-    });
-
-  // ---- Utenti ----
-  const operatori = state.utenti
-    .filter(u => u.attivo && !isKioskRecord(u))
-    .sort((a, b) => a.nome.localeCompare(b.nome));
-
-  // ---- Costruzione vista ----
-  const wrap = el('div', { class:'carico2-wrap' });
-  const grid = el('div', { class:'carico2-grid' });
-
-  // Sfondo a colonne (linee verticali tenui + weekend ombreggiati)
-  const buildSfondo = () => {
-    const sf = el('div', { class:'carico2-sfondo' });
-    giorni.forEach((g, i) => {
-      const col = el('div', {
-        class: 'carico2-col'
-          + (g.weekend ? ' we' : '')
-          + (g.nonLav && !g.weekend ? ' nonlav' : '')
-          + (g.oggi ? ' oggi' : ''),
-        style: 'left:' + (i * colW) + '%;width:' + colW + '%;',
-      });
-      sf.append(col);
-    });
-    return sf;
-  };
-
-  // --- Riga intestazione: giorni del mese ---
-  const headRow = el('div', { class:'carico2-row carico2-head' });
-  headRow.append(el('div', { class:'carico2-name carico2-name-head' },
-    MESI_ESTESI[mese] + ' ' + anno));
-  const headTrack = el('div', { class:'carico2-track' });
-  giorni.forEach((g, i) => {
-    headTrack.append(el('div', {
-      class: 'carico2-daynum' + (g.weekend ? ' we' : '') + (g.oggi ? ' oggi' : ''),
-      style: 'left:' + (i * colW) + '%;width:' + colW + '%;',
-    },
-      el('div', { class:'carico2-daynum-n' }, String(g.d)),
-      el('div', { class:'carico2-daynum-w' }, GIORNI_BREVI[g.dow])));
-  });
-  headRow.append(headTrack);
-  grid.append(headRow);
-
-  // --- Righe addetti raggruppate per gruppo ---
-  const sezioni = raggruppaUtenti(operatori);
-
-  // Estraggo la costruzione della riga utente in una funzione: la richiamo
-  // dentro ogni sezione di gruppo, mantenendo lo stesso identico contenuto.
-  const buildRigaUtente = (u) => {
-    const commesse = (caricoByUtente[u.id] || [])
-      .slice().sort((a, b) => a.inizio < b.inizio ? -1 : 1);
-
-    // Calcolo sovraccarico per giorno
-    const overGiorni = new Set();
-    giorni.forEach(g => {
-      if (g.nonLav) return;
-      let ore = 0;
-      commesse.forEach(c => {
-        if (c.giorniLavSet.has(g.iso)) ore += c.oreGiorno;
-      });
-      const assenti = (typeof oreAssenzaUtenteGiorno === 'function')
-        ? oreAssenzaUtenteGiorno(u.id, g.iso) : 0;
-      const cap = Math.max(0, ORE_STANDARD_GIORNO - assenti);
-      if (ore > cap + 0.05) overGiorni.add(g.iso);
-    });
-
-    const row = el('div', { class:'carico2-row' });
-    row.append(el('div', { class:'carico2-name' + (u.esterno ? ' esterno' : '') },
-      u.nome + (u.esterno ? ' ✦' : '')));
-
-    const track = el('div', { class:'carico2-track' });
-    track.append(buildSfondo());
-
-    // Marcatori giorni di sovraccarico (striscia rossa sotto le barre)
-    overGiorni.forEach(iso => {
-      const i = indiceGiorno(iso);
-      track.append(el('div', {
-        class:'carico2-over-mark',
-        style:'left:' + (i * colW) + '%;width:' + colW + '%;',
-      }));
-    });
-
-    // Barre commesse (continue). Più commesse → impilate verticalmente.
-    const barre = el('div', { class:'carico2-barre' });
-    const BAR_H = 16, BAR_GAP = 3;
-    const altezzaPila = commesse.length > 0
-      ? commesse.length * BAR_H + (commesse.length - 1) * BAR_GAP
-      : 0;
-    commesse.forEach((c, idx) => {
-      const iStart = indiceGiorno(c.inizio < primoIso ? primoIso : c.inizio);
-      const iEnd = indiceGiorno(c.scadenza > ultimoIso ? ultimoIso : c.scadenza);
-      const left = iStart * colW;
-      const width = (iEnd - iStart + 1) * colW;
-      const tagliataSx = c.inizio < primoIso;
-      const tagliataDx = c.scadenza > ultimoIso;
-      const bar = el('div', {
-        class: 'carico2-bar'
-          + (tagliataSx ? ' cut-l' : '')
-          + (tagliataDx ? ' cut-r' : ''),
-        style: 'left:' + left + '%;width:' + width + '%;'
-          + 'top:' + (idx * (BAR_H + BAR_GAP)) + 'px;'
-          + 'background:' + c.colore + ';',
-        title: descrizioneCommessa(c.op)
-          + '\nOre totali: ' + Math.round(c.oreTot)
-          + ' · ' + c.nAddetti + ' addett' + (c.nAddetti === 1 ? 'o' : 'i')
-          + '\nScadenza: ' + fmtIT(c.scadenza)
-          + '\n(clic per aprire la commessa)',
-        onclick: () => {
-          if (typeof openOperazioneModal === 'function') openOperazioneModal(c.op);
-        },
-      }, el('span', { class:'carico2-bar-txt' }, etichettaCommessa(c.op)));
-      barre.append(bar);
-    });
-    // L'altezza della pila determina l'altezza della riga
-    const trackMinH = Math.max(34, altezzaPila + 10);
-    track.style.minHeight = trackMinH + 'px';
-    barre.style.height = altezzaPila + 'px';
-    track.append(barre);
-    row.append(track);
-    grid.append(row);
-  };
-
-  // Per ogni sezione: intestazione di gruppo + righe utenti
-  sezioni.forEach(sez => {
-    const hdRow = el('div', {
-      class: 'carico2-row carico2-gruppo-row' + (sez.key === '__nogroup__' ? ' nogroup' : ''),
-    });
-    hdRow.append(el('div', {
-      class: 'gruppo-hd' + (sez.key === '__nogroup__' ? ' nogroup' : ''),
-      style: 'flex:1;',
-    }, sez.label));
-    grid.append(hdRow);
-    sez.utenti.forEach(buildRigaUtente);
-  });
-
-  wrap.append(grid);
-  root.append(wrap);
-
-  // ---- Legenda + nota ----
-  const legenda = el('div', { class:'carico-legenda' });
-  legenda.append(el('span', { class:'carico-leg-item' },
-    el('span', { class:'carico-leg-bar' }), 'Commessa (clic per aprirla)'));
-  legenda.append(el('span', { class:'carico-leg-item' },
-    el('span', { class:'carico-leg-overbox' }), 'Giorno in sovraccarico'));
-  root.append(legenda);
-
-  root.append(el('div', { class:'carico-nota' },
-    'Ogni barra è una commessa aperta, dalla data di inizio calcolata alla ' +
-    'scadenza. Le ore sono divise in parti uguali tra gli addetti assegnati. ' +
-    'La striscia rossa segnala i giorni in cui le ore pianificate per ' +
-    'quell\'addetto superano la sua capacità (8 ore, meno le ferie). Stima indicativa.'));
-
-  if (opSenzaAddetti > 0) {
-    root.append(el('div', { class:'carico-nota', style:'border-left-color:var(--yel);color:var(--yel);' },
-      '⚠ ' + opSenzaAddetti + ' commess' + (opSenzaAddetti === 1 ? 'a aperta esclusa' : 'e aperte escluse') +
-      ': non ' + (opSenzaAddetti === 1 ? 'ha' : 'hanno') + ' addetti assegnati.'));
-  }
-}
-
 // Distribuisce le ore di un addetto sui giorni lavorativi di [inizio, scadenza].
 function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
   const giorniLav = [];
@@ -9034,9 +8761,8 @@ function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
 // CARICO UTENTE NEL RANGE (helper riutilizzabile)
 // ────────────────────────────────────────────────────────────
 // Calcola il carico % di un utente in una finestra temporale.
-// Usa la stessa logica della scheda Carico (ore residue distribuite sui
-// giorni lavorativi, divise per il numero di addetti). Coerente con
-// opCalcInizio e indietroOreCapacita.
+// Modello: ore residue distribuite sui giorni lavorativi, divise per il
+// numero di addetti. Coerente con opCalcInizio e indietroOreCapacita.
 //
 // Returns: { oreCarico, oreCapacita, perc, livello }
 //   livello: 'libero' | 'normale' | 'pieno' | 'sovraccarico'
@@ -9352,8 +9078,8 @@ function renderGanttLive(root) {
   const sezioniLive = raggruppaUtenti(operatori);
 
   const buildCardUtente = (u) => {
-    // Card senza click (vista admin solo informativa)
-    grid.append(buildLiveCard(u));
+    // Click apre il pannello laterale con lo storico consuntivi di quell'utente.
+    grid.append(buildLiveCard(u, () => apriStoricoConsuntivi(u)));
   };
 
   // Per ogni gruppo con utenti: emetto un separatore a tutta larghezza,
@@ -9378,6 +9104,235 @@ function renderGanttLive(root) {
       d.textContent = formatLiveDuration(d.getAttribute('data-inizio'));
     });
   }, 1000);
+}
+
+// ─── PANNELLO STORICO CONSUNTIVI (drill-down da Gantt Live) ───
+// Apre un pannello laterale con la cronologia delle sessioni di lavoro
+// timbrate dall'utente, raggruppate per giorno (più recente in alto).
+// Include anche le assenze come righe compatte per spiegare i "buchi".
+function apriStoricoConsuntivi(utente) {
+  // State locale (closure): range giorni + set giorni espansi
+  const RANGE_OPZIONI = [
+    { val: 30,   label: 'Ultimi 30 giorni' },
+    { val: 90,   label: 'Ultimi 90 giorni' },
+    { val: 9999, label: 'Tutto' },
+  ];
+  let rangeGiorni = 30;
+  const giorniEspansi = new Set(); // popolato dopo il primo render
+
+  const modal = el('div', { class:'modal side' });
+  modal.append(el('div', { class:'mhd' },
+    el('div', {},
+      el('div', { style:'font-family:DM Mono,monospace;font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px;' },
+        'Storico consuntivi'),
+      el('h2', { style:'margin:0;' }, utente.nome),
+    ),
+    el('button', { class:'mclose', onclick: closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  modal.append(body);
+
+  function calcolaDati() {
+    const oggi = new Date();
+    const oggiIso = toLocalISO(oggi);
+    const limite = new Date(oggi);
+    limite.setDate(limite.getDate() - rangeGiorni);
+    const limiteIso = toLocalISO(limite);
+
+    // Sessioni: filtro su utente, fine valorizzata o aperta, e data inizio >= limite
+    const sess = state.sessioni.filter(s => {
+      if (s.utente_id !== utente.id) return false;
+      const dataIso = (s.inizio || '').substring(0, 10);
+      return dataIso >= limiteIso && dataIso <= oggiIso;
+    });
+
+    // Assenze nel range
+    const ass = state.assenze.filter(a => {
+      if (a.utente_id !== utente.id) return false;
+      if (a.stato !== 'valida') return false;
+      return a.data >= limiteIso && a.data <= oggiIso;
+    });
+
+    // Raggruppo per data ISO
+    const giorni = {};
+    sess.forEach(s => {
+      const d = (s.inizio || '').substring(0, 10);
+      if (!giorni[d]) giorni[d] = { iso: d, sessioni: [], assenze: [], secLavorati: 0 };
+      giorni[d].sessioni.push(s);
+      if (s.fine) {
+        giorni[d].secLavorati += Math.max(0,
+          Math.floor((new Date(s.fine) - new Date(s.inizio)) / 1000));
+      } else {
+        // sessione aperta: conto fino a "adesso"
+        giorni[d].secLavorati += Math.max(0,
+          Math.floor((Date.now() - new Date(s.inizio)) / 1000));
+      }
+    });
+    ass.forEach(a => {
+      const d = a.data;
+      if (!giorni[d]) giorni[d] = { iso: d, sessioni: [], assenze: [], secLavorati: 0 };
+      giorni[d].assenze.push(a);
+    });
+
+    const lista = Object.values(giorni).sort((a, b) => b.iso.localeCompare(a.iso));
+
+    // KPI totali
+    const totSec = lista.reduce((acc, g) => acc + g.secLavorati, 0);
+    const giorniLavorati = lista.filter(g => g.sessioni.length > 0).length;
+    const totSessioni = sess.length;
+
+    return { lista, totSec, giorniLavorati, totSessioni };
+  }
+
+  function renderBody() {
+    body.innerHTML = '';
+
+    // Toolbar: select range
+    const tb = el('div', { class:'storico-toolbar' });
+    const sel = el('select');
+    RANGE_OPZIONI.forEach(o => {
+      const opt = el('option', { value: String(o.val) }, o.label);
+      if (o.val === rangeGiorni) opt.selected = true;
+      sel.append(opt);
+    });
+    sel.onchange = () => {
+      rangeGiorni = parseInt(sel.value, 10);
+      giorniEspansi.clear();
+      // ripopolerà i primi 7 al re-render
+      renderBody();
+    };
+    tb.append(sel);
+    body.append(tb);
+
+    // Dati
+    const { lista, totSec, giorniLavorati, totSessioni } = calcolaDati();
+
+    // KPI
+    const kpis = el('div', { class:'storico-kpis' });
+    kpis.append(
+      el('div', { class:'storico-kpi' },
+        el('div', { class:'l' }, 'Ore lavorate'),
+        el('div', { class:'v' }, formatSecondsHuman(totSec) || '0')),
+      el('div', { class:'storico-kpi' },
+        el('div', { class:'l' }, 'Giorni'),
+        el('div', { class:'v' }, String(giorniLavorati))),
+      el('div', { class:'storico-kpi' },
+        el('div', { class:'l' }, 'Sessioni'),
+        el('div', { class:'v' }, String(totSessioni))),
+    );
+    body.append(kpis);
+
+    if (lista.length === 0) {
+      body.append(el('div', { class:'storico-empty' },
+        'Nessuna sessione né assenza nel periodo selezionato.'));
+      return;
+    }
+
+    // Primo render: espando i primi 7 giorni della lista
+    if (giorniEspansi.size === 0) {
+      lista.slice(0, 7).forEach(g => giorniEspansi.add(g.iso));
+    }
+
+    lista.forEach(g => buildGiorno(body, g));
+  }
+
+  function buildGiorno(parent, g) {
+    const espanso = giorniEspansi.has(g.iso);
+    const d = parseISODate(g.iso);
+    const dow = (d.getDay() + 6) % 7; // 0 = lunedì (coerente con GIORNI_BREVI)
+    const giornoNome = ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'][dow];
+    const dataStr = `${z(d.getDate())} ${MESI_BREVI[d.getMonth()]}`;
+
+    const wrap = el('div', { class:'storico-giorno' });
+
+    // Header (cliccabile)
+    const infoParts = [];
+    if (g.sessioni.length > 0) {
+      infoParts.push(
+        el('span', { class:'totore' }, formatSecondsHuman(g.secLavorati)),
+        ' · ',
+        String(g.sessioni.length) + (g.sessioni.length === 1 ? ' sess.' : ' sess.'),
+      );
+    }
+    if (g.assenze.length > 0) {
+      if (infoParts.length) infoParts.push(' · ');
+      infoParts.push('assenza');
+    }
+    if (infoParts.length === 0) infoParts.push('—');
+
+    const hd = el('div', { class:'storico-giorno-hd' },
+      el('div', { class:'gg-data' },
+        el('span', { class:'dow' }, giornoNome),
+        dataStr,
+      ),
+      el('div', { class:'gg-info' }, ...infoParts),
+    );
+    hd.onclick = () => {
+      if (giorniEspansi.has(g.iso)) giorniEspansi.delete(g.iso);
+      else giorniEspansi.add(g.iso);
+      // Re-render del solo body (più semplice di replace localizzato)
+      renderBody();
+    };
+    wrap.append(hd);
+
+    if (espanso) {
+      // Assenze in cima
+      g.assenze.forEach(a => {
+        const tipo = state.tipiAssenza.find(t => t.id === a.tipo_assenza_id);
+        const ore = parseFloat(a.ore) || 0;
+        wrap.append(el('div', { class:'storico-ass' },
+          el('span', { class:'dot', style: 'background:'+(tipo?.colore || '#6b6b64')+';' }),
+          el('span', {}, (tipo?.nome || 'Assenza') + ' · ' + ore + 'h' + (a.note ? ' · ' + a.note : '')),
+        ));
+      });
+
+      // Sessioni
+      if (g.sessioni.length > 0) {
+        const bd = el('div', { class:'storico-giorno-body' });
+        // Ordino le sessioni del giorno per ora di inizio crescente
+        const sess = [...g.sessioni].sort((a, b) =>
+          (a.inizio || '').localeCompare(b.inizio || ''));
+        sess.forEach(s => bd.append(buildSessione(s)));
+        wrap.append(bd);
+      }
+    }
+    parent.append(wrap);
+  }
+
+  function buildSessione(s) {
+    const op = state.operazioni.find(o => o.id === s.operazione_id);
+    const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
+    const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+    const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
+
+    const aperta = !s.fine;
+    const dur = aperta
+      ? Math.floor((Date.now() - new Date(s.inizio)) / 1000)
+      : Math.max(0, Math.floor((new Date(s.fine) - new Date(s.inizio)) / 1000));
+
+    const oraInizio = new Date(s.inizio);
+    const oraFine = s.fine ? new Date(s.fine) : null;
+    const oraStr = z(oraInizio.getHours()) + ':' + z(oraInizio.getMinutes())
+      + (oraFine ? '–' + z(oraFine.getHours()) + ':' + z(oraFine.getMinutes()) : '–…');
+
+    const commessaStr = (cli?.nome || '—')
+      + (op?.numero_ordine ? ' · ' + op.numero_ordine : '');
+    const articoloStr = art?.codice || '—';
+    const lavStr = tipo?.nome || '—';
+
+    return el('div', { class:'storico-sess' + (aperta ? ' aperta' : '') },
+      el('span', { class:'dot', style:'background:'+(tipo?.colore || '#6b6b64')+';' }),
+      el('div', { class:'corpo' },
+        el('div', { class:'commessa' }, commessaStr),
+        el('div', { class:'meta' }, articoloStr + ' · ' + lavStr + ' · ' + oraStr),
+      ),
+      el('div', { class:'dur' }, formatSecondsHuman(dur) + (aperta ? ' ●' : '')),
+    );
+  }
+
+  renderBody();
+  openModal(modal, { side: true });
 }
 
 function formatLiveDuration(inizioISO) {
