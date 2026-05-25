@@ -718,6 +718,7 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
     <button class="navtab active" data-area="calendari">Calendari</button>
     <button class="navtab" data-area="lavoro">Lavoro</button>
     <button class="navtab" data-area="gestione" id="area-gestione" style="display:none">Gestione</button>
+    <button class="navtab" data-area="impostazioni" id="area-impostazioni" style="display:none">Impostazioni</button>
   </nav>
   <nav class="nav nav-sub" id="tabs"></nav>
 
@@ -1323,10 +1324,34 @@ function getFinestreAssenze() {
   ];
 }
 
+// Restituisce l'elenco dei gruppi esenti dai vincoli di inserimento assenze
+// (le finestre di apertura e il blocco sulle date passate non si applicano
+// agli utenti di questi gruppi). Letto da impostazioni come JSON; fallback
+// ['laboratorio'] = stato storico, così se la chiave non è mai stata salvata
+// il comportamento resta quello dell'esenzione introdotta sessione precedente.
+function getGruppiEsentiAssenze() {
+  const raw = getImpostazione('assenze_gruppi_esenti', null);
+  if (raw === null || raw === undefined) return ['laboratorio'];
+  try {
+    const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    console.warn('Impostazione assenze_gruppi_esenti non valida:', raw);
+    return [];
+  }
+}
+
 // Decide se un utente non-admin può oggi inserire/modificare un'assenza sulla
 // data 'iso'. Regola: oggi deve cadere nella finestra di apertura associata
 // al periodo a cui appartiene 'iso'. Restituisce { ok, motivo, finestra }.
-function verificaAccessoAssenza(iso) {
+function verificaAccessoAssenza(iso, utente) {
+  // Eccezione: i gruppi configurati come esenti hanno inserimento libero
+  // (nessun vincolo di finestra né di data passata). Configurabile da
+  // Impostazioni → Calendari.
+  const esenti = getGruppiEsentiAssenze();
+  if (utente?.gruppo && esenti.includes(utente.gruppo)) {
+    return { ok: true, esenzione: utente.gruppo };
+  }
   const oggiIso = toLocalISO(new Date());
   // Le date passate non sono mai accessibili agli utenti
   if (iso < oggiIso) {
@@ -1488,6 +1513,7 @@ async function afterLogin() {
   $('#role-pill').innerHTML = state.profile.ruolo === 'admin'
     ? '<span class="badge bvio">admin</span>' : '<span class="badge bgry">user</span>';
   $('#area-gestione').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
+  $('#area-impostazioni').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#kiosk-jump').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   applyTheme(localStorage.getItem('theme') || 'dark');
 
@@ -1961,7 +1987,13 @@ const TAB_STRUCTURE = {
       { id: 'operatori',      label: 'Utenti',            adminOnly: true },
       { id: 'chiusure',       label: 'Chiusure aziendali', adminOnly: true },
       { id: 'tipi_assenza',   label: 'Tipi assenza',      adminOnly: true },
-      { id: 'impostazioni',   label: 'Impostazioni',      adminOnly: true },
+    ],
+  },
+  impostazioni: {
+    label: 'Impostazioni',
+    adminOnly: true,
+    tabs: [
+      { id: 'imp_calendari',  label: 'Calendari',         adminOnly: true },
     ],
   },
 };
@@ -2026,6 +2058,9 @@ function switchToTab(areaId, tabId) {
 function renderTab(name) {
   // Compatibilità: la vecchia scheda unica 'gantt' è ora divisa in due
   if (name === 'gantt') name = 'gantt_commesse';
+  // Compatibilità: la vecchia tab 'impostazioni' dentro Gestione è ora la
+  // sub-tab 'imp_calendari' dentro la nuova macro-area Impostazioni.
+  if (name === 'impostazioni') name = 'imp_calendari';
   state.currentTab = name;
   const root = $('#tab-content');
   if (!state.loaded) { root.innerHTML = '<div class="empty">Caricamento…</div>'; return; }
@@ -2046,7 +2081,7 @@ function renderTab(name) {
     else if (name === 'carico') renderCarico(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
-    else if (name === 'impostazioni') renderImpostazioni(root);
+    else if (name === 'imp_calendari') renderImpostazioni(root);
   } catch (e) {
     console.error('Errore rendering tab '+name+':', e);
     root.innerHTML = '';
@@ -10318,7 +10353,7 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
       const isMiaRiga = mioUtenteId && u.id === mioUtenteId;
       let bloccatoFinestra = false, motivoBlocco = '';
       if (!isAdmin && isMiaRiga) {
-        const v = verificaAccessoAssenza(g.iso);
+        const v = verificaAccessoAssenza(g.iso, u);
         if (!v.ok) { bloccatoFinestra = true; motivoBlocco = v.motivo; }
       }
       if (bloccatoFinestra) cls.push('bloccato-preavviso');
@@ -10350,20 +10385,15 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
     table.append(tr);
   };
 
-  // Per gli admin: raggruppo per gruppo utenti (riga-intestazione + utenti del gruppo).
-  // Per i non-admin: tengo il vecchio comportamento (riga propria in cima, niente
-  // intestazioni di gruppo) — è un aiuto pensato per loro che voglio preservare.
-  if (isAdmin) {
-    const sezioniAss = raggruppaUtenti(utentiOrdinati);
-    sezioniAss.forEach(sez => {
-      const trHd = el('tr', { class: 'gruppo-hd-row' + (sez.key === '__nogroup__' ? ' nogroup' : '') });
-      trHd.append(el('td', { colspan: String(giorni.length + 1) }, sez.label));
-      table.append(trHd);
-      sez.utenti.forEach(buildRigaUtente);
-    });
-  } else {
-    utentiOrdinati.forEach(buildRigaUtente);
-  }
+  // Raggruppo per gruppo utenti (riga-intestazione + utenti del gruppo).
+  // Coerente con le altre viste raggruppate (Carico, Gantt Live, Gantt Commesse, Kiosk).
+  const sezioniAss = raggruppaUtenti(utentiOrdinati);
+  sezioniAss.forEach(sez => {
+    const trHd = el('tr', { class: 'gruppo-hd-row' + (sez.key === '__nogroup__' ? ' nogroup' : '') });
+    trHd.append(el('td', { colspan: String(giorni.length + 1) }, sez.label));
+    table.append(trHd);
+    sez.utenti.forEach(buildRigaUtente);
+  });
 
   wrap.append(table);
   root.append(wrap);
@@ -10576,7 +10606,7 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
         const sonoAdmin = state.profile?.ruolo === 'admin';
         const perMeStesso = utente.account_id === state.profile?.id;
         if (!sonoAdmin && perMeStesso) {
-          const verifica = verificaAccessoAssenza(iso);
+          const verifica = verificaAccessoAssenza(iso, utente);
           if (!verifica.ok) {
             return toast('Eliminazione non consentita: ' + verifica.motivo + '.', 'err');
           }
@@ -10598,7 +10628,7 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     const sonoAdmin = state.profile?.ruolo === 'admin';
     const perMeStesso = utente.account_id === state.profile?.id;
     if (!sonoAdmin && perMeStesso) {
-      const verifica = verificaAccessoAssenza(iso);
+      const verifica = verificaAccessoAssenza(iso, utente);
       if (!verifica.ok) {
         return toast('Inserimento non consentito: ' + verifica.motivo + '.', 'err');
       }
@@ -10859,6 +10889,34 @@ function renderImpostazioni(root) {
   blocchiInvernali.append(fieldGGMM('finestra_invernale_periodo_a',  'Periodo coperto al:',  '31-03'));
   box.append(blocchiInvernali);
 
+  // ── Esenzioni per gruppo ───────────────────────────────────
+  // I gruppi spuntati sono esenti da TUTTI i vincoli di inserimento assenze
+  // (finestra di apertura + blocco date passate). Configurazione globale,
+  // letta da getGruppiEsentiAssenze() in verificaAccessoAssenza().
+  const esentiAttuali = new Set(getGruppiEsentiAssenze());
+  const checkboxEsenti = {};
+  const blocchiEsenti = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:14px;margin-bottom:14px;' });
+  blocchiEsenti.append(el('div', { style:'font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--txt);margin-bottom:6px;' },
+    '⊘ Esenzioni gruppi'));
+  blocchiEsenti.append(el('div', { style:'font-size:11px;color:var(--mut);margin-bottom:12px;line-height:1.6;' },
+    'I gruppi spuntati possono inserire/modificare le proprie assenze in qualsiasi data, ignorando le finestre di apertura e il blocco sulle date passate.'));
+  GRUPPI_UTENTI.forEach(g => {
+    const row = el('label', {
+      style:'display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:3px;cursor:pointer;font-family:DM Mono,monospace;font-size:11px;',
+      onmouseenter: function(){ this.style.background='var(--sur)'; },
+      onmouseleave: function(){ this.style.background='transparent'; },
+    });
+    const cb = el('input', {
+      type:'checkbox',
+      style:'cursor:pointer;accent-color:var(--acc);',
+    });
+    cb.checked = esentiAttuali.has(g.key);
+    checkboxEsenti[g.key] = cb;
+    row.append(cb, el('span', {}, g.label));
+    blocchiEsenti.append(row);
+  });
+  box.append(blocchiEsenti);
+
   // ── Anteprima dello stato corrente ─────────────────────────
   const oggiIso = toLocalISO(new Date());
   const finestreCorrenti = getFinestreAssenze();
@@ -10893,6 +10951,11 @@ function renderImpostazioni(root) {
       // Riscrivo in forma canonica zero-padded
       valoriDaSalvare[k] = z(parsed.giorno) + '-' + z(parsed.mese);
     }
+    // Esenzioni gruppi (JSON serializzato, lista di key)
+    const esentiNuovi = GRUPPI_UTENTI
+      .filter(g => checkboxEsenti[g.key]?.checked)
+      .map(g => g.key);
+    valoriDaSalvare['assenze_gruppi_esenti'] = JSON.stringify(esentiNuovi);
     btnSalva.disabled = true;
     btnSalva.textContent = 'Salvataggio…';
     try {
