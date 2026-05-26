@@ -863,6 +863,7 @@ const state = {
   sessioni: [],
   // Assenze v2 (modello righe giornaliere)
   tipiAssenza: [],         // anagrafica tipi assenza con codice e ore_default
+  attivitaExtra: [],       // anagrafica attività extra (lavoro non legato a commesse)
   assenze: [],             // righe assenza: {id, utente_id, tipo_assenza_id, data, ore, stato, ...}
   assAnno: new Date().getFullYear(),
   assMese: new Date().getMonth(), // 0-11
@@ -1564,7 +1565,7 @@ document.addEventListener('change', (e) => {
 // Avere un solo handler evita race condition tra ricreazione client e refresh.
 
 async function loadAllData() {
-  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, assenze, opAddetti, impostazioni, consegneCommessa, opFornitori] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, attivitaExtra, assenze, opAddetti, impostazioni, consegneCommessa, opFornitori] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('utenti').select('*').order('nome'),
@@ -1579,6 +1580,7 @@ async function loadAllData() {
     sb.from('operazioni').select('*').order('scadenza'),
     sb.from('sessioni_lavoro').select('*').order('inizio', { ascending:false }),
     sb.from('tipi_assenza').select('*').order('ordine'),
+    sb.from('attivita_extra').select('*').order('ordine'),
     sb.from('assenze').select('*').order('data', { ascending:false }),
     sb.from('operazioni_addetti').select('*'),
     sb.from('impostazioni').select('*'),
@@ -1599,6 +1601,7 @@ async function loadAllData() {
   if (operazioni.error) throw operazioni.error;
   if (sessioni.error) throw sessioni.error;
   if (tipiAssenza.error) throw tipiAssenza.error;
+  if (attivitaExtra.error) throw attivitaExtra.error;
   if (assenze.error) throw assenze.error;
   if (opAddetti.error) throw opAddetti.error;
   if (impostazioni.error) throw impostazioni.error;
@@ -1620,6 +1623,7 @@ async function loadAllData() {
   state.operazioni = operazioni.data || [];
   state.sessioni = sessioni.data || [];
   state.tipiAssenza = tipiAssenza.data || [];
+  state.attivitaExtra = attivitaExtra.data || [];
   state.assenze = assenze.data || [];
   state.opAddetti = opAddetti.data || [];
   state.opFornitori = opFornitori.data || [];
@@ -1660,6 +1664,8 @@ function startRealtime() {
         (p) => applyChange('sessioni_lavoro', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'tipi_assenza' },
         (p) => applyChange('tipi_assenza', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'attivita_extra' },
+        (p) => applyChange('attivita_extra', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'assenze' },
         (p) => applyChange('assenze', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'operazioni_addetti' },
@@ -1775,6 +1781,14 @@ function applyChange(tabella, payload) {
       state.tipiAssenza = state.tipiAssenza.map(x => x.id === row.id ? row : x);
     } else if (ev === 'DELETE') {
       state.tipiAssenza = state.tipiAssenza.filter(x => x.id !== oldRow.id);
+    }
+  } else if (tabella === 'attivita_extra') {
+    if (ev === 'INSERT') {
+      if (!state.attivitaExtra.find(x => x.id === row.id)) state.attivitaExtra.push(row);
+    } else if (ev === 'UPDATE') {
+      state.attivitaExtra = state.attivitaExtra.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.attivitaExtra = state.attivitaExtra.filter(x => x.id !== oldRow.id);
     }
   } else if (tabella === 'assenze') {
     if (ev === 'INSERT') {
@@ -1993,6 +2007,7 @@ const TAB_STRUCTURE = {
       { id: 'operatori',      label: 'Utenti',            adminOnly: true },
       { id: 'chiusure',       label: 'Chiusure aziendali', adminOnly: true },
       { id: 'tipi_assenza',   label: 'Tipi assenza',      adminOnly: true },
+      { id: 'attivita_extra', label: 'Attività extra',    adminOnly: true },
     ],
   },
   impostazioni: {
@@ -2086,6 +2101,7 @@ function renderTab(name) {
     else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
+    else if (name === 'attivita_extra') renderAttivitaExtra(root);
     else if (name === 'imp_calendari') renderImpostazioni(root);
   } catch (e) {
     console.error('Errore rendering tab '+name+':', e);
@@ -11454,6 +11470,189 @@ async function deleteTipoAssenza(t) {
   if (!data || !data.length) return toast('Eliminazione bloccata', 'err');
   state.tipiAssenza = state.tipiAssenza.filter(x => x.id !== t.id);
   toast('Tipo eliminato'); renderTab('tipi_assenza');
+}
+
+// ═══════════════════════════════════════════════════════════
+// ATTIVITÀ EXTRA — anagrafica delle attività non legate a commesse
+// (pulizia officina, riunioni, formazione, manutenzione, ecc.).
+// Usate dal kiosk come terza opzione accanto a Mezzi e Commesse.
+// Modello dati: timbrature salvate sulla stessa tabella sessioni_lavoro,
+// con operazione_id = null e attivita_id valorizzato (vedi migration SQL).
+// ═══════════════════════════════════════════════════════════
+
+function renderAttivitaExtra(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const list = state.attivitaExtra.slice().sort((a,b) => (a.ordine||0) - (b.ordine||0));
+
+  root.innerHTML = '';
+  const toolbar = el('div', { class:'toolbar' },
+    el('h2', {}, 'Attività extra'),
+  );
+  if (isAdmin) {
+    toolbar.append(el('button', { class:'btnp', onclick:()=>openAttivitaExtraModal() }, '+ Nuova Attività'));
+  }
+  root.append(toolbar);
+  root.append(el('div', { class:'sub', style:'margin-bottom:14px;' },
+    'Attività che gli operatori possono timbrare al kiosk quando non lavorano su una commessa (pulizia officina, riunioni, formazione, manutenzione mezzi, ecc.).'));
+
+  if (list.length === 0) {
+    root.append(el('div', { class:'empty' },
+      'Nessuna attività ancora. Creane una con "+ Nuova Attività".'));
+    return;
+  }
+
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', { class:'tc', style:'width:50px;' }, 'Ord.'),
+    el('th', {}, 'Nome'),
+    el('th', {}, 'Descrizione'),
+    el('th', { class:'tc' }, 'Colore'),
+    el('th', { class:'tc' }, 'Stato'),
+    el('th', { class:'tc' }, 'Azioni'),
+  )));
+  const tb = el('tbody');
+  list.forEach(a => {
+    tb.append(el('tr', {},
+      el('td', { class:'tc mono' }, String(a.ordine || 0)),
+      el('td', {}, a.nome),
+      el('td', { class:'sub' }, a.descrizione || '—'),
+      el('td', { class:'tc' }, el('span', {
+        style: `display:inline-block;width:24px;height:14px;border-radius:2px;background:${a.colore||'#6b6b64'};vertical-align:middle;border:1px solid var(--brd);`,
+      })),
+      el('td', { class:'tc' }, a.attivo
+        ? el('span', { class:'badge bok' }, 'attiva')
+        : el('span', { class:'badge bgry' }, 'disatt.')),
+      el('td', { class:'tc' },
+        isAdmin
+          ? el('span', {},
+              el('button', { class:'btnsm', onclick:()=>openAttivitaExtraModal(a) }, 'Modifica'),
+              ' ',
+              el('button', { class:'btnd', onclick:()=>deleteAttivitaExtra(a) }, 'Elimina'),
+            )
+          : '—'
+      ),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+}
+
+function openAttivitaExtraModal(a) {
+  const isNew = !a;
+  const nextOrdine = isNew
+    ? (Math.max(0, ...state.attivitaExtra.map(x => x.ordine||0)) + 1)
+    : a.ordine;
+  a = a || {
+    nome:'',
+    descrizione:'',
+    ordine: nextOrdine,
+    colore: TIPI_ASSENZA_COLORI[state.attivitaExtra.length % TIPI_ASSENZA_COLORI.length],
+    attivo: true,
+  };
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuova Attività Extra' : 'Modifica Attività Extra'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  const inNome = el('input', { type:'text', name:'nome', value:a.nome||'', required:'true',
+    placeholder:'es. Pulizia officina' });
+  const inDesc = el('textarea', { name:'descrizione', rows:'2',
+    placeholder:'Descrizione opzionale (visibile al kiosk).' }, a.descrizione || '');
+  const inOrdine = el('input', { type:'number', name:'ordine', value:String(a.ordine||0), min:'0' });
+  const selAttivo = el('select', { name:'attivo' },
+    el('option', { value:'true' }, 'Attiva'),
+    el('option', { value:'false' }, 'Disattivata'));
+  selAttivo.value = String(!!a.attivo);
+
+  // Riuso la palette di TIPI_ASSENZA_COLORI: stesso pattern, niente duplicazione
+  let coloreScelto = a.colore || TIPI_ASSENZA_COLORI[0];
+  const palette = el('div', { style:'display:flex;flex-wrap:wrap;gap:6px;padding:6px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;' });
+  const refreshPalette = () => {
+    palette.innerHTML = '';
+    TIPI_ASSENZA_COLORI.forEach(col => {
+      const sel = col === coloreScelto;
+      palette.append(el('button', {
+        type:'button',
+        style: `width:34px;height:28px;border-radius:3px;background:${col};border:2px solid ${sel?'var(--acc)':'transparent'};cursor:pointer;outline:none;`,
+        onclick: () => { coloreScelto = col; refreshPalette(); },
+      }));
+    });
+  };
+  refreshPalette();
+
+  form.append(
+    el('div', { class:'field' }, el('label', {}, 'Nome *'), inNome),
+    el('div', { class:'field' }, el('label', {}, 'Descrizione'), inDesc),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Ordine'), inOrdine),
+      el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Colore'), palette),
+  );
+
+  body.append(form);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  const btnSave = el('button', { class:'btnp' }, 'Salva');
+  btnSave.onclick = async () => {
+    const fd = new FormData(form);
+    const payload = {
+      nome: (fd.get('nome')||'').trim(),
+      descrizione: (fd.get('descrizione')||'').trim() || null,
+      ordine: parseInt(fd.get('ordine')) || 0,
+      colore: coloreScelto,
+      attivo: fd.get('attivo') === 'true',
+    };
+    if (!payload.nome) return toast('Nome obbligatorio', 'err');
+    btnSave.disabled = true;
+    btnSave.textContent = 'Salvataggio…';
+    try {
+      const { data, error } = await eseguiConRetry(
+        () => isNew
+          ? sb.from('attivita_extra').insert(payload).select().single()
+          : sb.from('attivita_extra').update(payload).eq('id', a.id).select().single(),
+        { label: 'salvataggio attivita_extra' }
+      );
+      if (error) {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Salva';
+        if (error.code === '23505') return toast('Nome già esistente', 'err');
+        return toast(error.message, 'err');
+      }
+      if (isNew) {
+        if (!state.attivitaExtra.find(x => x.id === data.id)) state.attivitaExtra.push(data);
+      } else {
+        state.attivitaExtra = state.attivitaExtra.map(x => x.id === a.id ? data : x);
+      }
+      toast(isNew ? 'Attività creata' : 'Attività aggiornata');
+      closeModal(); renderTab('attivita_extra');
+    } catch (e) {
+      btnSave.disabled = false;
+      btnSave.textContent = 'Salva';
+      toast('Errore: '+(e.message||e), 'err');
+    }
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+}
+
+async function deleteAttivitaExtra(a) {
+  if (!confirm(`Eliminare l'attività "${a.nome}"?\nLe timbrature passate resteranno ma senza riferimento all'attività.`)) return;
+  const { data, error } = await sb.from('attivita_extra').delete().eq('id', a.id).select();
+  if (error) return toast(error.message, 'err');
+  if (!data || !data.length) return toast('Eliminazione bloccata', 'err');
+  state.attivitaExtra = state.attivitaExtra.filter(x => x.id !== a.id);
+  toast('Attività eliminata'); renderTab('attivita_extra');
 }
 
 init();
