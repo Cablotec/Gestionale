@@ -399,8 +399,23 @@ input.search:focus{border-color:var(--acc);}
    auto-fit + 'fr' fa sì che si distribuiscano sulla larghezza disponibile. */
 .kiosk-op-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;
   max-width:1320px;margin:0 auto;}
-.kiosk-op-card{background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:18px 20px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:8px;transition:all .12s;color:var(--txt);font-family:inherit;min-height:190px;}
+.kiosk-op-card{background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:18px 20px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:8px;transition:all .12s;color:var(--txt);font-family:inherit;min-height:320px;}
 .kiosk-op-card:hover,.kiosk-op-card:active{border-color:var(--acc);background:rgba(212,255,78,.05);transform:translateY(-1px);}
+/* Stati colorati: bordo + tinta sfondo del colore di stato.
+   L'hover preserva il colore di stato (più scuro), così l'utente non
+   "perde" l'informazione visiva passando il mouse sopra. */
+.kiosk-op-card.stato-prog-ok{border-color:var(--grn);background:rgba(78,255,163,.07);}
+.kiosk-op-card.stato-prog-ok:hover,.kiosk-op-card.stato-prog-ok:active{
+  border-color:var(--grn);background:rgba(78,255,163,.14);}
+.kiosk-op-card.stato-prog-vicino{border-color:var(--yel);background:rgba(255,204,78,.08);}
+.kiosk-op-card.stato-prog-vicino:hover,.kiosk-op-card.stato-prog-vicino:active{
+  border-color:var(--yel);background:rgba(255,204,78,.16);}
+.kiosk-op-card.stato-prog-sfora{border-color:var(--red);background:rgba(255,78,107,.08);}
+.kiosk-op-card.stato-prog-sfora:hover,.kiosk-op-card.stato-prog-sfora:active{
+  border-color:var(--red);background:rgba(255,78,107,.16);}
+.kiosk-op-card.stato-noprev{border-color:var(--yel);background:rgba(255,204,78,.08);}
+.kiosk-op-card.stato-noprev:hover,.kiosk-op-card.stato-noprev:active{
+  border-color:var(--yel);background:rgba(255,204,78,.16);}
 /* Cliente: la cosa più grande e prominente */
 .kop-cliente{font-family:'Syne',sans-serif;font-size:17px;font-weight:700;color:var(--txt);line-height:1.2;}
 /* Riga meta: OP · ordine · scadenza */
@@ -8753,6 +8768,25 @@ function kioskOpCard(o) {
     const diff = (parseISODate(o.scadenza) - new Date()) / 86400000;
     if (diff <= 3) scadCls = 'vicina';
   }
+
+  // Determino lo stato di progresso una volta sola — usato sia per la
+  // classe della card (bordo + tinta sfondo) sia per la riga progresso/badge.
+  // Stati possibili: 'intonsa', 'prog-ok', 'prog-vicino', 'prog-sfora', 'noprev'.
+  let stato = 'intonsa';
+  let oreCons = 0, orePrev = 0, perc = 0;
+  if (kioskState.opIniziate.has(o.id)) {
+    oreCons = kioskState.opOreCons[o.id] || 0;
+    orePrev = ((o.quantita || 0) * (o.minuti_unitari || 0)) / 60;
+    if (orePrev > 0) {
+      perc = oreCons / orePrev;
+      if (perc > 1.0)      stato = 'prog-sfora';
+      else if (perc >= 0.9) stato = 'prog-vicino';
+      else                  stato = 'prog-ok';
+    } else {
+      stato = 'noprev';
+    }
+  }
+
   // Riga "meta" in alto: OP · n° ordine · scadenza
   const metaParts = [];
     if (o.numero_ordine) metaParts.push(el('span', { class:'kop-ord' }, o.numero_ordine));
@@ -8768,43 +8802,39 @@ function kioskOpCard(o) {
 
   // Riga progresso (solo se commessa iniziata)
   let progressRow = null;
-  if (kioskState.opIniziate.has(o.id)) {
-    const oreCons = kioskState.opOreCons[o.id] || 0;
-    const orePrev = ((o.quantita || 0) * (o.minuti_unitari || 0)) / 60;
-    if (orePrev > 0) {
-      // Caso normale: barra di progresso ore consuntivate / preventivo
-      const perc = oreCons / orePrev;
-      const percRound = Math.round(perc * 100);
-      const fillW = Math.min(100, perc * 100);
-      let fillCls = '';
-      if (perc > 1.0)      fillCls = 'sfora';
-      else if (perc >= 0.9) fillCls = 'vicino';
-      const valCls = perc > 1.0 ? 'sfora' : '';
-      progressRow = el('div', {
-        class:'kop-progress',
-        title: oreCons.toFixed(1) + 'h consuntivate su ' + orePrev.toFixed(1) + 'h preventivate'
-          + (perc > 1.0 ? ' (sforamento +' + (oreCons - orePrev).toFixed(1) + 'h)' : ''),
-      },
-        el('div', { class:'kop-progress-bar' },
-          el('div', { class:'kop-progress-fill ' + fillCls, style:'width:'+fillW+'%;' })),
-        el('div', { class:'kop-progress-val ' + valCls }, percRound + '%'),
-      );
-    } else {
-      // Caso anomalo: iniziata ma senza preventivo. Da segnalare al responsabile.
-      progressRow = el('div', {
-        class:'kop-noprev',
-        title: 'Questa commessa è stata iniziata ma non ha minuti unitari impostati. '
-          + 'Aggiornare in pianificazione per avere il preventivo ore.',
-      },
-        el('span', {}, '⚠'),
-        el('span', { style:'flex:1;' }, 'INIZIATA · NO PREVENTIVO'),
-        el('span', {}, oreCons.toFixed(1) + 'h'),
-      );
-    }
+  if (stato === 'prog-ok' || stato === 'prog-vicino' || stato === 'prog-sfora') {
+    const percRound = Math.round(perc * 100);
+    const fillW = Math.min(100, perc * 100);
+    const fillCls = stato === 'prog-sfora' ? 'sfora'
+                  : stato === 'prog-vicino' ? 'vicino' : '';
+    const valCls = stato === 'prog-sfora' ? 'sfora' : '';
+    progressRow = el('div', {
+      class:'kop-progress',
+      title: oreCons.toFixed(1) + 'h consuntivate su ' + orePrev.toFixed(1) + 'h preventivate'
+        + (perc > 1.0 ? ' (sforamento +' + (oreCons - orePrev).toFixed(1) + 'h)' : ''),
+    },
+      el('div', { class:'kop-progress-bar' },
+        el('div', { class:'kop-progress-fill ' + fillCls, style:'width:'+fillW+'%;' })),
+      el('div', { class:'kop-progress-val ' + valCls }, percRound + '%'),
+    );
+  } else if (stato === 'noprev') {
+    // Caso anomalo: iniziata ma senza preventivo. Da segnalare al responsabile.
+    progressRow = el('div', {
+      class:'kop-noprev',
+      title: 'Questa commessa è stata iniziata ma non ha minuti unitari impostati. '
+        + 'Aggiornare in pianificazione per avere il preventivo ore.',
+    },
+      el('span', {}, '⚠'),
+      el('span', { style:'flex:1;' }, 'INIZIATA · NO PREVENTIVO'),
+      el('span', {}, oreCons.toFixed(1) + 'h'),
+    );
   }
 
+  // Classe card: base + classe stato (per bordo + tinta)
+  const cardClass = 'kiosk-op-card' + (stato !== 'intonsa' ? ' stato-' + stato : '');
+
   return el('button', {
-    class:'kiosk-op-card',
+    class: cardClass,
     onclick: () => kioskSelectOperazione(o),
   },
     el('div', { class:'kop-cliente' }, cli?.nome || '— senza cliente —'),
