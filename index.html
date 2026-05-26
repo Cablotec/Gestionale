@@ -397,9 +397,9 @@ input.search:focus{border-color:var(--acc);}
 /* Griglia commesse: fino a 3 colonne, scende a 2 o 1 se non c'è spazio.
    minmax(320px,1fr) garantisce che ogni card sia di almeno 320px;
    auto-fit + 'fr' fa sì che si distribuiscano sulla larghezza disponibile. */
-.kiosk-op-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;
+.kiosk-op-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;
   max-width:1320px;margin:0 auto;}
-.kiosk-op-card{background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:18px 20px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:8px;transition:all .12s;color:var(--txt);font-family:inherit;min-height:130px;}
+.kiosk-op-card{background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:18px 20px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:8px;transition:all .12s;color:var(--txt);font-family:inherit;min-height:190px;}
 .kiosk-op-card:hover,.kiosk-op-card:active{border-color:var(--acc);background:rgba(212,255,78,.05);transform:translateY(-1px);}
 /* Cliente: la cosa più grande e prominente */
 .kop-cliente{font-family:'Syne',sans-serif;font-size:17px;font-weight:700;color:var(--txt);line-height:1.2;}
@@ -410,8 +410,6 @@ input.search:focus{border-color:var(--acc);}
 .kop-scad{font-weight:700;color:var(--mut);}
 .kop-scad.vicina{color:var(--yel);}
 .kop-scad.passata{color:var(--red);}
-.kop-iniziata{font-weight:700;color:var(--grn);letter-spacing:.04em;
-  border:1px solid var(--grn);border-radius:3px;padding:1px 6px;font-size:9px;}
 /* Articolo: codice grande, descrizione sotto */
 .kop-articolo{margin-top:2px;}
 .kop-cod{font-family:'DM Mono',monospace;font-size:14px;color:var(--or);font-weight:700;letter-spacing:.02em;}
@@ -421,6 +419,19 @@ input.search:focus{border-color:var(--acc);}
 .kop-bottom{display:flex;gap:10px;align-items:baseline;font-family:'DM Mono',monospace;font-size:11px;margin-top:auto;padding-top:6px;border-top:1px solid var(--brd);}
 .kop-qta{color:var(--txt);font-weight:700;}
 .kop-note{color:var(--mut);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;}
+/* Riga progresso: barra orizzontale per commesse iniziate, sotto la riga bottom */
+.kop-progress{margin-top:8px;display:flex;align-items:center;gap:10px;font-family:'DM Mono',monospace;font-size:11px;}
+.kop-progress-bar{flex:1;position:relative;height:10px;background:var(--sur2);border:1px solid var(--brd);border-radius:5px;overflow:hidden;}
+.kop-progress-fill{position:absolute;left:0;top:0;bottom:0;background:var(--grn);transition:width .25s;}
+.kop-progress-fill.vicino{background:var(--yel);}
+.kop-progress-fill.sfora{background:var(--red);}
+.kop-progress-val{font-weight:700;color:var(--txt);min-width:48px;text-align:right;}
+.kop-progress-val.sfora{color:var(--red);}
+/* Badge avviso "iniziata ma senza preventivo" — caso anomalo da risolvere */
+.kop-noprev{margin-top:8px;padding:6px 10px;background:rgba(255,204,78,.12);
+  border:1px solid var(--yel);border-radius:4px;
+  font-family:'DM Mono',monospace;font-size:10px;color:var(--yel);font-weight:700;
+  letter-spacing:.04em;display:flex;align-items:center;gap:8px;}
 
 .kiosk-op-search-box{margin:14px 0;display:flex;gap:10px;align-items:center;}
 .kiosk-op-search-box input{flex:1;background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:14px 18px;border-radius:6px;font-family:'DM Mono',monospace;font-size:14px;outline:none;}
@@ -7968,6 +7979,7 @@ const kioskState = {
   mezziInUso: [],              // usi_mezzo aperti (data_rientro IS NULL)
   prenotazioniOggi: [],        // prenotazioni che coprono oggi
   opIniziate: new Set(),       // id operazioni con almeno una sessione chiusa
+  opOreCons: {},               // operazione_id → ore consuntivate (sessioni chiuse)
   inactivityTimer: null,
   doneTimer: null,
   rfidBuffer: '',
@@ -8197,21 +8209,27 @@ async function kioskLoadAll() {
   });
 
   // Set degli id operazione che hanno almeno una sessione chiusa (cioè
-  // hanno avuto almeno una timbratura completata). Usato nelle card della
-  // lista commesse del kiosk per distinguere "iniziate" vs "intonse".
+  // hanno avuto almeno una timbratura completata) + mappa delle ore reali
+  // consuntivate per ogni operazione. Usati nelle card del kiosk per la
+  // barra di progresso preventivo/consuntivo.
   // Query mirata: solo sulle operazioni aperte attualmente in cache,
   // peso minimo anche se lo storico è grande.
   kioskState.opIniziate = new Set();
+  kioskState.opOreCons = {};       // operazione_id → ore consuntivate (sessioni chiuse)
   const opIds = state.operazioni.map(o => o.id);
   if (opIds.length > 0) {
     try {
       const { data: sessChiuse, error: errIniz } = await sb
         .from('sessioni_lavoro')
-        .select('operazione_id')
+        .select('operazione_id, durata_secondi')
         .in('operazione_id', opIds)
         .not('fine', 'is', null);
       if (errIniz) console.error('[KIOSK] Errore caricamento op iniziate:', errIniz);
-      else (sessChiuse || []).forEach(s => kioskState.opIniziate.add(s.operazione_id));
+      else (sessChiuse || []).forEach(s => {
+        kioskState.opIniziate.add(s.operazione_id);
+        kioskState.opOreCons[s.operazione_id] =
+          (kioskState.opOreCons[s.operazione_id] || 0) + (s.durata_secondi || 0) / 3600;
+      });
     } catch (e) {
       console.error('[KIOSK] Errore caricamento op iniziate:', e);
     }
@@ -8735,15 +8753,10 @@ function kioskOpCard(o) {
     const diff = (parseISODate(o.scadenza) - new Date()) / 86400000;
     if (diff <= 3) scadCls = 'vicina';
   }
-  // Riga "meta" in alto: OP · n° ordine · scadenza · badge "iniziata"
+  // Riga "meta" in alto: OP · n° ordine · scadenza
   const metaParts = [];
     if (o.numero_ordine) metaParts.push(el('span', { class:'kop-ord' }, o.numero_ordine));
   if (o.scadenza) metaParts.push(el('span', { class:'kop-scad ' + scadCls }, '📅 ' + fmtIT(o.scadenza)));
-  // Indicatore: la commessa ha già almeno una timbratura chiusa (è "iniziata"
-  // a differenza di "intonsa"). Letto dal Set popolato in kioskLoadAll.
-  if (kioskState.opIniziate.has(o.id)) {
-    metaParts.push(el('span', { class:'kop-iniziata', title:'Questa commessa ha già almeno una timbratura registrata' }, '▶ INIZIATA'));
-  }
 
   // Riga inferiore: quantità + note (se presenti)
   const bottomParts = [];
@@ -8751,6 +8764,43 @@ function kioskOpCard(o) {
   if (o.note) {
     // Le note possono essere lunghe: limito a una riga, troncata
     bottomParts.push(el('span', { class:'kop-note', title: o.note }, '✎ ' + o.note));
+  }
+
+  // Riga progresso (solo se commessa iniziata)
+  let progressRow = null;
+  if (kioskState.opIniziate.has(o.id)) {
+    const oreCons = kioskState.opOreCons[o.id] || 0;
+    const orePrev = ((o.quantita || 0) * (o.minuti_unitari || 0)) / 60;
+    if (orePrev > 0) {
+      // Caso normale: barra di progresso ore consuntivate / preventivo
+      const perc = oreCons / orePrev;
+      const percRound = Math.round(perc * 100);
+      const fillW = Math.min(100, perc * 100);
+      let fillCls = '';
+      if (perc > 1.0)      fillCls = 'sfora';
+      else if (perc >= 0.9) fillCls = 'vicino';
+      const valCls = perc > 1.0 ? 'sfora' : '';
+      progressRow = el('div', {
+        class:'kop-progress',
+        title: oreCons.toFixed(1) + 'h consuntivate su ' + orePrev.toFixed(1) + 'h preventivate'
+          + (perc > 1.0 ? ' (sforamento +' + (oreCons - orePrev).toFixed(1) + 'h)' : ''),
+      },
+        el('div', { class:'kop-progress-bar' },
+          el('div', { class:'kop-progress-fill ' + fillCls, style:'width:'+fillW+'%;' })),
+        el('div', { class:'kop-progress-val ' + valCls }, percRound + '%'),
+      );
+    } else {
+      // Caso anomalo: iniziata ma senza preventivo. Da segnalare al responsabile.
+      progressRow = el('div', {
+        class:'kop-noprev',
+        title: 'Questa commessa è stata iniziata ma non ha minuti unitari impostati. '
+          + 'Aggiornare in pianificazione per avere il preventivo ore.',
+      },
+        el('span', {}, '⚠'),
+        el('span', { style:'flex:1;' }, 'INIZIATA · NO PREVENTIVO'),
+        el('span', {}, oreCons.toFixed(1) + 'h'),
+      );
+    }
   }
 
   return el('button', {
@@ -8764,6 +8814,7 @@ function kioskOpCard(o) {
       art?.descrizione ? el('div', { class:'kop-desc' }, art.descrizione) : null,
     ),
     el('div', { class:'kop-bottom' }, ...bottomParts),
+    progressRow,
   );
 }
 
