@@ -4283,24 +4283,6 @@ function splitNumeroOrdine(numOrdine) {
   return { eser:'', sz:'', ord: parts.join('/') };
 }
 
-// Estrae da una stringa note i prefissi "Rifer. Cliente:" e "Riferimento
-// Cliente:" creati dall'import, restituendoli separati. Le altre note
-// (non prefissate) restano in "altreNote", così non si perde nulla.
-function estraiRiferimentiNote(note) {
-  if (!note) return { rif1:'', rif2:'', altreNote:'' };
-  const lines = String(note).split('\n');
-  let rif1 = '', rif2 = '';
-  const altre = [];
-  lines.forEach(line => {
-    const m1 = line.match(/^Rifer\.\s*Cliente:\s*(.*)$/i);
-    const m2 = line.match(/^Riferimento\s+Cliente:\s*(.*)$/i);
-    if (m1)      rif1 = m1[1].trim();
-    else if (m2) rif2 = m2[1].trim();
-    else if (line.trim()) altre.push(line);
-  });
-  return { rif1, rif2, altreNote: altre.join('\n') };
-}
-
 function operazioniExportExcel(stati) {
   if (typeof XLSX === 'undefined') {
     toast('Libreria Excel non caricata, ricarica la pagina', 'err');
@@ -4324,12 +4306,13 @@ function operazioniExportExcel(stati) {
   const uById = {};
   state.utenti.forEach(u => uById[u.id] = u);
 
-  // Costruzione righe. Header coerenti col matcher dell'import (in particolare
-  // "Eser", "Sz Cl", "Ord/Off cliente", "Riga", "Codice articolo", "Scadenza",
-  // "Quantità", "Cliente", "Rifer. Cliente", "Riferimento Cliente").
+  // Costruzione righe. Header delle prime colonne coerenti con l'import ERP
+  // (Eser, Sz Cl, Ord/Off cliente, Riga, Codice articolo, Scadenza, Quantità,
+  // Cliente, Rifer. Cliente, Riferimento Cliente — quest'ultime due in input
+  // vengono concatenate nel campo `riferimento_cliente`; in export le
+  // restituiamo come unica colonna "Riferimento Cliente").
   const righe = list.map(o => {
     const { eser, sz, ord } = splitNumeroOrdine(o.numero_ordine);
-    const { rif1, rif2, altreNote } = estraiRiferimentiNote(o.note);
     const art = artById[o.articolo_id];
     const cli = cliById[o.cliente_id];
     const addetti = getOperazioneAddetti(o.id)
@@ -4349,8 +4332,8 @@ function operazioniExportExcel(stati) {
       'Scadenza':              o.scadenza ? fmtIT(o.scadenza) : '',
       'Quantità':              o.quantita ?? '',
       'Cliente':               cli?.nome || '',
-      'Rifer. Cliente':        rif1,
-      'Riferimento Cliente':   rif2,
+      'Riferimento Cliente':   o.riferimento_cliente || '',
+      'Numero OP':             o.numero_op || '',
       // ── Colonne extra (ignorate dall'import) ──
       'Stato':                 o.stato || 'aperta',
       'Stato preparazione':    o.stato_preparazione || '',
@@ -4359,7 +4342,7 @@ function operazioniExportExcel(stati) {
       'Ore consuntivo':        oreCons ? +oreCons.toFixed(2) : 0,
       'Avanzamento %':         orePrev > 0 ? Math.round((oreCons / orePrev) * 100) : '',
       'Addetti assegnati':     addetti,
-      'Note interne':          altreNote,
+      'Note':                  o.note || '',
     };
   });
 
@@ -4369,7 +4352,7 @@ function operazioniExportExcel(stati) {
   ws['!cols'] = [
     { wch: 6 }, { wch: 6 }, { wch: 14 }, { wch: 6 },
     { wch: 18 }, { wch: 36 }, { wch: 11 }, { wch: 8 },
-    { wch: 24 }, { wch: 20 }, { wch: 20 },
+    { wch: 24 }, { wch: 24 }, { wch: 16 },
     { wch: 11 }, { wch: 14 }, { wch: 11 }, { wch: 12 },
     { wch: 12 }, { wch: 11 }, { wch: 30 }, { wch: 30 },
   ];
@@ -4439,9 +4422,11 @@ function openOperazioniImportPreviewModal(rows) {
     const nomeCli = colCli ? String(r[colCli]||'').trim() : '';
     const rif1 = colRif1 ? String(r[colRif1]||'').trim() : '';
     const rif2 = colRif2 ? String(r[colRif2]||'').trim() : '';
-    const noteRighe = [];
-    if (rif1) noteRighe.push('Rifer. Cliente: ' + rif1);
-    if (rif2) noteRighe.push('Riferimento Cliente: ' + rif2);
+    // I due riferimenti cliente vengono concatenati con " / " se entrambi
+    // presenti, e finiscono nel campo dedicato `riferimento_cliente`.
+    // Prima venivano infilati dentro `note` come righe prefissate, scelta
+    // abbandonata col passaggio al campo dedicato.
+    const riferimentoCliente = [rif1, rif2].filter(Boolean).join(' / ') || null;
     const qta = parseInt(colQta ? r[colQta] : '', 10);
     return {
       _row: idx + 2,
@@ -4453,7 +4438,8 @@ function openOperazioniImportPreviewModal(rows) {
       cli: cliByNome[nomeCli.toLowerCase()] || null,
       scadenza: valoreAData(colScad ? r[colScad] : null),
       quantita: (Number.isFinite(qta) && qta > 0) ? qta : null,
-      note: noteRighe.join('\n') || null,
+      riferimentoCliente,
+      note: null,
     };
   });
 
@@ -4561,6 +4547,7 @@ async function operazioniImportEsegui(validi) {
       scadenza: p.scadenza,
       stato: 'aperta',
       stato_preparazione: 'vuoto',
+      riferimento_cliente: p.riferimentoCliente,
       note: p.note,
     }));
     try {
@@ -6093,7 +6080,7 @@ function openOperazioneModal(o) {
   const isNew = !o;
   const isAdmin = state.profile?.ruolo === 'admin';
   o = o || {
-    cliente_id:'', articolo_id:'', numero_ordine:'', pos:'',
+    cliente_id:'', articolo_id:'', numero_ordine:'', numero_op:'', riferimento_cliente:'', pos:'',
     quantita:1, minuti_unitari:0,
     scadenza:'', cl_consegna_materiali:'',
     stato:'aperta', stato_preparazione:'vuoto', note:'',
@@ -6345,6 +6332,26 @@ function openOperazioneModal(o) {
       el('div', { class:'field' }, el('label', {}, 'POS'),
         el('input', { type:'text', name:'pos', value:o.pos||'',
           placeholder:'es. 0010' })),
+    ),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Numero OP'),
+        el('input', { type:'text', name:'numero_op',
+          value: o.numero_op || (new Date().getFullYear() + '/OP/'),
+          placeholder:'es. 2026/OP/00001',
+          pattern:'\\d{4}/OP/\\d{5}',
+          title:'Formato richiesto: AAAA/OP/NNNNN (opzionale)',
+          // Al blur: stesso pattern del numero ordine ma per OP.
+          // Se l'utente lascia solo "AAAA/OP/" il submit lo convertirà in null.
+          onblur: (e) => {
+            const v = e.target.value.trim();
+            const m = v.match(/^(\d{4})\/OP\/(\d{1,4})$/);
+            if (m) e.target.value = m[1] + '/OP/' + m[2].padStart(5, '0');
+          },
+        })),
+      el('div', { class:'field' }, el('label', {}, 'Riferimento cliente'),
+        el('input', { type:'text', name:'riferimento_cliente',
+          value: o.riferimento_cliente || '',
+          placeholder:'es. ABC-001, PO12345, DDT 4456' })),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Quantità *'),
@@ -6889,6 +6896,18 @@ function openOperazioneModal(o) {
         return toast('Numero ordine non valido. Usa il formato AAAA/OC/NNNNN (es. 2026/OC/00388).', 'err');
       }
 
+      // Validazione numero OP: opzionale, ma se valorizzato deve essere AAAA/OP/NNNNN.
+      // Se l'utente non ha toccato la precompilazione (solo "AAAA/OP/" senza
+      // cifre dopo), trattiamo come "vuoto" e salviamo null.
+      let numOp = (fd.get('numero_op')||'').trim();
+      const padOpMatch = numOp.match(/^(\d{4})\/OP\/(\d{1,4})$/);
+      if (padOpMatch) numOp = padOpMatch[1] + '/OP/' + padOpMatch[2].padStart(5, '0');
+      const opSoloPrefisso = /^\d{4}\/OP\/$/.test(numOp);
+      if (numOp && !opSoloPrefisso && !/^\d{4}\/OP\/\d{5}$/.test(numOp)) {
+        return toast('Numero OP non valido. Usa il formato AAAA/OP/NNNNN o lascia vuoto.', 'err');
+      }
+      const numOpFinale = (numOp && !opSoloPrefisso) ? numOp : null;
+
       btnSave.disabled = true;
       btnSave.textContent = 'Salvataggio…';
       const stopWatchdog = avviaWatchdog(btnSave, 'Salva');
@@ -6933,6 +6952,8 @@ function openOperazioneModal(o) {
         cliente_id: clienteId,
         articolo_id: articoloId,
         numero_ordine: numOrd,
+        numero_op: numOpFinale,
+        riferimento_cliente: (fd.get('riferimento_cliente')||'').trim() || null,
         pos: (fd.get('pos')||'').trim() || null,
         quantita: parseInt(fd.get('quantita')) || 1,
         minuti_unitari: parseInt(fd.get('minuti_unitari')) || 0,
