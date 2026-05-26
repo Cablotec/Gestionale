@@ -410,6 +410,8 @@ input.search:focus{border-color:var(--acc);}
 .kop-scad{font-weight:700;color:var(--mut);}
 .kop-scad.vicina{color:var(--yel);}
 .kop-scad.passata{color:var(--red);}
+.kop-iniziata{font-weight:700;color:var(--grn);letter-spacing:.04em;
+  border:1px solid var(--grn);border-radius:3px;padding:1px 6px;font-size:9px;}
 /* Articolo: codice grande, descrizione sotto */
 .kop-articolo{margin-top:2px;}
 .kop-cod{font-family:'DM Mono',monospace;font-size:14px;color:var(--or);font-weight:700;letter-spacing:.02em;}
@@ -7965,6 +7967,7 @@ const kioskState = {
   utenteSelezionato: null,    // { id, nome, numero_badge }
   mezziInUso: [],              // usi_mezzo aperti (data_rientro IS NULL)
   prenotazioniOggi: [],        // prenotazioni che coprono oggi
+  opIniziate: new Set(),       // id operazioni con almeno una sessione chiusa
   inactivityTimer: null,
   doneTimer: null,
   rfidBuffer: '',
@@ -8192,6 +8195,27 @@ async function kioskLoadAll() {
    ['operazioni',operazioni],['sessioni',sessioni],['opAddetti',opAddetti]].forEach(([n,r]) => {
     if (r.error) console.error('[KIOSK] Errore caricamento', n, r.error);
   });
+
+  // Set degli id operazione che hanno almeno una sessione chiusa (cioè
+  // hanno avuto almeno una timbratura completata). Usato nelle card della
+  // lista commesse del kiosk per distinguere "iniziate" vs "intonse".
+  // Query mirata: solo sulle operazioni aperte attualmente in cache,
+  // peso minimo anche se lo storico è grande.
+  kioskState.opIniziate = new Set();
+  const opIds = state.operazioni.map(o => o.id);
+  if (opIds.length > 0) {
+    try {
+      const { data: sessChiuse, error: errIniz } = await sb
+        .from('sessioni_lavoro')
+        .select('operazione_id')
+        .in('operazione_id', opIds)
+        .not('fine', 'is', null);
+      if (errIniz) console.error('[KIOSK] Errore caricamento op iniziate:', errIniz);
+      else (sessChiuse || []).forEach(s => kioskState.opIniziate.add(s.operazione_id));
+    } catch (e) {
+      console.error('[KIOSK] Errore caricamento op iniziate:', e);
+    }
+  }
 }
 
 function kioskStartRealtime() {
@@ -8711,10 +8735,15 @@ function kioskOpCard(o) {
     const diff = (parseISODate(o.scadenza) - new Date()) / 86400000;
     if (diff <= 3) scadCls = 'vicina';
   }
-  // Riga "meta" in alto: OP · n° ordine · scadenza
+  // Riga "meta" in alto: OP · n° ordine · scadenza · badge "iniziata"
   const metaParts = [];
     if (o.numero_ordine) metaParts.push(el('span', { class:'kop-ord' }, o.numero_ordine));
   if (o.scadenza) metaParts.push(el('span', { class:'kop-scad ' + scadCls }, '📅 ' + fmtIT(o.scadenza)));
+  // Indicatore: la commessa ha già almeno una timbratura chiusa (è "iniziata"
+  // a differenza di "intonsa"). Letto dal Set popolato in kioskLoadAll.
+  if (kioskState.opIniziate.has(o.id)) {
+    metaParts.push(el('span', { class:'kop-iniziata', title:'Questa commessa ha già almeno una timbratura registrata' }, '▶ INIZIATA'));
+  }
 
   // Riga inferiore: quantità + note (se presenti)
   const bottomParts = [];
