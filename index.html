@@ -380,7 +380,10 @@ input.search:focus{border-color:var(--acc);}
 .kiosk-done-detail{font-family:'DM Mono',monospace;font-size:14px;color:var(--mut);line-height:1.7;}
 
 /* Menu kiosk (Mezzi / Commesse) */
-.kiosk-menu-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;flex:1;align-content:center;padding:40px 0;}
+.kiosk-menu-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;flex:1;align-content:center;padding:40px 0;}
+@media (max-width:900px){
+  .kiosk-menu-grid{grid-template-columns:1fr;gap:18px;padding:24px 0;}
+}
 .kiosk-menu-btn{padding:60px 40px;background:var(--sur);border:2px solid var(--brd);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:14px;transition:all .15s;color:var(--txt);font-family:inherit;}
 .kiosk-menu-btn:hover,.kiosk-menu-btn:active{border-color:var(--acc);background:rgba(212,255,78,.05);transform:scale(.99);}
 .kmb-icon{font-size:80px;line-height:1;}
@@ -399,6 +402,16 @@ input.search:focus{border-color:var(--acc);}
    auto-fit + 'fr' fa sì che si distribuiscano sulla larghezza disponibile. */
 .kiosk-op-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;
   max-width:1320px;margin:0 auto;}
+/* Attività extra: griglia più semplice (card più piccole, nessuna meta complicata) */
+.kiosk-attivita-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;
+  max-width:1100px;margin:0 auto;}
+.kiosk-attivita-card{background:var(--sur);border:2px solid var(--brd);border-radius:10px;
+  padding:22px 24px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:6px;
+  transition:all .12s;color:var(--txt);font-family:inherit;min-height:110px;}
+.kiosk-attivita-card:hover,.kiosk-attivita-card:active{
+  border-color:var(--acc);background:rgba(212,255,78,.05);transform:translateY(-1px);}
+.kac-nome{font-family:'Syne',sans-serif;font-size:17px;font-weight:700;color:var(--txt);line-height:1.2;}
+.kac-desc{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);line-height:1.4;}
 .kiosk-op-card{background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:18px 20px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:8px;transition:all .12s;color:var(--txt);font-family:inherit;min-height:320px;}
 .kiosk-op-card:hover,.kiosk-op-card:active{border-color:var(--acc);background:rgba(212,255,78,.05);transform:translateY(-1px);}
 /* Stati colorati: bordo + tinta sfondo del colore di stato.
@@ -787,7 +800,21 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
         <div class="kmb-label">Commesse</div>
         <div class="kmb-sub">Avvia / sospendi lavoro</div>
       </button>
+      <button class="kiosk-menu-btn" onclick="kioskGoToAttivita()">
+        <div class="kmb-icon">⚒</div>
+        <div class="kmb-label">Attività extra</div>
+        <div class="kmb-sub">Pulizia, riunioni, formazione…</div>
+      </button>
     </div>
+  </div>
+
+  <!-- Schermata attività extra - lista attività -->
+  <div id="kiosk-step-attivita-list" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name">Seleziona attività</div>
+      <button class="kiosk-cancel" onclick="kioskGoToMenu()">Indietro</button>
+    </div>
+    <div id="kiosk-attivita-list-content"></div>
   </div>
 
   <!-- Schermata commesse - lista operazioni -->
@@ -8191,9 +8218,10 @@ function kioskUpdateClock() {
 async function kioskLoadAll() {
   // Carica mezzi, operatori, usi aperti, prenotazioni di oggi
   // + clienti, articoli, tipi_lav, operazioni, sessioni per il flusso commesse
+  // + attività extra per il terzo flusso "Attività extra"
   // + assenze del giorno e tipi_assenza per mostrare ferie/permessi nelle card
   const oggi = toLocalISO(new Date());
-  const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti, assenze, tipiAss] = await Promise.all([
+  const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti, assenze, tipiAss, attExtra] = await Promise.all([
     sb.from('mezzi').select('*').eq('attivo', true).order('nome'),
     sb.from('utenti').select('*').eq('attivo', true).order('nome'),
     sb.from('usi_mezzo').select('*').is('data_rientro', null),
@@ -8206,6 +8234,7 @@ async function kioskLoadAll() {
     sb.from('operazioni_addetti').select('*'),
     sb.from('assenze').select('*').eq('data', oggi).eq('stato', 'valida'),
     sb.from('tipi_assenza').select('*'),
+    sb.from('attivita_extra').select('*').eq('attivo', true).order('ordine'),
   ]);
   state.mezzi = mezzi.data || [];
   state.utenti = util.data || [];
@@ -8220,6 +8249,7 @@ async function kioskLoadAll() {
   state.opAddetti = opAddetti.data || [];
   state.assenze = assenze.data || [];
   state.tipiAssenza = tipiAss.data || [];
+  state.attivitaExtra = attExtra.data || [];
   // Log diagnostico (visibile in console)
   console.log('[KIOSK] Loaded:', {
     mezzi: state.mezzi.length,
@@ -8235,7 +8265,8 @@ async function kioskLoadAll() {
   // Log errori se ci sono
   [['mezzi',mezzi],['operatori',util],['usi',usi],['pren',pren],
    ['clienti',clienti],['articoli',articoli],['tipiLav',tipiLav],
-   ['operazioni',operazioni],['sessioni',sessioni],['opAddetti',opAddetti]].forEach(([n,r]) => {
+   ['operazioni',operazioni],['sessioni',sessioni],['opAddetti',opAddetti],
+   ['attExtra',attExtra]].forEach(([n,r]) => {
     if (r.error) console.error('[KIOSK] Errore caricamento', n, r.error);
   });
 
@@ -8465,7 +8496,7 @@ function kioskGoToMezzi() {
 function kioskHideAllSteps() {
   ['kiosk-step-id','kiosk-step-action','kiosk-step-menu',
    'kiosk-step-op-list','kiosk-step-tipo','kiosk-step-attiva',
-   'kiosk-step-done'].forEach(id => {
+   'kiosk-step-attivita-list','kiosk-step-done'].forEach(id => {
     const e = $('#'+id); if (e) e.style.display = 'none';
   });
 }
@@ -8948,6 +8979,101 @@ async function kioskSelectTipo(tipo) {
   }
 }
 
+// ─── FLUSSO ATTIVITÀ EXTRA ───
+// Stesso pattern del flusso commesse, ma più semplice: l'utente seleziona
+// un'attività dall'anagrafica (attivita_extra) e parte direttamente la sessione.
+// Non c'è scelta del "tipo lavorazione" (non si applica ad attività non commessa).
+
+function kioskGoToAttivita() {
+  kioskHideAllSteps();
+  $('#kiosk-step-attivita-list').style.display = 'flex';
+  kioskRenderAttivitaList();
+  kioskResetInactivity();
+}
+
+function kioskRenderAttivitaList() {
+  const root = $('#kiosk-attivita-list-content');
+  root.innerHTML = '';
+
+  const list = (state.attivitaExtra || [])
+    .filter(a => a.attivo !== false)
+    .slice()
+    .sort((a, b) => (a.ordine||0) - (b.ordine||0) || a.nome.localeCompare(b.nome));
+
+  if (list.length === 0) {
+    root.append(el('div', { class:'kiosk-empty' },
+      'Nessuna attività extra configurata. Chiedi a un admin di crearle in Gestione → Attività extra.'));
+    return;
+  }
+
+  const grid = el('div', { class:'kiosk-attivita-grid' });
+  list.forEach(a => grid.append(kioskAttivitaCard(a)));
+  root.append(grid);
+}
+
+function kioskAttivitaCard(a) {
+  return el('button', {
+    class:'kiosk-attivita-card',
+    style:'border-left:6px solid '+(a.colore || '#6b6b64')+';',
+    onclick: () => kioskSelectAttivita(a),
+  },
+    el('div', { class:'kac-nome' }, a.nome),
+    a.descrizione
+      ? el('div', { class:'kac-desc' }, a.descrizione)
+      : null,
+  );
+}
+
+async function kioskSelectAttivita(a) {
+  const u = kioskState.utenteSelezionato;
+  if (!u || !a) return;
+
+  // Eventuale sessione aperta dell'utente: la chiudo prima di aprire la nuova.
+  // Stesso pattern dello switch tra commesse (kioskStopSessione, modalità 'switch').
+  const sessAperta = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
+  if (sessAperta) {
+    try {
+      const { data: chiusa, error: errClose } = await sb.from('sessioni_lavoro').update({
+        fine: new Date().toISOString(),
+      }).eq('id', sessAperta.id).select().single();
+      if (errClose) {
+        kioskBeep('err');
+        kioskShowError('Errore chiudendo la sessione precedente: ' + errClose.message);
+        return;
+      }
+      state.sessioni = state.sessioni.map(s => s.id === chiusa.id ? chiusa : s);
+    } catch (e) {
+      kioskBeep('err');
+      kioskShowError('Errore di rete: ' + (e.message||e));
+      return;
+    }
+  }
+
+  // Apro nuova sessione su attività extra (operazione_id resta null)
+  const sedeUrl = new URLSearchParams(location.search).get('kiosk') || 'sede?';
+  try {
+    const { data, error } = await sb.from('sessioni_lavoro').insert({
+      operazione_id: null,
+      attivita_id: a.id,
+      utente_id: u.id,
+      tipo_lavorazione_id: null,
+      sede: sedeUrl,
+      inizio: new Date().toISOString(),
+    }).select().single();
+    if (error) {
+      kioskBeep('err');
+      kioskShowError('Errore: ' + error.message);
+      return;
+    }
+    if (!state.sessioni.find(s => s.id === data.id)) state.sessioni.unshift(data);
+    kioskBeep('ok');
+    kioskGoToAttiva();
+  } catch (e) {
+    kioskBeep('err');
+    kioskShowError('Errore di rete: ' + (e.message||e));
+  }
+}
+
 // ─── Schermata sessione attiva ───
 function kioskGoToAttiva() {
   kioskHideAllSteps();
@@ -8973,7 +9099,15 @@ function kioskRenderAttiva() {
   const root = $('#kiosk-attiva-content');
   root.innerHTML = '';
 
-  const o = state.operazioni.find(x => x.id === sess.operazione_id);
+  // La sessione può essere su una commessa (operazione_id) o su un'attività
+  // extra (attivita_id). Le due informazioni sono mutuamente esclusive.
+  const isAttivitaExtra = !!sess.attivita_id;
+  const attivita = isAttivitaExtra
+    ? (state.attivitaExtra || []).find(x => x.id === sess.attivita_id)
+    : null;
+  const o = !isAttivitaExtra
+    ? state.operazioni.find(x => x.id === sess.operazione_id)
+    : null;
   const cli = o ? state.aziende.find(c => c.id === o.cliente_id) : null;
   const art = o ? state.articoli.find(a => a.id === o.articolo_id) : null;
   const tipo = state.tipiLav.find(t => t.id === sess.tipo_lavorazione_id);
@@ -8989,28 +9123,51 @@ function kioskRenderAttiva() {
     ));
   }
 
-  // Card sessione attiva
+  // Card sessione attiva: contenuto diverso per attività extra vs commessa
   const card = el('div', { class:'kiosk-attiva-card' });
-  card.append(
-    el('div', { class:'kiosk-attiva-cliente' }, cli?.nome || '— senza cliente —'),
-    el('div', { class:'kiosk-attiva-cod' }, art?.codice || '—'),
-    el('div', { class:'kiosk-attiva-tipo' },
-      el('div', { class:'ktipo-color-bar', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
-      tipo?.nome || '— tipo sconosciuto —',
-      ' · ',
-      o?.numero_ordine || '—',
-    ),
-    el('div', { class:'kiosk-attiva-stats' },
-      el('div', { class:'kas-block' },
-        el('div', { class:'kas-label' }, 'Iniziato alle'),
-        el('div', { class:'kas-value' }, fmtT(inizioDate)),
+  if (isAttivitaExtra) {
+    card.append(
+      el('div', { class:'kiosk-attiva-cliente' }, attivita?.nome || '— attività sconosciuta —'),
+      attivita?.descrizione
+        ? el('div', { class:'kiosk-attiva-tipo' },
+            el('div', { class:'ktipo-color-bar', style:'background:'+(attivita.colore||'#6b6b64')+';' }),
+            attivita.descrizione)
+        : el('div', { class:'kiosk-attiva-tipo' },
+            el('div', { class:'ktipo-color-bar', style:'background:'+(attivita?.colore||'#6b6b64')+';' }),
+            'Attività extra'),
+      el('div', { class:'kiosk-attiva-stats' },
+        el('div', { class:'kas-block' },
+          el('div', { class:'kas-label' }, 'Iniziato alle'),
+          el('div', { class:'kas-value' }, fmtT(inizioDate)),
+        ),
+        el('div', { class:'kas-block' },
+          el('div', { class:'kas-label' }, 'Durata'),
+          el('div', { class:'kas-value', id:'kiosk-durata-live' }, kioskFormatDurataLive(inizioDate)),
+        ),
       ),
-      el('div', { class:'kas-block' },
-        el('div', { class:'kas-label' }, 'Durata'),
-        el('div', { class:'kas-value', id:'kiosk-durata-live' }, kioskFormatDurataLive(inizioDate)),
+    );
+  } else {
+    card.append(
+      el('div', { class:'kiosk-attiva-cliente' }, cli?.nome || '— senza cliente —'),
+      el('div', { class:'kiosk-attiva-cod' }, art?.codice || '—'),
+      el('div', { class:'kiosk-attiva-tipo' },
+        el('div', { class:'ktipo-color-bar', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
+        tipo?.nome || '— tipo sconosciuto —',
+        ' · ',
+        o?.numero_ordine || '—',
       ),
-    ),
-  );
+      el('div', { class:'kiosk-attiva-stats' },
+        el('div', { class:'kas-block' },
+          el('div', { class:'kas-label' }, 'Iniziato alle'),
+          el('div', { class:'kas-value' }, fmtT(inizioDate)),
+        ),
+        el('div', { class:'kas-block' },
+          el('div', { class:'kas-label' }, 'Durata'),
+          el('div', { class:'kas-value', id:'kiosk-durata-live' }, kioskFormatDurataLive(inizioDate)),
+        ),
+      ),
+    );
+  }
   root.append(card);
 
   // Bottone azione (uno solo: termina la sessione)
@@ -9342,16 +9499,14 @@ function buildLiveCard(u, onClick) {
       style: 'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-top:6px;',
     }, `${tipo?.nome || 'Assenza'} · ${ore}h${assOggi.note ? ' — '+assOggi.note : ''}`));
   } else if (sess) {
-    const op = state.operazioni.find(o => o.id === sess.operazione_id);
-    const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
-    const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
-    const tipo = state.tipiLav.find(t => t.id === sess.tipo_lavorazione_id);
+    const d = descriviSessione(sess);
     card.append(
-      el('div', { class:'live-card-cliente' }, (cli?.nome || '—') + ' · ' + (op?.numero_ordine || '—')),
-      el('div', { class:'live-card-cod' }, art?.codice || '—'),
+      el('div', { class:'live-card-cliente' }, d.titolo),
+      // Per attività extra non c'è codice articolo: nascondo quella riga
+      d.codice ? el('div', { class:'live-card-cod' }, d.codice) : null,
       el('div', { class:'live-card-tipo' },
-        el('div', { class:'live-card-tipo-dot', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
-        tipo?.nome || '—',
+        el('div', { class:'live-card-tipo-dot', style:'background:'+d.colore+';' }),
+        d.tipoLabel,
       ),
       el('div', { class:'live-card-durata', 'data-sess-id': sess.id, 'data-inizio': sess.inizio },
         formatLiveDuration(sess.inizio)),
@@ -9642,11 +9797,7 @@ function apriStoricoConsuntivi(utente) {
   }
 
   function buildSessione(s) {
-    const op = state.operazioni.find(o => o.id === s.operazione_id);
-    const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
-    const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
-    const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
-
+    const d = descriviSessione(s);
     const aperta = !s.fine;
     const dur = aperta
       ? Math.floor((Date.now() - new Date(s.inizio)) / 1000)
@@ -9657,16 +9808,18 @@ function apriStoricoConsuntivi(utente) {
     const oraStr = z(oraInizio.getHours()) + ':' + z(oraInizio.getMinutes())
       + (oraFine ? '–' + z(oraFine.getHours()) + ':' + z(oraFine.getMinutes()) : '–…');
 
-    const commessaStr = (cli?.nome || '—')
-      + (op?.numero_ordine ? ' · ' + op.numero_ordine : '');
-    const articoloStr = art?.codice || '—';
-    const lavStr = tipo?.nome || '—';
+    // Meta: per le commesse "codice · tipo lavoro · orario"; per le attività
+    // extra mostro "Attività extra · orario" (descrizione facoltativa, già nel
+    // titolo se presente sarebbe ridondante).
+    const metaStr = d.isAttivitaExtra
+      ? d.tipoLabel + ' · ' + oraStr
+      : (d.codice + ' · ' + d.tipoLabel + ' · ' + oraStr);
 
     return el('div', { class:'storico-sess' + (aperta ? ' aperta' : '') },
-      el('span', { class:'dot', style:'background:'+(tipo?.colore || '#6b6b64')+';' }),
+      el('span', { class:'dot', style:'background:'+d.colore+';' }),
       el('div', { class:'corpo' },
-        el('div', { class:'commessa' }, commessaStr),
-        el('div', { class:'meta' }, articoloStr + ' · ' + lavStr + ' · ' + oraStr),
+        el('div', { class:'commessa' }, d.titolo),
+        el('div', { class:'meta' }, metaStr),
       ),
       el('div', { class:'dur' }, formatSecondsHuman(dur) + (aperta ? ' ●' : '')),
     );
@@ -9674,6 +9827,49 @@ function apriStoricoConsuntivi(utente) {
 
   renderBody();
   openModal(modal, { side: true });
+}
+
+// Helper: descrive una sessione di lavoro in modo agnostico al tipo
+// (commessa via operazione_id vs attività extra via attivita_id).
+// Ritorna { isAttivitaExtra, titolo, sottotitolo, codice, tipoLabel, colore,
+//          op, cliente, articolo, attivita, tipoLav }.
+// I campi non applicabili sono null. Pensato per essere usato sia dalle
+// card live, sia dal drawer storico, sia dalla modal modifica admin.
+function descriviSessione(s) {
+  const isAttivitaExtra = !!s.attivita_id;
+  if (isAttivitaExtra) {
+    const att = (state.attivitaExtra || []).find(x => x.id === s.attivita_id);
+    return {
+      isAttivitaExtra: true,
+      titolo:     '⚒ ' + (att?.nome || '— attività sconosciuta —'),
+      sottotitolo: 'Attività extra',
+      codice:     null,
+      tipoLabel:  att?.descrizione || 'Attività extra',
+      colore:     att?.colore || '#6b6b64',
+      op:         null,
+      cliente:    null,
+      articolo:   null,
+      attivita:   att || null,
+      tipoLav:    null,
+    };
+  }
+  const op = state.operazioni.find(o => o.id === s.operazione_id);
+  const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
+  const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+  const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
+  return {
+    isAttivitaExtra: false,
+    titolo:     (cli?.nome || '—') + ' · ' + (op?.numero_ordine || '—'),
+    sottotitolo: op?.numero_ordine || '—',
+    codice:     art?.codice || '—',
+    tipoLabel:  tipo?.nome || '—',
+    colore:     tipo?.colore || '#6b6b64',
+    op:         op || null,
+    cliente:    cli || null,
+    articolo:   art || null,
+    attivita:   null,
+    tipoLav:    tipo || null,
+  };
 }
 
 function formatLiveDuration(inizioISO) {
@@ -9742,8 +9938,11 @@ function renderGanttCommesse(root) {
   }
 
   // Set delle operazioni con almeno una sessione aperta adesso
+  // (escludo sessioni su attività extra: hanno operazione_id null)
   const opConSessioneAperta = new Set();
-  state.sessioni.forEach(s => { if (!s.fine) opConSessioneAperta.add(s.operazione_id); });
+  state.sessioni.forEach(s => {
+    if (!s.fine && s.operazione_id) opConSessioneAperta.add(s.operazione_id);
+  });
 
   // Range come ISO per intersezione
   const rangeStartIso = toLocalISO(range.start);
@@ -10225,11 +10424,8 @@ function openSessioneModal(s) {
     return;
   }
 
-  const op = state.operazioni.find(o => o.id === s.operazione_id);
-  const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
-  const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+  const d = descriviSessione(s);
   const operatore = state.utenti.find(u => u.id === s.utente_id);
-  const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
 
   const inizioDt = new Date(s.inizio);
   const fineDt = s.fine ? new Date(s.fine) : null;
@@ -10245,25 +10441,43 @@ function openSessioneModal(s) {
   const body = el('div', { class:'mbody' });
   const form = el('form');
 
-  body.append(el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;margin-bottom:14px;font-family:monospace;font-size:11px;line-height:1.7;' },
-    el('div', {}, el('span', { style:'color:var(--mut)' }, 'Operatore: '), operatore?.nome || '—'),
-    el('div', {}, el('span', { style:'color:var(--mut)' }, 'Cliente: '), cli?.nome || '—'),
-    el('div', {}, el('span', { style:'color:var(--mut)' }, 'Articolo: '), el('span', { style:'color:var(--or)' }, art?.codice || '—')),
-    el('div', {}, el('span', { style:'color:var(--mut)' }, 'OP / Ordine: '), (op?.numero_ordine || '—')),
-    el('div', {}, el('span', { style:'color:var(--mut)' }, 'Tipo: '), tipo?.nome || '—'),
-  ));
+  // Info contestuali (sola lettura): commessa o attività extra a seconda del tipo
+  const infoBox = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;margin-bottom:14px;font-family:monospace;font-size:11px;line-height:1.7;' });
+  infoBox.append(el('div', {}, el('span', { style:'color:var(--mut)' }, 'Operatore: '), operatore?.nome || '—'));
+  if (d.isAttivitaExtra) {
+    infoBox.append(
+      el('div', {}, el('span', { style:'color:var(--mut)' }, 'Tipo: '),
+        el('span', { style:'color:var(--yel)' }, 'Attività extra')),
+      el('div', {}, el('span', { style:'color:var(--mut)' }, 'Attività: '), d.attivita?.nome || '—'),
+      d.attivita?.descrizione
+        ? el('div', {}, el('span', { style:'color:var(--mut)' }, 'Descrizione: '), d.attivita.descrizione)
+        : null,
+    );
+  } else {
+    infoBox.append(
+      el('div', {}, el('span', { style:'color:var(--mut)' }, 'Cliente: '), d.cliente?.nome || '—'),
+      el('div', {}, el('span', { style:'color:var(--mut)' }, 'Articolo: '), el('span', { style:'color:var(--or)' }, d.articolo?.codice || '—')),
+      el('div', {}, el('span', { style:'color:var(--mut)' }, 'OP / Ordine: '), (d.op?.numero_ordine || '—')),
+      el('div', {}, el('span', { style:'color:var(--mut)' }, 'Tipo lavorazione: '), d.tipoLav?.nome || '—'),
+    );
+  }
+  body.append(infoBox);
 
-  const selTipo = el('select', { name:'tipo_lavorazione_id' },
-    ...state.tipiLav.filter(t => t.attivo).map(t =>
-      el('option', { value:t.id }, t.nome))
-  );
-  selTipo.value = s.tipo_lavorazione_id || '';
+  // Il tipo lavorazione è modificabile solo per le sessioni su commessa
+  let selTipo = null;
+  if (!d.isAttivitaExtra) {
+    selTipo = el('select', { name:'tipo_lavorazione_id' },
+      ...state.tipiLav.filter(t => t.attivo).map(t =>
+        el('option', { value:t.id }, t.nome))
+    );
+    selTipo.value = s.tipo_lavorazione_id || '';
+  }
 
   const inInizio = el('input', { type:'datetime-local', name:'inizio', value:dtLocalStr(inizioDt), required:'true' });
   const inFine = el('input', { type:'datetime-local', name:'fine', value: fineDt ? dtLocalStr(fineDt) : '' });
 
   form.append(
-    el('div', { class:'field' }, el('label', {}, 'Tipo lavorazione'), selTipo),
+    selTipo ? el('div', { class:'field' }, el('label', {}, 'Tipo lavorazione'), selTipo) : null,
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Inizio *'), inInizio),
       el('div', { class:'field' }, el('label', {}, 'Fine (vuoto = ancora aperta)'), inFine),
@@ -10294,11 +10508,14 @@ function openSessioneModal(s) {
     if (!inizioStr) return toast('Inizio obbligatorio', 'err');
     if (fineStr && fineStr <= inizioStr) return toast('Fine deve essere dopo inizio', 'err');
     const payload = {
-      tipo_lavorazione_id: fd.get('tipo_lavorazione_id'),
       inizio: new Date(inizioStr).toISOString(),
       fine: fineStr ? new Date(fineStr).toISOString() : null,
       note: (fd.get('note')||'').trim() || null,
     };
+    // tipo_lavorazione_id va aggiornato solo per le sessioni su commessa
+    if (!d.isAttivitaExtra) {
+      payload.tipo_lavorazione_id = fd.get('tipo_lavorazione_id');
+    }
     btnSave.disabled = true; btnSave.textContent = 'Salvataggio…';
     try {
       const { data, error } = await sb.from('sessioni_lavoro').update(payload).eq('id', s.id).select().single();
