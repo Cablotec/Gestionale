@@ -1544,7 +1544,10 @@ async function afterLogin() {
     ? '<span class="badge bvio">admin</span>' : '<span class="badge bgry">user</span>';
   $('#area-gestione').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#area-impostazioni').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
-  $('#btn-kiosk').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
+  // Bottone Kiosk: admin (per testare/aprire da PC personale) + account kiosk
+  // dedicato (perché LUI deve sempre poter tornare al kiosk dei mini-PC)
+  const mostraBottoneKiosk = state.profile.ruolo === 'admin' || isKioskRecord(state.profile);
+  $('#btn-kiosk').style.display = mostraBottoneKiosk ? '' : 'none';
   applyTheme(localStorage.getItem('theme') || 'dark');
 
   // Carica filtri persistenti
@@ -2027,8 +2030,8 @@ const TAB_STRUCTURE = {
       { id: 'pianificazione', label: 'Pianificazione', adminOnly: false },
       { id: 'magazzino',      label: 'Magazzino',      adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
-      { id: 'gantt_live',     label: 'Live',           adminOnly: true },
-      { id: 'gantt_commesse', label: 'Gantt',          adminOnly: true },
+      { id: 'gantt_live',     label: 'Live',           adminOnly: false },
+      { id: 'gantt_commesse', label: 'Gantt',          adminOnly: false },
     ],
   },
   gestione: {
@@ -6551,9 +6554,13 @@ function openOperazioneModal(o) {
 
         const row = el('div', {
           class: 'sess-row-clic',
-          style: 'display:grid;grid-template-columns:14px 1fr 1fr auto auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--brd);cursor:pointer;'+(s.fine?'':'background:rgba(78,255,163,.04);'),
-          title: 'Clic per modificare questa timbratura',
-          onclick: () => { if (typeof openSessioneModal === 'function') openSessioneModal(s); },
+          style: 'display:grid;grid-template-columns:14px 1fr 1fr auto auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--brd);'
+            + (isAdmin ? 'cursor:pointer;' : '')
+            + (s.fine?'':'background:rgba(78,255,163,.04);'),
+          title: isAdmin ? 'Clic per modificare questa timbratura' : '',
+          onclick: isAdmin
+            ? () => { if (typeof openSessioneModal === 'function') openSessioneModal(s); }
+            : null,
         },
           el('div', { style:'width:6px;height:6px;border-radius:50%;background:'+(tipo?.colore||'#6b6b64')+';' }),
           el('div', {}, oper?.nome || '—'),
