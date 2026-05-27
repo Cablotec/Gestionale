@@ -1883,10 +1883,13 @@ function getOperazioneFornitoriDettaglio(opId) {
 // ============================================================
 // CONSEGNE PARZIALI — helper di lettura (cache sync)
 // ============================================================
-// Le consegne parziali sono righe in `consegne_commessa` collegate a un'operazione.
-// Una commessa può essere consegnata in più tranche; la somma delle quantità
-// consegnate va confrontata con `operazioni.quantita` per sapere quanto resta.
-// Tutte le funzioni qui sono pure e leggono solo dalla cache in memoria.
+// Le righe in `consegne_commessa` rappresentano LOTTI PRODOTTI messi in
+// magazzino (non "consegne al cliente" — il nome della tabella è storico).
+// Una commessa può essere prodotta in più tranche; la somma delle quantità
+// prodotte va confrontata con `operazioni.quantita` per sapere quanto resta
+// da produrre. Tutte le funzioni qui sono pure e leggono solo dalla cache.
+// La consegna finale al cliente è invece tracciata via `consegnato_il`
+// e dallo stato `spedita` direttamente su `operazioni`.
 
 function consegneDiOperazione(opId) {
   return (state.consegneCommessa || [])
@@ -5186,9 +5189,10 @@ function opCalcOre(op) {
   return ((op.quantita || 0) * (op.minuti_unitari || 0)) / 60;
 }
 
-// Ore di lavoro RESIDUO: pezzi ancora da fare × minuti_unitari.
+// Ore di lavoro RESIDUO: pezzi ancora da produrre × minuti_unitari.
 // Usata dove serve "quanto lavoro c'è davanti" (carico, calcolo inizio):
-// se ho già consegnato parte dell'ordine, quel lavoro è fatto.
+// se ho già prodotto parte dell'ordine (lotti in `consegne_commessa`),
+// quel lavoro è fatto.
 // NON usare per confronti preventivo/consuntivo nel modal — lì serve il
 // totale ordinato (vedi opCalcOre). Mai negativa.
 function opCalcOreResidue(op) {
@@ -5223,7 +5227,7 @@ function opCalcInizio(op, addettiOverride, fornitoriOverride) {
   // Se l'admin ha bloccato manualmente l'inizio, rispettiamo la sua scelta
   // e calcoliamo sulle ore TOTALI (semantica stabile: lui ha fissato la data
   // su quel volume di lavoro). Altrimenti usiamo le ore RESIDUE: ha senso
-  // che il calcolo automatico tenga conto del lavoro già fatto/consegnato.
+  // che il calcolo automatico tenga conto del lavoro già prodotto.
   const ore = op.inizio_manuale ? opCalcOre(op) : opCalcOreResidue(op);
   if (ore <= 0) return op.scadenza;
 
@@ -5756,10 +5760,10 @@ function renderPianificazione(root) {
       title: desc,
     }, desc || '—'));
 
-    // Quantità — formato dinamico "consegnata/totale" con colore secondo stato:
-    //   0/Tot   → monocromatico (nessuna consegna ancora)
-    //   N/Tot   → giallo (parzialmente consegnata)
-    //   Tot/Tot → verde (tutto consegnato)
+    // Quantità — formato dinamico "prodotta/totale" con colore secondo stato:
+    //   0/Tot   → monocromatico (nessun lotto ancora prodotto)
+    //   N/Tot   → giallo (produzione parziale)
+    //   Tot/Tot → verde (tutto prodotto, pronto in magazzino)
     // Tooltip sempre presente per leggere il dettaglio senza aprire il modal.
     const qtaTot = Number(o.quantita || 0);
     const qtaCons = quantitaConsegnata(o.id);
@@ -5770,7 +5774,7 @@ function renderPianificazione(root) {
     tr.append(el('td', {
       class: 'tr mono',
       style: qtaColor,
-      title: `${qtaCons} consegnati su ${qtaTot} — residuo ${qtaRes} pz`,
+      title: `${qtaCons} pz prodotti su ${qtaTot} — da produrre ${qtaRes} pz`,
     }, `${qtaCons}/${qtaTot}`));
 
     // Scadenza
@@ -5864,7 +5868,7 @@ function renderPianificazione(root) {
     }
     tr.append(statoCell);
 
-    // Azioni: ✓ consegna rapida + ✕ elimina (solo admin, stopPropagation per non aprire il modal)
+    // Azioni: ✓ spedizione rapida + ✕ elimina (solo admin, stopPropagation per non aprire il modal)
     const azioniCell = el('td', { class:'tc' });
     if (isAdmin) {
       if (o.stato !== 'spedita') {
