@@ -884,6 +884,7 @@ const state = {
   // Assenze v2 (modello righe giornaliere)
   tipiAssenza: [],         // anagrafica tipi assenza con codice e ore_default
   attivitaExtra: [],       // anagrafica attività extra (lavoro non legato a commesse)
+  spedizioni: [],          // eventi spedizione: pezzi usciti dal magazzino verso cliente
   assenze: [],             // righe assenza: {id, utente_id, tipo_assenza_id, data, ore, stato, ...}
   assAnno: new Date().getFullYear(),
   assMese: new Date().getMonth(), // 0-11
@@ -1585,7 +1586,7 @@ document.addEventListener('click', async (e) => {
 // Avere un solo handler evita race condition tra ricreazione client e refresh.
 
 async function loadAllData() {
-  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, attivitaExtra, assenze, opAddetti, impostazioni, consegneCommessa, opFornitori] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, attivitaExtra, assenze, opAddetti, impostazioni, consegneCommessa, opFornitori, spedizioni] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('utenti').select('*').order('nome'),
@@ -1606,6 +1607,7 @@ async function loadAllData() {
     sb.from('impostazioni').select('*'),
     sb.from('consegne_commessa').select('*').order('data', { ascending:false }),
     sb.from('operazioni_fornitori').select('*'),
+    sb.from('spedizioni').select('*').order('data', { ascending:false }),
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
@@ -1627,6 +1629,7 @@ async function loadAllData() {
   if (impostazioni.error) throw impostazioni.error;
   if (consegneCommessa.error) throw consegneCommessa.error;
   if (opFornitori.error) throw opFornitori.error;
+  if (spedizioni.error) throw spedizioni.error;
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
@@ -1650,6 +1653,7 @@ async function loadAllData() {
   // Impostazioni: oggetto chiave→valore, comodo da consultare
   state.impostazioni = Object.fromEntries((impostazioni.data||[]).map(r=>[r.chiave, r.valore]));
   state.consegneCommessa = consegneCommessa.data || [];
+  state.spedizioni = spedizioni.data || [];
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -1694,6 +1698,8 @@ function startRealtime() {
         (p) => applyChange('operazioni_fornitori', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'consegne_commessa' },
         (p) => applyChange('consegne_commessa', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'spedizioni' },
+        (p) => applyChange('spedizioni', p))
     .subscribe();
 }
 
@@ -1845,6 +1851,14 @@ function applyChange(tabella, payload) {
     } else if (ev === 'DELETE') {
       state.opFornitori = state.opFornitori.filter(x => x.id !== oldRow.id);
     }
+  } else if (tabella === 'spedizioni') {
+    if (ev === 'INSERT') {
+      if (!state.spedizioni.find(x => x.id === row.id)) state.spedizioni.push(row);
+    } else if (ev === 'UPDATE') {
+      state.spedizioni = state.spedizioni.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.spedizioni = state.spedizioni.filter(x => x.id !== oldRow.id);
+    }
   }
 
   // Re-render solo la tab attiva
@@ -1905,6 +1919,31 @@ function quantitaConsegnata(opId) {
 function quantitaResidua(op) {
   if (!op) return 0;
   return Number(op.quantita || 0) - quantitaConsegnata(op.id);
+}
+
+// ============================================================
+// SPEDIZIONI — uscite dal magazzino verso il cliente
+// Riga in `spedizioni`: evento di spedizione di N pezzi di una commessa,
+// con DDT, destinatario, data, note. Una commessa può avere N spedizioni.
+// Stato 'spedita' su operazioni viene sincronizzato automaticamente quando
+// la somma di quantitaSpedita raggiunge o supera operazioni.quantita.
+// ============================================================
+
+function spedizioniDiOperazione(opId) {
+  return (state.spedizioni || [])
+    .filter(s => s.operazione_id === opId)
+    .sort((a, b) => (a.data || '').localeCompare(b.data || ''));
+}
+
+function quantitaSpedita(opId) {
+  return spedizioniDiOperazione(opId)
+    .reduce((sum, s) => sum + Number(s.quantita || 0), 0);
+}
+
+// Pezzi attualmente in magazzino per una commessa: prodotti - spediti.
+// Mai negativa.
+function pezziInMagazzino(opId) {
+  return Math.max(0, quantitaConsegnata(opId) - quantitaSpedita(opId));
 }
 
 // Sincronizza gli addetti previsti di un'operazione: diff tra vecchi e nuovi
@@ -6827,6 +6866,202 @@ function openOperazioneModal(o) {
     };
 
     renderConsegne();
+  }
+
+  // ─── Sezione: spedizioni al cliente ───
+  // Visibile solo per operazioni esistenti. Mostra storico spedizioni,
+  // pezzi pronti per spedire (= prodotti - già spediti), e form di
+  // registrazione. Validazioni:
+  // - data obbligatoria
+  // - quantità > 0
+  // - quantità <= pezziInMagazzino (non puoi spedire quel che non hai prodotto)
+  // - somma totale <= operazione.quantita (non puoi spedire più dell'ordinato)
+  // Al raggiungimento del 100% spedito, marca automaticamente la commessa
+  // come 'spedita' (sincronizzazione automatica dello stato).
+  if (!isNew) {
+    form.append(
+      el('div', { style:'margin-top:14px;padding-top:14px;border-top:1px solid var(--brd);font-family:monospace;font-size:11px;font-weight:600;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;' },
+        '── Spedizioni ──'),
+    );
+
+    const spedBox = el('div', { style:'margin-top:8px;' });
+    form.append(spedBox);
+
+    const renderSpedizioni = () => {
+      spedBox.innerHTML = '';
+
+      const qtaOrd = Number(o.quantita || 0);
+      const prodotti = quantitaConsegnata(o.id);
+      const totSped = quantitaSpedita(o.id);
+      const pronti = Math.max(0, prodotti - totSped);
+      const daSpedire = Math.max(0, qtaOrd - totSped);
+      const completo = qtaOrd > 0 && totSped >= qtaOrd;
+
+      // KPI riga
+      spedBox.append(el('div', {
+        style:'display:flex;gap:14px;flex-wrap:wrap;padding:8px 12px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;font-family:monospace;font-size:11px;margin-bottom:10px;',
+      },
+        el('div', {},
+          el('span', { style:'color:var(--mut)' }, 'Ordinata: '),
+          el('span', { style:'color:var(--txt);font-weight:600;' }, qtaOrd + ' pz')),
+        el('div', {},
+          el('span', { style:'color:var(--mut)' }, 'Spedita: '),
+          el('span', { style:'color:'+(completo?'var(--grn)':'var(--txt)')+';font-weight:600;' }, totSped + ' pz')),
+        el('div', {},
+          el('span', { style:'color:var(--mut)' }, 'Pronti per spedire: '),
+          el('span', { style:'color:'+(pronti>0?'var(--blu)':'var(--mut)')+';font-weight:600;' }, pronti + ' pz')),
+        el('div', {},
+          el('span', { style:'color:var(--mut)' }, 'Da spedire: '),
+          el('span', { style:'color:'+(daSpedire<=0?'var(--grn)':'var(--txt)')+';font-weight:600;' }, daSpedire + ' pz')),
+      ));
+
+      // Lista spedizioni esistenti
+      const lista = spedizioniDiOperazione(o.id);
+      if (lista.length === 0) {
+        spedBox.append(el('div', { style:'color:var(--mut);font-size:11px;font-style:italic;padding:6px 0;' },
+          'Nessuna spedizione registrata.'));
+      } else {
+        const listWrap = el('div', { style:'display:flex;flex-direction:column;gap:4px;margin-bottom:10px;' });
+        lista.forEach(s => {
+          const row = el('div', {
+            style:'display:grid;grid-template-columns:90px 70px 1fr 1fr auto;gap:10px;align-items:center;padding:6px 8px;background:var(--sur);border:1px solid var(--brd);border-radius:3px;font-family:monospace;font-size:11px;',
+          },
+            el('div', {}, fmtIT(s.data)),
+            el('div', { style:'text-align:right;font-weight:600;' }, s.quantita + ' pz'),
+            el('div', { style:'color:var(--mut);' }, s.ddt ? ('DDT ' + s.ddt) : '—'),
+            el('div', { style:'color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: (s.destinatario||'') + (s.note?(' · '+s.note):'') },
+              (s.destinatario || '') + (s.note?(' · '+s.note):'') || '—'),
+            isAdmin ? el('button', {
+              class:'btnsm', type:'button',
+              style:'padding:2px 6px;font-size:10px;background:transparent;border:1px solid var(--red);color:var(--red);',
+              title:'Elimina questa spedizione',
+              onclick: async () => {
+                if (!confirm(`Eliminare la spedizione del ${fmtIT(s.data)} (${s.quantita} pz)?`)) return;
+                const { error } = await sb.from('spedizioni').delete().eq('id', s.id);
+                if (error) return toast('Errore eliminazione: '+error.message, 'err');
+                state.spedizioni = state.spedizioni.filter(x => x.id !== s.id);
+                // Se la commessa era 'spedita' e ora non è più 100%, resync
+                const nuovoTot = quantitaSpedita(o.id);
+                if (o.stato === 'spedita' && nuovoTot < qtaOrd) {
+                  const sel = form.querySelector('[name="stato"]');
+                  if (sel) {
+                    sel.value = 'completata';
+                    sel.dispatchEvent(new Event('change', { bubbles:true }));
+                    toast('Spedizione eliminata · stato riportato a "completata" (ricordati di salvare)');
+                  } else {
+                    toast('Spedizione eliminata');
+                  }
+                } else {
+                  toast('Spedizione eliminata');
+                }
+                renderSpedizioni();
+              },
+            }, '✕') : null,
+          );
+          listWrap.append(row);
+        });
+        spedBox.append(listWrap);
+      }
+
+      // Form per aggiungere nuova spedizione (solo admin, se c'è qualcosa da spedire)
+      if (isAdmin && daSpedire > 0) {
+        const dataInputS = el('input', { type:'date', value: toLocalISO(new Date()) });
+        const qtaInputS = el('input', { type:'number', min:'1', max:String(Math.max(pronti, 1)), value:String(Math.max(1, pronti)) });
+        const ddtInputS = el('input', { type:'text', placeholder:'numero DDT al cliente (opzionale)' });
+        const destInputS = el('input', { type:'text', placeholder:'destinatario / luogo (opzionale)' });
+        const noteInputS = el('input', { type:'text', placeholder:'note (opzionale)' });
+
+        const btnAddS = el('button', {
+          type:'button', class:'btnp',
+          style:'padding:6px 12px;font-size:11px;height:fit-content;',
+        }, '+ Registra spedizione');
+
+        btnAddS.onclick = async () => {
+          const data = dataInputS.value;
+          const qta = parseInt(qtaInputS.value, 10);
+          const ddt = (ddtInputS.value || '').trim();
+          const dest = (destInputS.value || '').trim();
+          const note = (noteInputS.value || '').trim();
+
+          if (!data) return toast('Data obbligatoria', 'err');
+          if (!Number.isFinite(qta) || qta <= 0) return toast('Quantità deve essere > 0', 'err');
+
+          // Validazione doppia: 1) non superare totale ordinato 2) non superare pronto in magazzino
+          const totSpedOra = quantitaSpedita(o.id);
+          const daSpedireOra = qtaOrd - totSpedOra;
+          if (qta > daSpedireOra) {
+            return toast(`Da spedire: ${daSpedireOra} pz. Non puoi spedire ${qta} pz.`, 'err');
+          }
+          const prontiOra = Math.max(0, quantitaConsegnata(o.id) - totSpedOra);
+          if (qta > prontiOra) {
+            return toast(`In magazzino: ${prontiOra} pz pronti. Prima registra la produzione mancante.`, 'err');
+          }
+
+          btnAddS.disabled = true; btnAddS.textContent = 'Salvataggio…';
+          const payload = {
+            operazione_id: o.id,
+            data,
+            quantita: qta,
+            ddt: ddt || null,
+            destinatario: dest || null,
+            note: note || null,
+            creato_da: state.profile?.id || null,
+          };
+          const { data: nuova, error } = await sb.from('spedizioni')
+            .insert(payload).select().single();
+          btnAddS.disabled = false; btnAddS.textContent = '+ Registra spedizione';
+          if (error) return toast('Errore registrazione: '+error.message, 'err');
+
+          // Aggiorno cache locale
+          if (!state.spedizioni.find(x => x.id === nuova.id)) state.spedizioni.push(nuova);
+          toast('Spedizione registrata');
+
+          // Sincronizzazione automatica stato: se ora siamo al 100%, marca 'spedita'
+          const nuovoTotSped = quantitaSpedita(o.id);
+          if (nuovoTotSped >= qtaOrd) {
+            const sel = form.querySelector('[name="stato"]');
+            if (sel && sel.value !== 'spedita') {
+              sel.value = 'spedita';
+              sel.dispatchEvent(new Event('change', { bubbles:true }));
+              // Anche data consegnato_il se vuota
+              const inCons = form.querySelector('[name="consegnato_il"]');
+              if (inCons && !inCons.value) inCons.value = data;
+              toast('Tutto spedito · stato impostato a "spedita" (salva per confermare)');
+            }
+          }
+
+          renderSpedizioni();
+        };
+
+        const formSped = el('div', {
+          style:'background:var(--sur);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;display:grid;grid-template-columns:130px 90px 1fr 1fr 1fr auto;gap:8px;align-items:end;',
+        },
+          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Data'), dataInputS),
+          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Quantità'), qtaInputS),
+          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'DDT'), ddtInputS),
+          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Destinatario'), destInputS),
+          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Note'), noteInputS),
+          btnAddS,
+        );
+        spedBox.append(formSped);
+
+        // Avviso se in magazzino ci sono meno pezzi del massimo selezionabile
+        if (pronti < daSpedire) {
+          spedBox.append(el('div', { style:'color:var(--yel);font-size:10px;padding:6px 0 0;' },
+            `Solo ${pronti} pz pronti in magazzino (${daSpedire - pronti} ancora da produrre).`));
+        }
+      } else if (isAdmin && daSpedire <= 0) {
+        spedBox.append(el('div', {
+          style:'color:var(--grn);font-size:11px;padding:6px 0;font-weight:600;',
+        }, '✓ Tutto il materiale è stato spedito.'));
+      } else if (isAdmin && pronti === 0 && daSpedire > 0) {
+        spedBox.append(el('div', {
+          style:'color:var(--mut);font-size:11px;padding:6px 0;font-style:italic;',
+        }, 'Nulla in magazzino da spedire. Registra prima la produzione.'));
+      }
+    };
+
+    renderSpedizioni();
   }
 
   // Preview calcoli
