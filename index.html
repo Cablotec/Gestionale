@@ -2080,7 +2080,7 @@ const TAB_STRUCTURE = {
     label: 'Gestione',
     adminOnly: true,
     tabs: [
-      { id: 'clienti',        label: 'Aziende',           adminOnly: true },
+      { id: 'aziende',        label: 'Aziende',           adminOnly: true },
       { id: 'articoli',       label: 'Articoli',          adminOnly: true },
       { id: 'tipi_lav',       label: 'Tipi lavorazione',  adminOnly: true },
       { id: 'mezzi',          label: 'Anagrafica mezzi',  adminOnly: true },
@@ -2170,7 +2170,7 @@ function renderTab(name) {
     else if (name === 'cal_mezzi')    renderCalMezzi(root);
     else if (name === 'cal_assenze')  renderAssenze(root);
     else if (name === 'mezzi')        renderMezzi(root);
-    else if (name === 'clienti')      renderClienti(root);
+    else if (name === 'aziende')      renderAziende(root);
     else if (name === 'articoli')     renderArticoli(root);
     else if (name === 'tipi_lav')     renderTipiLavorazione(root);
     else if (name === 'operatori')    renderOperatori(root);
@@ -3253,7 +3253,7 @@ function openOperatoreModal(u) {
 // CLIENTI — anagrafica, CRUD, import Excel
 // ═══════════════════════════════════════════════════════════
 
-function renderClienti(root) {
+function renderAziende(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.azSearch || '').toLowerCase();
   const filter = state.azFilter || 'attivi';
@@ -3299,7 +3299,7 @@ function renderClienti(root) {
   ].forEach(opt => {
     chipsStato.append(el('div', {
       class: 'chip' + (filter === opt.id ? ' act' : ''),
-      onclick: () => { state.azFilter = opt.id; renderTab('clienti'); }
+      onclick: () => { state.azFilter = opt.id; renderTab('aziende'); }
     }, opt.label));
   });
   root.append(chipsStato);
@@ -3314,7 +3314,7 @@ function renderClienti(root) {
   ].forEach(opt => {
     chipsRuolo.append(el('div', {
       class: 'chip' + (ruoloFilter === opt.id ? ' act' : ''),
-      onclick: () => { state.azRuoloFilter = opt.id; renderTab('clienti'); }
+      onclick: () => { state.azRuoloFilter = opt.id; renderTab('aziende'); }
     }, opt.label));
   });
   root.append(chipsRuolo);
@@ -3326,7 +3326,7 @@ function renderClienti(root) {
       type:'text', class:'search', id:'cli-search',
       placeholder:'Cerca per nome, indirizzo, città, P.IVA…',
       value: state.azSearch || '',
-      oninput: (e) => { state.azSearch = e.target.value; state._focusSearch = 'cli-search'; renderTab('clienti'); }
+      oninput: (e) => { state.azSearch = e.target.value; state._focusSearch = 'cli-search'; renderTab('aziende'); }
     }),
   );
   if (isAdmin) {
@@ -3339,7 +3339,7 @@ function renderClienti(root) {
           onchange: (e) => clientiImportExcel(e.target.files[0]),
         }),
       ),
-      el('button', { class:'btng', onclick:clientiExportExcel }, '⬇ Esporta Excel'),
+      el('button', { class:'btng', onclick:aziendeExportExcel }, '⬇ Esporta Excel'),
       el('button', { class:'btnp', onclick:()=>openClienteModal() }, '+ Nuova Azienda'),
     );
   }
@@ -3556,7 +3556,7 @@ function openClienteModal(c) {
           state.aziende = state.aziende.map(x => x.id === c.id ? data : x);
         }
         toast(isNew ? 'Azienda creata' : 'Azienda aggiornata');
-        closeModal(); renderTab('clienti');
+        closeModal(); renderTab('aziende');
       } catch (e) {
         btnSave.disabled = false;
         btnSave.textContent = 'Salva';
@@ -3580,7 +3580,7 @@ async function deleteCliente(c) {
     return toast('Eliminazione bloccata: verifica le policy DELETE su aziende', 'err');
   }
   state.aziende = state.aziende.filter(x => x.id !== c.id);
-  toast('Azienda eliminata'); renderTab('clienti');
+  toast('Azienda eliminata'); renderTab('aziende');
 }
 
 // ─── Import Excel ───
@@ -3648,7 +3648,7 @@ function openClientiImportPreviewModal(rows) {
 
   const modal = el('div', { class:'modal', style:'max-width:680px' });
   modal.append(el('div', { class:'mhd' },
-    el('h2', {}, 'Anteprima import clienti'),
+    el('h2', {}, 'Anteprima import aziende'),
     el('button', { class:'mclose', onclick:closeModal }, '✕'),
   ));
   const body = el('div', { class:'mbody' });
@@ -3712,14 +3712,14 @@ function openClientiImportPreviewModal(rows) {
   if (validi.length) {
     foot.append(el('button', {
       class:'btnp',
-      onclick: () => clientiImportEsegui(nuovi, aggiornamenti),
-    }, `Importa ${validi.length} clienti`));
+      onclick: () => aziendeImportEsegui(nuovi, aggiornamenti),
+    }, `Importa ${validi.length} aziende`));
   }
   modal.append(foot);
   openModal(modal);
 }
 
-async function clientiImportEsegui(nuovi, aggiornamenti) {
+async function aziendeImportEsegui(nuovi, aggiornamenti) {
   closeModal();
   let okIns = 0, errIns = 0, okUpd = 0, errUpd = 0;
 
@@ -3756,10 +3756,10 @@ async function clientiImportEsegui(nuovi, aggiornamenti) {
 
   toast(`Import completato: ${okIns} nuovi, ${okUpd} aggiornati${errIns||errUpd ? `, ${errIns+errUpd} errori` : ''}`,
         (errIns||errUpd) ? 'err' : 'ok');
-  renderTab('clienti');
+  renderTab('aziende');
 }
 
-function clientiExportExcel() {
+function aziendeExportExcel() {
   if (typeof XLSX === 'undefined') {
     toast('Libreria Excel non caricata', 'err');
     return;
@@ -4372,6 +4372,17 @@ function operazioniExportExcel(stati) {
       .map(id => uById[id]?.nome)
       .filter(Boolean)
       .join(', ');
+    // Fornitori esterni (90% uno solo, ma fino a 3): concateno "Nome: numero_OF"
+    // separati da virgola. Se il numero ordine non è ancora compilato, mostro
+    // solo il nome del fornitore.
+    const fornitoriStr = (state.opFornitori || [])
+      .filter(r => r.operazione_id === o.id)
+      .map(r => {
+        const az = cliById[r.azienda_id];
+        const nome = az?.nome || '?';
+        return r.numero_ordine ? (nome + ': ' + r.numero_ordine) : nome;
+      })
+      .join(', ');
     const orePrev = opCalcOre(o);
     const oreCons = opCalcOreReali(o);
     const inizio = opInizio(o);
@@ -4395,6 +4406,7 @@ function operazioniExportExcel(stati) {
       'Ore consuntivo':        oreCons ? +oreCons.toFixed(2) : 0,
       'Avanzamento %':         orePrev > 0 ? Math.round((oreCons / orePrev) * 100) : '',
       'Addetti assegnati':     addetti,
+      'Fornitori':             fornitoriStr,
       'Note':                  o.note || '',
     };
   });
@@ -4407,7 +4419,7 @@ function operazioniExportExcel(stati) {
     { wch: 18 }, { wch: 36 }, { wch: 11 }, { wch: 8 },
     { wch: 24 }, { wch: 24 }, { wch: 16 },
     { wch: 11 }, { wch: 14 }, { wch: 11 }, { wch: 12 },
-    { wch: 12 }, { wch: 11 }, { wch: 30 }, { wch: 30 },
+    { wch: 12 }, { wch: 11 }, { wch: 30 }, { wch: 36 }, { wch: 30 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Operazioni');
@@ -6338,7 +6350,7 @@ function openOperazioneModal(o) {
   // Stato locale: array di azienda_id allocati a questa commessa.
   // Stato locale fornitori esterni: lista di oggetti {azienda_id, numero_ordine, allocazione}.
   // Cambio rispetto al vecchio modello: prima era un semplice array di id.
-  // Ora trasporto anche numero_ordine (formato AAAA/OF/NNNNN, opzionale)
+  // Ora trasporto anche numero_ordine (formato AAAA/OF/NNNNN o AAAA/OL/NNNNN, opzionale)
   // perché ogni fornitore può avere il proprio ordine di fornitura.
   let fornitoriSel = isNew ? [] : (state.opFornitori || [])
     .filter(r => r.operazione_id === o.id)
@@ -6378,19 +6390,22 @@ function openOperazioneModal(o) {
       row.append(el('div', { style:'flex:1;min-width:0;color:#f0c070;font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
         a.nome + (a.coefficiente && a.coefficiente !== 1
           ? ` · coef ${Number(a.coefficiente).toFixed(2)}` : '')));
-      // Input numero ordine fornitore
+      // Input numero ordine fornitore.
+      // Accetta sia OF (Ordine Fornitore) sia OL (Ordine Lavorazione).
+      // Precompilo con OF perché caso più frequente; l'utente sostituisce
+      // OF→OL a mano quando serve.
       const inputNO = el('input', {
         type:'text',
         value: sel.numero_ordine || (new Date().getFullYear() + '/OF/'),
-        placeholder:'2026/OF/00001',
-        pattern:'\\d{4}/OF/\\d{5}',
-        title:'Formato richiesto: AAAA/OF/NNNNN (opzionale)',
+        placeholder:'2026/OF/00001 o 2026/OL/00001',
+        pattern:'\\d{4}/(OF|OL)/\\d{5}',
+        title:'Formato richiesto: AAAA/OF/NNNNN o AAAA/OL/NNNNN (opzionale)',
         style:'width:140px;padding:4px 8px;font-family:DM Mono,monospace;font-size:11px;background:var(--sur);border:1px solid var(--brd);border-radius:3px;color:var(--txt);',
-        // Padding automatico al blur (stesso pattern di numero ordine cliente)
+        // Padding automatico al blur. Preserva OF/OL come scelto dall'utente.
         onblur: (e) => {
           const v = e.target.value.trim();
-          const m = v.match(/^(\d{4})\/OF\/(\d{1,4})$/);
-          if (m) e.target.value = m[1] + '/OF/' + m[2].padStart(5, '0');
+          const m = v.match(/^(\d{4})\/(OF|OL)\/(\d{1,4})$/);
+          if (m) e.target.value = m[1] + '/' + m[2] + '/' + m[3].padStart(5, '0');
           // Salvo nello stato locale (lo prenderà il submit)
           sel.numero_ordine = e.target.value.trim();
         },
@@ -7373,18 +7388,19 @@ function openOperazioneModal(o) {
         }
         // Normalizza i numeri ordine fornitore: padding zero a 5 cifre,
         // svuotamento del "solo prefisso" precompilato, validazione formato.
-        // Stessa logica del numero ordine cliente, ma per OF.
+        // Accetto sia AAAA/OF/NNNNN (Ordine Fornitore) sia AAAA/OL/NNNNN
+        // (Ordine Lavorazione): preservo quale prefisso ha usato l'utente.
         for (const sel of fornitoriSel) {
           let n = (sel.numero_ordine || '').trim();
-          const padM = n.match(/^(\d{4})\/OF\/(\d{1,4})$/);
-          if (padM) n = padM[1] + '/OF/' + padM[2].padStart(5, '0');
-          const soloPrefisso = /^\d{4}\/OF\/$/.test(n);
-          if (n && !soloPrefisso && !/^\d{4}\/OF\/\d{5}$/.test(n)) {
+          const padM = n.match(/^(\d{4})\/(OF|OL)\/(\d{1,4})$/);
+          if (padM) n = padM[1] + '/' + padM[2] + '/' + padM[3].padStart(5, '0');
+          const soloPrefisso = /^\d{4}\/(OF|OL)\/$/.test(n);
+          if (n && !soloPrefisso && !/^\d{4}\/(OF|OL)\/\d{5}$/.test(n)) {
             const fornNome = (state.aziende.find(a => a.id === sel.azienda_id) || {}).nome || sel.azienda_id;
             stopWatchdog();
             btnSave.disabled = false;
             btnSave.textContent = 'Salva';
-            return toast(`Numero ordine fornitore "${fornNome}" non valido. Usa il formato AAAA/OF/NNNNN o lascia vuoto.`, 'err');
+            return toast(`Numero ordine fornitore "${fornNome}" non valido. Usa il formato AAAA/OF/NNNNN o AAAA/OL/NNNNN, oppure lascia vuoto.`, 'err');
           }
           sel.numero_ordine = (n && !soloPrefisso) ? n : '';
         }
