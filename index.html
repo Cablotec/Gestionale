@@ -5395,7 +5395,7 @@ function renderMagazzino(root) {
     el('th', {}, 'Cliente'),
     el('th', {}, 'Codice'),
     el('th', {}, 'Descrizione'),
-    el('th', { class:'tr' }, 'Pz pronti / Totale'),
+    el('th', { class:'tr' }, 'Pronti / Da spedire'),
     el('th', { class:'tc' }, 'Stato'),
     el('th', {}, 'Scadenza'),
     el('th', {}, 'Note'),
@@ -5441,12 +5441,16 @@ function renderMagazzino(root) {
       title: desc,
     }, desc || '—'));
 
-    // Pz pronti in magazzino / Totale ordinato, con tooltip dettagliato
+    // Pronti in magazzino / Da spedire totali (= ordinati - già spediti).
+    // Il riferimento "da spedire" è coerente con l'azione del bottone:
+    // se la cella dice "6 / 6", basta un click per chiudere la commessa;
+    // se dice "6 / 8" significa che ne mancano 2 ancora da produrre.
+    const daSpedireTot = Math.max(0, qtaTot - qtaSped);
     tr.append(el('td', {
       class:'tr mono',
       style: 'font-weight:700;color:' + (completa ? 'var(--grn)' : 'var(--yel)') + ';',
-      title: 'Prodotti: ' + qtaProd + ' · Spediti: ' + qtaSped + ' · Pronti in magazzino: ' + pronti,
-    }, pronti + ' / ' + qtaTot));
+      title: 'Prodotti: ' + qtaProd + ' · Spediti: ' + qtaSped + ' · Pronti in magazzino: ' + pronti + ' · Da produrre: ' + Math.max(0, qtaTot - qtaProd),
+    }, pronti + ' / ' + daSpedireTot));
 
     // Stato: badge "Completa" o "Parziale"
     tr.append(el('td', { class:'tc' },
@@ -7441,66 +7445,89 @@ function renderStorico(root) {
   const filtroAddetto = state.stoAddetto || '';
   const filtroPunt = state.stoPunt || 'all';
 
-  // Solo spedite
-  let list = state.operazioni.filter(o => o.stato === 'spedita' && o.consegnato_il);
+  // Vista evento-centrica: ogni riga è UNA spedizione (dalla tabella `spedizioni`).
+  // Una commessa con N spedizioni parziali appare N volte (una riga per evento).
+  // NB: le commesse storiche pre-introduzione spedizioni (stato='spedita' senza
+  // righe in `spedizioni`) NON sono qui — sono visibili dalla Pianificazione.
+  let list = (state.spedizioni || []).slice();
 
+  // Map operazione_id → operazione per lookup veloci
+  const opById = Object.fromEntries(state.operazioni.map(o => [o.id, o]));
+
+  // Filtri: mese (su data spedizione)
   if (filtroMese) {
-    list = list.filter(o => (o.consegnato_il||'').startsWith(filtroMese));
+    list = list.filter(s => (s.data || '').startsWith(filtroMese));
   }
-  if (filtroCliente) list = list.filter(o => o.cliente_id === filtroCliente);
+  // Cliente (dell'operazione collegata)
+  if (filtroCliente) {
+    list = list.filter(s => {
+      const op = opById[s.operazione_id];
+      return op && op.cliente_id === filtroCliente;
+    });
+  }
+  // Addetto (dell'operazione collegata)
   if (filtroAddetto) {
-    list = list.filter(o => getOperazioneAddetti(o.id).includes(filtroAddetto));
+    list = list.filter(s => {
+      const op = opById[s.operazione_id];
+      return op && getOperazioneAddetti(op.id).includes(filtroAddetto);
+    });
   }
+  // Puntualità: ritardo = data spedizione - scadenza (negativo = anticipo)
+  const ritardoSped = (s) => {
+    const op = opById[s.operazione_id];
+    if (!op || !op.scadenza || !s.data) return null;
+    return Math.round((parseISODate(s.data) - parseISODate(op.scadenza)) / 86400000);
+  };
+  if (filtroPunt === 'puntuali') list = list.filter(s => (ritardoSped(s)||0) <= 0);
+  else if (filtroPunt === 'ritardo') list = list.filter(s => (ritardoSped(s)||0) > 0);
 
-  if (filtroPunt === 'puntuali') list = list.filter(o => (calcRitardoGiorni(o)||0) <= 0);
-  else if (filtroPunt === 'ritardo') list = list.filter(o => (calcRitardoGiorni(o)||0) > 0);
-
+  // Ricerca: DDT, destinatario, note spedizione, ordine, cliente, codice articolo
   if (search) {
-    list = list.filter(o => {
-      const cli = state.aziende.find(c => c.id === o.cliente_id);
-      const art = state.articoli.find(a => a.id === o.articolo_id);
-      return (o.numero_ordine||'').toLowerCase().includes(search)
-          || (cli?.nome||'').toLowerCase().includes(search)
-          || (art?.codice||'').toLowerCase().includes(search)
-          || (o.giustificazione_ritardo||'').toLowerCase().includes(search)
-          || (o.nc_post_consegna||'').toLowerCase().includes(search);
+    list = list.filter(s => {
+      const op = opById[s.operazione_id];
+      const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
+      const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+      return (s.ddt || '').toLowerCase().includes(search)
+          || (s.destinatario || '').toLowerCase().includes(search)
+          || (s.note || '').toLowerCase().includes(search)
+          || (op?.numero_ordine || '').toLowerCase().includes(search)
+          || (op?.numero_op || '').toLowerCase().includes(search)
+          || (cli?.nome || '').toLowerCase().includes(search)
+          || (art?.codice || '').toLowerCase().includes(search);
     });
   }
 
   // Sort: più recente prima
-  list.sort((a,b) => (b.consegnato_il||'').localeCompare(a.consegnato_il||''));
+  list.sort((a, b) => (b.data || '').localeCompare(a.data || ''));
 
   // KPI
   const tot = list.length;
-  const ritardi = list.map(calcRitardoGiorni).filter(r => r !== null);
+  const ritardi = list.map(ritardoSped).filter(r => r !== null);
   const puntuali = ritardi.filter(r => r <= 0).length;
   const inRitardo = ritardi.filter(r => r > 0).length;
-  const percPunt = tot > 0 ? Math.round((puntuali / tot) * 100) : 0;
+  const percPunt = ritardi.length > 0 ? Math.round((puntuali / ritardi.length) * 100) : 0;
   const ritardiPos = ritardi.filter(r => r > 0);
   const ritardoMedio = ritardiPos.length > 0
     ? (ritardiPos.reduce((a,b) => a + b, 0) / ritardiPos.length).toFixed(1)
     : '0';
-  const totPezzi = list.reduce((sum, o) => sum + (o.quantita||0), 0);
-  const conNc = list.filter(o => o.nc_post_consegna && o.nc_post_consegna.trim() !== '').length;
+  const totPezzi = list.reduce((sum, s) => sum + (s.quantita || 0), 0);
 
   root.innerHTML = '';
 
   // KPI
   const kpiClass = percPunt >= 90 ? 'kg' : (percPunt >= 70 ? 'ky' : 'kr');
   root.append(el('div', { class:'kpis' },
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Spedite'),       el('div', { class:'kv' }, String(tot))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Spedizioni'),       el('div', { class:'kv' }, String(tot))),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Puntualità'),       el('div', { class:'kv '+kpiClass }, percPunt+'%')),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'In ritardo'),       el('div', { class:'kv kr' }, String(inRitardo))),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Ritardo medio (gg)'), el('div', { class:'kv' }, ritardoMedio)),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Pezzi totali'),     el('div', { class:'kv ka' }, String(totPezzi))),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Con NC'),           el('div', { class:'kv ky' }, String(conNc))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Pezzi spediti'),     el('div', { class:'kv ka' }, String(totPezzi))),
   ));
 
-  // Filtri mese (chips dei mesi presenti)
+  // Filtri mese (chips dei mesi in cui ci sono state spedizioni)
   const mesiDist = new Set();
-  state.operazioni.forEach(o => {
-    if (o.stato === 'spedita' && o.consegnato_il)
-      mesiDist.add(o.consegnato_il.substring(0,7));
+  (state.spedizioni || []).forEach(s => {
+    if (s.data) mesiDist.add(s.data.substring(0, 7));
   });
   const mesiArr = Array.from(mesiDist).sort().reverse();
 
@@ -7557,11 +7584,11 @@ function renderStorico(root) {
   selAdd.value = filtroAddetto;
 
   const toolbar = el('div', { class:'toolbar' },
-    el('h2', {}, 'Storico consegne'),
+    el('h2', {}, 'Storico spedizioni'),
     selCli, selAdd,
     el('input', {
       type:'text', class:'search', id:'sto-search',
-      placeholder:'Cerca…',
+      placeholder:'Cerca per DDT, ordine, cliente, codice…',
       value: state.stoSearch || '',
       oninput: (e) => { state.stoSearch = e.target.value; state._focusSearch = 'sto-search'; renderTab('storico'); }
     }),
@@ -7571,9 +7598,9 @@ function renderStorico(root) {
 
   if (list.length === 0) {
     root.append(el('div', { class:'empty' },
-      state.operazioni.filter(o => o.stato === 'spedita').length === 0
-        ? 'Nessuna operazione spedita. Le operazioni passano qui quando vengono marcate come "spedita" nella Pianificazione.'
-        : 'Nessuna operazione corrisponde ai filtri.'
+      (state.spedizioni || []).length === 0
+        ? 'Nessuna spedizione registrata. Le spedizioni appaiono qui appena le registri dal Magazzino o dalla modal Operazione.'
+        : 'Nessuna spedizione corrisponde ai filtri.'
     ));
     return;
   }
@@ -7582,30 +7609,25 @@ function renderStorico(root) {
   const tw = el('div', { class:'tw' });
   const tbl = el('table', { class:'rt op-table' });
   tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Data sped.'),
     el('th', {}, 'Ordine'),
     el('th', {}, 'Cliente'),
-    el('th', {}, 'Codice Art.'),
-    el('th', {}, 'Descrizione'),
+    el('th', {}, 'Codice'),
     el('th', { class:'tr' }, 'Qtà'),
+    el('th', {}, 'DDT'),
+    el('th', {}, 'Destinatario'),
     el('th', {}, 'Note'),
-    el('th', {}, 'Addetto'),
     el('th', {}, 'Scadenza'),
-    el('th', {}, 'Consegnato'),
     el('th', { class:'tc' }, 'Esito'),
-    el('th', {}, 'Note consegna / NC'),
     el('th', { class:'tc' }, 'Azioni'),
   )));
   const tb = el('tbody');
 
-  list.forEach(o => {
-    const cli = state.aziende.find(c => c.id === o.cliente_id);
-    const art = state.articoli.find(a => a.id === o.articolo_id);
-    const addettiIds = getOperazioneAddetti(o.id);
-    const addettiNomi = addettiIds
-      .map(id => state.utenti.find(u => u.id === id)?.nome)
-      .filter(Boolean);
-    const addettiLbl = addettiNomi.length ? addettiNomi.join(', ') : '—';
-    const ritardo = calcRitardoGiorni(o);
+  list.forEach(s => {
+    const op = opById[s.operazione_id];
+    const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
+    const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+    const ritardo = ritardoSped(s);
 
     let esitoBadge;
     if (ritardo === null) {
@@ -7618,38 +7640,27 @@ function renderStorico(root) {
       esitoBadge = el('span', { class:'badge berr' }, '+'+ritardo+' gg');
     }
 
-    // Tooltip note
-    const noteText = [];
-    if (o.giustificazione_ritardo) noteText.push('⚠ '+o.giustificazione_ritardo);
-    if (o.nc_post_consegna) noteText.push('NC: '+o.nc_post_consegna);
-    if (o.responsabilita) noteText.push('Resp.: '+o.responsabilita);
-    const noteCell = noteText.length
-      ? el('td', { style:'max-width:280px;font-size:10px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: noteText.join('\n') }, noteText.join(' · '))
-      : el('td', {}, '');
-
     tb.append(el('tr', { class:'spedita' },
-      el('td', { class:'mono' }, o.numero_ordine || '—'),
+      el('td', { class:'mono' }, fmtIT(s.data)),
+      el('td', { class:'mono' }, op?.numero_ordine || '—'),
       el('td', {}, cli?.nome || '—'),
       el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
-      el('td', {
-        style:'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
-        title: art?.descrizione || '',
-      }, art?.descrizione || '—'),
-      el('td', { class:'tr mono' }, String(o.quantita || 0)),
+      el('td', { class:'tr mono', style:'font-weight:600;' }, String(s.quantita || 0)),
+      el('td', { class:'mono' }, s.ddt || '—'),
       el('td', {
         style:'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
-        title: o.note || '',
-      }, o.note || '—'),
-      el('td', {}, addettiLbl),
-      el('td', { class:'mono' }, o.scadenza ? fmtIT(o.scadenza) : '—'),
-      el('td', { class:'mono' }, fmtIT(o.consegnato_il)),
+        title: s.destinatario || '',
+      }, s.destinatario || '—'),
+      el('td', {
+        style:'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mut);',
+        title: s.note || '',
+      }, s.note || '—'),
+      el('td', { class:'mono' }, op?.scadenza ? fmtIT(op.scadenza) : '—'),
       el('td', { class:'tc' }, esitoBadge),
-      noteCell,
       el('td', { class:'tc' },
-        el('button', { class:'btnsm', onclick:()=>openOperazioneModal(o) }, 'Apri'),
-        isAdmin
-          ? el('span', {}, ' ', el('button', { class:'btng', onclick:()=>riaperturaOperazione(o), title:'Riapri operazione' }, '↺'))
-          : ''
+        el('button', { class:'btnsm',
+          onclick: () => { if (op) openOperazioneModal(op); else toast('Operazione non trovata', 'err'); },
+        }, 'Apri'),
       ),
     ));
   });
@@ -7856,46 +7867,52 @@ function storicoExportExcel() {
     toast('Libreria Excel non caricata', 'err');
     return;
   }
-  const spedite = state.operazioni.filter(o => o.stato === 'spedita' && o.consegnato_il);
-  if (spedite.length === 0) return toast('Nessuna spedsegna da esportare', 'err');
+  const spedizioni = (state.spedizioni || []).slice();
+  if (spedizioni.length === 0) return toast('Nessuna spedizione da esportare', 'err');
 
-  const rows = spedite.map(o => {
-    const cli = state.aziende.find(c => c.id === o.cliente_id);
-    const art = state.articoli.find(a => a.id === o.articolo_id);
-    const addettiNomi = getOperazioneAddetti(o.id)
-      .map(id => state.utenti.find(u => u.id === id)?.nome)
-      .filter(Boolean);
-    const ritardo = calcRitardoGiorni(o);
+  const opById = Object.fromEntries(state.operazioni.map(o => [o.id, o]));
+
+  const rows = spedizioni.map(s => {
+    const op = opById[s.operazione_id];
+    const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
+    const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+    const addettiNomi = op
+      ? getOperazioneAddetti(op.id)
+          .map(id => state.utenti.find(u => u.id === id)?.nome)
+          .filter(Boolean)
+      : [];
+    const ritardo = (op && op.scadenza && s.data)
+      ? Math.round((parseISODate(s.data) - parseISODate(op.scadenza)) / 86400000)
+      : null;
     return {
-      
-      'POS': o.pos || '',
-      'Ordine': o.numero_ordine || '',
-      'Cliente': cli?.nome || '',
+      'Data spedizione': s.data || '',
+      'Ordine':          op?.numero_ordine || '',
+      'OP':              op?.numero_op || '',
+      'POS':             op?.pos || '',
+      'Cliente':         cli?.nome || '',
       'Codice articolo': art?.codice || '',
-      'Descrizione': art?.descrizione || '',
-      'Quantità': o.quantita || 0,
-      'Min. unitari': o.minuti_unitari || 0,
-      'Addetti': addettiNomi.join(', '),
-      'Scadenza': o.scadenza || '',
-      'Consegnato il': o.consegnato_il || '',
-      'Ritardo (giorni)': ritardo,
-      'Esito': ritardo === null ? '—' : (ritardo <= 0 ? 'In tempo' : 'In ritardo'),
-      'Giustificazione': o.giustificazione_ritardo || '',
-      'NC post-consegna': o.nc_post_consegna || '',
-      'Responsabilità': o.responsabilita || '',
-      'Note': o.note || '',
+      'Descrizione':     art?.descrizione || '',
+      'Quantità':        s.quantita || 0,
+      'DDT':             s.ddt || '',
+      'Destinatario':    s.destinatario || '',
+      'Note spedizione': s.note || '',
+      'Scadenza':        op?.scadenza || '',
+      'Ritardo (gg)':    ritardo,
+      'Esito':           ritardo === null ? '—' : (ritardo <= 0 ? 'In tempo' : 'In ritardo'),
+      'Addetti':         addettiNomi.join(', '),
+      'Riferimento cliente': op?.riferimento_cliente || '',
     };
   });
-  rows.sort((a,b) => (b['Consegnato il']||'').localeCompare(a['Consegnato il']||''));
+  rows.sort((a, b) => (b['Data spedizione']||'').localeCompare(a['Data spedizione']||''));
 
   const ws = XLSX.utils.json_to_sheet(rows);
   ws['!cols'] = [
-    {wch:16},{wch:8},{wch:16},{wch:24},{wch:22},{wch:30},{wch:8},{wch:10},
-    {wch:18},{wch:12},{wch:12},{wch:10},{wch:12},{wch:30},{wch:30},{wch:18},{wch:30},
+    {wch:14},{wch:16},{wch:16},{wch:8},{wch:24},{wch:18},{wch:30},{wch:8},
+    {wch:14},{wch:24},{wch:30},{wch:12},{wch:10},{wch:12},{wch:24},{wch:20},
   ];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Storico');
-  XLSX.writeFile(wb, 'storico_consegne_'+new Date().toISOString().substring(0,10)+'.xlsx');
+  XLSX.utils.book_append_sheet(wb, ws, 'Spedizioni');
+  XLSX.writeFile(wb, 'storico_spedizioni_'+new Date().toISOString().substring(0,10)+'.xlsx');
 }
 
 
