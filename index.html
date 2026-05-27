@@ -259,7 +259,7 @@ input.search:focus{border-color:var(--acc);}
 .kpi{background:var(--sur);border:1px solid var(--brd);border-radius:4px;padding:12px 15px;flex:1;min-width:120px;}
 .kl{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);margin-bottom:4px;}
 .kv{font-family:'DM Mono',monospace;font-size:22px;font-weight:500;color:var(--txt);}
-.ka{color:var(--acc);} .kg{color:var(--grn);} .kb{color:var(--blu);}
+.ka{color:var(--acc);} .kg{color:var(--grn);} .kb{color:var(--blu);} .ky{color:var(--yel);} .kr{color:var(--red);}
 
 /* Toast */
 .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--sur);border:1px solid var(--acc);color:var(--txt);padding:10px 14px;border-radius:4px;font-family:'DM Mono',monospace;font-size:11px;z-index:9999;animation:tin .2s ease-out;}
@@ -5276,19 +5276,31 @@ function opIsRitardo(op) {
 }
 
 // ─── MAGAZZINO ─────────────────────────────────────────────────────
-// Vista delle commesse in stato "completata": il lavoro è finito,
-// il pezzo è pronto in magazzino, in attesa di essere consegnato al cliente.
-// Visibile a tutti, ma le azioni (consegna, modifica) sono solo per admin.
+// Vista delle commesse con pezzi fisicamente in magazzino: tutte quelle
+// che hanno almeno un lotto registrato (`consegne_commessa`) e non sono
+// ancora state spedite al cliente.
+// - Completate (100% prodotto) → badge verde, bottone "✓ Consegna" per
+//   marcare la spedizione totale al cliente
+// - Parziali (alcuni pezzi prodotti, altri ancora da fare) → badge giallo,
+//   senza bottone consegna (serve prima completare la produzione, oppure
+//   in futuro usare la sezione Spedizioni per spedire parzialmente)
+// Visibile a tutti, ma le azioni sono solo per admin.
 function renderMagazzino(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   root.innerHTML = '';
 
-  // Lista: solo commesse completate, ordinate per scadenza crescente
-  // (le più urgenti da spedire in cima). Senza scadenza in fondo.
+  // Lista: tutte le commesse con almeno un lotto prodotto, non ancora spedite.
+  // Ordinamento: completate prima (più urgenti da consegnare al cliente),
+  // poi per scadenza crescente; senza scadenza in fondo.
   const list = state.operazioni
-    .filter(o => o.stato === 'completata')
+    .filter(o => o.stato !== 'spedita' && quantitaConsegnata(o.id) > 0)
     .slice()
     .sort((a, b) => {
+      // Completate prima
+      const aCompl = a.stato === 'completata' ? 0 : 1;
+      const bCompl = b.stato === 'completata' ? 0 : 1;
+      if (aCompl !== bCompl) return aCompl - bCompl;
+      // Poi per scadenza (senza scadenza in fondo)
       if (!a.scadenza && !b.scadenza) return 0;
       if (!a.scadenza) return 1;
       if (!b.scadenza) return -1;
@@ -5298,31 +5310,37 @@ function renderMagazzino(root) {
   // KPI in alto
   const oggiIso = toLocalISO(new Date());
   const totale = list.length;
+  const completate = list.filter(o => o.stato === 'completata').length;
+  const parziali = totale - completate;
   const scadute = list.filter(o => o.scadenza && o.scadenza < oggiIso).length;
-  const inGiornata = list.filter(o => o.scadenza === oggiIso).length;
+  // Pezzi totali in magazzino: somma di tutti i lotti prodotti delle commesse visibili
+  const pezziTotali = list.reduce((s, o) => s + quantitaConsegnata(o.id), 0);
 
   root.append(el('div', { class:'kpis' },
     el('div', { class:'kpi' },
-      el('div', { class:'kl' }, 'Pronte da spedire'),
-      el('div', { class:'kv kb' }, String(totale))),
+      el('div', { class:'kl' }, 'Pezzi in magazzino'),
+      el('div', { class:'kv kg' }, String(pezziTotali))),
+    el('div', { class:'kpi' },
+      el('div', { class:'kl' }, 'Commesse complete'),
+      el('div', { class:'kv kb' }, String(completate))),
+    el('div', { class:'kpi' },
+      el('div', { class:'kl' }, 'Commesse parziali'),
+      el('div', { class:'kv ky' }, String(parziali))),
     el('div', { class:'kpi' },
       el('div', { class:'kl' }, 'Scadute'),
       el('div', { class:'kv kr' }, String(scadute))),
-    el('div', { class:'kpi' },
-      el('div', { class:'kl' }, 'Scadenza oggi'),
-      el('div', { class:'kv ky' }, String(inGiornata))),
   ));
 
-  // Toolbar minima (solo titolo per ora)
-  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Magazzino — commesse pronte da consegnare')));
+  // Toolbar (solo titolo)
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Magazzino — pezzi pronti')));
 
   // Stato vuoto
   if (list.length === 0) {
     root.append(el('div', { class:'empty', style:'padding:40px;text-align:center;color:var(--mut);' },
       el('div', { style:'font-size:32px;margin-bottom:10px;' }, '📦'),
-      el('div', {}, 'Nessuna commessa in magazzino al momento.'),
+      el('div', {}, 'Nessun pezzo in magazzino al momento.'),
       el('div', { style:'font-size:11px;margin-top:6px;' },
-        'Le commesse marcate come "Completata" appariranno qui, in attesa di essere consegnate al cliente.'),
+        'Le commesse appariranno qui appena registri il primo lotto prodotto (sezione "Produzione" della scheda operazione).'),
     ));
     return;
   }
@@ -5335,7 +5353,8 @@ function renderMagazzino(root) {
     el('th', {}, 'Cliente'),
     el('th', {}, 'Codice'),
     el('th', {}, 'Descrizione'),
-    el('th', { class:'tr' }, 'Qtà'),
+    el('th', { class:'tr' }, 'Pz pronti / Totale'),
+    el('th', { class:'tc' }, 'Stato'),
     el('th', {}, 'Scadenza'),
     el('th', {}, 'Note'),
     el('th', { class:'tc' }, 'Azioni'),
@@ -5345,6 +5364,9 @@ function renderMagazzino(root) {
   list.forEach(o => {
     const cli = state.aziende.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
+    const qtaTot = Number(o.quantita || 0);
+    const qtaCons = quantitaConsegnata(o.id);
+    const completa = o.stato === 'completata';
 
     // Colore scadenza: rosso se passata, giallo se entro 3 giorni
     let scadCls = '';
@@ -5375,7 +5397,22 @@ function renderMagazzino(root) {
       title: desc,
     }, desc || '—'));
 
-    tr.append(el('td', { class:'tr mono' }, String(o.quantita || 0)));
+    // Pz pronti / Totale, colorato secondo stato (verde se completa, giallo se parziale)
+    tr.append(el('td', {
+      class:'tr mono',
+      style: 'font-weight:700;color:' + (completa ? 'var(--grn)' : 'var(--yel)') + ';',
+      title: completa
+        ? 'Tutti i pezzi sono pronti in magazzino'
+        : 'Parziale: ' + qtaCons + ' pz pronti, ' + (qtaTot - qtaCons) + ' ancora da produrre',
+    }, qtaCons + ' / ' + qtaTot));
+
+    // Stato: badge "Completa" o "Parziale"
+    tr.append(el('td', { class:'tc' },
+      completa
+        ? el('span', { class:'badge bok', style:'font-size:10px;' }, 'COMPLETA')
+        : el('span', { class:'badge byel', style:'font-size:10px;' }, 'PARZIALE')
+    ));
+
     tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
 
     // Note
@@ -5384,15 +5421,21 @@ function renderMagazzino(root) {
       title: o.note || '',
     }, o.note || '—'));
 
-    // Azioni: ✓ Consegna (solo admin)
+    // Azioni: ✓ Consegna solo per le COMPLETE (spedire una parziale via questo
+    // bottone significherebbe "ho spedito tutti i pezzi", ma alcuni sono ancora
+    // da produrre → fuorviante. Le parziali si gestiranno con la Sezione
+    // Spedizioni quando sarà disponibile).
     const azioniCell = el('td', { class:'tc' });
-    if (isAdmin) {
+    if (isAdmin && completa) {
       azioniCell.append(el('button', {
         class:'btnsm',
         style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
         title:'Consegna definitiva al cliente (apre modal con data e giustificazione)',
         onclick: (e) => { e.stopPropagation(); quickSpedizione(o); },
       }, '✓ Consegna'));
+    } else if (isAdmin) {
+      // Per le parziali: spazio vuoto (niente "Consegna" — fuorviante)
+      azioniCell.append(el('span', { style:'color:var(--mut);font-size:10px;' }, '—'));
     }
     tr.append(azioniCell);
 
