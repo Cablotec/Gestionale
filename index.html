@@ -722,7 +722,7 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
     <div class="user-info">
       <span id="user-name">…</span>
       <span id="role-pill"></span>
-      <a class="btnsm" id="btn-kiosk" href="./?kiosk" title="Apri schermata kiosk operatori" style="display:none;text-decoration:none;">⌐ Kiosk</a>
+      <button class="btnsm" id="btn-kiosk" title="Apri schermata kiosk operatori" style="display:none;">⌐ Kiosk</button>
       <button class="theme-toggle" id="btn-theme" title="Cambia tema">🌙</button>
       <button class="btnsm" id="btn-logout">Esci</button>
     </div>
@@ -1250,10 +1250,11 @@ function avviaWatchdog(btn, testoOriginale, secondi) {
   return () => clearTimeout(timer);
 }
 
-// Rileva modalità kiosk dall'URL: ?kiosk (con o senza valore, retrocompatibile
-// con i vecchi `?kiosk=sede1` / `?kiosk=sede2` che alcuni mini-PC potrebbero
-// avere ancora salvati nei bookmark).
-const IS_KIOSK = new URLSearchParams(location.search).has('kiosk');
+// Rileva modalità kiosk dall'URL: deve essere esattamente `?kiosk` (senza valore).
+// URL con valore (es. ?kiosk=sede1, ?kiosk=on, ...) NON sono accettati.
+const _kioskParam = new URLSearchParams(location.search).get('kiosk');
+const IS_KIOSK = _kioskParam === '';
+const KIOSK_PARAM_INVALIDO = _kioskParam !== null && _kioskParam !== '';
 
 // Credenziali account kiosk condiviso (creato a mano su Supabase, vedi istruzioni)
 const KIOSK_EMAIL = 'kiosk@cablotec.local';
@@ -1432,6 +1433,20 @@ async function init() {
   // Le letture (select) non vengono toccate.
   installaProtezioneSalvataggi();
 
+  // ─── PARAMETRO KIOSK CON VALORE NON ACCETTATO ───
+  // L'unico URL kiosk valido è `?kiosk` senza valore. URL come ?kiosk=sede1
+  // mostrano questo errore (i mini-PC vanno aggiornati al nuovo URL).
+  if (KIOSK_PARAM_INVALIDO) {
+    document.body.innerHTML = `
+      <div class="setup">
+        <h1>⚠ URL kiosk non valido</h1>
+        <p>L'URL deve essere <code>?kiosk</code> (senza valore).</p>
+        <p style="margin-top:14px;"><a href="./?kiosk" style="color:var(--acc);">→ Apri il kiosk</a></p>
+        <p><a href="./" style="color:var(--mut);">← Torna al gestionale</a></p>
+      </div>`;
+    return;
+  }
+
   // ─── MODALITÀ KIOSK ───
   if (IS_KIOSK) {
     await kioskInit();
@@ -1559,6 +1574,7 @@ async function afterLogin() {
 document.addEventListener('click', async (e) => {
   if (e.target.id === 'btn-logout') await sb.auth.signOut();
   if (e.target.id === 'btn-theme') toggleTheme();
+  if (e.target.id === 'btn-kiosk') location.href = './?kiosk';
 });
 
 // NOTA: gli handler 'visibilitychange' e 'online' sono ora gestiti centralmente
