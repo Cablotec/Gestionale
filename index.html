@@ -6585,7 +6585,7 @@ function openOperazioneModal(o) {
   if (!isNew) {
     form.append(
       el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
-        '── Consegne ──'),
+        '── Produzione ──'),
     );
 
     // Container che ri-renderizza solo la sezione consegne dopo ogni operazione
@@ -6614,10 +6614,10 @@ function openOperazioneModal(o) {
             el('span', { style:'color:var(--mut)' }, 'Ordinata: '),
             el('span', { style:'color:var(--txt);font-weight:600;' }, qtaOrd + ' pz')),
           el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Consegnata: '),
+            el('span', { style:'color:var(--mut)' }, 'Prodotta: '),
             el('span', { style:'color:'+(completo?'var(--grn)':'var(--txt)')+';font-weight:600;' }, tot + ' pz')),
           el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Residua: '),
+            el('span', { style:'color:var(--mut)' }, 'Da produrre: '),
             el('span', { style:'color:'+(residuo<=0?'var(--grn)':'var(--txt)')+';font-weight:600;' }, Math.max(0, residuo) + ' pz')),
           el('div', {},
             el('span', { style:'color:var(--mut)' }, 'Avanzamento: '),
@@ -6641,7 +6641,7 @@ function openOperazioneModal(o) {
       // Lista consegne registrate
       if (cons.length === 0) {
         consegneBox.append(el('div', { style:'color:var(--mut);font-size:11px;padding:6px 0 10px;' },
-          'Nessuna consegna registrata.'));
+          'Nessun lotto prodotto.'));
       } else {
         const consList = el('div', { style:'max-height:180px;overflow-y:auto;font-family:monospace;font-size:11px;margin-bottom:10px;' });
         cons.forEach(c => {
@@ -6650,18 +6650,18 @@ function openOperazioneModal(o) {
           },
             el('div', { style:'color:var(--txt);' }, fmtIT(c.data)),
             el('div', { style:'color:var(--txt);font-weight:600;text-align:right;' }, c.quantita + ' pz'),
-            el('div', { style:'color:var(--mut);' }, c.ddt ? ('DDT ' + c.ddt) : '—'),
+            el('div', { style:'color:var(--mut);' }, c.ddt ? ('Lotto ' + c.ddt) : '—'),
             el('div', { style:'color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: c.nota || '' }, c.nota || '—'),
             isAdmin ? el('button', {
               type:'button',
               style:'background:transparent;border:1px solid var(--brd);color:var(--mut);padding:2px 8px;font-size:11px;cursor:pointer;border-radius:3px;',
-              title:'Elimina questa consegna',
+              title:'Elimina questo lotto',
               onclick: async () => {
-                if (!confirm(`Eliminare la consegna del ${fmtIT(c.data)} (${c.quantita} pz)?`)) return;
+                if (!confirm(`Eliminare il lotto del ${fmtIT(c.data)} (${c.quantita} pz)?`)) return;
                 const { error } = await sb.from('consegne_commessa').delete().eq('id', c.id);
                 if (error) return toast('Errore eliminazione: '+error.message, 'err');
                 state.consegneCommessa = state.consegneCommessa.filter(x => x.id !== c.id);
-                toast('Consegna eliminata');
+                toast('Lotto eliminato');
                 renderConsegne();
               },
             }, '✕') : el('span'),
@@ -6700,7 +6700,7 @@ function openOperazioneModal(o) {
           type:'button',
           class:'btnp',
           style:'white-space:nowrap;',
-        }, '+ Registra');
+        }, '+ Registra produzione');
 
         btnAdd.onclick = async () => {
           const data = dataInput.value;
@@ -6711,10 +6711,10 @@ function openOperazioneModal(o) {
           if (!data) return toast('Data obbligatoria', 'err');
           if (!Number.isFinite(qta) || qta <= 0) return toast('Quantità deve essere > 0', 'err');
           // Ricalcolo il residuo qui per evitare race condition (qualcuno potrebbe
-          // aver registrato una consegna in parallelo via realtime).
+          // aver registrato un lotto in parallelo via realtime).
           const residuoOra = qtaOrd - quantitaConsegnata(o.id);
           if (qta > residuoOra) {
-            return toast(`Residuo: ${residuoOra} pz. Non puoi consegnare ${qta} pz.`, 'err');
+            return toast(`Da produrre: ${residuoOra} pz. Non puoi produrre ${qta} pz.`, 'err');
           }
 
           btnAdd.disabled = true; btnAdd.textContent = 'Salvataggio…';
@@ -6728,14 +6728,14 @@ function openOperazioneModal(o) {
           };
           const { data: nuova, error } = await sb.from('consegne_commessa')
             .insert(payload).select().single();
-          btnAdd.disabled = false; btnAdd.textContent = '+ Registra';
+          btnAdd.disabled = false; btnAdd.textContent = '+ Registra produzione';
           if (error) return toast('Errore registrazione: '+error.message, 'err');
 
           // Aggiorno la cache locale subito (il realtime arriverà comunque)
           if (!state.consegneCommessa.find(x => x.id === nuova.id)) {
             state.consegneCommessa.push(nuova);
           }
-          toast('Consegna registrata');
+          toast('Lotto registrato');
 
           // Auto-suggerimento: se ora siamo al 100%, proponi 'completata'
           const nuovoTot = quantitaConsegnata(o.id);
@@ -6745,7 +6745,7 @@ function openOperazioneModal(o) {
           const giaFinita = (statoCorrente === 'completata' || statoCorrente === 'spedita');
           if (raggiuntoOra && !giaFinita) {
             const ok = confirm(
-              `Tutto il materiale è stato consegnato (${nuovoTot} / ${qtaOrd} pz).\n\n` +
+              `Tutto il materiale è stato prodotto (${nuovoTot} / ${qtaOrd} pz).\n\n` +
               `Vuoi marcare la commessa come COMPLETATA?\n\n` +
               `(Ricordati poi di salvare il modal per confermare il cambio di stato.)`
             );
@@ -6767,7 +6767,7 @@ function openOperazioneModal(o) {
         },
           el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Data'), dataInput),
           el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Quantità'), qtaInput),
-          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'DDT/Bolla'), ddtInput),
+          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Lotto/Rif.'), ddtInput),
           el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Nota'), notaInput),
           btnAdd,
         );
@@ -6775,7 +6775,7 @@ function openOperazioneModal(o) {
       } else if (isAdmin && residuo <= 0) {
         consegneBox.append(el('div', {
           style:'color:var(--grn);font-size:11px;padding:6px 0;font-weight:600;',
-        }, '✓ Tutto il materiale è stato consegnato.'));
+        }, '✓ Tutto il materiale è stato prodotto.'));
       }
     };
 
