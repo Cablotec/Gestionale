@@ -36,8 +36,6 @@ h1 span{color:var(--acc);}
 .sub{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);margin-top:4px;}
 .user-info{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .user-info b{color:var(--txt);font-weight:500;}
-.kiosk-jump{background:var(--sur);border:1px solid var(--brd);color:var(--mut);font-family:'DM Mono',monospace;font-size:10px;padding:5px 8px;border-radius:3px;cursor:pointer;letter-spacing:.05em;text-transform:uppercase;outline:none;}
-.kiosk-jump:hover{color:var(--txt);border-color:var(--mut);}
 
 /* Toggle tema */
 .theme-toggle{background:transparent;border:1px solid var(--brd);color:var(--mut);width:30px;height:30px;border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;transition:all .15s;}
@@ -724,11 +722,7 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
     <div class="user-info">
       <span id="user-name">…</span>
       <span id="role-pill"></span>
-      <select class="kiosk-jump" id="kiosk-jump" title="Apri schermata kiosk" style="display:none">
-        <option value="">⌐ Kiosk…</option>
-        <option value="sede1">Sede 1</option>
-        <option value="sede2">Sede 2</option>
-      </select>
+      <a class="btnsm" id="btn-kiosk" href="./?kiosk" title="Apri schermata kiosk operatori" style="display:none;text-decoration:none;">⌐ Kiosk</a>
       <button class="theme-toggle" id="btn-theme" title="Cambia tema">🌙</button>
       <button class="btnsm" id="btn-logout">Esci</button>
     </div>
@@ -755,11 +749,10 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
   <div class="kiosk-header">
     <div>
       <div class="kiosk-title">Cablotec <span>Operatori</span></div>
-      <div class="kiosk-sede" id="kiosk-sede-lbl"></div>
     </div>
     <div class="kiosk-header-right">
       <div class="kiosk-clock" id="kiosk-clock">--:--:--</div>
-      <a class="kiosk-exit" id="kiosk-exit-btn" href="./" title="Esci dal kiosk">⚙ Admin</a>
+      <a class="kiosk-exit" id="kiosk-exit-btn" href="./" title="Torna al gestionale">← Gestionale</a>
     </div>
   </div>
 
@@ -1257,11 +1250,10 @@ function avviaWatchdog(btn, testoOriginale, secondi) {
   return () => clearTimeout(timer);
 }
 
-// Rileva modalità kiosk dall'URL: ?kiosk=sede1 oppure ?kiosk=sede2
-const KIOSK_SEDI_VALIDE = ['sede1', 'sede2'];
-const KIOSK_PARAM = new URLSearchParams(location.search).get('kiosk');
-const IS_KIOSK = KIOSK_PARAM && KIOSK_SEDI_VALIDE.includes(KIOSK_PARAM);
-const KIOSK_PARAM_INVALIDO = KIOSK_PARAM && !IS_KIOSK;
+// Rileva modalità kiosk dall'URL: ?kiosk (con o senza valore, retrocompatibile
+// con i vecchi `?kiosk=sede1` / `?kiosk=sede2` che alcuni mini-PC potrebbero
+// avere ancora salvati nei bookmark).
+const IS_KIOSK = new URLSearchParams(location.search).has('kiosk');
 
 // Credenziali account kiosk condiviso (creato a mano su Supabase, vedi istruzioni)
 const KIOSK_EMAIL = 'kiosk@cablotec.local';
@@ -1440,18 +1432,6 @@ async function init() {
   // Le letture (select) non vengono toccate.
   installaProtezioneSalvataggi();
 
-  // ─── PARAMETRO KIOSK NON VALIDO ───
-  if (KIOSK_PARAM_INVALIDO) {
-    document.body.innerHTML = `
-      <div class="setup">
-        <h1>⚠ Postazione kiosk non valida</h1>
-        <p>Il valore <code>?kiosk=${KIOSK_PARAM.replace(/[<>"&]/g,'')}</code> non corrisponde a nessuna postazione configurata.</p>
-        <p>Postazioni valide: ${KIOSK_SEDI_VALIDE.map(s=>'<code>'+s+'</code>').join(', ')}</p>
-        <p style="margin-top:14px;"><a href="/" style="color:var(--acc);">← Torna all'app normale</a></p>
-      </div>`;
-    return;
-  }
-
   // ─── MODALITÀ KIOSK ───
   if (IS_KIOSK) {
     await kioskInit();
@@ -1549,7 +1529,7 @@ async function afterLogin() {
     ? '<span class="badge bvio">admin</span>' : '<span class="badge bgry">user</span>';
   $('#area-gestione').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#area-impostazioni').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
-  $('#kiosk-jump').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
+  $('#btn-kiosk').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   applyTheme(localStorage.getItem('theme') || 'dark');
 
   // Carica filtri persistenti
@@ -1579,12 +1559,6 @@ async function afterLogin() {
 document.addEventListener('click', async (e) => {
   if (e.target.id === 'btn-logout') await sb.auth.signOut();
   if (e.target.id === 'btn-theme') toggleTheme();
-});
-
-document.addEventListener('change', (e) => {
-  if (e.target.id === 'kiosk-jump' && e.target.value) {
-    location.href = './?kiosk=' + e.target.value;
-  }
 });
 
 // NOTA: gli handler 'visibilitychange' e 'online' sono ora gestiti centralmente
@@ -1939,32 +1913,50 @@ async function syncOperazioneAddetti(opId, nuoviIds) {
 }
 
 // Sincronizza i fornitori esterni di un'operazione (stesso pattern degli addetti).
-// nuoviIds è array di azienda_id (con is_fornitore=true, vincolato dal trigger SQL).
-async function syncOperazioneFornitori(opId, nuoviIds) {
-  const vecchi = getOperazioneFornitori(opId);
-  const daAggiungere = nuoviIds.filter(id => !vecchi.includes(id));
-  const daRimuovere = vecchi.filter(id => !nuoviIds.includes(id));
+// `nuovi` è array di oggetti { azienda_id, numero_ordine }.
+// Gestisce insert, update (quando numero_ordine cambia), e delete.
+async function syncOperazioneFornitori(opId, nuovi) {
+  const vecchieRighe = (state.opFornitori || []).filter(r => r.operazione_id === opId);
+  const vecchieById = Object.fromEntries(vecchieRighe.map(r => [r.azienda_id, r]));
+  const nuoviIds = new Set(nuovi.map(n => n.azienda_id));
 
+  // INSERT: presenti in nuovi ma non in vecchieById
+  const daAggiungere = nuovi.filter(n => !vecchieById[n.azienda_id]);
   if (daAggiungere.length) {
-    const rows = daAggiungere.map(aid => ({
-      operazione_id: opId, azienda_id: aid, allocazione: 1.0,
+    const rows = daAggiungere.map(n => ({
+      operazione_id: opId,
+      azienda_id: n.azienda_id,
+      allocazione: 1.0,
+      numero_ordine: n.numero_ordine || null,
     }));
     const { data, error } = await sb.from('operazioni_fornitori').insert(rows).select();
     if (error) return { error };
-    // Aggiorna cache locale subito (id arriva dal DB)
     (data || []).forEach(r => {
       if (!state.opFornitori.find(x => x.id === r.id)) state.opFornitori.push(r);
     });
   }
-  for (const aid of daRimuovere) {
-    const { error } = await sb.from('operazioni_fornitori')
-      .delete()
-      .eq('operazione_id', opId)
-      .eq('azienda_id', aid);
+
+  // UPDATE: presenti in entrambi ma con numero_ordine diverso
+  for (const n of nuovi) {
+    const vecchia = vecchieById[n.azienda_id];
+    if (!vecchia) continue; // già gestito da insert
+    const nuovoNum = n.numero_ordine || null;
+    if ((vecchia.numero_ordine || null) === nuovoNum) continue; // nessun cambiamento
+    const { data, error } = await sb.from('operazioni_fornitori')
+      .update({ numero_ordine: nuovoNum })
+      .eq('id', vecchia.id).select().single();
     if (error) return { error };
-    state.opFornitori = state.opFornitori.filter(x =>
-      !(x.operazione_id === opId && x.azienda_id === aid));
+    state.opFornitori = state.opFornitori.map(x => x.id === vecchia.id ? data : x);
   }
+
+  // DELETE: presenti in vecchieById ma non in nuoviIds
+  const daRimuovere = vecchieRighe.filter(r => !nuoviIds.has(r.azienda_id));
+  for (const r of daRimuovere) {
+    const { error } = await sb.from('operazioni_fornitori').delete().eq('id', r.id);
+    if (error) return { error };
+    state.opFornitori = state.opFornitori.filter(x => x.id !== r.id);
+  }
+
   return {};
 }
 
@@ -5671,6 +5663,8 @@ function renderPianificazione(root) {
   tbl.append(el('thead', {}, el('tr', {},
     sortHead('numero_ordine',   'Ordine'),
     sortHead('pos',             'Pos'),
+    sortHead('numero_op',       'OP'),
+    sortHead('riferimento_cliente', 'Rif. cliente'),
     sortHead('cliente',         'Cliente'),
     sortHead('articolo',        'Codice'),
     el('th', {}, 'Descrizione'),
@@ -5717,8 +5711,21 @@ function renderPianificazione(root) {
     // Pos
     tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.pos || '—'));
 
-    // Cliente
-    tr.append(el('td', {}, cli?.nome || '—'));
+    // OP (numero ordine di produzione, opzionale)
+    tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.numero_op || '—'));
+
+    // Riferimento cliente (testo libero, può essere lungo: tronco con ellissi
+    // e mostro il valore completo nel tooltip)
+    tr.append(el('td', {
+      style: 'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mut);',
+      title: o.riferimento_cliente || '',
+    }, o.riferimento_cliente || '—'));
+
+    // Cliente — restringo con troncamento per fare spazio alle nuove colonne
+    tr.append(el('td', {
+      style: 'max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+      title: cli?.nome || '',
+    }, cli?.nome || '—'));
 
     // Codice articolo
     tr.append(el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'));
@@ -6217,11 +6224,19 @@ function openOperazioneModal(o) {
 
   // ── Fornitori esterni (aziende con is_fornitore=true) ─────────────
   // Stato locale: array di azienda_id allocati a questa commessa.
-  // Al salvataggio viene comparato con quello in DB e si fanno insert/delete
-  // su operazioni_fornitori (allocazione fissa a 1.0 in questa sessione).
-  let fornitoriSel = isNew ? [] : getOperazioneFornitori(o.id).slice();
+  // Stato locale fornitori esterni: lista di oggetti {azienda_id, numero_ordine, allocazione}.
+  // Cambio rispetto al vecchio modello: prima era un semplice array di id.
+  // Ora trasporto anche numero_ordine (formato AAAA/OF/NNNNN, opzionale)
+  // perché ogni fornitore può avere il proprio ordine di fornitura.
+  let fornitoriSel = isNew ? [] : (state.opFornitori || [])
+    .filter(r => r.operazione_id === o.id)
+    .map(r => ({
+      azienda_id: r.azienda_id,
+      numero_ordine: r.numero_ordine || '',
+      allocazione: r.allocazione || 1.0,
+    }));
   const aziendeFornitrici = state.aziende.filter(a => a.is_fornitore && a.attivo);
-  const forSelectedWrap = el('div', { class:'util-selected' });
+  const forSelectedWrap = el('div', { class:'util-selected', style:'display:flex;flex-direction:column;gap:8px;' });
   const forSearchInput = el('input', {
     type:'text', class:'util-search',
     placeholder: aziendeFornitrici.length === 0
@@ -6241,25 +6256,58 @@ function openOperazioneModal(o) {
       forSelectedWrap.append(el('span', { class:'util-empty' }, 'Nessun fornitore'));
       return;
     }
-    fornitoriSel.forEach(aid => {
-      const a = state.aziende.find(x => x.id === aid);
+    fornitoriSel.forEach((sel, idx) => {
+      const a = state.aziende.find(x => x.id === sel.azienda_id);
       if (!a) return;
-      forSelectedWrap.append(el('span', { class:'util-pill', style:'background:rgba(212,140,40,.18);border-color:rgba(212,140,40,.4);color:#f0c070;' },
-        el('span', {}, a.nome + (a.coefficiente && a.coefficiente !== 1
-          ? ` · coef ${Number(a.coefficiente).toFixed(2)}` : '')),
-        canEdit ? el('button', {
-          type:'button', class:'util-pill-x',
+      const row = el('div', {
+        style:'display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(212,140,40,.08);border:1px solid rgba(212,140,40,.3);border-radius:4px;',
+      });
+      // Nome fornitore + coefficiente
+      row.append(el('div', { style:'flex:1;min-width:0;color:#f0c070;font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+        a.nome + (a.coefficiente && a.coefficiente !== 1
+          ? ` · coef ${Number(a.coefficiente).toFixed(2)}` : '')));
+      // Input numero ordine fornitore
+      const inputNO = el('input', {
+        type:'text',
+        value: sel.numero_ordine || (new Date().getFullYear() + '/OF/'),
+        placeholder:'2026/OF/00001',
+        pattern:'\\d{4}/OF/\\d{5}',
+        title:'Formato richiesto: AAAA/OF/NNNNN (opzionale)',
+        style:'width:140px;padding:4px 8px;font-family:DM Mono,monospace;font-size:11px;background:var(--sur);border:1px solid var(--brd);border-radius:3px;color:var(--txt);',
+        // Padding automatico al blur (stesso pattern di numero ordine cliente)
+        onblur: (e) => {
+          const v = e.target.value.trim();
+          const m = v.match(/^(\d{4})\/OF\/(\d{1,4})$/);
+          if (m) e.target.value = m[1] + '/OF/' + m[2].padStart(5, '0');
+          // Salvo nello stato locale (lo prenderà il submit)
+          sel.numero_ordine = e.target.value.trim();
+        },
+        oninput: (e) => {
+          // Aggiorno in tempo reale così il submit ha sempre il valore corretto
+          sel.numero_ordine = e.target.value;
+        },
+      });
+      if (!canEdit) inputNO.disabled = true;
+      row.append(inputNO);
+      // Bottone elimina
+      if (canEdit) {
+        row.append(el('button', {
+          type:'button',
+          style:'background:none;border:none;color:#f0c070;font-size:14px;cursor:pointer;padding:0 4px;',
+          title:'Rimuovi questo fornitore',
           onclick: () => {
-            fornitoriSel = fornitoriSel.filter(x => x !== aid);
+            fornitoriSel = fornitoriSel.filter((_, i) => i !== idx);
             renderForSelected(); renderForDropList();
             if (aggiornaPreviewInizio) aggiornaPreviewInizio();
           },
-        }, '✕') : null,
-      ));
+        }, '✕'));
+      }
+      forSelectedWrap.append(row);
     });
   };
   const renderForDropList = () => {
     const q = forSearchInput.value.trim().toLowerCase();
+    const selectedIds = new Set(fornitoriSel.map(s => s.azienda_id));
     const filtered = aziendeFornitrici.filter(a =>
       !q || (a.nome || '').toLowerCase().includes(q)
     );
@@ -6270,13 +6318,20 @@ function openOperazioneModal(o) {
       return;
     }
     filtered.forEach(a => {
-      const isSel = fornitoriSel.includes(a.id);
+      const isSel = selectedIds.has(a.id);
       forDropList.append(el('div', {
         class: 'util-row' + (isSel ? ' selected' : ''),
         onclick: () => {
           if (!canEdit) return;
-          if (isSel) fornitoriSel = fornitoriSel.filter(x => x !== a.id);
-          else fornitoriSel.push(a.id);
+          if (isSel) {
+            fornitoriSel = fornitoriSel.filter(x => x.azienda_id !== a.id);
+          } else {
+            fornitoriSel.push({
+              azienda_id: a.id,
+              numero_ordine: '',
+              allocazione: 1.0,
+            });
+          }
           renderForSelected(); renderForDropList();
           if (aggiornaPreviewInizio) aggiornaPreviewInizio();
         },
@@ -7004,6 +7059,24 @@ function openOperazioneModal(o) {
           btnSave.textContent = 'Salva';
           return toast('Operazione salvata, ma errore addetti: '+syncRes.error.message, 'err');
         }
+        // Normalizza i numeri ordine fornitore: padding zero a 5 cifre,
+        // svuotamento del "solo prefisso" precompilato, validazione formato.
+        // Stessa logica del numero ordine cliente, ma per OF.
+        for (const sel of fornitoriSel) {
+          let n = (sel.numero_ordine || '').trim();
+          const padM = n.match(/^(\d{4})\/OF\/(\d{1,4})$/);
+          if (padM) n = padM[1] + '/OF/' + padM[2].padStart(5, '0');
+          const soloPrefisso = /^\d{4}\/OF\/$/.test(n);
+          if (n && !soloPrefisso && !/^\d{4}\/OF\/\d{5}$/.test(n)) {
+            const fornNome = (state.aziende.find(a => a.id === sel.azienda_id) || {}).nome || sel.azienda_id;
+            stopWatchdog();
+            btnSave.disabled = false;
+            btnSave.textContent = 'Salva';
+            return toast(`Numero ordine fornitore "${fornNome}" non valido. Usa il formato AAAA/OF/NNNNN o lascia vuoto.`, 'err');
+          }
+          sel.numero_ordine = (n && !soloPrefisso) ? n : '';
+        }
+
         // Sincronizza i fornitori esterni nella tabella ponte
         const syncFor = await syncOperazioneFornitori(data.id, fornitoriSel);
         if (syncFor.error) {
@@ -8191,7 +8264,6 @@ async function kioskInit() {
   $('#auth-screen').style.display = 'none';
   $('#app-screen').style.display = 'none';
   $('#kiosk-screen').style.display = 'flex';
-  $('#kiosk-sede-lbl').textContent = 'Postazione: ' + KIOSK_PARAM;
   applyTheme(localStorage.getItem('theme') || 'dark');
 
   // Carica dati iniziali
@@ -8604,7 +8676,7 @@ async function kioskConfirmUscita(mezzo) {
     const { data, error } = await sb.from('usi_mezzo').insert({
       mezzo_id: mezzo.id,
       utente_id: u.id,
-      sede: KIOSK_PARAM,
+      sede: 'kiosk',
     }).select().single();
     if (error) throw error;
     // Aggiorna cache subito
@@ -8976,13 +9048,12 @@ async function kioskSelectTipo(tipo) {
   if (!u || !o || !tipo) return;
 
   // Crea sessione
-  const sedeUrl = new URLSearchParams(location.search).get('kiosk') || 'sede?';
   try {
     const { data, error } = await sb.from('sessioni_lavoro').insert({
       operazione_id: o.id,
       utente_id: u.id,
       tipo_lavorazione_id: tipo.id,
-      sede: sedeUrl,
+      sede: 'kiosk',
       inizio: new Date().toISOString(),
     }).select().single();
     if (error) {
@@ -9071,14 +9142,13 @@ async function kioskSelectAttivita(a) {
   }
 
   // Apro nuova sessione su attività extra (operazione_id resta null)
-  const sedeUrl = new URLSearchParams(location.search).get('kiosk') || 'sede?';
   try {
     const { data, error } = await sb.from('sessioni_lavoro').insert({
       operazione_id: null,
       attivita_id: a.id,
       utente_id: u.id,
       tipo_lavorazione_id: null,
-      sede: sedeUrl,
+      sede: 'kiosk',
       inizio: new Date().toISOString(),
     }).select().single();
     if (error) {
