@@ -5328,11 +5328,14 @@ function renderMagazzino(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   root.innerHTML = '';
 
-  // Lista: tutte le commesse con almeno un lotto prodotto, non ancora spedite.
+  // Lista: tutte le commesse con pezzi attualmente in magazzino
+  // (= prodotti - già spediti > 0). Esclude le 'spedita' per definizione
+  // (anche se in teoria una commessa parzialmente spedita potrebbe avere
+  // ancora qualcosa, il filtro stato='spedita' è applicato come barriera).
   // Ordinamento: completate prima (più urgenti da consegnare al cliente),
   // poi per scadenza crescente; senza scadenza in fondo.
   const list = state.operazioni
-    .filter(o => o.stato !== 'spedita' && quantitaConsegnata(o.id) > 0)
+    .filter(o => o.stato !== 'spedita' && pezziInMagazzino(o.id) > 0)
     .slice()
     .sort((a, b) => {
       // Completate prima
@@ -5352,8 +5355,8 @@ function renderMagazzino(root) {
   const completate = list.filter(o => o.stato === 'completata').length;
   const parziali = totale - completate;
   const scadute = list.filter(o => o.scadenza && o.scadenza < oggiIso).length;
-  // Pezzi totali in magazzino: somma di tutti i lotti prodotti delle commesse visibili
-  const pezziTotali = list.reduce((s, o) => s + quantitaConsegnata(o.id), 0);
+  // Pezzi in magazzino: somma dei pronti (prodotti - spediti) per ogni commessa visibile
+  const pezziTotali = list.reduce((s, o) => s + pezziInMagazzino(o.id), 0);
 
   root.append(el('div', { class:'kpis' },
     el('div', { class:'kpi' },
@@ -5404,7 +5407,9 @@ function renderMagazzino(root) {
     const cli = state.aziende.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
     const qtaTot = Number(o.quantita || 0);
-    const qtaCons = quantitaConsegnata(o.id);
+    const qtaProd = quantitaConsegnata(o.id);
+    const qtaSped = quantitaSpedita(o.id);
+    const pronti = Math.max(0, qtaProd - qtaSped);
     const completa = o.stato === 'completata';
 
     // Colore scadenza: rosso se passata, giallo se entro 3 giorni
@@ -5436,14 +5441,12 @@ function renderMagazzino(root) {
       title: desc,
     }, desc || '—'));
 
-    // Pz pronti / Totale, colorato secondo stato (verde se completa, giallo se parziale)
+    // Pz pronti in magazzino / Totale ordinato, con tooltip dettagliato
     tr.append(el('td', {
       class:'tr mono',
       style: 'font-weight:700;color:' + (completa ? 'var(--grn)' : 'var(--yel)') + ';',
-      title: completa
-        ? 'Tutti i pezzi sono pronti in magazzino'
-        : 'Parziale: ' + qtaCons + ' pz pronti, ' + (qtaTot - qtaCons) + ' ancora da produrre',
-    }, qtaCons + ' / ' + qtaTot));
+      title: 'Prodotti: ' + qtaProd + ' · Spediti: ' + qtaSped + ' · Pronti in magazzino: ' + pronti,
+    }, pronti + ' / ' + qtaTot));
 
     // Stato: badge "Completa" o "Parziale"
     tr.append(el('td', { class:'tc' },
@@ -5460,21 +5463,21 @@ function renderMagazzino(root) {
       title: o.note || '',
     }, o.note || '—'));
 
-    // Azioni: ✓ Consegna solo per le COMPLETE (spedire una parziale via questo
-    // bottone significherebbe "ho spedito tutti i pezzi", ma alcuni sono ancora
-    // da produrre → fuorviante. Le parziali si gestiranno con la Sezione
-    // Spedizioni quando sarà disponibile).
+    // Azioni: ✓ Spedisci per tutte le commesse con qualcosa in magazzino.
+    // Per le complete spedisce tutto, per le parziali spedisce solo i pezzi
+    // prodotti finora (la modal precompila quantità = pronti in magazzino).
     const azioniCell = el('td', { class:'tc' });
-    if (isAdmin && completa) {
+    if (isAdmin) {
+      const labelBtn = completa ? '✓ Spedisci' : '✓ Spedisci parziale';
+      const tooltipBtn = completa
+        ? 'Registra spedizione (tutti i pezzi)'
+        : 'Registra spedizione dei pezzi pronti in magazzino';
       azioniCell.append(el('button', {
         class:'btnsm',
         style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
-        title:'Consegna definitiva al cliente (apre modal con data e giustificazione)',
-        onclick: (e) => { e.stopPropagation(); quickSpedizione(o); },
-      }, '✓ Consegna'));
-    } else if (isAdmin) {
-      // Per le parziali: spazio vuoto (niente "Consegna" — fuorviante)
-      azioniCell.append(el('span', { style:'color:var(--mut);font-size:10px;' }, '—'));
+        title: tooltipBtn,
+        onclick: (e) => { e.stopPropagation(); quickRegistraSpedizione(o); },
+      }, labelBtn));
     }
     tr.append(azioniCell);
 
@@ -7692,67 +7695,150 @@ async function quickStato(op, nuovoStato) {
   }
 }
 
-function quickSpedizione(o) {
+// Modal rapida di registrazione spedizione, chiamata da Magazzino, Pianificazione
+// (bottone ✓ e dropdown stato → 'spedita'). Crea una riga nella tabella
+// `spedizioni`. Se la somma spedita raggiunge il totale ordinato, aggiorna
+// anche operazioni.stato = 'spedita' (sincronizzazione automatica) e copia
+// `consegnato_il = data` per compatibilità con lo Storico.
+// Il nome "quickSpedizione" è mantenuto come alias per non rompere i call site.
+function quickRegistraSpedizione(o) {
   const oggi = toLocalISO(new Date());
   const ritardo = o.scadenza && o.scadenza < oggi;
+  const cli = state.aziende.find(c => c.id === o.cliente_id);
+  const art = state.articoli.find(a => a.id === o.articolo_id);
+
+  const qtaOrd = Number(o.quantita || 0);
+  const totSped = quantitaSpedita(o.id);
+  const prodotti = quantitaConsegnata(o.id);
+  const pronti = Math.max(0, prodotti - totSped);
+  const daSpedire = Math.max(0, qtaOrd - totSped);
+
+  // Caso limite: niente in magazzino → niente da spedire
+  if (pronti <= 0) {
+    if (daSpedire <= 0) {
+      toast('Questa commessa è già stata spedita per intero.', 'err');
+    } else {
+      toast('Nulla in magazzino da spedire. Registra prima la produzione.', 'err');
+    }
+    return;
+  }
+
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
-    el('h2', {}, 'Segna come spedita'),
+    el('h2', {}, 'Registra spedizione'),
     el('button', { class:'mclose', onclick:closeModal }, '✕'),
   ));
   const body = el('div', { class:'mbody' });
 
-  const cli = state.aziende.find(c => c.id === o.cliente_id);
-  const art = state.articoli.find(a => a.id === o.articolo_id);
+  // Box info commessa
   body.append(el('div', { class:'sub', style:'margin-bottom:14px;padding:10px;background:var(--sur2);border-radius:4px;font-family:monospace;font-size:11px;line-height:1.6;' },
-    el('div', {}, 'Ordine: ', el('span', { style:'color:var(--or)' }, o.numero_ordine || '—'), ' · ',
-      'Ordine: ', el('span', { style:'color:var(--txt)' }, o.numero_ordine || '—')),
-    el('div', {}, cli?.nome || '—', ' · ', art?.codice || '—', ' · ', (o.quantita||0)+' pz'),
+    el('div', {}, 'Ordine: ', el('span', { style:'color:var(--or)' }, o.numero_ordine || '—'),
+      o.numero_op ? ' · OP: ' + o.numero_op : ''),
+    el('div', {}, (cli?.nome || '—') + ' · ' + (art?.codice || '—')),
+    el('div', {},
+      'Ordinati: ' + qtaOrd + ' pz · ',
+      el('span', { style:'color:'+(pronti>0?'var(--blu)':'var(--mut)') }, 'pronti in magazzino: ' + pronti + ' pz'),
+      ' · ',
+      'già spediti: ' + totSped + ' pz',
+    ),
     el('div', {}, 'Scadenza: ', el('span', { style:'color:'+(ritardo?'var(--red)':'var(--txt)') }, o.scadenza ? fmtIT(o.scadenza) : '—')),
   ));
 
+  // Form
   const form = el('form');
-  const inData = el('input', { type:'date', name:'consegnato_il', value:oggi, required:'true' });
+  const inData = el('input', { type:'date', name:'data', value:oggi, required:'true' });
+  // Quantità precompilata al massimo possibile (pronti in magazzino)
+  const inQta = el('input', {
+    type:'number', name:'quantita',
+    min:'1', max:String(pronti), value:String(pronti), required:'true',
+  });
+  const inDDT = el('input', { type:'text', name:'ddt', placeholder:'numero DDT al cliente (opzionale)' });
+  const inDest = el('input', { type:'text', name:'destinatario', placeholder:'destinatario / luogo (opzionale)' });
+  const inNote = el('textarea', { name:'note', rows:'2', placeholder:'note (opzionale)' });
+
   form.append(
-    el('div', { class:'field' }, el('label', {}, 'Data consegna *'), inData),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Data *'), inData),
+      el('div', { class:'field' }, el('label', {}, 'Quantità * (max ' + pronti + ')'), inQta),
+    ),
+    el('div', { class:'field' }, el('label', {}, 'DDT'), inDDT),
+    el('div', { class:'field' }, el('label', {}, 'Destinatario'), inDest),
+    el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
 
-  // Mostra subito i campi NC/giustificazione (sempre, anche se in tempo, opzionali)
-  form.append(
-    el('div', { class:'field' }, el('label', {}, 'Giustificazione ritardo (se applicabile)'),
-      el('textarea', { name:'giustificazione_ritardo', rows:'2', placeholder: ritardo ? 'Es. attesa materiale, fermo macchina, …' : 'Non richiesta (consegna in tempo)' })),
-    el('div', { class:'field' }, el('label', {}, 'Non conformità post-consegna'),
-      el('textarea', { name:'nc_post_consegna', rows:'2', placeholder:'Es. cliente ha segnalato difetto X' })),
-    el('div', { class:'field' }, el('label', {}, 'Responsabilità'),
-      el('input', { type:'text', name:'responsabilita', placeholder:'Es. interna / fornitore / cliente' })),
-  );
+  // Avviso se questa spedizione NON completerà la commessa
+  const previewSpedTot = totSped + pronti;
+  if (previewSpedTot < qtaOrd) {
+    body.append(el('div', { style:'color:var(--yel);font-size:10px;padding:6px 0 10px;font-style:italic;' },
+      'Dopo questa spedizione resteranno ' + (qtaOrd - previewSpedTot) + ' pz ancora da produrre/spedire.'));
+  }
+
   body.append(form);
   modal.append(body);
 
   const foot = el('div', { class:'mfoot' });
   foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
-  const btnOk = el('button', { class:'btnp' }, '✓ Conferma consegna');
+  const btnOk = el('button', { class:'btnp' }, '✓ Registra spedizione');
   btnOk.onclick = async () => {
     const fd = new FormData(form);
-    if (!fd.get('consegnato_il')) return toast('Data consegna obbligatoria', 'err');
+    const data = fd.get('data');
+    const qta = parseInt(fd.get('quantita'), 10);
+    if (!data) return toast('Data obbligatoria', 'err');
+    if (!Number.isFinite(qta) || qta <= 0) return toast('Quantità deve essere > 0', 'err');
+
+    // Validazione doppia ricalcolata al submit (sicurezza vs race condition)
+    const totSpedNow = quantitaSpedita(o.id);
+    const daSpedireNow = qtaOrd - totSpedNow;
+    if (qta > daSpedireNow) {
+      return toast(`Da spedire: ${daSpedireNow} pz. Non puoi spedire ${qta} pz.`, 'err');
+    }
+    const prontiNow = Math.max(0, quantitaConsegnata(o.id) - totSpedNow);
+    if (qta > prontiNow) {
+      return toast(`In magazzino: ${prontiNow} pz pronti. Prima registra la produzione mancante.`, 'err');
+    }
+
     btnOk.disabled = true; btnOk.textContent = 'Salvataggio…';
     try {
-      const { data, error } = await sb.from('operazioni').update({
-        stato: 'spedita',
-        consegnato_il: fd.get('consegnato_il'),
-        giustificazione_ritardo: (fd.get('giustificazione_ritardo')||'').trim() || null,
-        nc_post_consegna: (fd.get('nc_post_consegna')||'').trim() || null,
-        responsabilita: (fd.get('responsabilita')||'').trim() || null,
-      }).eq('id', o.id).select().single();
-      if (error) {
-        btnOk.disabled = false; btnOk.textContent = '✓ Conferma consegna';
-        return toast(error.message, 'err');
+      // 1) Inserisco la spedizione
+      const { data: nuovaSped, error: errSped } = await sb.from('spedizioni').insert({
+        operazione_id: o.id,
+        data,
+        quantita: qta,
+        ddt: (fd.get('ddt')||'').trim() || null,
+        destinatario: (fd.get('destinatario')||'').trim() || null,
+        note: (fd.get('note')||'').trim() || null,
+        creato_da: state.profile?.id || null,
+      }).select().single();
+      if (errSped) {
+        btnOk.disabled = false; btnOk.textContent = '✓ Registra spedizione';
+        return toast(errSped.message, 'err');
       }
-      state.operazioni = state.operazioni.map(x => x.id === o.id ? data : x);
-      toast('Operazione spedita');
+      // Aggiorno cache locale (oltre al realtime)
+      if (!state.spedizioni.find(x => x.id === nuovaSped.id)) state.spedizioni.push(nuovaSped);
+
+      // 2) Sincronizzazione automatica stato commessa.
+      // Se la nuova somma spedita raggiunge o supera il totale ordinato,
+      // marca la commessa come 'spedita' e popola consegnato_il = data
+      // (per compatibilità con lo Storico esistente).
+      const sommaTotSped = quantitaSpedita(o.id);
+      if (sommaTotSped >= qtaOrd && o.stato !== 'spedita') {
+        const { data: opAgg, error: errOp } = await sb.from('operazioni').update({
+          stato: 'spedita',
+          consegnato_il: data,
+        }).eq('id', o.id).select().single();
+        if (errOp) {
+          // La spedizione è stata salvata, ma lo stato no — segnalo ma non blocco
+          toast('Spedizione salvata, ma errore aggiornamento stato: '+errOp.message, 'err');
+        } else {
+          state.operazioni = state.operazioni.map(x => x.id === o.id ? opAgg : x);
+        }
+        toast('Spedizione registrata · commessa marcata SPEDITA');
+      } else {
+        toast('Spedizione registrata');
+      }
       closeModal(); renderTab(state.currentTab);
     } catch (e) {
-      btnOk.disabled = false; btnOk.textContent = '✓ Conferma consegna';
+      btnOk.disabled = false; btnOk.textContent = '✓ Registra spedizione';
       toast('Errore: '+(e.message||e), 'err');
     }
   };
@@ -7760,6 +7846,9 @@ function quickSpedizione(o) {
   modal.append(foot);
   openModal(modal);
 }
+
+// Alias compatibilità: tutti i call site esistenti continuano a funzionare.
+const quickSpedizione = quickRegistraSpedizione;
 
 // Export storico in Excel
 function storicoExportExcel() {
