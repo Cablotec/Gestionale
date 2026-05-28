@@ -764,7 +764,6 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
     </div>
     <input type="text" id="kiosk-rfid-input" class="kiosk-hidden-input" autocomplete="off">
     <div class="kiosk-grid" id="kiosk-utili-grid"></div>
-    <div class="kiosk-fuori" id="kiosk-fuori-list"></div>
   </div>
 
   <!-- Schermata 2: scelta mezzo / rientro -->
@@ -9085,25 +9084,6 @@ function kioskRenderId() {
       grid.appendChild(buildLiveCard(u, () => kioskSelectUtente(u)));
     });
   });
-
-  // Lista "mezzi attualmente fuori"
-  const fuori = $('#kiosk-fuori-list');
-  fuori.innerHTML = '';
-  fuori.appendChild(el('div', { class:'kiosk-fuori-title' }, 'Mezzi attualmente fuori'));
-  if (kioskState.mezziInUso.length === 0) {
-    fuori.appendChild(el('div', { class:'kiosk-fuori-empty' }, 'Nessun mezzo fuori al momento'));
-  } else {
-    kioskState.mezziInUso.forEach(uso => {
-      const m = state.mezzi.find(x => x.id === uso.mezzo_id);
-      const u = state.utentiById[uso.utente_id];
-      const ora = new Date(uso.data_uscita);
-      fuori.appendChild(el('div', { class:'kiosk-fuori-row' },
-        el('span', {}, (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '')),
-        el('span', { style:'color:var(--mut)' },
-          (u?.nome || '?') + ' — uscito alle ' + z(ora.getHours())+':'+z(ora.getMinutes())),
-      ));
-    });
-  }
 }
 
 function kioskSelectUtente(u) {
