@@ -837,6 +837,15 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
     <div id="kiosk-attiva-content"></div>
   </div>
 
+  <!-- Schermata mezzo - conferma uscita con rientro previsto obbligatorio -->
+  <div id="kiosk-step-mezzo-rientro" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name">Fino a quando ti serve?</div>
+      <button class="kiosk-cancel" onclick="kioskGoToAction()">Indietro</button>
+    </div>
+    <div id="kiosk-mezzo-rientro-content"></div>
+  </div>
+
   <!-- Schermata 3: conferma -->
   <div id="kiosk-step-done" class="kiosk-step" style="display:none">
     <div class="kiosk-done" id="kiosk-done-msg"></div>
@@ -8555,6 +8564,7 @@ function openUsoMezzoModal(uso) {
 // ═══════════════════════════════════════════════════════════
 const kioskState = {
   utenteSelezionato: null,    // { id, nome, numero_badge }
+  mezzoInUscita: null,         // mezzo in fase di check-out (in attesa rientro previsto)
   mezziInUso: [],              // usi_mezzo aperti (data_rientro IS NULL)
   prenotazioniOggi: [],        // prenotazioni che coprono oggi
   opIniziate: new Set(),       // id operazioni con almeno una sessione chiusa
@@ -8741,7 +8751,7 @@ async function kioskLoadAll() {
   // + attività extra per il terzo flusso "Attività extra"
   // + assenze del giorno e tipi_assenza per mostrare ferie/permessi nelle card
   const oggi = toLocalISO(new Date());
-  const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti, assenze, tipiAss, attExtra] = await Promise.all([
+  const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti, assenze, tipiAss, attExtra, prenFuture, prenOp] = await Promise.all([
     sb.from('mezzi').select('*').eq('attivo', true).order('nome'),
     sb.from('utenti').select('*').eq('attivo', true).order('nome'),
     sb.from('usi_mezzo').select('*').is('data_rientro', null),
@@ -8755,6 +8765,10 @@ async function kioskLoadAll() {
     sb.from('assenze').select('*').eq('data', oggi).eq('stato', 'valida'),
     sb.from('tipi_assenza').select('*'),
     sb.from('attivita_extra').select('*').eq('attivo', true).order('ordine'),
+    // Prenotazioni da oggi in avanti: servono per il check conflitti quando
+    // si prende un mezzo al kiosk indicando un rientro futuro.
+    sb.from('prenotazioni').select('*').gte('data_fine', oggi),
+    sb.from('prenotazioni_utenti').select('*'),
   ]);
   state.mezzi = mezzi.data || [];
   state.utenti = util.data || [];
@@ -8770,6 +8784,10 @@ async function kioskLoadAll() {
   state.assenze = assenze.data || [];
   state.tipiAssenza = tipiAss.data || [];
   state.attivitaExtra = attExtra.data || [];
+  // Prenotazioni future + relazione operatori: usate da checkSovrapposizioni
+  // e loadPrenotazioneOperatori durante il check-out mezzi.
+  state.prenotazioni = prenFuture.data || [];
+  state.prenOp = prenOp.data || [];
   // Log diagnostico (visibile in console)
   console.log('[KIOSK] Loaded:', {
     mezzi: state.mezzi.length,
@@ -9016,7 +9034,7 @@ function kioskGoToMezzi() {
 function kioskHideAllSteps() {
   ['kiosk-step-id','kiosk-step-action','kiosk-step-menu',
    'kiosk-step-op-list','kiosk-step-tipo','kiosk-step-attiva',
-   'kiosk-step-attivita-list','kiosk-step-done'].forEach(id => {
+   'kiosk-step-attivita-list','kiosk-step-mezzo-rientro','kiosk-step-done'].forEach(id => {
     const e = $('#'+id); if (e) e.style.display = 'none';
   });
 }
@@ -9043,12 +9061,17 @@ function kioskRenderAction() {
     const m = state.mezzi.find(x => x.id === usoAperto.mezzo_id);
     const ora = new Date(usoAperto.data_uscita);
     const durata = kioskFormatDurata(Date.now() - ora.getTime());
+    const rp = usoAperto.rientro_previsto ? new Date(usoAperto.rientro_previsto) : null;
+    const rpScaduto = rp && rp < new Date();
     root.appendChild(el('div', { class:'kiosk-rientro-box' },
       el('div', { class:'kiosk-rientro-title' }, 'Hai un mezzo fuori'),
       el('div', { class:'kiosk-rientro-mezzo' },
         (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '')),
       el('div', { class:'kiosk-rientro-info' },
         'Uscito alle '+z(ora.getHours())+':'+z(ora.getMinutes())+' ('+durata+' fa)'),
+      rp ? el('div', { class:'kiosk-rientro-info', style: rpScaduto ? 'color:var(--red);font-weight:600;' : '' },
+        (rpScaduto ? '⚠ Rientro previsto era: ' : 'Rientro previsto: ')
+        + fmtIT(toLocalISO(rp)) + ' ' + z(rp.getHours())+':'+z(rp.getMinutes())) : null,
       el('button', { class:'kiosk-rientro-btn', onclick:()=>kioskConfirmRientro(usoAperto) },
         '✓ Conferma rientro'),
     ));
@@ -9097,22 +9120,193 @@ function kioskRenderAction() {
   root.appendChild(grid);
 }
 
-async function kioskConfirmUscita(mezzo) {
+// Click su un mezzo → apre la schermata per indicare data+ora rientro previsto
+// (obbligatorio). La timbratura vera avviene in kioskFinalizzaUscita.
+function kioskConfirmUscita(mezzo) {
+  kioskState.mezzoInUscita = mezzo;
+  kioskHideAllSteps();
+  $('#kiosk-step-mezzo-rientro').style.display = 'flex';
+  kioskRenderRientroPrevisto();
+  kioskResetInactivity();
+}
+
+function kioskRenderRientroPrevisto() {
+  const mezzo = kioskState.mezzoInUscita;
   const u = kioskState.utenteSelezionato;
+  if (!mezzo || !u) { kioskGoToAction(); return; }
+
+  const root = $('#kiosk-mezzo-rientro-content');
+  root.innerHTML = '';
+
+  // Default proposto: oggi alle 18:00 (orario tipico di fine giornata).
+  // Se sono già passate le 18, propongo domani alle 18.
+  const now = new Date();
+  const def = new Date(now);
+  def.setHours(18, 0, 0, 0);
+  if (def <= now) def.setDate(def.getDate() + 1);
+  const defData = `${def.getFullYear()}-${z(def.getMonth()+1)}-${z(def.getDate())}`;
+  const defOra = `${z(def.getHours())}:${z(def.getMinutes())}`;
+
+  // Riepilogo mezzo scelto
+  root.append(el('div', { class:'kiosk-rientro-box', style:'margin-bottom:18px;' },
+    el('div', { class:'kiosk-rientro-title' }, 'Mezzo scelto'),
+    el('div', { class:'kiosk-rientro-mezzo' },
+      mezzo.nome + (mezzo.targa ? ' · '+mezzo.targa : '')),
+  ));
+
+  // Scelte rapide (riempiono i campi sottostanti) + campi data/ora manuali.
+  // Touch-friendly: bottoni grandi.
+  const inData = el('input', { type:'date', value: defData, required:'true',
+    style:'font-size:20px;padding:12px;width:100%;box-sizing:border-box;background:var(--sur);border:2px solid var(--brd);border-radius:8px;color:var(--txt);' });
+  const inOra = el('input', { type:'time', value: defOra, required:'true',
+    style:'font-size:20px;padding:12px;width:100%;box-sizing:border-box;background:var(--sur);border:2px solid var(--brd);border-radius:8px;color:var(--txt);' });
+
+  const setQuick = (d, oraStr) => {
+    inData.value = `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+    inOra.value = oraStr;
+  };
+  const quickWrap = el('div', { style:'display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px;' });
+  const mkQuick = (label, fn) => el('button', {
+    type:'button', class:'kiosk-quick-btn',
+    style:'flex:1;min-width:130px;padding:14px;font-size:15px;font-weight:600;background:var(--sur);border:2px solid var(--brd);border-radius:8px;color:var(--txt);cursor:pointer;',
+    onclick: fn,
+  }, label);
+
+  quickWrap.append(
+    mkQuick('Oggi 13:00', () => { const d=new Date(); setQuick(d,'13:00'); }),
+    mkQuick('Oggi 18:00', () => { const d=new Date(); setQuick(d,'18:00'); }),
+    mkQuick('Domani 18:00', () => { const d=new Date(); d.setDate(d.getDate()+1); setQuick(d,'18:00'); }),
+  );
+  root.append(el('div', { style:'font-size:13px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em;' }, 'Scelte rapide'));
+  root.append(quickWrap);
+
+  root.append(el('div', { style:'display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px;' },
+    el('div', {}, el('div', { style:'font-size:13px;color:var(--mut);margin-bottom:6px;' }, 'Data rientro'), inData),
+    el('div', {}, el('div', { style:'font-size:13px;color:var(--mut);margin-bottom:6px;' }, 'Ora rientro'), inOra),
+  ));
+
+  const btnConferma = el('button', {
+    class:'kiosk-rientro-btn',
+    style:'width:100%;font-size:20px;padding:18px;',
+    onclick: () => {
+      const dataV = inData.value;
+      const oraV = inOra.value;
+      if (!dataV || !oraV) {
+        kioskBeep('err');
+        kioskShowError('Indica data e ora di rientro previsto.');
+        return;
+      }
+      const rientroPrev = new Date(`${dataV}T${oraV}`);
+      if (isNaN(rientroPrev.getTime())) {
+        kioskBeep('err');
+        kioskShowError('Data/ora non valida.');
+        return;
+      }
+      if (rientroPrev <= new Date()) {
+        kioskBeep('err');
+        kioskShowError('Il rientro previsto deve essere nel futuro.');
+        return;
+      }
+      kioskFinalizzaUscita(mezzo, rientroPrev.toISOString());
+    },
+  }, '✓ Prendi il mezzo');
+  root.append(btnConferma);
+}
+
+async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO) {
+  const u = kioskState.utenteSelezionato;
+  const oraUscita = new Date();
+  const rp = new Date(rientroPrevistoISO);
+
+  // Date in formato ISO giorno per le prenotazioni (che ragionano a giorni)
+  const dataInizio = toLocalISO(oraUscita);
+  const dataFine = toLocalISO(rp);
+  const oraInizioStr = z(oraUscita.getHours()) + ':' + z(oraUscita.getMinutes());
+  const oraFineStr = z(rp.getHours()) + ':' + z(rp.getMinutes());
+
+  // Prenotazione esistente dell'utente per oggi su QUESTO mezzo
+  const prenMia = (kioskState.prenotazioniOggi || []).find(p =>
+    p.mezzo_id === mezzo.id &&
+    (p.utente_id === u.id || (loadPrenotazioneOperatori(p.id) || []).includes(u.id))
+  );
+
+  // CHECK CONFLITTI: prenotazioni dello stesso mezzo che si sovrappongono al
+  // periodo [oggi → rientro previsto], escludendo l'eventuale prenotazione propria.
+  const conflitti = checkSovrapposizioni(mezzo.id, dataInizio, dataFine, prenMia ? prenMia.id : null);
+  if (conflitti.length > 0) {
+    const dettagli = conflitti.map(c => {
+      const periodo = c.data_inizio === c.data_fine
+        ? fmtIT(c.data_inizio)
+        : `${fmtIT(c.data_inizio)} → ${fmtIT(c.data_fine)}`;
+      return '• ' + periodo;
+    }).join('\n');
+    kioskBeep('err');
+    kioskShowError('Mezzo già prenotato nel periodo:\n' + dettagli + '\n\nScegli un rientro prima, o un altro mezzo.');
+    return;
+  }
+
   try {
+    // 1) Gestione prenotazione: aggiorna l'esistente (2b) o creane una nuova
+    if (prenMia) {
+      // Aggiorna: ora_inizio = reale, data_fine + ora_fine = rientro previsto
+      const { data: prenAgg, error: errPren } = await sb.from('prenotazioni').update({
+        ora_inizio: oraInizioStr,
+        data_fine: dataFine,
+        ora_fine: oraFineStr,
+      }).eq('id', prenMia.id).select().single();
+      if (errPren) {
+        kioskBeep('err');
+        kioskShowError('Errore aggiornando la prenotazione: ' + errPren.message);
+        return;
+      }
+      // Aggiorna cache
+      state.prenotazioni = state.prenotazioni.map(x => x.id === prenAgg.id ? prenAgg : x);
+      kioskState.prenotazioniOggi = kioskState.prenotazioniOggi.map(x => x.id === prenAgg.id ? prenAgg : x);
+    } else {
+      // Crea prenotazione al volo
+      const { data: prenNuova, error: errPren } = await sb.from('prenotazioni').insert({
+        mezzo_id: mezzo.id,
+        data_inizio: dataInizio,
+        data_fine: dataFine,
+        ora_inizio: oraInizioStr,
+        ora_fine: oraFineStr,
+        utente_id: u.id,
+        note: 'Creata da kiosk',
+      }).select().single();
+      if (errPren) {
+        kioskBeep('err');
+        kioskShowError('Errore creando la prenotazione: ' + errPren.message);
+        return;
+      }
+      state.prenotazioni.push(prenNuova);
+      // Associo l'operatore alla prenotazione
+      const { data: pu } = await sb.from('prenotazioni_utenti')
+        .insert({ prenotazione_id: prenNuova.id, utente_id: u.id }).select();
+      if (pu && pu[0] && Array.isArray(state.prenOp)) state.prenOp.push(pu[0]);
+      // Se copre oggi, aggiorno anche la cache kiosk
+      if (dataInizio <= toLocalISO(new Date()) && dataFine >= toLocalISO(new Date())) {
+        kioskState.prenotazioniOggi.push(prenNuova);
+      }
+    }
+
+    // 2) Crea l'uso reale del mezzo (con rientro previsto)
     const { data, error } = await sb.from('usi_mezzo').insert({
       mezzo_id: mezzo.id,
       utente_id: u.id,
       sede: 'kiosk',
+      rientro_previsto: rientroPrevistoISO,
     }).select().single();
     if (error) throw error;
-    // Aggiorna cache subito
     if (data && !kioskState.mezziInUso.find(x => x.id === data.id))
       kioskState.mezziInUso.push(data);
+
+    kioskState.mezzoInUscita = null;
     kioskBeep('ok');
     kioskShowDone({
       title: 'Uscita registrata',
-      detail: u.nome + ' → ' + (mezzo.nome + (mezzo.targa ? ' · '+mezzo.targa : '')),
+      detail: u.nome + ' → ' + (mezzo.nome + (mezzo.targa ? ' · '+mezzo.targa : ''))
+        + '\nRientro previsto: ' + fmtIT(dataFine) + ' ' + oraFineStr
+        + (prenMia ? '\n(prenotazione aggiornata)' : '\n(prenotazione creata)'),
       ok: true,
     });
   } catch (e) {
