@@ -9158,13 +9158,12 @@ function kioskRenderAction() {
     root.appendChild(el('div', { class:'kiosk-section-title' }, 'Oppure prendi un altro mezzo'));
   }
 
-  // Lista mezzi disponibili.
-  // Escludo solo i mezzi FISICAMENTE in uso (usi_mezzo aperti). I mezzi
-  // prenotati da altri NON vengono più nascosti: con la logica oraria un
-  // mezzo "prenotato solo dalle 18" è prendibile prima. Sarà il check
-  // kioskConflittoOrarioMezzo (in fase di conferma) a bloccare se serve.
-  // Mostro però un'indicazione "prenotato dalle …" per dare contesto.
-  const mezziInUsoIds = kioskState.mezziInUso.map(x => x.mezzo_id);
+  // Lista mezzi.
+  // - I mezzi prenotati da altri NON vengono nascosti: con la logica oraria
+  //   un mezzo "prenotato solo dalle 18" è prendibile prima (lo gestisce il
+  //   check kioskConflittoOrarioMezzo in conferma). Mostro "prenotato dalle …".
+  // - I mezzi FISICAMENTE fuori adesso (uso aperto) restano visibili ma
+  //   bloccati (grigi, non cliccabili), con operatore e rientro previsto.
 
   // Mezzo prenotato dall'utente corrente per oggi (per evidenziarlo in cima)
   const prenMia = kioskState.prenotazioniOggi.find(p =>
@@ -9183,13 +9182,22 @@ function kioskRenderAction() {
     return cand.length ? cand[0].p : null;
   };
 
-  const disponibili = state.mezzi.filter(m => !mezziInUsoIds.includes(m.id));
-  // Ordina con il prenotato per me in cima
+  // Mappa mezzo_id → uso aperto (chi lo ha fuori adesso), per segnalare i
+  // mezzi occupati come bloccati invece di nasconderli.
+  const usoByMezzo = {};
+  kioskState.mezziInUso.forEach(uso => { usoByMezzo[uso.mezzo_id] = uso; });
+
+  // Tutti i mezzi: quelli fuori restano visibili ma bloccati.
+  const disponibili = state.mezzi.slice();
+  // Ordina: prima quelli liberi, poi gli occupati; il mio prenotato in cima.
   disponibili.sort((a,b) => {
     if (prenMia) {
       if (a.id === prenMia.mezzo_id) return -1;
       if (b.id === prenMia.mezzo_id) return 1;
     }
+    const aOcc = usoByMezzo[a.id] ? 1 : 0;
+    const bOcc = usoByMezzo[b.id] ? 1 : 0;
+    if (aOcc !== bOcc) return aOcc - bOcc;
     return a.nome.localeCompare(b.nome);
   });
 
@@ -9198,8 +9206,34 @@ function kioskRenderAction() {
     grid.appendChild(el('div', { class:'kiosk-empty' }, 'Nessun mezzo disponibile al momento.'));
   } else {
     disponibili.forEach(m => {
+      const usoAttivo = usoByMezzo[m.id];
+      // ── Mezzo OCCUPATO (fuori adesso): visibile ma bloccato ──
+      if (usoAttivo) {
+        const chi = state.utentiById[usoAttivo.utente_id];
+        const rp = usoAttivo.rientro_previsto ? new Date(usoAttivo.rientro_previsto) : null;
+        const rpStr = rp
+          ? (fmtIT(toLocalISO(rp)) + ' ' + z(rp.getHours()) + ':' + z(rp.getMinutes()))
+          : null;
+        grid.appendChild(el('div', {
+          class: 'kiosk-tile mezzo mezzo-occupato',
+          style: 'border-left-color:var(--mut);opacity:.55;cursor:not-allowed;',
+          onclick: () => {
+            kioskBeep('err');
+            kioskShowError('Mezzo occupato da ' + (chi?.nome || 'un operatore')
+              + (rpStr ? ('. Rientro previsto: ' + rpStr) : '.'));
+          },
+        },
+          el('div', { class:'kiosk-tile-name' }, m.nome),
+          m.targa ? el('div', { class:'kiosk-tile-targa' }, m.targa) : null,
+          el('div', { class:'kiosk-tile-targa', style:'color:var(--red);font-weight:600;' },
+            '● Occupato · ' + (chi?.nome || '?')),
+          rpStr ? el('div', { class:'kiosk-tile-targa', style:'color:var(--mut);' },
+            'rientro ' + rpStr) : null,
+        ));
+        return;
+      }
+      // ── Mezzo LIBERO ──
       const isPren = prenMia && prenMia.mezzo_id === m.id;
-      // Prenotazione altrui di oggi che limita l'uso (solo se non è la mia)
       const prossima = (!isPren) ? prossimaPrenOggi(m.id) : null;
       grid.appendChild(el('div', {
         class: 'kiosk-tile mezzo'+(isPren ? ' mezzo-prenotato' : ''),
