@@ -9133,7 +9133,7 @@ function kioskGoToAction() {
 // attiva ADESSO (la prima trovata) o null.
 function kioskPrenotazioneAttivaOra(mezzoId) {
   const now = new Date();
-  return (kioskState.prenotazioniOggi || []).find(p => {
+  return (state.prenotazioni || []).find(p => {
     if (p.mezzo_id !== mezzoId) return false;
     if (!p.data_inizio || !p.data_fine) return false;
     const pInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
@@ -9164,24 +9164,35 @@ function kioskRenderAction() {
   const root = $('#kiosk-action-content');
   root.innerHTML = '';
 
-  // Ha un mezzo fuori? Se sì, proponi rientro
-  const usoAperto = kioskState.mezziInUso.find(x => x.utente_id === u.id);
-  if (usoAperto) {
-    const m = state.mezzi.find(x => x.id === usoAperto.mezzo_id);
-    const ora = new Date(usoAperto.data_uscita);
-    const durata = kioskFormatDurata(Date.now() - ora.getTime());
-    const rp = usoAperto.rientro_previsto ? new Date(usoAperto.rientro_previsto) : null;
-    const rpScaduto = rp && rp < new Date();
+  // Ha un mezzo fuori? (verità unica: prenotazione mia attiva ADESSO)
+  // Cerco tra le prenotazioni che coprono questo istante una di cui l'utente
+  // corrente è operatore (via prenotazioni_utenti) o autore.
+  const nowTS = new Date();
+  const prenFuoriMia = (state.prenotazioni || []).find(p => {
+    if (!p.mezzo_id || !p.data_inizio || !p.data_fine) return false;
+    const pInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
+    const pFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
+    if (isNaN(pInizio.getTime()) || isNaN(pFine.getTime())) return false;
+    if (!(pInizio <= nowTS && pFine > nowTS)) return false;
+    return p.utente_id === kioskState.authorId
+      || (loadPrenotazioneOperatori(p.id) || []).includes(u.id);
+  });
+  if (prenFuoriMia) {
+    const m = state.mezzi.find(x => x.id === prenFuoriMia.mezzo_id);
+    const inizio = new Date(prenFuoriMia.data_inizio + 'T' + (prenFuoriMia.ora_inizio || '00:00'));
+    const durata = kioskFormatDurata(Date.now() - inizio.getTime());
+    const fine = new Date(prenFuoriMia.data_fine + 'T' + (prenFuoriMia.ora_fine || '23:59'));
+    const fineScaduto = fine < new Date();
     root.appendChild(el('div', { class:'kiosk-rientro-box' },
       el('div', { class:'kiosk-rientro-title' }, 'Hai un mezzo fuori'),
       el('div', { class:'kiosk-rientro-mezzo' },
         (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '')),
       el('div', { class:'kiosk-rientro-info' },
-        'Uscito alle '+z(ora.getHours())+':'+z(ora.getMinutes())+' ('+durata+' fa)'),
-      rp ? el('div', { class:'kiosk-rientro-info', style: rpScaduto ? 'color:var(--red);font-weight:600;' : '' },
-        (rpScaduto ? '⚠ Rientro previsto era: ' : 'Rientro previsto: ')
-        + fmtIT(toLocalISO(rp)) + ' ' + z(rp.getHours())+':'+z(rp.getMinutes())) : null,
-      el('button', { class:'kiosk-rientro-btn', onclick:()=>kioskConfirmRientro(usoAperto) },
+        'Preso alle '+z(inizio.getHours())+':'+z(inizio.getMinutes())+' ('+durata+' fa)'),
+      el('div', { class:'kiosk-rientro-info', style: fineScaduto ? 'color:var(--red);font-weight:600;' : '' },
+        (fineScaduto ? '⚠ Rientro previsto era: ' : 'Rientro previsto: ')
+        + fmtIT(toLocalISO(fine)) + ' ' + z(fine.getHours())+':'+z(fine.getMinutes())),
+      el('button', { class:'kiosk-rientro-btn', onclick:()=>kioskConfirmRientro(prenFuoriMia) },
         '✓ Conferma rientro'),
     ));
     root.appendChild(el('div', { class:'kiosk-section-title' }, 'Oppure prendi un altro mezzo'));
@@ -9194,16 +9205,26 @@ function kioskRenderAction() {
   // - I mezzi FISICAMENTE fuori adesso (uso aperto) restano visibili ma
   //   bloccati (grigi, non cliccabili), con operatore e rientro previsto.
 
+  // FONTE UNICA: usa state.prenotazioni (la stessa che usa kioskConflittoOrarioMezzo
+  // in conferma) così render e blocco sono SEMPRE allineati. In passato il render
+  // leggeva kioskState.prenotazioniOggi, che poteva non contenere prenotazioni
+  // create dal calendario app → mezzo "libero a vista" ma bloccato al click.
+  // Filtro localmente alle prenotazioni che coprono oggi.
+  const oggiIso = toLocalISO(new Date());
+  const prenOggi = (state.prenotazioni || []).filter(p =>
+    p.data_inizio && p.data_fine && p.data_inizio <= oggiIso && p.data_fine >= oggiIso
+  );
+
   // Mezzo prenotato dall'utente corrente per oggi (per evidenziarlo in cima)
-  const prenMia = kioskState.prenotazioniOggi.find(p =>
-    p.mezzo_id && (p.utente_id === u.id || (loadPrenotazioneOperatori(p.id) || []).includes(u.id))
+  const prenMia = prenOggi.find(p =>
+    p.mezzo_id && (p.utente_id === kioskState.authorId || (loadPrenotazioneOperatori(p.id) || []).includes(u.id))
   );
 
   // Per ogni mezzo, la prossima prenotazione di oggi (di chiunque) con orario,
   // usata come etichetta informativa "prenotato dalle HH:MM".
-  const oggiIsoNow = toLocalISO(new Date());
+  const oggiIsoNow = oggiIso;
   const prossimaPrenOggi = (mezzoId) => {
-    const cand = (kioskState.prenotazioniOggi || [])
+    const cand = prenOggi
       .filter(p => p.mezzo_id === mezzoId && p.ora_inizio)
       .map(p => ({ p, ts: new Date(`${oggiIsoNow}T${p.ora_inizio}`) }))
       .filter(x => !isNaN(x.ts.getTime()) && x.ts > new Date())
@@ -9421,8 +9442,10 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO, tipo) {
   // prenotazioni è l'autore/profilo, non l'operatore).
   const adesso = new Date();
   const oggiIso = toLocalISO(adesso);
-  const prenMia = (kioskState.prenotazioniOggi || []).find(p => {
+  const prenMia = (state.prenotazioni || []).find(p => {
     if (p.mezzo_id !== mezzo.id) return false;
+    if (!p.data_inizio || !p.data_fine) return false;
+    if (!(p.data_inizio <= oggiIso && p.data_fine >= oggiIso)) return false;
     const operatori = loadPrenotazioneOperatori(p.id) || [];
     if (!operatori.includes(u.id)) return false;
     // Scarta se già conclusa: ora_fine (di oggi) nel passato.
@@ -9469,9 +9492,8 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO, tipo) {
         kioskShowError('Errore aggiornando la prenotazione: ' + errPren.message);
         return;
       }
-      // Aggiorna cache
+      // Aggiorna cache (fonte unica)
       state.prenotazioni = state.prenotazioni.map(x => x.id === prenAgg.id ? prenAgg : x);
-      kioskState.prenotazioniOggi = kioskState.prenotazioniOggi.map(x => x.id === prenAgg.id ? prenAgg : x);
     } else {
       // Crea prenotazione al volo.
       // utente_id = autore (profilo loggato), NON l'operatore: la FK punta a profili.
@@ -9496,23 +9518,9 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO, tipo) {
       const { data: pu } = await sb.from('prenotazioni_utenti')
         .insert({ prenotazione_id: prenNuova.id, utente_id: u.id }).select();
       if (pu && pu[0] && Array.isArray(state.prenOp)) state.prenOp.push(pu[0]);
-      // Se copre oggi, aggiorno anche la cache kiosk
-      if (dataInizio <= toLocalISO(new Date()) && dataFine >= toLocalISO(new Date())) {
-        kioskState.prenotazioniOggi.push(prenNuova);
-      }
     }
 
-    // 2) Crea l'uso reale del mezzo (con rientro previsto)
-    const { data, error } = await sb.from('usi_mezzo').insert({
-      mezzo_id: mezzo.id,
-      utente_id: u.id,
-      sede: 'kiosk',
-      rientro_previsto: rientroPrevistoISO,
-    }).select().single();
-    if (error) throw error;
-    if (data && !kioskState.mezziInUso.find(x => x.id === data.id))
-      kioskState.mezziInUso.push(data);
-
+    // Verità unica: nessun usi_mezzo. La presa del mezzo È la prenotazione.
     kioskState.mezzoInUscita = null;
     kioskBeep('ok');
     kioskShowDone({
@@ -9527,49 +9535,28 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO, tipo) {
   }
 }
 
-async function kioskConfirmRientro(uso) {
+async function kioskConfirmRientro(pren) {
   try {
     const rientroReale = new Date();
-    const { data, error } = await sb.from('usi_mezzo')
-      .update({ data_rientro: rientroReale.toISOString() })
-      .eq('id', uso.id)
-      .select().single();
-    if (error) throw error;
-    // Rimuovi dalla cache aperti
-    kioskState.mezziInUso = kioskState.mezziInUso.filter(x => x.id !== uso.id);
-    const m = state.mezzi.find(x => x.id === uso.mezzo_id);
+    const oggiIso = toLocalISO(rientroReale);
+    const oraFineReale = z(rientroReale.getHours()) + ':' + z(rientroReale.getMinutes());
+    const m = state.mezzi.find(x => x.id === pren.mezzo_id);
     const u = kioskState.utenteSelezionato;
 
-    // Punto 1: la prenotazione collegata si "chiude" coi dati reali.
-    // Cerco una prenotazione che copre oggi per questo mezzo+operatore e
-    // ne aggiorno data_fine + ora_fine con il momento effettivo di rientro.
-    try {
-      const oggiIso = toLocalISO(rientroReale);
-      const prenColl = (state.prenotazioni || []).find(p =>
-        p.mezzo_id === uso.mezzo_id &&
-        p.data_inizio <= oggiIso && p.data_fine >= oggiIso &&
-        (p.utente_id === kioskState.authorId ||
-         (loadPrenotazioneOperatori(p.id) || []).includes(u?.id))
-      );
-      if (prenColl) {
-        const oraFineReale = z(rientroReale.getHours()) + ':' + z(rientroReale.getMinutes());
-        const { data: pAgg } = await sb.from('prenotazioni').update({
-          data_fine: oggiIso,
-          ora_fine: oraFineReale,
-        }).eq('id', prenColl.id).select().single();
-        if (pAgg) {
-          state.prenotazioni = state.prenotazioni.map(x => x.id === pAgg.id ? pAgg : x);
-          kioskState.prenotazioniOggi = kioskState.prenotazioniOggi.map(x => x.id === pAgg.id ? pAgg : x);
-        }
-      }
-    } catch (ePren) {
-      // Non blocco il rientro se l'aggiornamento prenotazione fallisce
-      console.warn('[KIOSK] Aggiornamento prenotazione al rientro fallito:', ePren);
-    }
+    // Verità unica: il rientro "chiude" la prenotazione portando
+    // data_fine + ora_fine al momento effettivo. Niente usi_mezzo.
+    const { data: pAgg, error } = await sb.from('prenotazioni').update({
+      data_fine: oggiIso,
+      ora_fine: oraFineReale,
+    }).eq('id', pren.id).select().single();
+    if (error) throw error;
+    state.prenotazioni = state.prenotazioni.map(x => x.id === pAgg.id ? pAgg : x);
 
-    const durata = kioskFormatDurata(
-      new Date(data.data_rientro).getTime() - new Date(uso.data_uscita).getTime()
-    );
+    // Durata reale dalla presa (ora_inizio) al rientro.
+    const inizio = new Date(pren.data_inizio + 'T' + (pren.ora_inizio || '00:00'));
+    const durata = !isNaN(inizio.getTime())
+      ? kioskFormatDurata(rientroReale.getTime() - inizio.getTime())
+      : '—';
     kioskBeep('ok');
     kioskShowDone({
       title: 'Rientro registrato',
