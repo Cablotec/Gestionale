@@ -2053,79 +2053,47 @@ function getPrenotazioneDestinazione(prenId) {
   return { breve, tooltip };
 }
 
-// Verifica sovrapposizioni dalla cache in memoria (no fetch)
-function checkSovrapposizioni(mezzoId, dataInizio, dataFine, escludiId) {
-  return state.prenotazioni.filter(p => {
+// Verifica sovrapposizioni dalla cache in memoria (no fetch).
+// Considera gli ORARI: due prenotazioni dello stesso mezzo lo stesso giorno in
+// fasce diverse (es. 08:00–12:00 e 14:00–18:00) NON sono in conflitto. Stessa
+// regola del vincolo DB tsrange e di kioskConflittoOrarioMezzo: istanti
+// effettivi, fallback 00:00–23:59 per prenotazioni senza orario, bound [) così
+// che 08–12 e 12–18 (estremi che si toccano) non confliggano.
+function checkSovrapposizioni(mezzoId, dataInizio, dataFine, escludiId, oraInizio, oraFine) {
+  // Istanti della prenotazione in esame.
+  const aInizio = new Date(dataInizio + 'T' + (oraInizio || '00:00'));
+  const aFine = new Date(dataFine + 'T' + (oraFine || '23:59'));
+  const usaOrari = !isNaN(aInizio.getTime()) && !isNaN(aFine.getTime());
+
+  const res = state.prenotazioni.filter(p => {
     if (p.mezzo_id !== mezzoId) return false;
     if (escludiId && p.id === escludiId) return false;
-    return p.data_inizio <= dataFine && p.data_fine >= dataInizio;
-  });
-}
-
-// Conflitto ORARIO per il check-out mezzi dal kiosk.
-// A differenza di checkSovrapposizioni (che ragiona a giorni interi e serve
-// alla modal admin), questa calcola gli istanti effettivi usando ora_inizio/
-// ora_fine. Le prenotazioni senza orario (storiche) sono trattate come
-// "tutto il giorno" (00:00 → 23:59) — fallback sicuro.
-//
-// Parametri:
-//   mezzoId      — mezzo da prendere
-//   presaTS      — Date di presa (di norma adesso)
-//   rientroTS    — Date di rientro richiesto dall'utente
-//   escludiId    — id prenotazione propria da ignorare (se sta confermando la sua)
-//
-// Ritorna:
-//   { occupatoOra: bool, conflitto: Date|null }
-//   - occupatoOra=true  → una prenotazione altrui è GIÀ in corso al momento
-//                          della presa: il mezzo non è disponibile adesso.
-//   - conflitto=Date    → il primo istante (inizio di una prenotazione altrui)
-//                          che cade dentro [presa, rientro richiesto]: oltre
-//                          quell'ora non puoi tenere il mezzo.
-//   - se entrambi nulli/false → nessun conflitto, ok fino al rientro richiesto.
-function kioskConflittoOrarioMezzo(mezzoId, presaTS, rientroTS, escludiId) {
-  // Costruisce gli istanti [inizio, fine] di una prenotazione, con fallback
-  // tutto-il-giorno se mancano gli orari.
-  const intervallo = (p) => {
-    const oraI = p.ora_inizio || '00:00';
-    const oraF = p.ora_fine || '23:59';
-    const inizio = new Date(`${p.data_inizio}T${oraI}`);
-    const fine = new Date(`${p.data_fine}T${oraF}`);
-    return { inizio, fine };
-  };
-
-  let occupatoOra = false;
-  let primoConflitto = null;
-
-  (state.prenotazioni || []).forEach(p => {
-    if (p.mezzo_id !== mezzoId) return;
-    if (escludiId && p.id === escludiId) return;
-    const { inizio, fine } = intervallo(p);
-    if (isNaN(inizio.getTime()) || isNaN(fine.getTime())) return;
-
-    // Prenotazione già in corso al momento della presa?
-    if (inizio <= presaTS && fine > presaTS) {
-      occupatoOra = true;
+    // Filtro grossolano per giorno: se i giorni non si toccano, niente conflitto.
+    if (!(p.data_inizio <= dataFine && p.data_fine >= dataInizio)) return false;
+    // Affinamento orario (se disponibili gli istanti di entrambe).
+    if (usaOrari) {
+      const bInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
+      const bFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
+      if (!isNaN(bInizio.getTime()) && !isNaN(bFine.getTime())) {
+        // Sovrapposizione su intervalli semiaperti [inizio, fine).
+        return aInizio < bFine && bInizio < aFine;
+      }
     }
-    // Prenotazione che inizia dentro la finestra [presa, rientro richiesto]?
-    if (inizio > presaTS && inizio < rientroTS) {
-      if (!primoConflitto || inizio < primoConflitto) primoConflitto = inizio;
-    }
+    return true;
   });
-
-  return { occupatoOra, conflitto: primoConflitto };
+  return res;
 }
 
 // Conflitto ORARIO (usato dal kiosk al check-out mezzo).
-// Diversamente da checkSovrapposizioni (che ragiona a giorni), questa
-// funzione calcola gli istanti effettivi di ogni prenotazione usando anche
+// Calcola gli istanti effettivi di ogni prenotazione usando anche
 // ora_inizio/ora_fine. Per le prenotazioni storiche SENZA orario, fallback
 // "tutto il giorno" (00:00 → 23:59) come deciso.
-// Ritorna { conflitto: Date | null }:
-//   - la Date è l'istante in cui inizia la PRIMA prenotazione che cade nel
-//     periodo [presaTS, rientroTS]. È il "tetto massimo" fino a cui si può
-//     tenere il mezzo. null = nessun conflitto, periodo libero.
-// Se una prenotazione è già in corso nell'istante della presa, ritorna
-// { occupatoOra: true }.
+// Ritorna { occupatoOra: bool, conflitto: Date | null }:
+//   - occupatoOra=true → una prenotazione altrui è GIÀ in corso al momento
+//                        della presa: il mezzo non è disponibile adesso.
+//   - conflitto=Date   → l'istante in cui inizia la PRIMA prenotazione che cade
+//                        nel periodo [presaTS, rientroTS]. È il "tetto massimo"
+//                        fino a cui si può tenere il mezzo. null = periodo libero.
 function kioskConflittoOrarioMezzo(mezzoId, presaTS, rientroTS, escludiId) {
   const presa = presaTS instanceof Date ? presaTS : new Date(presaTS);
   const rientro = rientroTS instanceof Date ? rientroTS : new Date(rientroTS);
@@ -8428,9 +8396,10 @@ async function openPrenotazioneModal(p) {
     if (utentiSel.length === 0)
       return toast('Seleziona almeno un operatore del mezzo', 'err');
 
-    // CHECK SOVRAPPOSIZIONI prima di salvare
+    // CHECK SOVRAPPOSIZIONI prima di salvare (considera gli orari)
     const conflitti = checkSovrapposizioni(
-      payload.mezzo_id, payload.data_inizio, payload.data_fine, isNew ? null : p.id
+      payload.mezzo_id, payload.data_inizio, payload.data_fine,
+      isNew ? null : p.id, payload.ora_inizio, payload.ora_fine
     );
     if (conflitti.length > 0) {
       const m = state.mezzi.find(x => x.id === payload.mezzo_id);
