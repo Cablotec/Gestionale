@@ -2385,35 +2385,21 @@ function renderCalendar(root) {
   const prenInRange = isGenerale ? [] : state.prenotazioni.filter(p =>
     p.data_inizio <= endISO && p.data_fine >= startISO
   );
-  // Filtro gli usi mezzo che intersecano la griglia
-  // - aperti (data_rientro = null): visualizzati da data_uscita fino ad oggi
-  // - chiusi: visualizzati da data_uscita a data_rientro
-  // In modalità "generale" escludiamo gli usi dei mezzi
-  const usiInRange = isGenerale ? [] : state.usiMezzo.filter(u => {
-    const usoStart = u.data_uscita.substring(0, 10);
-    const usoEnd = u.data_rientro ? u.data_rientro.substring(0, 10) : todayISO;
-    return usoStart <= endISO && usoEnd >= startISO;
-  });
+  // Il calendario mostra SOLO le prenotazioni. Gli usi_mezzo (timbrature
+  // fisiche dal kiosk) NON vengono più disegnati: erano ridondanti perché
+  // ogni uscita dal kiosk crea/aggiorna già una prenotazione corrispondente.
+  // Mostrarli entrambi produceva una doppia voce per la stessa uscita.
+  const usiInRange = [];
   const mezziById = Object.fromEntries(state.mezzi.map(m=>[m.id,m]));
 
   // Costruisco indice giorno → array di entries
-  // entry = { kind:'pren', data:p } oppure { kind:'uso', data:u, aperto:bool }
+  // entry = { kind:'pren', data:p }
   const byDay = {};
   for (const p of prenInRange) {
     const a = parseISODate(p.data_inizio), b = parseISODate(p.data_fine);
     for (let d = new Date(a); d <= b; d.setDate(d.getDate()+1)) {
       const k = toLocalISO(d);
       (byDay[k] = byDay[k] || []).push({ kind:'pren', data:p });
-    }
-  }
-  for (const u of usiInRange) {
-    const a = parseISODate(u.data_uscita.substring(0, 10));
-    const b = u.data_rientro
-      ? parseISODate(u.data_rientro.substring(0, 10))
-      : parseISODate(todayISO);
-    for (let d = new Date(a); d <= b; d.setDate(d.getDate()+1)) {
-      const k = toLocalISO(d);
-      (byDay[k] = byDay[k] || []).push({ kind:'uso', data:u, aperto: !u.data_rientro });
     }
   }
   // Assenze valide nel range (modello giornaliero: una riga per giorno).
@@ -2480,10 +2466,6 @@ function renderCalendar(root) {
     TIPI.forEach(t => legend.append(el('span', { class:'lg' },
       el('span', { class:'swatch', style:`background:${t.color}` }), t.label
     )));
-    legend.append(el('span', { class:'lg' },
-      el('span', { class:'swatch swatch-uso-aperto' }), 'Uso in corso'));
-    legend.append(el('span', { class:'lg' },
-      el('span', { class:'swatch swatch-uso-chiuso' }), 'Uso chiuso'));
   }
   // Assenza: solo nel "Generale". Chiusure e festività: solo nel "Generale".
   if (isGenerale) {
@@ -9377,11 +9359,25 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO, tipo) {
   const oraInizioStr = z(oraUscita.getHours()) + ':' + z(oraUscita.getMinutes());
   const oraFineStr = z(rp.getHours()) + ':' + z(rp.getMinutes());
 
-  // Prenotazione esistente dell'utente per oggi su QUESTO mezzo
-  const prenMia = (kioskState.prenotazioniOggi || []).find(p =>
-    p.mezzo_id === mezzo.id &&
-    (p.utente_id === u.id || (loadPrenotazioneOperatori(p.id) || []).includes(u.id))
-  );
+  // Prenotazione esistente dell'utente per oggi su QUESTO mezzo, ANCORA VALIDA.
+  // "Valida" = non già conclusa: se l'operatore ha usato e chiuso una
+  // prenotazione stamattina (ora_fine già passata), quella NON va riaperta —
+  // se riprende il mezzo nel pomeriggio se ne crea una nuova.
+  // L'operatore si identifica SOLO via prenotazioni_utenti (utente_id su
+  // prenotazioni è l'autore/profilo, non l'operatore).
+  const adesso = new Date();
+  const oggiIso = toLocalISO(adesso);
+  const prenMia = (kioskState.prenotazioniOggi || []).find(p => {
+    if (p.mezzo_id !== mezzo.id) return false;
+    const operatori = loadPrenotazioneOperatori(p.id) || [];
+    if (!operatori.includes(u.id)) return false;
+    // Scarta se già conclusa: ora_fine (di oggi) nel passato.
+    if (p.ora_fine && p.data_fine <= oggiIso) {
+      const fineTS = new Date(`${p.data_fine}T${p.ora_fine}`);
+      if (!isNaN(fineTS.getTime()) && fineTS <= adesso) return false;
+    }
+    return true;
+  });
 
   // CHECK CONFLITTI ORARIO: cerco la prima prenotazione (di altri) che cade
   // nel periodo [adesso → rientro previsto], escludendo la mia. Modalità A:
