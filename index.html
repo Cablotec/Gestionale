@@ -8564,6 +8564,7 @@ function openUsoMezzoModal(uso) {
 // ═══════════════════════════════════════════════════════════
 const kioskState = {
   utenteSelezionato: null,    // { id, nome, numero_badge }
+  authorId: null,              // id profilo loggato (autore prenotazioni, FK profili)
   mezzoInUscita: null,         // mezzo in fase di check-out (in attesa rientro previsto)
   mezziInUso: [],              // usi_mezzo aperti (data_rientro IS NULL)
   prenotazioniOggi: [],        // prenotazioni che coprono oggi
@@ -8702,6 +8703,16 @@ async function kioskInit() {
   $('#app-screen').style.display = 'none';
   $('#kiosk-screen').style.display = 'flex';
   applyTheme(localStorage.getItem('theme') || 'dark');
+
+  // Recupero l'id dell'utente auth loggato (kiosk@cablotec.local o l'admin
+  // che ha aperto il kiosk). Serve come "autore" (utente_id) quando il kiosk
+  // crea prenotazioni: quel campo ha una FK verso `profili`, non verso `utenti`.
+  try {
+    const { data: ud } = await sb.auth.getUser();
+    kioskState.authorId = ud?.user?.id || null;
+  } catch (e) {
+    kioskState.authorId = null;
+  }
 
   // Carica dati iniziali
   await kioskLoadAll();
@@ -9263,14 +9274,16 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO) {
       state.prenotazioni = state.prenotazioni.map(x => x.id === prenAgg.id ? prenAgg : x);
       kioskState.prenotazioniOggi = kioskState.prenotazioniOggi.map(x => x.id === prenAgg.id ? prenAgg : x);
     } else {
-      // Crea prenotazione al volo
+      // Crea prenotazione al volo.
+      // utente_id = autore (profilo loggato), NON l'operatore: la FK punta a profili.
+      // L'operatore vero va in prenotazioni_utenti (FK verso utenti).
       const { data: prenNuova, error: errPren } = await sb.from('prenotazioni').insert({
         mezzo_id: mezzo.id,
         data_inizio: dataInizio,
         data_fine: dataFine,
         ora_inizio: oraInizioStr,
         ora_fine: oraFineStr,
-        utente_id: u.id,
+        utente_id: kioskState.authorId,
         note: 'Creata da kiosk',
       }).select().single();
       if (errPren) {
