@@ -8623,8 +8623,6 @@ const kioskState = {
   utenteSelezionato: null,    // { id, nome, numero_badge }
   authorId: null,              // id profilo loggato (autore prenotazioni, FK profili)
   mezzoInUscita: null,         // mezzo in fase di check-out (in attesa rientro previsto)
-  mezziInUso: [],              // usi_mezzo aperti (data_rientro IS NULL)
-  prenotazioniOggi: [],        // prenotazioni che coprono oggi
   opIniziate: new Set(),       // id operazioni con almeno una sessione chiusa
   opOreCons: {},               // operazione_id → ore consuntivate (sessioni chiuse)
   inactivityTimer: null,
@@ -8819,11 +8817,9 @@ async function kioskLoadAll() {
   // + attività extra per il terzo flusso "Attività extra"
   // + assenze del giorno e tipi_assenza per mostrare ferie/permessi nelle card
   const oggi = toLocalISO(new Date());
-  const [mezzi, util, usi, pren, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti, assenze, tipiAss, attExtra, prenFuture, prenOp] = await Promise.all([
+  const [mezzi, util, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti, assenze, tipiAss, attExtra, prenFuture, prenOp] = await Promise.all([
     sb.from('mezzi').select('*').eq('attivo', true).order('nome'),
     sb.from('utenti').select('*').eq('attivo', true).order('nome'),
-    sb.from('usi_mezzo').select('*').is('data_rientro', null),
-    sb.from('prenotazioni').select('*').lte('data_inizio', oggi).gte('data_fine', oggi),
     sb.from('aziende').select('*').eq('attivo', true).order('nome'),
     sb.from('articoli').select('*').eq('attivo', true).order('codice'),
     sb.from('tipi_lavorazione').select('*').eq('attivo', true).order('ordine'),
@@ -8833,16 +8829,14 @@ async function kioskLoadAll() {
     sb.from('assenze').select('*').eq('data', oggi).eq('stato', 'valida'),
     sb.from('tipi_assenza').select('*'),
     sb.from('attivita_extra').select('*').eq('attivo', true).order('ordine'),
-    // Prenotazioni da oggi in avanti: servono per il check conflitti quando
-    // si prende un mezzo al kiosk indicando un rientro futuro.
+    // Prenotazioni da oggi in avanti: fonte UNICA del kiosk (state.prenotazioni).
+    // Coprono il check conflitti e la segnalazione mezzi occupati/prenotati.
     sb.from('prenotazioni').select('*').gte('data_fine', oggi),
     sb.from('prenotazioni_utenti').select('*'),
   ]);
   state.mezzi = mezzi.data || [];
   state.utenti = util.data || [];
   state.utentiById = Object.fromEntries(state.utenti.map(u => [u.id, u]));
-  kioskState.mezziInUso = usi.data || [];
-  kioskState.prenotazioniOggi = pren.data || [];
   state.aziende = clienti.data || [];
   state.articoli = articoli.data || [];
   state.tipiLav = tipiLav.data || [];
@@ -8869,7 +8863,7 @@ async function kioskLoadAll() {
     assenze_oggi: state.assenze.length,
   });
   // Log errori se ci sono
-  [['mezzi',mezzi],['operatori',util],['usi',usi],['pren',pren],
+  [['mezzi',mezzi],['operatori',util],['prenotazioni',prenFuture],['prenOp',prenOp],
    ['clienti',clienti],['articoli',articoli],['tipiLav',tipiLav],
    ['operazioni',operazioni],['sessioni',sessioni],['opAddetti',opAddetti],
    ['attExtra',attExtra]].forEach(([n,r]) => {
@@ -8906,20 +8900,6 @@ async function kioskLoadAll() {
 
 function kioskStartRealtime() {
   sb.channel('kiosk-changes')
-    .on('postgres_changes', { event:'*', schema:'public', table:'usi_mezzo' }, (p) => {
-      const ev = p.eventType;
-      const row = p.new, oldRow = p.old;
-      if (ev === 'INSERT') {
-        if (!row.data_rientro && !kioskState.mezziInUso.find(x => x.id === row.id))
-          kioskState.mezziInUso.push(row);
-      } else if (ev === 'UPDATE') {
-        kioskState.mezziInUso = kioskState.mezziInUso.filter(x => x.id !== row.id);
-        if (!row.data_rientro) kioskState.mezziInUso.push(row);
-      } else if (ev === 'DELETE') {
-        kioskState.mezziInUso = kioskState.mezziInUso.filter(x => x.id !== oldRow.id);
-      }
-      kioskRefreshActive();
-    })
     .on('postgres_changes', { event:'*', schema:'public', table:'mezzi' }, () => {
       kioskLoadAll().then(kioskRefreshActive);
     })
@@ -9457,10 +9437,16 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO, tipo) {
         data_fine: dataFine,
         ora_fine: oraFineStr,
         tipo: tipo,
-      }).eq('id', prenMia.id).select().single();
+      }).eq('id', prenMia.id).select().maybeSingle();
       if (errPren) {
         kioskBeep('err');
         kioskShowError('Errore aggiornando la prenotazione: ' + errPren.message);
+        return;
+      }
+      if (!prenAgg) {
+        kioskBeep('err');
+        kioskShowError('Non è stato possibile aggiornare la prenotazione '
+          + '(permessi o prenotazione non più presente). Avvisa l\'amministratore.');
         return;
       }
       // Aggiorna cache (fonte unica)
@@ -9516,11 +9502,19 @@ async function kioskConfirmRientro(pren) {
 
     // Verità unica: il rientro "chiude" la prenotazione portando
     // data_fine + ora_fine al momento effettivo. Niente usi_mezzo.
+    // maybeSingle: se 0 righe (es. RLS o prenotazione rimossa) non lancia
+    // l'errato "Cannot coerce..." ma restituisce null → messaggio chiaro.
     const { data: pAgg, error } = await sb.from('prenotazioni').update({
       data_fine: oggiIso,
       ora_fine: oraFineReale,
-    }).eq('id', pren.id).select().single();
+    }).eq('id', pren.id).select().maybeSingle();
     if (error) throw error;
+    if (!pAgg) {
+      kioskBeep('err');
+      kioskShowError('Non è stato possibile chiudere la prenotazione '
+        + '(permessi o prenotazione non più presente). Avvisa l\'amministratore.');
+      return;
+    }
     state.prenotazioni = state.prenotazioni.map(x => x.id === pAgg.id ? pAgg : x);
 
     // Durata reale dalla presa (ora_inizio) al rientro.
