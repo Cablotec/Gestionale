@@ -9127,6 +9127,35 @@ function kioskGoToAction() {
   kioskResetInactivity();
 }
 
+// Prenotazione che copre l'istante corrente per un mezzo (verità unica:
+// niente più usi_mezzo). Costruisce gli istanti come kioskConflittoOrarioMezzo:
+// senza orario → tutto il giorno (00:00–23:59). Restituisce la prenotazione
+// attiva ADESSO (la prima trovata) o null.
+function kioskPrenotazioneAttivaOra(mezzoId) {
+  const now = new Date();
+  return (kioskState.prenotazioniOggi || []).find(p => {
+    if (p.mezzo_id !== mezzoId) return false;
+    if (!p.data_inizio || !p.data_fine) return false;
+    const pInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
+    const pFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
+    if (isNaN(pInizio.getTime()) || isNaN(pFine.getTime())) return false;
+    return pInizio <= now && pFine > now;
+  }) || null;
+}
+
+// Chi è l'operatore di una prenotazione: autore (utente_id su profili) NON è
+// l'operatore. Gli operatori stanno in prenotazioni_utenti via
+// loadPrenotazioneOperatori. Restituisce il nome del primo operatore, con
+// fallback ragionevoli.
+function kioskNomeOperatorePren(p) {
+  const opIds = loadPrenotazioneOperatori(p.id) || [];
+  for (const oid of opIds) {
+    const nome = state.utentiById[oid]?.nome;
+    if (nome) return nome;
+  }
+  return null;
+}
+
 function kioskRenderAction() {
   const u = kioskState.utenteSelezionato;
   if (!u) { kioskGoToId(); return; }
@@ -9182,21 +9211,30 @@ function kioskRenderAction() {
     return cand.length ? cand[0].p : null;
   };
 
-  // Mappa mezzo_id → uso aperto (chi lo ha fuori adesso), per segnalare i
-  // mezzi occupati come bloccati invece di nasconderli.
-  const usoByMezzo = {};
-  kioskState.mezziInUso.forEach(uso => { usoByMezzo[uso.mezzo_id] = uso; });
+  // Mappa mezzo_id → prenotazione attiva ADESSO (verità unica: niente usi_mezzo).
+  // Serve a segnalare come bloccati i mezzi occupati da una prenotazione altrui
+  // in corso, invece di nasconderli.
+  const prenAttivaByMezzo = {};
+  state.mezzi.forEach(m => {
+    const pa = kioskPrenotazioneAttivaOra(m.id);
+    if (pa) prenAttivaByMezzo[m.id] = pa;
+  });
+  // È "miа" la prenotazione attiva? (autore o operatore) → non va bloccata.
+  const prenAttivaMia = (p) => p && (
+    p.utente_id === kioskState.authorId ||
+    (loadPrenotazioneOperatori(p.id) || []).includes(u.id)
+  );
 
-  // Tutti i mezzi: quelli fuori restano visibili ma bloccati.
+  // Tutti i mezzi: quelli occupati da altri restano visibili ma bloccati.
   const disponibili = state.mezzi.slice();
-  // Ordina: prima quelli liberi, poi gli occupati; il mio prenotato in cima.
+  // Ordina: prima i liberi, poi gli occupati da altri; il mio prenotato in cima.
   disponibili.sort((a,b) => {
     if (prenMia) {
       if (a.id === prenMia.mezzo_id) return -1;
       if (b.id === prenMia.mezzo_id) return 1;
     }
-    const aOcc = usoByMezzo[a.id] ? 1 : 0;
-    const bOcc = usoByMezzo[b.id] ? 1 : 0;
+    const aOcc = (prenAttivaByMezzo[a.id] && !prenAttivaMia(prenAttivaByMezzo[a.id])) ? 1 : 0;
+    const bOcc = (prenAttivaByMezzo[b.id] && !prenAttivaMia(prenAttivaByMezzo[b.id])) ? 1 : 0;
     if (aOcc !== bOcc) return aOcc - bOcc;
     return a.nome.localeCompare(b.nome);
   });
@@ -9206,29 +9244,31 @@ function kioskRenderAction() {
     grid.appendChild(el('div', { class:'kiosk-empty' }, 'Nessun mezzo disponibile al momento.'));
   } else {
     disponibili.forEach(m => {
-      const usoAttivo = usoByMezzo[m.id];
-      // ── Mezzo OCCUPATO (fuori adesso): visibile ma bloccato ──
-      if (usoAttivo) {
-        const chi = state.utentiById[usoAttivo.utente_id];
-        const rp = usoAttivo.rientro_previsto ? new Date(usoAttivo.rientro_previsto) : null;
-        const rpStr = rp
-          ? (fmtIT(toLocalISO(rp)) + ' ' + z(rp.getHours()) + ':' + z(rp.getMinutes()))
+      const prenAttiva = prenAttivaByMezzo[m.id];
+      const occupatoDaAltri = prenAttiva && !prenAttivaMia(prenAttiva);
+      // ── Mezzo OCCUPATO da prenotazione altrui in corso: visibile ma bloccato ──
+      if (occupatoDaAltri) {
+        const chi = kioskNomeOperatorePren(prenAttiva);
+        // Fine prenotazione (= "rientro previsto" nel nuovo modello).
+        const fine = new Date(prenAttiva.data_fine + 'T' + (prenAttiva.ora_fine || '23:59'));
+        const fineStr = !isNaN(fine.getTime())
+          ? (fmtIT(toLocalISO(fine)) + ' ' + z(fine.getHours()) + ':' + z(fine.getMinutes()))
           : null;
         grid.appendChild(el('div', {
           class: 'kiosk-tile mezzo mezzo-occupato',
           style: 'border-left-color:var(--mut);opacity:.55;cursor:not-allowed;',
           onclick: () => {
             kioskBeep('err');
-            kioskShowError('Mezzo occupato da ' + (chi?.nome || 'un operatore')
-              + (rpStr ? ('. Rientro previsto: ' + rpStr) : '.'));
+            kioskShowError('Mezzo occupato da ' + (chi || 'un altro operatore')
+              + (fineStr ? ('. Libero dal: ' + fineStr) : '.'));
           },
         },
           el('div', { class:'kiosk-tile-name' }, m.nome),
           m.targa ? el('div', { class:'kiosk-tile-targa' }, m.targa) : null,
           el('div', { class:'kiosk-tile-targa', style:'color:var(--red);font-weight:600;' },
-            '● Occupato · ' + (chi?.nome || '?')),
-          rpStr ? el('div', { class:'kiosk-tile-targa', style:'color:var(--mut);' },
-            'rientro ' + rpStr) : null,
+            '● Occupato · ' + (chi || '?')),
+          fineStr ? el('div', { class:'kiosk-tile-targa', style:'color:var(--mut);' },
+            'fino alle ' + fineStr) : null,
         ));
         return;
       }
