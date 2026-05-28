@@ -2063,6 +2063,108 @@ function checkSovrapposizioni(mezzoId, dataInizio, dataFine, escludiId) {
   });
 }
 
+// Conflitto ORARIO per il check-out mezzi dal kiosk.
+// A differenza di checkSovrapposizioni (che ragiona a giorni interi e serve
+// alla modal admin), questa calcola gli istanti effettivi usando ora_inizio/
+// ora_fine. Le prenotazioni senza orario (storiche) sono trattate come
+// "tutto il giorno" (00:00 → 23:59) — fallback sicuro.
+//
+// Parametri:
+//   mezzoId      — mezzo da prendere
+//   presaTS      — Date di presa (di norma adesso)
+//   rientroTS    — Date di rientro richiesto dall'utente
+//   escludiId    — id prenotazione propria da ignorare (se sta confermando la sua)
+//
+// Ritorna:
+//   { occupatoOra: bool, conflitto: Date|null }
+//   - occupatoOra=true  → una prenotazione altrui è GIÀ in corso al momento
+//                          della presa: il mezzo non è disponibile adesso.
+//   - conflitto=Date    → il primo istante (inizio di una prenotazione altrui)
+//                          che cade dentro [presa, rientro richiesto]: oltre
+//                          quell'ora non puoi tenere il mezzo.
+//   - se entrambi nulli/false → nessun conflitto, ok fino al rientro richiesto.
+function kioskConflittoOrarioMezzo(mezzoId, presaTS, rientroTS, escludiId) {
+  // Costruisce gli istanti [inizio, fine] di una prenotazione, con fallback
+  // tutto-il-giorno se mancano gli orari.
+  const intervallo = (p) => {
+    const oraI = p.ora_inizio || '00:00';
+    const oraF = p.ora_fine || '23:59';
+    const inizio = new Date(`${p.data_inizio}T${oraI}`);
+    const fine = new Date(`${p.data_fine}T${oraF}`);
+    return { inizio, fine };
+  };
+
+  let occupatoOra = false;
+  let primoConflitto = null;
+
+  (state.prenotazioni || []).forEach(p => {
+    if (p.mezzo_id !== mezzoId) return;
+    if (escludiId && p.id === escludiId) return;
+    const { inizio, fine } = intervallo(p);
+    if (isNaN(inizio.getTime()) || isNaN(fine.getTime())) return;
+
+    // Prenotazione già in corso al momento della presa?
+    if (inizio <= presaTS && fine > presaTS) {
+      occupatoOra = true;
+    }
+    // Prenotazione che inizia dentro la finestra [presa, rientro richiesto]?
+    if (inizio > presaTS && inizio < rientroTS) {
+      if (!primoConflitto || inizio < primoConflitto) primoConflitto = inizio;
+    }
+  });
+
+  return { occupatoOra, conflitto: primoConflitto };
+}
+
+// Conflitto ORARIO (usato dal kiosk al check-out mezzo).
+// Diversamente da checkSovrapposizioni (che ragiona a giorni), questa
+// funzione calcola gli istanti effettivi di ogni prenotazione usando anche
+// ora_inizio/ora_fine. Per le prenotazioni storiche SENZA orario, fallback
+// "tutto il giorno" (00:00 → 23:59) come deciso.
+// Ritorna { conflitto: Date | null }:
+//   - la Date è l'istante in cui inizia la PRIMA prenotazione che cade nel
+//     periodo [presaTS, rientroTS]. È il "tetto massimo" fino a cui si può
+//     tenere il mezzo. null = nessun conflitto, periodo libero.
+// Se una prenotazione è già in corso nell'istante della presa, ritorna
+// { occupatoOra: true }.
+function kioskConflittoOrarioMezzo(mezzoId, presaTS, rientroTS, escludiId) {
+  const presa = presaTS instanceof Date ? presaTS : new Date(presaTS);
+  const rientro = rientroTS instanceof Date ? rientroTS : new Date(rientroTS);
+
+  let primoInizioConflitto = null;
+  let occupatoOra = false;
+
+  (state.prenotazioni || []).forEach(p => {
+    if (p.mezzo_id !== mezzoId) return;
+    if (escludiId && p.id === escludiId) return;
+    if (!p.data_inizio || !p.data_fine) return;
+
+    // Calcola istanti effettivi della prenotazione esistente.
+    // Senza orario → tutto il giorno (00:00 inizio, 23:59 fine).
+    const oraIn = p.ora_inizio || '00:00';
+    const oraFi = p.ora_fine || '23:59';
+    const pInizio = new Date(p.data_inizio + 'T' + oraIn);
+    const pFine = new Date(p.data_fine + 'T' + oraFi);
+    if (isNaN(pInizio.getTime()) || isNaN(pFine.getTime())) return;
+
+    // La prenotazione è già in corso al momento della presa?
+    if (pInizio <= presa && pFine > presa) {
+      occupatoOra = true;
+      return;
+    }
+    // La prenotazione inizia dopo la presa ma prima del rientro richiesto?
+    // → è un conflitto: limita fino al suo inizio.
+    if (pInizio > presa && pInizio < rientro) {
+      if (!primoInizioConflitto || pInizio < primoInizioConflitto) {
+        primoInizioConflitto = pInizio;
+      }
+    }
+  });
+
+  if (occupatoOra) return { occupatoOra: true, conflitto: null };
+  return { occupatoOra: false, conflitto: primoInizioConflitto };
+}
+
 // Definizione macro-aree e sotto-tab
 const TAB_STRUCTURE = {
   calendari: {
@@ -8169,10 +8271,10 @@ async function openPrenotazioneModal(p) {
         el('input', { type:'date', name:'data_fine', required:'true', value:p.data_fine||p.data_inizio||today })),
     ),
     el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Ora inizio (opz.)'),
-        el('input', { type:'time', name:'ora_inizio', value:p.ora_inizio||'' })),
-      el('div', { class:'field' }, el('label', {}, 'Ora fine (opz.)'),
-        el('input', { type:'time', name:'ora_fine', value:p.ora_fine||'' })),
+      el('div', { class:'field' }, el('label', {}, 'Ora inizio *'),
+        el('input', { type:'time', name:'ora_inizio', required:'true', value:p.ora_inizio||'08:00' })),
+      el('div', { class:'field' }, el('label', {}, 'Ora fine *'),
+        el('input', { type:'time', name:'ora_fine', required:'true', value:p.ora_fine||'18:00' })),
     ),
     el('div', { class:'field' }, el('label', {}, 'Note (opz.)'),
       el('textarea', { name:'note', rows:'2' }, p.note||'')),
@@ -8335,8 +8437,13 @@ async function openPrenotazioneModal(p) {
     };
     if (!payload.mezzo_id || !payload.data_inizio || !payload.data_fine)
       return toast('Compila i campi obbligatori', 'err');
+    if (!payload.ora_inizio || !payload.ora_fine)
+      return toast('Ora inizio e ora fine sono obbligatorie', 'err');
     if (payload.data_fine < payload.data_inizio)
       return toast('Data fine non può essere prima dell\'inizio', 'err');
+    // Se stesso giorno, l'ora fine deve essere dopo l'ora inizio
+    if (payload.data_inizio === payload.data_fine && payload.ora_fine <= payload.ora_inizio)
+      return toast('Nello stesso giorno, l\'ora fine deve essere dopo l\'ora inizio', 'err');
     if (utentiSel.length === 0)
       return toast('Seleziona almeno un operatore del mezzo', 'err');
 
@@ -9089,20 +9196,33 @@ function kioskRenderAction() {
     root.appendChild(el('div', { class:'kiosk-section-title' }, 'Oppure prendi un altro mezzo'));
   }
 
-  // Lista mezzi disponibili
+  // Lista mezzi disponibili.
+  // Escludo solo i mezzi FISICAMENTE in uso (usi_mezzo aperti). I mezzi
+  // prenotati da altri NON vengono più nascosti: con la logica oraria un
+  // mezzo "prenotato solo dalle 18" è prendibile prima. Sarà il check
+  // kioskConflittoOrarioMezzo (in fase di conferma) a bloccare se serve.
+  // Mostro però un'indicazione "prenotato dalle …" per dare contesto.
   const mezziInUsoIds = kioskState.mezziInUso.map(x => x.mezzo_id);
-  // Mezzi prenotati oggi da OGNI altro utente (se prenotato dall'utente corrente, lo evidenziamo invece di nasconderlo)
-  const mezziPrenotatiAltri = kioskState.prenotazioniOggi
-    .filter(p => p.utente_id !== u.id /* utente_id è l'autore, non l'operatore - vedi nota sotto */)
-    .map(p => p.mezzo_id);
 
-  // Mezzo prenotato dall'utente corrente per oggi
-  const prenMia = kioskState.prenotazioniOggi.find(p => p.utente_id === u.id);
-
-  const disponibili = state.mezzi.filter(m =>
-    !mezziInUsoIds.includes(m.id) && !mezziPrenotatiAltri.includes(m.id)
+  // Mezzo prenotato dall'utente corrente per oggi (per evidenziarlo in cima)
+  const prenMia = kioskState.prenotazioniOggi.find(p =>
+    p.mezzo_id && (p.utente_id === u.id || (loadPrenotazioneOperatori(p.id) || []).includes(u.id))
   );
-  // Ordina con il prenotato in cima
+
+  // Per ogni mezzo, la prossima prenotazione di oggi (di chiunque) con orario,
+  // usata come etichetta informativa "prenotato dalle HH:MM".
+  const oggiIsoNow = toLocalISO(new Date());
+  const prossimaPrenOggi = (mezzoId) => {
+    const cand = (kioskState.prenotazioniOggi || [])
+      .filter(p => p.mezzo_id === mezzoId && p.ora_inizio)
+      .map(p => ({ p, ts: new Date(`${oggiIsoNow}T${p.ora_inizio}`) }))
+      .filter(x => !isNaN(x.ts.getTime()) && x.ts > new Date())
+      .sort((a,b) => a.ts - b.ts);
+    return cand.length ? cand[0].p : null;
+  };
+
+  const disponibili = state.mezzi.filter(m => !mezziInUsoIds.includes(m.id));
+  // Ordina con il prenotato per me in cima
   disponibili.sort((a,b) => {
     if (prenMia) {
       if (a.id === prenMia.mezzo_id) return -1;
@@ -9117,6 +9237,8 @@ function kioskRenderAction() {
   } else {
     disponibili.forEach(m => {
       const isPren = prenMia && prenMia.mezzo_id === m.id;
+      // Prenotazione altrui di oggi che limita l'uso (solo se non è la mia)
+      const prossima = (!isPren) ? prossimaPrenOggi(m.id) : null;
       grid.appendChild(el('div', {
         class: 'kiosk-tile mezzo'+(isPren ? ' mezzo-prenotato' : ''),
         style: 'border-left-color:'+(m.colore || '#4eb8ff'),
@@ -9125,6 +9247,8 @@ function kioskRenderAction() {
         el('div', { class:'kiosk-tile-name' }, m.nome),
         m.targa ? el('div', { class:'kiosk-tile-targa' }, m.targa) : null,
         isPren ? el('div', { class:'kiosk-tile-prenotato' }, '★ Prenotato per te oggi') : null,
+        (prossima ? el('div', { class:'kiosk-tile-targa', style:'color:var(--yel);' },
+          '⏱ prenotato dalle ' + prossima.ora_inizio) : null),
       ));
     });
   }
@@ -9259,18 +9383,24 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO, tipo) {
     (p.utente_id === u.id || (loadPrenotazioneOperatori(p.id) || []).includes(u.id))
   );
 
-  // CHECK CONFLITTI: prenotazioni dello stesso mezzo che si sovrappongono al
-  // periodo [oggi → rientro previsto], escludendo l'eventuale prenotazione propria.
-  const conflitti = checkSovrapposizioni(mezzo.id, dataInizio, dataFine, prenMia ? prenMia.id : null);
-  if (conflitti.length > 0) {
-    const dettagli = conflitti.map(c => {
-      const periodo = c.data_inizio === c.data_fine
-        ? fmtIT(c.data_inizio)
-        : `${fmtIT(c.data_inizio)} → ${fmtIT(c.data_fine)}`;
-      return '• ' + periodo;
-    }).join('\n');
+  // CHECK CONFLITTI ORARIO: cerco la prima prenotazione (di altri) che cade
+  // nel periodo [adesso → rientro previsto], escludendo la mia. Modalità A:
+  // blocco e chiedo di correggere il rientro.
+  const cf = kioskConflittoOrarioMezzo(mezzo.id, oraUscita, rp, prenMia ? prenMia.id : null);
+  if (cf.occupatoOra) {
     kioskBeep('err');
-    kioskShowError('Mezzo già prenotato nel periodo:\n' + dettagli + '\n\nScegli un rientro prima, o un altro mezzo.');
+    kioskShowError('Questo mezzo è già in uso/prenotato in questo momento. Non è disponibile.');
+    return;
+  }
+  if (cf.conflitto) {
+    const lim = cf.conflitto;
+    const limGiorno = toLocalISO(lim);
+    const oggiIso = toLocalISO(oraUscita);
+    const quando = (limGiorno === oggiIso)
+      ? ('oggi alle ' + z(lim.getHours()) + ':' + z(lim.getMinutes()))
+      : ('il ' + fmtIT(limGiorno) + ' alle ' + z(lim.getHours()) + ':' + z(lim.getMinutes()));
+    kioskBeep('err');
+    kioskShowError('Mezzo prenotato da ' + quando + '.\nScegli un rientro entro quell\'orario.');
     return;
   }
 
