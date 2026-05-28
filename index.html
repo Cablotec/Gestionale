@@ -9165,8 +9165,9 @@ function kioskRenderAction() {
   root.innerHTML = '';
 
   // Ha un mezzo fuori? (verità unica: prenotazione mia attiva ADESSO)
-  // Cerco tra le prenotazioni che coprono questo istante una di cui l'utente
-  // corrente è operatore (via prenotazioni_utenti) o autore.
+  // "Mia" = l'utente corrente è operatore della prenotazione (via
+  // prenotazioni_utenti). NON si usa utente_id: è l'account kiosk, uguale per
+  // tutti gli operatori → identificherebbe chiunque come "mio".
   const nowTS = new Date();
   const prenFuoriMia = (state.prenotazioni || []).find(p => {
     if (!p.mezzo_id || !p.data_inizio || !p.data_fine) return false;
@@ -9174,8 +9175,9 @@ function kioskRenderAction() {
     const pFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
     if (isNaN(pInizio.getTime()) || isNaN(pFine.getTime())) return false;
     if (!(pInizio <= nowTS && pFine > nowTS)) return false;
-    return p.utente_id === kioskState.authorId
-      || (loadPrenotazioneOperatori(p.id) || []).includes(u.id);
+    // L'operatore vero è SOLO chi sta in prenotazioni_utenti. utente_id sulla
+    // prenotazione è l'autore (account kiosk), uguale per tutti → non distingue.
+    return (loadPrenotazioneOperatori(p.id) || []).includes(u.id);
   });
   if (prenFuoriMia) {
     const m = state.mezzi.find(x => x.id === prenFuoriMia.mezzo_id);
@@ -9215,9 +9217,10 @@ function kioskRenderAction() {
     p.data_inizio && p.data_fine && p.data_inizio <= oggiIso && p.data_fine >= oggiIso
   );
 
-  // Mezzo prenotato dall'utente corrente per oggi (per evidenziarlo in cima)
+  // Mezzo prenotato dall'utente corrente per oggi (per evidenziarlo in cima).
+  // Solo via prenotazioni_utenti: utente_id è l'autore kiosk, non distingue.
   const prenMia = prenOggi.find(p =>
-    p.mezzo_id && (p.utente_id === kioskState.authorId || (loadPrenotazioneOperatori(p.id) || []).includes(u.id))
+    p.mezzo_id && (loadPrenotazioneOperatori(p.id) || []).includes(u.id)
   );
 
   // Per ogni mezzo, la prossima prenotazione di oggi (di chiunque) con orario,
@@ -9240,11 +9243,10 @@ function kioskRenderAction() {
     const pa = kioskPrenotazioneAttivaOra(m.id);
     if (pa) prenAttivaByMezzo[m.id] = pa;
   });
-  // È "miа" la prenotazione attiva? (autore o operatore) → non va bloccata.
-  const prenAttivaMia = (p) => p && (
-    p.utente_id === kioskState.authorId ||
-    (loadPrenotazioneOperatori(p.id) || []).includes(u.id)
-  );
+  // È "mia" la prenotazione attiva? Solo via prenotazioni_utenti (utente_id è
+  // l'autore kiosk, uguale per tutti). Se è mia non va bloccata.
+  const prenAttivaMia = (p) => p &&
+    (loadPrenotazioneOperatori(p.id) || []).includes(u.id);
 
   // Tutti i mezzi: quelli occupati da altri restano visibili ma bloccati.
   const disponibili = state.mezzi.slice();
