@@ -197,21 +197,12 @@ input.search:focus{border-color:var(--acc);}
 .cal-events{display:flex;flex-direction:column;gap:2px;margin-top:2px;}
 .cal-evt{font-family:'DM Mono',monospace;font-size:10px;line-height:1.2;padding:3px 5px;border-radius:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid;background:var(--hover2);color:var(--txt);}
 .cal-evt:hover{background:var(--hover3);}
-.cal-uso{border-left-style:dashed;}
-.cal-uso-aperto{background:rgba(255,107,53,.12);border-left-color:var(--or);color:var(--or);font-weight:500;}
-.cal-uso-aperto:hover{background:rgba(255,107,53,.2);}
-.cal-uso-chiuso{background:rgba(107,107,100,.12);border-left-color:var(--mut);color:var(--mut);}
-.cal-uso-chiuso:hover{background:rgba(107,107,100,.2);}
 .cal-assenza{border-left-style:dotted;font-style:italic;}
 .cal-assenza:hover{filter:brightness(1.3);}
-.swatch-uso-aperto{background:rgba(255,107,53,.5);border-color:var(--or);}
-.swatch-uso-chiuso{background:rgba(107,107,100,.5);border-color:var(--mut);}
 .cal-more{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);padding:3px 5px;cursor:pointer;border-radius:2px;background:var(--hover2);text-align:center;letter-spacing:.05em;}
 .cal-more:hover{background:var(--hover3);color:var(--txt);}
 .day-row{padding:10px 12px;margin-bottom:6px;background:var(--sur2);border:1px solid var(--brd);border-left:4px solid var(--mut);border-radius:4px;cursor:pointer;transition:background .12s;}
 .day-row:hover{background:var(--hover2);}
-.day-row-uso-aperto{border-left-color:var(--or);background:rgba(255,107,53,.06);}
-.day-row-uso-chiuso{border-left-color:var(--mut);}
 .day-row-title{font-size:14px;font-weight:600;margin-bottom:4px;}
 .day-row-sub{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
 
@@ -351,13 +342,7 @@ input.search:focus{border-color:var(--acc);}
 .kiosk-tile-sub{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);margin-top:6px;letter-spacing:.06em;}
 .kiosk-tile.mezzo{border-left-width:6px;}
 .kiosk-tile.mezzo-prenotato{background:rgba(212,255,78,.08);border-color:var(--acc);}
-.kiosk-tile.mezzo-prenotato .kiosk-tile-prenotato{font-family:'DM Mono',monospace;font-size:10px;color:var(--acc);margin-top:6px;letter-spacing:.06em;font-weight:600;}
 .kiosk-tile-targa{font-family:'DM Mono',monospace;font-size:11px;color:var(--or);margin-top:4px;}
-.kiosk-fuori{margin-top:auto;padding:14px 16px;background:var(--sur);border:1px solid var(--brd);border-radius:6px;max-height:130px;overflow-y:auto;}
-.kiosk-fuori-title{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px;}
-.kiosk-fuori-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-family:'DM Mono',monospace;font-size:12px;border-bottom:1px solid var(--brd);}
-.kiosk-fuori-row:last-child{border-bottom:none;}
-.kiosk-fuori-empty{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);font-style:italic;text-align:center;padding:6px;}
 .kiosk-greet{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
 .kiosk-greet-name{font-size:28px;font-weight:700;}
 .kiosk-cancel{padding:10px 20px;background:transparent;border:1px solid var(--brd);color:var(--mut);font-family:'Syne',sans-serif;font-size:14px;font-weight:600;cursor:pointer;border-radius:4px;text-transform:uppercase;letter-spacing:.05em;}
@@ -863,7 +848,6 @@ const state = {
   consegne: [],            // tutte le consegne in memoria
   consegneCommessa: [],    // consegne parziali di commesse (tabella consegne_commessa)
   prenOp: [],            // pivot prenotazione_id ↔ utente_id
-  usiMezzo: [],            // tutti gli usi mezzo (aperti e chiusi)
   aziende: [],             // anagrafica unificata clienti/fornitori
   azFilter: 'attivi',      // 'all' | 'attivi' | 'disattivi'
   azRuoloFilter: 'tutti',  // 'tutti' | 'cliente' | 'fornitore' | 'entrambi'
@@ -1594,14 +1578,13 @@ document.addEventListener('click', async (e) => {
 // Avere un solo handler evita race condition tra ricreazione client e refresh.
 
 async function loadAllData() {
-  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, usiMezzo, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, attivitaExtra, assenze, opAddetti, impostazioni, consegneCommessa, opFornitori, spedizioni] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, attivitaExtra, assenze, opAddetti, impostazioni, consegneCommessa, opFornitori, spedizioni] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('utenti').select('*').order('nome'),
     sb.from('prenotazioni').select('*').order('data_inizio'),
     sb.from('consegne').select('*').order('ordine'),
     sb.from('prenotazioni_utenti').select('*'),
-    sb.from('usi_mezzo').select('*').order('data_uscita'),
     sb.from('aziende').select('*').order('nome'),
     sb.from('articoli').select('*').order('codice'),
     sb.from('tipi_lavorazione').select('*').order('ordine'),
@@ -1623,7 +1606,6 @@ async function loadAllData() {
   if (prenotazioni.error) throw prenotazioni.error;
   if (consegne.error) throw consegne.error;
   if (prenOp.error) throw prenOp.error;
-  if (usiMezzo.error) throw usiMezzo.error;
   if (aziende.error) throw aziende.error;
   if (articoli.error) throw articoli.error;
   if (tipiLav.error) throw tipiLav.error;
@@ -1646,7 +1628,6 @@ async function loadAllData() {
   state.prenotazioni = prenotazioni.data || [];
   state.consegne = consegne.data || [];
   state.prenOp = prenOp.data || [];
-  state.usiMezzo = usiMezzo.data || [];
   state.aziende = aziende.data || [];
   state.articoli = articoli.data || [];
   state.tipiLav = tipiLav.data || [];
@@ -1680,8 +1661,6 @@ function startRealtime() {
         (p) => applyChange('consegne', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni_utenti' },
         (p) => applyChange('prenotazioni_utenti', p))
-    .on('postgres_changes', { event:'*', schema:'public', table:'usi_mezzo' },
-        (p) => applyChange('usi_mezzo', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'aziende' },
         (p) => applyChange('aziende', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'articoli' },
@@ -1752,14 +1731,6 @@ function applyChange(tabella, payload) {
       if (!dup) state.prenOp.push(row);
     } else if (ev === 'DELETE') state.prenOp = state.prenOp.filter(x =>
       !(x.prenotazione_id === oldRow.prenotazione_id && x.utente_id === oldRow.utente_id));
-  } else if (tabella === 'usi_mezzo') {
-    if (ev === 'INSERT') {
-      if (!state.usiMezzo.find(x => x.id === row.id)) state.usiMezzo.push(row);
-    } else if (ev === 'UPDATE') {
-      state.usiMezzo = state.usiMezzo.map(x => x.id === row.id ? row : x);
-    } else if (ev === 'DELETE') {
-      state.usiMezzo = state.usiMezzo.filter(x => x.id !== oldRow.id);
-    }
   } else if (tabella === 'aziende') {
     if (ev === 'INSERT') {
       if (!state.aziende.find(x => x.id === row.id)) state.aziende.push(row);
@@ -2356,7 +2327,6 @@ function renderCalendar(root) {
   // fisiche dal kiosk) NON vengono più disegnati: erano ridondanti perché
   // ogni uscita dal kiosk crea/aggiorna già una prenotazione corrispondente.
   // Mostrarli entrambi produceva una doppia voce per la stessa uscita.
-  const usiInRange = [];
   const mezziById = Object.fromEntries(state.mezzi.map(m=>[m.id,m]));
 
   // Costruisco indice giorno → array di entries
@@ -2535,29 +2505,6 @@ function renderCalendar(root) {
           title: `Mezzo: ${m?.nome || '—'}\nDestinazione:\n${dest.tooltip}\nOperatori: ${utilLbl}\nTipo: ${p.tipo}\nCreata da: ${autore}`,
           onclick: (e) => { e.stopPropagation(); openPrenotazioneModal(p); }
         }, lblPezzi.join(' ')));
-      } else if (entry.kind === 'uso') {
-        // entry.kind === 'uso'
-        const u = entry.data;
-        const m = mezziById[u.mezzo_id];
-        const utz = state.utentiById[u.utente_id];
-        const oraUscita = new Date(u.data_uscita);
-        const oraRientro = u.data_rientro ? new Date(u.data_rientro) : null;
-        const titleParts = [
-          `Mezzo: ${m?.nome || '—'}${m?.targa ? ' · '+m.targa : ''}`,
-          `Operatore: ${utz?.nome || '—'}`,
-          `Uscita: ${fmtIT(oraUscita.toISOString().substring(0,10))} ${z(oraUscita.getHours())}:${z(oraUscita.getMinutes())}`,
-        ];
-        if (oraRientro) titleParts.push(
-          `Rientro: ${fmtIT(oraRientro.toISOString().substring(0,10))} ${z(oraRientro.getHours())}:${z(oraRientro.getMinutes())}`);
-        else titleParts.push('Rientro: in corso');
-        if (u.sede) titleParts.push(`Sede: ${u.sede}`);
-        const evtCls = 'cal-evt cal-uso' + (entry.aperto ? ' cal-uso-aperto' : ' cal-uso-chiuso');
-        const lbl = (m?.nome || '?') + ' · ' + (utz?.nome || '?') + (entry.aperto ? ' ⏱' : '');
-        box.append(el('div', {
-          class: evtCls,
-          title: titleParts.join('\n'),
-          onclick: (e) => { e.stopPropagation(); openUsoMezzoModal(u); }
-        }, lbl));
       } else {
         // entry.kind === 'assenza'
         const ass = entry.data;
@@ -2630,29 +2577,8 @@ function openDayDetailModal(iso, evs) {
     }
 
     // ── Uso mezzo ──────────────────────────────────────────
-    if (entry.kind === 'uso') {
-      const u = entry.data;
-      const m = mezziById[u.mezzo_id];
-      const utz = state.utentiById[u.utente_id];
-      const oraUscita = new Date(u.data_uscita);
-      const oraRientro = u.data_rientro ? new Date(u.data_rientro) : null;
-      const cls = entry.aperto ? 'day-row day-row-uso-aperto' : 'day-row day-row-uso-chiuso';
-      body.append(el('div', {
-        class:cls,
-        onclick: () => { closeModal(); openUsoMezzoModal(u); },
-      },
-        el('div', { class:'day-row-title' },
-          (m?.nome || '?') + (m?.targa ? ' · '+m.targa : '') +
-          (entry.aperto ? ' ⏱' : '')),
-        el('div', { class:'day-row-sub' },
-          el('span', { class:'badge '+(entry.aperto ? 'bor' : 'bgry') },
-            entry.aperto ? 'in corso' : 'chiuso'),
-          ' ', utz?.nome || '—',
-          ' · uscita ', z(oraUscita.getHours())+':'+z(oraUscita.getMinutes()),
-          oraRientro ? ' · rientro '+z(oraRientro.getHours())+':'+z(oraRientro.getMinutes()) : ''),
-      ));
-      return;
-    }
+    // (rimosso: gli usi_mezzo non sono più disegnati nel calendario,
+    //  le uscite sono rappresentate dalle prenotazioni)
 
     // ── Assenza ────────────────────────────────────────────
     if (entry.kind === 'assenza') {
@@ -7745,21 +7671,6 @@ function renderStorico(root) {
   root.append(tw);
 }
 
-// Bottone per riaprire un'operazione (spedita → aperta, svuota i campi spedizione)
-async function riaperturaOperazione(o) {
-  if (!confirm(`Riaprire l'operazione ${o.numero_ordine || ''}?\nVerranno azzerati: data consegna, giustificazione, NC, responsabilità.`)) return;
-  const { data, error } = await sb.from('operazioni').update({
-    stato: 'aperta',
-    consegnato_il: null,
-    giustificazione_ritardo: null,
-    nc_post_consegna: null,
-    responsabilita: null,
-  }).eq('id', o.id).select().single();
-  if (error) return toast(error.message, 'err');
-  state.operazioni = state.operazioni.map(x => x.id === o.id ? data : x);
-  toast('Operazione riaperta'); renderTab('storico');
-}
-
 // Apri il quick-dialog di consegna da Pianificazione
 // Cambio stato rapido per le azioni reversibili (aperta ↔ sospesa, riapri da spedita).
 // Click secco senza conferma: la commessa non viene "distrutta", il cambio è
@@ -8488,135 +8399,6 @@ async function openPrenotazioneModal(p) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// USO MEZZO — visualizzazione e modifica (admin) di un uso
-// ═══════════════════════════════════════════════════════════
-function openUsoMezzoModal(uso) {
-  const m = state.mezzi.find(x => x.id === uso.mezzo_id);
-  const utz = state.utentiById[uso.utente_id];
-  const isAdmin = state.profile?.ruolo === 'admin';
-  const aperto = !uso.data_rientro;
-
-  const modal = el('div', { class:'modal' });
-  modal.append(el('div', { class:'mhd' },
-    el('h2', {}, aperto ? 'Uso mezzo in corso' : 'Uso mezzo'),
-    el('button', { class:'mclose', onclick:closeModal }, '✕'),
-  ));
-
-  const body = el('div', { class:'mbody' });
-
-  // Stato corrente (lettura)
-  const oraUscita = new Date(uso.data_uscita);
-  const oraRientro = uso.data_rientro ? new Date(uso.data_rientro) : null;
-  const durataMs = (oraRientro || new Date()).getTime() - oraUscita.getTime();
-  const durata = (() => {
-    const min = Math.round(durataMs / 60000);
-    if (min < 60) return min + ' min';
-    const h = Math.floor(min / 60);
-    const r = min % 60;
-    return h + 'h' + (r ? ' '+r+'min' : '');
-  })();
-
-  body.append(el('div', { class:'field' },
-    el('label', {}, 'Mezzo'),
-    el('div', { class:'mono', style:'font-size:14px;padding:8px 0;' },
-      (m?.nome || '—') + (m?.targa ? ' · '+m.targa : '')),
-  ));
-  body.append(el('div', { class:'field' },
-    el('label', {}, 'Operatore'),
-    el('div', { class:'mono', style:'font-size:14px;padding:8px 0;' }, utz?.nome || '—'),
-  ));
-
-  // Form per admin: modifica orari
-  let inUscita, inRientro;
-  if (isAdmin) {
-    const isoLocal = (d) => {
-      // converte una Date in formato datetime-local "YYYY-MM-DDTHH:MM"
-      const pad = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    };
-    inUscita = el('input', { type:'datetime-local', value: isoLocal(oraUscita) });
-    inRientro = el('input', { type:'datetime-local', value: oraRientro ? isoLocal(oraRientro) : '' });
-    body.append(el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Data/ora uscita'), inUscita),
-      el('div', { class:'field' }, el('label', {}, 'Data/ora rientro'+(aperto ? ' (vuoto = aperto)' : '')), inRientro),
-    ));
-  } else {
-    body.append(el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Uscita'),
-        el('div', { class:'mono', style:'padding:8px 0;' },
-          fmtIT(toLocalISO(oraUscita))+' '+z(oraUscita.getHours())+':'+z(oraUscita.getMinutes()))),
-      el('div', { class:'field' }, el('label', {}, 'Rientro'),
-        el('div', { class:'mono', style:'padding:8px 0;' },
-          oraRientro
-            ? fmtIT(toLocalISO(oraRientro))+' '+z(oraRientro.getHours())+':'+z(oraRientro.getMinutes())
-            : el('span', { class:'badge byel' }, 'in corso'))),
-    ));
-  }
-
-  body.append(el('div', { class:'field' },
-    el('label', {}, 'Durata'),
-    el('div', { class:'mono', style:'padding:8px 0;' }, durata + (aperto ? ' (ancora in corso)' : '')),
-  ));
-  if (uso.sede) body.append(el('div', { class:'field' },
-    el('label', {}, 'Postazione check-out'),
-    el('div', { class:'mono', style:'padding:8px 0;' }, uso.sede),
-  ));
-  if (uso.note) body.append(el('div', { class:'field' },
-    el('label', {}, 'Note'),
-    el('div', { style:'padding:8px 0;' }, uso.note),
-  ));
-
-  modal.append(body);
-
-  // Footer
-  const foot = el('div', { class:'mfoot' });
-  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
-
-  if (isAdmin) {
-    if (aperto) {
-      foot.append(el('button', { class:'btnp', onclick: async () => {
-        if (!confirm('Chiudere questo uso adesso?')) return;
-        const now = new Date().toISOString();
-        const { data, error } = await sb.from('usi_mezzo')
-          .update({ data_rientro: now }).eq('id', uso.id).select().single();
-        if (error) return toast(error.message, 'err');
-        state.usiMezzo = state.usiMezzo.map(x => x.id === uso.id ? data : x);
-        toast('Uso chiuso'); closeModal(); renderTab(state.currentTab);
-      }}, 'Chiudi adesso'));
-    }
-    foot.append(el('button', { class:'btnp', onclick: async () => {
-      // Salva modifiche orari
-      const dUsc = inUscita.value;
-      const dRie = inRientro.value;
-      if (!dUsc) return toast('Data uscita obbligatoria', 'err');
-      const payload = {
-        data_uscita: new Date(dUsc).toISOString(),
-        data_rientro: dRie ? new Date(dRie).toISOString() : null,
-      };
-      if (payload.data_rientro && payload.data_rientro < payload.data_uscita)
-        return toast('Rientro non può essere prima di uscita', 'err');
-      const { data, error } = await sb.from('usi_mezzo')
-        .update(payload).eq('id', uso.id).select().single();
-      if (error) return toast(error.message, 'err');
-      state.usiMezzo = state.usiMezzo.map(x => x.id === uso.id ? data : x);
-      toast('Uso aggiornato'); closeModal(); renderTab(state.currentTab);
-    }}, 'Salva'));
-    foot.append(el('button', { class:'btnd', onclick: async () => {
-      if (!confirm('Eliminare questo uso? Operazione non reversibile.')) return;
-      const { data, error } = await sb.from('usi_mezzo').delete().eq('id', uso.id).select();
-      if (error) return toast(error.message, 'err');
-      if (!data || data.length === 0) {
-        return toast('Eliminazione bloccata: verifica le policy DELETE su usi_mezzo', 'err');
-      }
-      state.usiMezzo = state.usiMezzo.filter(x => x.id !== uso.id);
-      toast('Uso eliminato'); closeModal(); renderTab(state.currentTab);
-    }}, 'Elimina'));
-  }
-  modal.append(foot);
-  openModal(modal);
-}
-
-// ═══════════════════════════════════════════════════════════
 // KIOSK MODE — terminale check-out mezzi per mini-PC sede
 // ═══════════════════════════════════════════════════════════
 const kioskState = {
@@ -9166,11 +8948,19 @@ function kioskRenderAction() {
     p.data_inizio && p.data_fine && p.data_inizio <= oggiIso && p.data_fine >= oggiIso
   );
 
-  // Mezzo prenotato dall'utente corrente per oggi (per evidenziarlo in cima).
+  // Mezzo prenotato dall'utente corrente, ancora VALIDO (attivo ora o più
+  // tardi oggi) — per evidenziarlo in cima. Le prenotazioni già concluse oggi
+  // sono escluse: non ha senso evidenziare un mezzo già restituito.
   // Solo via prenotazioni_utenti: utente_id è l'autore kiosk, non distingue.
-  const prenMia = prenOggi.find(p =>
-    p.mezzo_id && (loadPrenotazioneOperatori(p.id) || []).includes(u.id)
-  );
+  const nowPrenMia = new Date();
+  const prenMia = prenOggi.find(p => {
+    if (!p.mezzo_id) return false;
+    if (!(loadPrenotazioneOperatori(p.id) || []).includes(u.id)) return false;
+    // Esclude se la fine è già passata.
+    const fine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
+    if (!isNaN(fine.getTime()) && fine <= nowPrenMia) return false;
+    return true;
+  });
 
   // Per ogni mezzo, la prossima prenotazione di oggi (di chiunque) con orario,
   // usata come etichetta informativa "prenotato dalle HH:MM".
@@ -9238,9 +9028,9 @@ function kioskRenderAction() {
           el('div', { class:'kiosk-tile-name' }, m.nome),
           m.targa ? el('div', { class:'kiosk-tile-targa' }, m.targa) : null,
           el('div', { class:'kiosk-tile-targa', style:'color:var(--red);font-weight:600;' },
-            '● Occupato · ' + (chi || '?')),
+            '● Occupato da ' + (chi || '?')),
           fineStr ? el('div', { class:'kiosk-tile-targa', style:'color:var(--mut);' },
-            'fino alle ' + fineStr) : null,
+            'fino al ' + fineStr) : null,
         ));
         return;
       }
@@ -9254,7 +9044,6 @@ function kioskRenderAction() {
       },
         el('div', { class:'kiosk-tile-name' }, m.nome),
         m.targa ? el('div', { class:'kiosk-tile-targa' }, m.targa) : null,
-        isPren ? el('div', { class:'kiosk-tile-prenotato' }, '★ Prenotato per te oggi') : null,
         (prossima ? el('div', { class:'kiosk-tile-targa', style:'color:var(--yel);' },
           '⏱ prenotato dalle ' + prossima.ora_inizio) : null),
       ));
