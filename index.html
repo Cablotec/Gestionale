@@ -9149,14 +9149,13 @@ function kioskRenderRientroPrevisto() {
   const root = $('#kiosk-mezzo-rientro-content');
   root.innerHTML = '';
 
-  // Default proposto: oggi alle 18:00 (orario tipico di fine giornata).
-  // Se sono già passate le 18, propongo domani alle 18.
+  // Default proposto: oggi alle 18:00. Se già passate, domani 18:00.
   const now = new Date();
   const def = new Date(now);
   def.setHours(18, 0, 0, 0);
   if (def <= now) def.setDate(def.getDate() + 1);
   const defData = `${def.getFullYear()}-${z(def.getMonth()+1)}-${z(def.getDate())}`;
-  const defOra = `${z(def.getHours())}:${z(def.getMinutes())}`;
+  const defOra = '18:00';
 
   // Riepilogo mezzo scelto
   root.append(el('div', { class:'kiosk-rientro-box', style:'margin-bottom:18px;' },
@@ -9165,43 +9164,62 @@ function kioskRenderRientroPrevisto() {
       mezzo.nome + (mezzo.targa ? ' · '+mezzo.targa : '')),
   ));
 
-  // Scelte rapide (riempiono i campi sottostanti) + campi data/ora manuali.
-  // Touch-friendly: bottoni grandi.
+  // ── Tipo di utilizzo (obbligatorio) ──
+  let tipoScelto = null;
+  root.append(el('div', { style:'font-size:13px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em;' }, 'Tipo di utilizzo *'));
+  const tipoWrap = el('div', { style:'display:flex;flex-wrap:wrap;gap:10px;margin-bottom:22px;' });
+  const tipoBtns = {};
+  TIPI.forEach(t => {
+    const btn = el('button', {
+      type:'button',
+      style:'flex:1;min-width:140px;padding:16px;font-size:16px;font-weight:600;background:var(--sur);border:2px solid var(--brd);border-radius:8px;color:var(--txt);cursor:pointer;border-left:6px solid '+t.color+';',
+      onclick: () => {
+        tipoScelto = t.id;
+        Object.values(tipoBtns).forEach(b => { b.style.borderColor = 'var(--brd)'; b.style.borderLeftWidth = '6px'; });
+        btn.style.borderColor = 'var(--acc)';
+        btn.style.borderLeftColor = t.color;
+      },
+    }, t.label);
+    tipoBtns[t.id] = btn;
+    tipoWrap.append(btn);
+  });
+  root.append(tipoWrap);
+
+  // ── Data + ora rientro previsto ──
+  root.append(el('div', { style:'font-size:13px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em;' }, 'Fino a quando *'));
+
   const inData = el('input', { type:'date', value: defData, required:'true',
     style:'font-size:20px;padding:12px;width:100%;box-sizing:border-box;background:var(--sur);border:2px solid var(--brd);border-radius:8px;color:var(--txt);' });
-  const inOra = el('input', { type:'time', value: defOra, required:'true',
-    style:'font-size:20px;padding:12px;width:100%;box-sizing:border-box;background:var(--sur);border:2px solid var(--brd);border-radius:8px;color:var(--txt);' });
 
-  const setQuick = (d, oraStr) => {
-    inData.value = `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
-    inOra.value = oraStr;
-  };
-  const quickWrap = el('div', { style:'display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px;' });
-  const mkQuick = (label, fn) => el('button', {
-    type:'button', class:'kiosk-quick-btn',
-    style:'flex:1;min-width:130px;padding:14px;font-size:15px;font-weight:600;background:var(--sur);border:2px solid var(--brd);border-radius:8px;color:var(--txt);cursor:pointer;',
-    onclick: fn,
-  }, label);
-
-  quickWrap.append(
-    mkQuick('Oggi 13:00', () => { const d=new Date(); setQuick(d,'13:00'); }),
-    mkQuick('Oggi 18:00', () => { const d=new Date(); setQuick(d,'18:00'); }),
-    mkQuick('Domani 18:00', () => { const d=new Date(); d.setDate(d.getDate()+1); setQuick(d,'18:00'); }),
-  );
-  root.append(el('div', { style:'font-size:13px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em;' }, 'Scelte rapide'));
-  root.append(quickWrap);
+  // Selettore orario completo: tutte le mezz'ore dalle 06:00 alle 22:00.
+  // <select> grande, touch-friendly, scrollabile — niente più scelte rapide.
+  const selOra = el('select', {
+    style:'font-size:20px;padding:12px;width:100%;box-sizing:border-box;background:var(--sur);border:2px solid var(--brd);border-radius:8px;color:var(--txt);',
+  });
+  for (let h = 6; h <= 22; h++) {
+    for (const mm of ['00', '30']) {
+      const val = z(h) + ':' + mm;
+      selOra.append(el('option', { value: val }, val));
+    }
+  }
+  selOra.value = defOra;
 
   root.append(el('div', { style:'display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px;' },
     el('div', {}, el('div', { style:'font-size:13px;color:var(--mut);margin-bottom:6px;' }, 'Data rientro'), inData),
-    el('div', {}, el('div', { style:'font-size:13px;color:var(--mut);margin-bottom:6px;' }, 'Ora rientro'), inOra),
+    el('div', {}, el('div', { style:'font-size:13px;color:var(--mut);margin-bottom:6px;' }, 'Ora rientro'), selOra),
   ));
 
   const btnConferma = el('button', {
     class:'kiosk-rientro-btn',
     style:'width:100%;font-size:20px;padding:18px;',
     onclick: () => {
+      if (!tipoScelto) {
+        kioskBeep('err');
+        kioskShowError('Seleziona il tipo di utilizzo (Trasferta, Consegna, …).');
+        return;
+      }
       const dataV = inData.value;
-      const oraV = inOra.value;
+      const oraV = selOra.value;
       if (!dataV || !oraV) {
         kioskBeep('err');
         kioskShowError('Indica data e ora di rientro previsto.');
@@ -9218,13 +9236,13 @@ function kioskRenderRientroPrevisto() {
         kioskShowError('Il rientro previsto deve essere nel futuro.');
         return;
       }
-      kioskFinalizzaUscita(mezzo, rientroPrev.toISOString());
+      kioskFinalizzaUscita(mezzo, rientroPrev.toISOString(), tipoScelto);
     },
   }, '✓ Prendi il mezzo');
   root.append(btnConferma);
 }
 
-async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO) {
+async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO, tipo) {
   const u = kioskState.utenteSelezionato;
   const oraUscita = new Date();
   const rp = new Date(rientroPrevistoISO);
@@ -9259,11 +9277,12 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO) {
   try {
     // 1) Gestione prenotazione: aggiorna l'esistente (2b) o creane una nuova
     if (prenMia) {
-      // Aggiorna: ora_inizio = reale, data_fine + ora_fine = rientro previsto
+      // Aggiorna: ora_inizio = reale, data_fine + ora_fine = rientro previsto, tipo scelto
       const { data: prenAgg, error: errPren } = await sb.from('prenotazioni').update({
         ora_inizio: oraInizioStr,
         data_fine: dataFine,
         ora_fine: oraFineStr,
+        tipo: tipo,
       }).eq('id', prenMia.id).select().single();
       if (errPren) {
         kioskBeep('err');
@@ -9283,6 +9302,7 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO) {
         data_fine: dataFine,
         ora_inizio: oraInizioStr,
         ora_fine: oraFineStr,
+        tipo: tipo,
         utente_id: kioskState.authorId,
         note: 'Creata da kiosk',
       }).select().single();
@@ -9329,8 +9349,9 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO) {
 
 async function kioskConfirmRientro(uso) {
   try {
+    const rientroReale = new Date();
     const { data, error } = await sb.from('usi_mezzo')
-      .update({ data_rientro: new Date().toISOString() })
+      .update({ data_rientro: rientroReale.toISOString() })
       .eq('id', uso.id)
       .select().single();
     if (error) throw error;
@@ -9338,6 +9359,34 @@ async function kioskConfirmRientro(uso) {
     kioskState.mezziInUso = kioskState.mezziInUso.filter(x => x.id !== uso.id);
     const m = state.mezzi.find(x => x.id === uso.mezzo_id);
     const u = kioskState.utenteSelezionato;
+
+    // Punto 1: la prenotazione collegata si "chiude" coi dati reali.
+    // Cerco una prenotazione che copre oggi per questo mezzo+operatore e
+    // ne aggiorno data_fine + ora_fine con il momento effettivo di rientro.
+    try {
+      const oggiIso = toLocalISO(rientroReale);
+      const prenColl = (state.prenotazioni || []).find(p =>
+        p.mezzo_id === uso.mezzo_id &&
+        p.data_inizio <= oggiIso && p.data_fine >= oggiIso &&
+        (p.utente_id === kioskState.authorId ||
+         (loadPrenotazioneOperatori(p.id) || []).includes(u?.id))
+      );
+      if (prenColl) {
+        const oraFineReale = z(rientroReale.getHours()) + ':' + z(rientroReale.getMinutes());
+        const { data: pAgg } = await sb.from('prenotazioni').update({
+          data_fine: oggiIso,
+          ora_fine: oraFineReale,
+        }).eq('id', prenColl.id).select().single();
+        if (pAgg) {
+          state.prenotazioni = state.prenotazioni.map(x => x.id === pAgg.id ? pAgg : x);
+          kioskState.prenotazioniOggi = kioskState.prenotazioniOggi.map(x => x.id === pAgg.id ? pAgg : x);
+        }
+      }
+    } catch (ePren) {
+      // Non blocco il rientro se l'aggiornamento prenotazione fallisce
+      console.warn('[KIOSK] Aggiornamento prenotazione al rientro fallito:', ePren);
+    }
+
     const durata = kioskFormatDurata(
       new Date(data.data_rientro).getTime() - new Date(uso.data_uscita).getTime()
     );
