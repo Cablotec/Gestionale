@@ -10256,6 +10256,13 @@ function renderGanttLive(root) {
     return ini === oggiISO;
   }).length;
 
+  // Toolbar: export ore/cartellino del periodo (solo admin)
+  if (state.profile?.ruolo === 'admin') {
+    root.append(el('div', { style:'display:flex;justify-content:flex-end;margin-bottom:10px;' },
+      el('button', { class:'btng', onclick: () => openCartellinoExportModal() },
+        '⬇ Esporta ore (Excel)')));
+  }
+
   root.append(el('div', { class:'kpis' },
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Operatori al lavoro'),
       el('div', { class:'kv kg' }, String(attivi)+' / '+String(totOperatori))),
@@ -10296,6 +10303,170 @@ function renderGanttLive(root) {
       d.textContent = formatLiveDuration(d.getAttribute('data-inizio'));
     });
   }, 1000);
+}
+
+// ─── EXPORT ORE / CARTELLINO (periodo, tutti gli operatori) ───
+// Pulisce valori spuri salvati come stringa letterale "null"/"undefined".
+function _exportClean(v) {
+  const t = (v == null ? '' : String(v)).trim();
+  return (!t || t === 'null' || t === 'undefined') ? '' : t;
+}
+
+// Sessioni con inizio nel periodo [fromISO, toISO] (estremi inclusi), per data
+// LOCALE di inizio (coerente con come l'orario è mostrato all'operatore).
+function sessioniNelPeriodo(fromISO, toISO) {
+  return state.sessioni.filter(s => {
+    if (!s.inizio) return false;
+    const dISO = toLocalISO(new Date(s.inizio));
+    return dISO >= fromISO && dISO <= toISO;
+  });
+}
+
+// Durata in secondi di una sessione: chiusa = fine−inizio; aperta = fino ad ora.
+function _sessDurSec(s) {
+  const ini = new Date(s.inizio);
+  const fin = s.fine ? new Date(s.fine) : new Date();
+  return Math.max(0, Math.floor((fin - ini) / 1000));
+}
+
+function openCartellinoExportModal() {
+  if (state.profile?.ruolo !== 'admin') { toast('Solo gli admin possono esportare le ore', 'err'); return; }
+  if (typeof XLSX === 'undefined') { toast('Libreria Excel non caricata, ricarica la pagina', 'err'); return; }
+
+  const oggi = new Date();
+  const primoMese = new Date(oggi.getFullYear(), oggi.getMonth(), 1);
+
+  const modal = el('div', { class:'modal', style:'max-width:460px;' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Esporta ore'),
+    el('button', { class:'mclose', onclick: closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+  body.append(el('div', { class:'sub', style:'margin-bottom:12px;' },
+    'Periodo da esportare. Include commesse e attività extra di tutti gli operatori. '
+    + 'Due fogli: dettaglio attività e riepilogo giornaliero per operatore.'));
+
+  const inDa = el('input', { type:'date', value: toLocalISO(primoMese) });
+  const inA  = el('input', { type:'date', value: toLocalISO(oggi) });
+  const conteggio = el('div', { style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-top:2px;' });
+
+  function aggiornaConteggio() {
+    if (!inDa.value || !inA.value || inA.value < inDa.value) { conteggio.textContent = ''; return; }
+    const n = sessioniNelPeriodo(inDa.value, inA.value).length;
+    conteggio.textContent = n + ' session' + (n === 1 ? 'e' : 'i') + ' nel periodo';
+  }
+  inDa.onchange = aggiornaConteggio;
+  inA.onchange = aggiornaConteggio;
+
+  const setRange = (f, t) => { inDa.value = toLocalISO(f); inA.value = toLocalISO(t); aggiornaConteggio(); };
+  const presetBtn = (label, fn) =>
+    el('button', { class:'btng', style:'padding:4px 10px;font-size:11px;', onclick: fn }, label);
+  const presetRow = el('div', { style:'display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px;' },
+    presetBtn('Mese corrente', () => { const o = new Date(); setRange(new Date(o.getFullYear(), o.getMonth(), 1), o); }),
+    presetBtn('Mese scorso', () => { const o = new Date(); setRange(new Date(o.getFullYear(), o.getMonth()-1, 1), new Date(o.getFullYear(), o.getMonth(), 0)); }),
+    presetBtn('Ultimi 30 gg', () => { const o = new Date(); const f = new Date(o); f.setDate(f.getDate()-29); setRange(f, o); }),
+  );
+
+  body.append(
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Da'), inDa),
+      el('div', { class:'field' }, el('label', {}, 'A'), inA),
+    ),
+    presetRow,
+    conteggio,
+  );
+  aggiornaConteggio();
+
+  modal.append(body);
+  modal.append(el('div', { class:'mfoot' },
+    el('button', { class:'btng', onclick: closeModal }, 'Annulla'),
+    el('button', { class:'btnp', onclick: () => {
+      if (!inDa.value || !inA.value) return toast('Imposta entrambe le date', 'err');
+      if (inA.value < inDa.value) return toast('La data "A" deve essere ≥ "Da"', 'err');
+      cartellinoExportExcel(inDa.value, inA.value);
+      closeModal();
+    } }, '⬇ Scarica'),
+  ));
+  openModal(modal);
+}
+
+function cartellinoExportExcel(fromISO, toISO) {
+  if (typeof XLSX === 'undefined') { toast('Libreria Excel non caricata, ricarica la pagina', 'err'); return; }
+
+  const sess = sessioniNelPeriodo(fromISO, toISO);
+  if (sess.length === 0) { toast('Nessuna sessione nel periodo selezionato', 'err'); return; }
+
+  const uById = {};
+  state.utenti.forEach(u => uById[u.id] = u);
+  const nomeOp = (id) => uById[id]?.nome || '—';
+
+  // ── Foglio Dettaglio: una riga per sessione, ordinato operatore → data → ora ──
+  const sessSorted = [...sess].sort((a, b) => {
+    const ua = nomeOp(a.utente_id).toLowerCase(), ub = nomeOp(b.utente_id).toLowerCase();
+    const da = toLocalISO(new Date(a.inizio)), db = toLocalISO(new Date(b.inizio));
+    return ua.localeCompare(ub) || da.localeCompare(db) || (a.inizio||'').localeCompare(b.inizio||'');
+  });
+
+  const dettaglio = sessSorted.map(s => {
+    const d = descriviSessione(s);
+    const ini = new Date(s.inizio);
+    const fin = s.fine ? new Date(s.fine) : null;
+    const sec = _sessDurSec(s);
+    return {
+      'Data':                  fmtIT(toLocalISO(ini)),
+      'Operatore':             nomeOp(s.utente_id),
+      'Tipo':                  d.isAttivitaExtra ? 'Attività extra' : 'Commessa',
+      'Cliente':               d.isAttivitaExtra ? '' : (d.cliente?.nome || ''),
+      'Numero ordine':         d.isAttivitaExtra ? '' : (d.op?.numero_ordine || ''),
+      'Numero OP':             d.isAttivitaExtra ? '' : (d.op?.numero_op || ''),
+      'Codice articolo':       d.isAttivitaExtra ? '' : (d.articolo?.codice || ''),
+      'Descrizione articolo':  d.isAttivitaExtra ? '' : _exportClean(d.articolo?.descrizione),
+      'Lavorazione / Attività': d.isAttivitaExtra
+        ? (_exportClean(d.attivita?.nome) || 'Attività extra')
+        : (d.tipoLav?.nome || ''),
+      'Inizio':                z(ini.getHours()) + ':' + z(ini.getMinutes()),
+      'Fine':                  fin ? (z(fin.getHours()) + ':' + z(fin.getMinutes())) : 'in corso',
+      'Ore':                   +(sec / 3600).toFixed(2),
+      'Note':                  _exportClean(s.note),
+    };
+  });
+
+  // ── Foglio Riepilogo giornaliero: somma ore per operatore × giorno ──
+  const aggMap = {};
+  sess.forEach(s => {
+    const dataISO = toLocalISO(new Date(s.inizio));
+    const key = s.utente_id + '|' + dataISO;
+    if (!aggMap[key]) aggMap[key] = { op: nomeOp(s.utente_id), dataISO, sec: 0, n: 0 };
+    aggMap[key].sec += _sessDurSec(s);
+    aggMap[key].n += 1;
+  });
+  const DOW = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+  const riepilogo = Object.values(aggMap)
+    .sort((a, b) => a.op.toLowerCase().localeCompare(b.op.toLowerCase()) || a.dataISO.localeCompare(b.dataISO))
+    .map(r => ({
+      'Operatore':   r.op,
+      'Data':        fmtIT(r.dataISO),
+      'Giorno':      DOW[parseISODate(r.dataISO).getDay()],
+      'Ore':         +(r.sec / 3600).toFixed(2),
+      'N. attività': r.n,
+    }));
+
+  // ── Workbook ──
+  const wsDet = XLSX.utils.json_to_sheet(dettaglio);
+  wsDet['!cols'] = [
+    { wch: 11 }, { wch: 20 }, { wch: 14 }, { wch: 24 }, { wch: 16 },
+    { wch: 16 }, { wch: 18 }, { wch: 34 }, { wch: 22 }, { wch: 8 },
+    { wch: 8 }, { wch: 7 }, { wch: 30 },
+  ];
+  const wsRie = XLSX.utils.json_to_sheet(riepilogo);
+  wsRie['!cols'] = [ { wch: 20 }, { wch: 11 }, { wch: 8 }, { wch: 8 }, { wch: 11 } ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsDet, 'Dettaglio');
+  XLSX.utils.book_append_sheet(wb, wsRie, 'Riepilogo giornaliero');
+  XLSX.writeFile(wb, `ore_${fromISO}_${toISO}.xlsx`);
+
+  toast('Esportate ' + dettaglio.length + ' attività (' + riepilogo.length + ' righe riepilogo)', 'ok');
 }
 
 // ─── PANNELLO STORICO CONSUNTIVI (drill-down da Gantt Live) ───
@@ -11147,8 +11318,10 @@ function openSessioneModal(s, onDone) {
   const inizioDt = new Date(s.inizio);
   const fineDt = s.fine ? new Date(s.fine) : null;
 
-  // Per input datetime-local serve formato "YYYY-MM-DDTHH:MM"
-  const dtLocalStr = (d) => `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`;
+  // Per input datetime-local con secondi serve formato "YYYY-MM-DDTHH:MM:SS".
+  // I secondi sono indispensabili: senza, le sessioni sotto il minuto avrebbero
+  // inizio e fine identici (collasso al minuto) e non sarebbero salvabili.
+  const dtLocalStr = (d) => `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
 
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
@@ -11162,19 +11335,29 @@ function openSessioneModal(s, onDone) {
   const infoBox = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;margin-bottom:14px;font-family:monospace;font-size:11px;line-height:1.7;' });
   infoBox.append(el('div', {}, el('span', { style:'color:var(--mut)' }, 'Operatore: '), operatore?.nome || '—'));
   if (d.isAttivitaExtra) {
+    // Guardia: alcuni record attività extra hanno nome/descrizione salvati come
+    // stringa letterale "null" → vanno trattati come vuoti, non stampati.
+    const clean = (v) => {
+      const t = (v == null ? '' : String(v)).trim();
+      return (!t || t === 'null' || t === 'undefined') ? '' : t;
+    };
+    const attNome = clean(d.attivita?.nome);
+    const attDesc = clean(d.attivita?.descrizione);
     infoBox.append(
       el('div', {}, el('span', { style:'color:var(--mut)' }, 'Tipo: '),
         el('span', { style:'color:var(--yel)' }, 'Attività extra')),
-      el('div', {}, el('span', { style:'color:var(--mut)' }, 'Attività: '), d.attivita?.nome || '—'),
-      d.attivita?.descrizione
-        ? el('div', {}, el('span', { style:'color:var(--mut)' }, 'Descrizione: '), d.attivita.descrizione)
+      el('div', {}, el('span', { style:'color:var(--mut)' }, 'Attività: '), attNome || '—'),
+      attDesc
+        ? el('div', {}, el('span', { style:'color:var(--mut)' }, 'Descrizione: '), attDesc)
         : null,
     );
   } else {
     infoBox.append(
       el('div', {}, el('span', { style:'color:var(--mut)' }, 'Cliente: '), d.cliente?.nome || '—'),
       el('div', {}, el('span', { style:'color:var(--mut)' }, 'Articolo: '), el('span', { style:'color:var(--or)' }, d.articolo?.codice || '—')),
-      el('div', {}, el('span', { style:'color:var(--mut)' }, 'OP / Ordine: '), (d.op?.numero_ordine || '—')),
+      el('div', {}, el('span', { style:'color:var(--mut)' }, 'Descrizione: '), (d.articolo?.descrizione || '—')),
+      el('div', {}, el('span', { style:'color:var(--mut)' }, 'Numero ordine: '), (d.op?.numero_ordine || '—')),
+      el('div', {}, el('span', { style:'color:var(--mut)' }, 'Numero OP: '), (d.op?.numero_op || '—')),
       el('div', {}, el('span', { style:'color:var(--mut)' }, 'Tipo lavorazione: '), d.tipoLav?.nome || '—'),
     );
   }
@@ -11190,8 +11373,8 @@ function openSessioneModal(s, onDone) {
     selTipo.value = s.tipo_lavorazione_id || '';
   }
 
-  const inInizio = el('input', { type:'datetime-local', name:'inizio', value:dtLocalStr(inizioDt), required:'true' });
-  const inFine = el('input', { type:'datetime-local', name:'fine', value: fineDt ? dtLocalStr(fineDt) : '' });
+  const inInizio = el('input', { type:'datetime-local', name:'inizio', step:'1', value:dtLocalStr(inizioDt), required:'true' });
+  const inFine = el('input', { type:'datetime-local', name:'fine', step:'1', value: fineDt ? dtLocalStr(fineDt) : '' });
 
   form.append(
     selTipo ? el('div', { class:'field' }, el('label', {}, 'Tipo lavorazione'), selTipo) : null,
