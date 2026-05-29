@@ -862,7 +862,7 @@ const state = {
   tipiLav: [],             // anagrafica tipi di lavorazione
   chiusure: [],            // chiusure aziendali (festivi non nazionali)
   operazioni: [],          // operazioni di pianificazione
-  opFilter: 'aperte',      // 'all' | 'aperte' | 'sospese' | 'spedite'
+  opFilter: 'all',      // 'all' | 'aperte' | 'sospese' | 'spedite'
   // Set degli ID cliente da NASCONDERE nella Pianificazione (filtro stile Excel)
   // Si carica/salva da localStorage all'avvio della pagina.
   opClientiEsclusi: new Set(),
@@ -1902,6 +1902,25 @@ function quantitaConsegnata(opId) {
 function quantitaResidua(op) {
   if (!op) return 0;
   return Number(op.quantita || 0) - quantitaConsegnata(op.id);
+}
+
+// Campi che una commessa DEVE avere compilati per essere pianificabile.
+// Ritorna l'elenco (leggibile) dei campi mancanti; vuoto = tutto a posto.
+// - Minuti unitari: assente o ≤ 0 (senza non si calcola la durata)
+// - Scadenza: vuota
+// - Numero OP: vuoto
+// - Addetti/Fornitori: manca se NON c'è né un addetto né un fornitore
+//   (ne basta uno dei due per considerare la riga assegnata)
+function opCampiMancanti(op) {
+  if (!op) return [];
+  const mancanti = [];
+  if (!(Number(op.minuti_unitari) > 0)) mancanti.push('Minuti unitari');
+  if (!op.scadenza) mancanti.push('Scadenza');
+  if (!(op.numero_op && String(op.numero_op).trim())) mancanti.push('Numero OP');
+  const nAddetti = (typeof getOperazioneAddetti === 'function') ? getOperazioneAddetti(op.id).length : 0;
+  const nFornitori = (typeof getOperazioneFornitori === 'function') ? getOperazioneFornitori(op.id).length : 0;
+  if (nAddetti === 0 && nFornitori === 0) mancanti.push('Addetto o fornitore');
+  return mancanti;
 }
 
 // ============================================================
@@ -5863,7 +5882,7 @@ function openFiltroClientiPopup(anchorBtn) {
 function renderPianificazione(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.opSearch || '').toLowerCase();
-  const filter = state.opFilter || 'aperte';
+  const filter = state.opFilter || 'all';
 
   let list = state.operazioni.slice();
   // Le commesse 'spedita' sono nello Storico — non si vedono nella Pianificazione
@@ -5882,6 +5901,8 @@ function renderPianificazione(root) {
       const cli = state.aziende.find(c => c.id === o.cliente_id);
       const art = state.articoli.find(a => a.id === o.articolo_id);
       return (o.numero_ordine||'').toLowerCase().includes(search)
+          || (o.numero_op||'').toLowerCase().includes(search)
+          || (o.riferimento_cliente||'').toLowerCase().includes(search)
           || (o.pos||'').toLowerCase().includes(search)
           || (cli?.nome||'').toLowerCase().includes(search)
           || (art?.codice||'').toLowerCase().includes(search)
@@ -5953,7 +5974,7 @@ function renderPianificazione(root) {
   // Toolbar
   const inputSearch = el('input', {
     type:'text', class:'search', id:'pian-search',
-    placeholder:'Cerca OP, ordine, cliente, codice, descrizione, note…',
+    placeholder:'Cerca OP, ordine, rif. cliente, cliente, codice, descrizione, note…',
     value: state.opSearch || '',
     oninput: (e) => {
       state.opSearch = e.target.value;
@@ -6067,8 +6088,18 @@ function renderPianificazione(root) {
       title: 'Click per aprire la scheda',
     });
 
-    // Ordine
-    tr.append(el('td', { class:'mono' }, o.numero_ordine || '—'));
+    // Ordine — con eventuale ⚠ se mancano campi obbligatori per la pianificazione
+    const mancanti = opCampiMancanti(o);
+    const ordineCell = el('td', { class:'mono' });
+    if (mancanti.length > 0) {
+      ordineCell.append(el('span', {
+        style:'color:var(--yel);font-weight:700;margin-right:5px;cursor:help;',
+        title:'Campi da compilare:\n• ' + mancanti.join('\n• '),
+        onclick:(e)=>{ e.stopPropagation(); openOperazioneModal(o); },
+      }, '⚠'));
+    }
+    ordineCell.append(document.createTextNode(o.numero_ordine || '—'));
+    tr.append(ordineCell);
 
     // Pos
     tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.pos || '—'));
@@ -6199,6 +6230,15 @@ function renderPianificazione(root) {
       );
       sel.value = o.stato; // imposto il valore corrente in modo affidabile
       statoCell.append(sel);
+      // Segnale di incoerenza: tutto prodotto ma ancora aperta/sospesa.
+      // Una commessa interamente prodotta non dovrebbe restare aperta.
+      if (qtaTot > 0 && qtaCons >= qtaTot && (o.stato === 'aperta' || o.stato === 'sospesa')) {
+        statoCell.append(el('span', {
+          style:'margin-left:6px;cursor:pointer;color:var(--yel);font-weight:700;',
+          title:'Tutto prodotto ma commessa ancora '+(o.stato==='aperta'?'aperta':'sospesa')+'. Clic per completarla.',
+          onclick:(e)=>{ e.stopPropagation(); quickStato(o, 'completata'); },
+        }, '⚠'));
+      }
     } else {
       statoCell.append(el('span', {
         class:'badge '+(OP_STATI[o.stato]?.badge||'bgry'),
@@ -7930,18 +7970,90 @@ function renderStorico(root) {
 // quickSpedizione() che chiede conferma e data, perché è un passaggio chiave.
 async function quickStato(op, nuovoStato) {
   if (!['aperta','sospesa','completata','spedita'].includes(nuovoStato)) return;
+
+  const qtaOrd = Number(op.quantita || 0);
+  const prodotto = (typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0;
+  const residuo = Math.max(0, qtaOrd - prodotto);
+
+  // ── Regola: tornare/lasciare "aperta" o "sospesa" con tutto già prodotto è
+  // uno stato incoerente. Se tutto è prodotto, la commessa non può restare
+  // aperta → propongo di completarla. ──
+  if ((nuovoStato === 'aperta' || nuovoStato === 'sospesa') && qtaOrd > 0 && residuo === 0) {
+    const ok = confirm(
+      `Tutto il materiale di questa commessa è già stato prodotto (${prodotto}/${qtaOrd} pz).\n\n`
+      + `Una commessa interamente prodotta non può restare ${nuovoStato === 'aperta' ? 'aperta' : 'sospesa'}.\n\n`
+      + `Vuoi marcarla come COMPLETATA?`
+    );
+    if (ok) { return quickStato(op, 'completata'); }
+    // L'utente rifiuta: annullo il cambio, ripristino la UI sullo stato attuale.
+    renderTab(state.currentTab || 'pianificazione');
+    return;
+  }
+
+  // ── Regola: passando a "completata" con quantità ancora da produrre, prima
+  // AVVISO, poi produco automaticamente il residuo (lotto di chiusura) così la
+  // commessa risulta coerente (tutto prodotto). ──
+  let lottoChiusura = null;
+  if (nuovoStato === 'completata' && qtaOrd > 0 && residuo > 0) {
+    const ok = confirm(
+      `Questa commessa ha ancora ${residuo} pz da produrre (${prodotto}/${qtaOrd} pz).\n\n`
+      + `Completandola verrà registrato in automatico un lotto di produzione di ${residuo} pz `
+      + `(data odierna) per chiudere la commessa.\n\n`
+      + `Vuoi procedere?`
+    );
+    if (!ok) {
+      // Annullato: ripristino la UI sullo stato corrente.
+      renderTab(state.currentTab || 'pianificazione');
+      return;
+    }
+    lottoChiusura = {
+      operazione_id: op.id,
+      data: toLocalISO(new Date()),
+      quantita: residuo,
+      ddt: null,
+      nota: 'Chiusura automatica commessa',
+      creato_da: state.profile?.id || null,
+    };
+  }
+
   try {
+    // 1) Se serve, registro il lotto di chiusura PRIMA di cambiare stato:
+    //    se fallisce, non voglio una commessa "completata" ma incompleta.
+    if (lottoChiusura) {
+      // Ricontrollo il residuo qui (race condition: lotti registrati in parallelo)
+      const residuoOra = Math.max(0, qtaOrd - quantitaConsegnata(op.id));
+      if (residuoOra <= 0) {
+        lottoChiusura = null; // nel frattempo è già stato prodotto tutto
+      } else {
+        lottoChiusura.quantita = residuoOra;
+        const { data: nuova, error: errLotto } = await eseguiConRetry(
+          () => sb.from('consegne_commessa').insert(lottoChiusura).select().single(),
+          { label: 'lotto chiusura commessa' }
+        );
+        if (errLotto) throw errLotto;
+        if (!state.consegneCommessa.find(x => x.id === nuova.id)) {
+          state.consegneCommessa.push(nuova);
+        }
+      }
+    }
+
+    // 2) Aggiorno lo stato
     const { data, error } = await eseguiConRetry(
       () => sb.from('operazioni').update({ stato: nuovoStato }).eq('id', op.id).select().single(),
       { label: 'cambia stato op' }
     );
     if (error) throw error;
     Object.assign(op, data); // aggiorno l'oggetto in state in place
-    toast('Stato aggiornato: ' + (OP_STATI[nuovoStato]?.label || nuovoStato), 'ok');
-    // Refresha la tab corrente, non forzare un cambio di vista
+
+    if (lottoChiusura) {
+      toast(`Prodotti ${lottoChiusura.quantita} pz e commessa completata`, 'ok');
+    } else {
+      toast('Stato aggiornato: ' + (OP_STATI[nuovoStato]?.label || nuovoStato), 'ok');
+    }
     renderTab(state.currentTab || 'pianificazione');
   } catch (e) {
     toast('Errore: ' + (e.message||e), 'err');
+    renderTab(state.currentTab || 'pianificazione');
   }
 }
 
