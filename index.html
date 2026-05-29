@@ -561,6 +561,7 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .gantt-cmbar-fill.sfora{background:var(--red);opacity:.9;}
 .gantt-cmbar-txt{position:relative;z-index:1;font-family:'DM Mono',monospace;font-size:9px;
   font-weight:700;color:#0f0f0e;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.gantt-cmdeadline{position:absolute;width:0;border-left:2px dashed var(--red);z-index:4;pointer-events:auto;}
 .sess-row-clic{transition:background .1s;}
 .sess-row-clic:hover{background:var(--sur2) !important;}
 
@@ -5009,6 +5010,32 @@ function indietroOreCapacita(scadenzaIso, oreTotali, addettiIds, fornitoriRows) 
   return toLocalISO(d);
 }
 
+// Versioni "in avanti": speculari alle indietro*. Dato un inizio, restituiscono
+// la data di FINE lavoro. Sono inverse esatte: se inizio = indietro…(scadenza, X),
+// allora avanti…(inizio, X) = scadenza. Servono al Gantt per dimensionare la
+// barra sul VOLUME di lavoro, non sulla finestra inizio→scadenza.
+function avantiGiorniLavorativi(inizioIso, giorni) {
+  const d = parseISODate(inizioIso);
+  let rest = giorni;
+  while (rest > 0) {
+    d.setDate(d.getDate() + 1);
+    if (!isGiornoNonLavorativo(d)) rest--;
+  }
+  return toLocalISO(d);
+}
+function avantiOreCapacita(inizioIso, oreTotali, addettiIds, fornitoriRows) {
+  const d = parseISODate(inizioIso);
+  let rest = oreTotali;
+  let guard = 0;
+  while (rest > 0 && guard < 3700) {
+    const cap = capacitaGiorno(d, addettiIds, fornitoriRows);
+    if (cap > 0) rest -= cap;
+    if (rest > 0) d.setDate(d.getDate() + 1);
+    guard++;
+  }
+  return toLocalISO(d);
+}
+
 
 function renderChiusure(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
@@ -5305,6 +5332,29 @@ function opCalcInizio(op, addettiOverride, fornitoriOverride) {
 function opInizio(op) {
   if (op && op.inizio_manuale) return op.inizio_manuale;
   return opCalcInizio(op);
+}
+
+// Data di FINE lavoro a partire da un inizio dato. Speculare a opCalcInizio:
+// usa lo stesso volume di ore (totali se inizio manuale, residue se automatico)
+// e la stessa capacità (addetti/fornitori, con fallback a giorni da 8h). Serve
+// al Gantt per disegnare la barra lunga quanto il LAVORO, ancorata all'inizio,
+// invece di stiracchiarla fino alla scadenza (che con inizio manuale è arbitraria).
+function opFineLavoro(op, inizioIso) {
+  if (!op || !inizioIso) return (op && op.scadenza) || inizioIso;
+  const ore = op.inizio_manuale ? opCalcOre(op) : opCalcOreResidue(op);
+  if (ore <= 0) return inizioIso;
+  let addetti = (typeof getOperazioneAddetti === 'function') ? getOperazioneAddetti(op.id) : [];
+  let fornitori = (typeof getOperazioneFornitoriDettaglio === 'function')
+    ? getOperazioneFornitoriDettaglio(op.id) : [];
+  if (fornitori.length && typeof fornitori[0] === 'string') {
+    fornitori = fornitori.map(id => ({ azienda_id: id, allocazione: 1.0 }));
+  }
+  if (addetti.length > 0 || fornitori.length > 0) {
+    return avantiOreCapacita(inizioIso, ore, addetti, fornitori);
+  }
+  const giorni = Math.ceil(ore / 8);
+  if (giorni <= 0) return inizioIso;
+  return avantiGiorniLavorativi(inizioIso, giorni);
 }
 function opIsRitardo(op) {
   if (op.stato === 'spedita' || op.stato === 'completata') return false;
@@ -10940,8 +10990,12 @@ function renderGanttCommesse(root) {
       const addetti = getOperazioneAddetti(o.id);
       if (!addetti.includes(u.id)) return;
       const inizio = opInizio(o) || o.scadenza;
-      if (o.scadenza < rangeStartIso || inizio > rangeEndIso) return;
-      commesse.push({ op:o, inizio, scadenza:o.scadenza });
+      const fine = opFineLavoro(o, inizio);
+      // Visibile se il blocco di LAVORO [inizio, fine] interseca il range
+      // (prima si filtrava sulla scadenza: una commessa il cui lavoro è tutto
+      // prima della finestra non riguarda l'operatore in questo periodo).
+      if (fine < rangeStartIso || inizio > rangeEndIso) return;
+      commesse.push({ op:o, inizio, scadenza:o.scadenza, fine });
     });
 
     // Una cella unica che copre tutti gli slot (track per le barre)
@@ -10989,7 +11043,7 @@ function renderGanttCommesse(root) {
     commesse.sort((a,b) => a.inizio < b.inizio ? -1 : 1);
     commesse.forEach((c, idx) => {
       let iStart = slotIndexOfIso(c.inizio < rangeStartIso ? rangeStartIso : c.inizio);
-      let iEnd = slotIndexOfIso(c.scadenza > rangeEndIso ? rangeEndIso : c.scadenza);
+      let iEnd = slotIndexOfIso(c.fine > rangeEndIso ? rangeEndIso : c.fine);
       if (iStart < 0) iStart = 0;
       if (iEnd < 0) iEnd = slots.length - 1;
       const left = iStart * slotWidth;
@@ -11016,6 +11070,7 @@ function renderGanttCommesse(root) {
           + (prev > 0 ? '  (' + Math.round(perc*100) + '%)' : '')
           + (sfora ? '\n⚠ SFORAMENTO: +' + (cons-prev).toFixed(1) + ' h' : '')
           + (attiva ? '\n● lavorazione in corso' : '')
+          + '\nLavoro: ' + fmtIT(c.inizio) + ' → ' + fmtIT(c.fine)
           + '\nScadenza: ' + fmtIT(c.scadenza)
           + '\n(clic per aprire la commessa)',
         onclick: () => { if (typeof openOperazioneModal === 'function') openOperazioneModal(c.op); },
@@ -11031,6 +11086,20 @@ function renderGanttCommesse(root) {
         (art && art.codice ? art.codice : 'OP')
         + '  ' + Math.round(cons) + '/' + Math.round(prev) + 'h'));
       track.append(bar);
+
+      // Marcatore scadenza: visibile quando la barra NON finisce sulla
+      // scadenza (slack per inizio anticipato, o sforamento per inizio
+      // tardivo). Con calcolo automatico fine == scadenza → niente marcatore.
+      if (c.scadenza !== c.fine && c.scadenza >= rangeStartIso && c.scadenza <= rangeEndIso) {
+        const iScad = slotIndexOfIso(c.scadenza);
+        if (iScad >= 0) {
+          track.append(el('div', {
+            class: 'gantt-cmdeadline',
+            style: `left:${iScad*slotWidth}px;top:${idx*(BAR_H+GAP)}px;height:${BAR_H}px;`,
+            title: 'Scadenza: ' + fmtIT(c.scadenza),
+          }));
+        }
+      }
     });
 
     // altezza riga in base al numero di barre
@@ -11110,8 +11179,9 @@ function renderGanttCommesse(root) {
         const for_ids = getOperazioneFornitori(o.id);
         if (!for_ids.includes(a.id)) return;
         const inizio = opInizio(o) || o.scadenza;
-        if (o.scadenza < rangeStartIso || inizio > rangeEndIso) return;
-        commesse.push({ op:o, inizio, scadenza:o.scadenza });
+        const fine = opFineLavoro(o, inizio);
+        if (fine < rangeStartIso || inizio > rangeEndIso) return;
+        commesse.push({ op:o, inizio, scadenza:o.scadenza, fine });
       });
 
       const track = el('div', {
@@ -11145,7 +11215,7 @@ function renderGanttCommesse(root) {
         // mostrare la barra a tutta larghezza. Usiamo lo stesso pattern
         // del blocco utenti sopra.
         let i0 = slotIndexOfIso(c.inizio < rangeStartIso ? rangeStartIso : c.inizio);
-        let i1 = slotIndexOfIso(c.scadenza > rangeEndIso ? rangeEndIso : c.scadenza);
+        let i1 = slotIndexOfIso(c.fine > rangeEndIso ? rangeEndIso : c.fine);
         if (i0 < 0) i0 = 0;
         if (i1 < 0) i1 = slots.length - 1;
         const left = i0 * slotWidth;
@@ -11164,6 +11234,7 @@ function renderGanttCommesse(root) {
             + (cli ? '\nCliente: ' + cli.nome : '')
             + (art ? '\nArticolo: ' + (art.codice || '') : '')
             + '\nPreventivo: ' + prev.toFixed(1) + ' h'
+            + '\nLavoro: ' + fmtIT(c.inizio) + ' → ' + fmtIT(c.fine)
             + '\nScadenza: ' + fmtIT(c.scadenza)
             + '\n(clic per aprire la commessa)',
           onclick: () => { if (typeof openOperazioneModal === 'function') openOperazioneModal(c.op); },
@@ -11171,6 +11242,18 @@ function renderGanttCommesse(root) {
         bar.append(el('div', { class:'gantt-cmbar-txt' },
           (art && art.codice ? art.codice : 'OP') + '  ' + Math.round(prev) + 'h'));
         track.append(bar);
+
+        // Marcatore scadenza (vedi blocco operatori)
+        if (c.scadenza !== c.fine && c.scadenza >= rangeStartIso && c.scadenza <= rangeEndIso) {
+          const iScad = slotIndexOfIso(c.scadenza);
+          if (iScad >= 0) {
+            track.append(el('div', {
+              class: 'gantt-cmdeadline',
+              style: `left:${iScad*slotWidth}px;top:${idx*(BAR_H+GAP)}px;height:${BAR_H}px;`,
+              title: 'Scadenza: ' + fmtIT(c.scadenza),
+            }));
+          }
+        }
       });
 
       const hRiga = Math.max(38, commesse.length * (BAR_H+GAP) + 8);
