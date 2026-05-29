@@ -146,6 +146,7 @@ input.search:focus{border-color:var(--acc);}
 .storico-sess .meta{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .storico-sess .dur{font-family:'DM Mono',monospace;font-size:11px;color:var(--txt);font-weight:700;text-align:right;}
 .storico-sess.aperta .dur{color:var(--grn);}
+.storico-sess[title]:hover{background:var(--sur2);border-radius:4px;}
 .storico-ass{display:flex;align-items:center;gap:8px;padding:6px 11px;font-family:'DM Mono',monospace;font-size:11px;background:var(--sur2);}
 .storico-ass .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .mhd{padding:14px 17px 11px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
@@ -10510,7 +10511,18 @@ function apriStoricoConsuntivi(utente) {
       ? d.tipoLabel + ' · ' + oraStr
       : (d.codice + ' · ' + d.tipoLabel + ' · ' + oraStr);
 
-    return el('div', { class:'storico-sess' + (aperta ? ' aperta' : '') },
+    // Admin: la riga è cliccabile e apre la modal di modifica tempi della
+    // sessione. Dopo il salvataggio/eliminazione riapro questo stesso drawer
+    // (le modal non si impilano) così l'admin resta nel contesto dell'operatore.
+    const isAdmin = state.profile?.ruolo === 'admin';
+    const row = el('div', {
+      class:'storico-sess' + (aperta ? ' aperta' : ''),
+      style: isAdmin ? 'cursor:pointer;' : undefined,
+      title: isAdmin ? 'Clic per modificare i tempi di questa sessione' : undefined,
+      onclick: isAdmin
+        ? () => openSessioneModal(s, () => apriStoricoConsuntivi(utente))
+        : null,
+    },
       el('span', { class:'dot', style:'background:'+d.colore+';' }),
       el('div', { class:'corpo' },
         el('div', { class:'commessa' }, d.titolo),
@@ -10518,6 +10530,7 @@ function apriStoricoConsuntivi(utente) {
       ),
       el('div', { class:'dur' }, formatSecondsHuman(dur) + (aperta ? ' ●' : '')),
     );
+    return row;
   }
 
   renderBody();
@@ -11112,12 +11125,21 @@ function sessIntersectsRange(sess, rangeStart, rangeEnd) {
 }
 
 // ─── Modal modifica/elimina sessione (admin) ───
-function openSessioneModal(s) {
+// onDone (opzionale): callback eseguito DOPO un salvataggio/eliminazione andati
+// a buon fine, al posto del re-render della tab corrente. Serve ai chiamanti che
+// vogliono tornare al proprio contesto (es. drawer storico in Live: le modal non
+// si impilano, quindi senza questo l'admin verrebbe rispedito sulla tab Live).
+function openSessioneModal(s, onDone) {
   const isAdmin = state.profile?.ruolo === 'admin';
   if (!isAdmin) {
     toast('Solo gli admin possono modificare le sessioni', 'err');
     return;
   }
+  const finalize = () => {
+    closeModal();
+    if (typeof onDone === 'function') onDone();
+    else renderTab(state.currentTab);
+  };
 
   const d = descriviSessione(s);
   const operatore = state.utenti.find(u => u.id === s.utente_id);
@@ -11191,7 +11213,7 @@ function openSessioneModal(s) {
     if (error) return toast(error.message, 'err');
     if (!data || data.length === 0) return toast('Eliminazione bloccata (verifica policy)', 'err');
     state.sessioni = state.sessioni.filter(x => x.id !== s.id);
-    toast('Sessione eliminata'); closeModal(); renderTab(state.currentTab);
+    toast('Sessione eliminata'); finalize();
   } }, '🗑 Elimina'));
   foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
 
@@ -11220,7 +11242,7 @@ function openSessioneModal(s) {
       }
       state.sessioni = state.sessioni.map(x => x.id === s.id ? data : x);
       toast('Sessione aggiornata');
-      closeModal(); renderTab(state.currentTab);
+      finalize();
     } catch (e) {
       btnSave.disabled = false; btnSave.textContent = 'Salva';
       toast('Errore di rete: '+(e.message||e), 'err');
