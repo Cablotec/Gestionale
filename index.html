@@ -556,6 +556,8 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .gantt-cmbar.sfora{background:#5c2a35;}
 .gantt-cmbar.attiva{box-shadow:0 0 0 2px var(--grn);}
 .gantt-cmbar.attiva:hover{box-shadow:0 0 0 2px var(--grn),0 0 0 3px var(--txt);}
+.gantt-cmbar.mzconflict{box-shadow:0 0 0 2px var(--red);z-index:2;}
+.gantt-cmbar.mzconflict:hover{box-shadow:0 0 0 2px var(--red),0 0 0 3px var(--txt);}
 /* riempimento = ore consuntivate sul preventivo */
 .gantt-cmbar-fill{position:absolute;left:0;top:0;bottom:0;background:var(--blu);opacity:.85;z-index:0;}
 .gantt-cmbar-fill.sfora{background:var(--red);opacity:.9;}
@@ -2270,14 +2272,14 @@ function renderGenerale(root) {
 // CALENDARI → MEZZI (calendario + tabella)
 // ═══════════════════════════════════════════════════════════
 
-// Vista unificata Mezzi: calendario in cima + tabella prenotazioni sotto
+// Vista unificata Mezzi: barre tipo Gantt in cima + tabella prenotazioni sotto
 function renderCalMezzi(root) {
   root.innerHTML = '';
   state.calMode = 'mezzi';
 
-  // Sezione 1: calendario
+  // Sezione 1: calendario a barre (mezzi × giorni)
   const calSection = el('div', {});
-  renderCalendar(calSection);
+  renderCalMezziBarre(calSection);
   root.append(calSection);
 
   // Separatore visivo
@@ -2289,6 +2291,201 @@ function renderCalMezzi(root) {
   const tblSection = el('div', {});
   renderElenco(tblSection);
   root.append(tblSection);
+}
+
+// ─── VISTA MEZZI A BARRE (Gantt) ───────────────────────────────
+// Righe = mezzi, colonne = giorni del periodo (settimana/mese, stessa
+// navigazione del vecchio calendario via state.calCursor/calZoom).
+// Le prenotazioni sono barre posizionate per ISTANTE (giorno + frazione
+// oraria), quindi in settimanale gli orari si vedono, in mensile degrada a
+// livello-giorno. Le prenotazioni che si sovrappongono nel tempo sullo stesso
+// mezzo finiscono su corsie separate dentro la riga e vengono bordate di rosso
+// (sovrapposizioni che NON devono esistere). Click su una barra → apre la
+// prenotazione. Riusa helper e CSS del Gantt commesse.
+function renderCalMezziBarre(root) {
+  if (!(state.calCursor instanceof Date)) state.calCursor = new Date();
+  const zoom = state.calZoom === 'mese' ? 'mese' : 'settimana';
+  const cursor = state.calCursor;
+  const range = ganttCalcRange(cursor, zoom);
+  const slots = range.slots;
+  if (!slots || slots.length === 0) { root.append(el('div', { class:'empty' }, 'Intervallo non valido')); return; }
+  const rangeStartIso = slots[0].dateISO;
+  const rangeEndIso = slots[slots.length - 1].dateISO;
+  const oggiISO = toLocalISO(new Date());
+
+  // ── Toolbar (settimana/mese + navigazione + nuova prenotazione) ──
+  root.append(el('div', { class:'gantt-toolbar' },
+    el('div', { class:'switch-bar' },
+      el('button', { class: zoom==='settimana'?'act':'', onclick:()=>{ state.calZoom='settimana'; renderTab('cal_mezzi'); } }, 'Settimana'),
+      el('button', { class: zoom==='mese'?'act':'', onclick:()=>{ state.calZoom='mese'; renderTab('cal_mezzi'); } }, 'Mese'),
+    ),
+    el('div', { class:'gantt-nav' },
+      el('button', { onclick:()=>{ state.calCursor = ganttShift(cursor, zoom, -1); renderTab('cal_mezzi'); }, title:'Indietro' }, '◀'),
+      el('button', { onclick:()=>{ state.calCursor = new Date(); renderTab('cal_mezzi'); } }, 'Oggi'),
+      el('button', { onclick:()=>{ state.calCursor = ganttShift(cursor, zoom, +1); renderTab('cal_mezzi'); }, title:'Avanti' }, '▶'),
+      el('div', { class:'label' }, ganttRangeLabel(range, zoom)),
+    ),
+    el('button', { class:'btnp', style:'margin-left:auto;', onclick:()=>openPrenotazioneModal() }, '+ Nuova Prenotazione'),
+  ));
+
+  // Legenda tipi + indicatore conflitto
+  const legend = el('div', { class:'legend' });
+  TIPI.forEach(t => legend.append(el('span', { class:'lg' },
+    el('span', { class:'swatch', style:`background:${t.color}` }), t.label)));
+  legend.append(el('span', { class:'lg' },
+    el('span', { class:'swatch', style:'background:transparent;border-color:var(--red);box-shadow:0 0 0 2px var(--red) inset;' }), '⚠ Sovrapposizione'));
+  root.append(legend);
+
+  // Mezzi attivi come righe
+  const mezzi = state.mezzi.filter(m => m.attivo).sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
+  if (mezzi.length === 0) { root.append(el('div', { class:'empty' }, 'Nessun mezzo attivo')); return; }
+
+  // Mappa giorni non lavorativi (festivi + chiusure) per lo sfondo colonne
+  const annoMin = parseISODate(rangeStartIso).getFullYear();
+  const annoMax = parseISODate(rangeEndIso).getFullYear();
+  const nonLavMap = {};
+  if (typeof festiviNazionali === 'function') {
+    for (let y=annoMin; y<=annoMax; y++) festiviNazionali(y).forEach(f => {
+      const iso = f.data instanceof Date ? toLocalISO(f.data) : f.data;
+      if (iso) nonLavMap[iso] = f.nome;
+    });
+  }
+  (state.chiusure || []).forEach(c => {
+    if (!c.data) return;
+    if (c.ricorrente) { const md = c.data.substring(5); for (let y=annoMin;y<=annoMax;y++) nonLavMap[`${y}-${md}`] = c.descrizione || 'Chiusura aziendale'; }
+    else nonLavMap[c.data] = c.descrizione || 'Chiusura aziendale';
+  });
+
+  // Geometria griglia
+  const wrap = el('div', { class:'gantt-wrap' });
+  const minSlot = zoom === 'settimana' ? 110 : 26;
+  const dispW = (root.clientWidth || 1100) - 170 - 4;
+  const slotWidth = Math.max(minSlot, Math.floor(dispW / slots.length));
+  const grid = el('div', { class:'gantt-grid',
+    style:`grid-template-columns:170px repeat(${slots.length}, ${slotWidth}px);` });
+
+  // Header
+  grid.append(el('div', { class:'gantt-hd-corner' }, 'Mezzo'));
+  slots.forEach(slot => {
+    const cls = ['gantt-hd-time'];
+    if (slot.weekend) cls.push('weekend');
+    if (slot.dateISO === oggiISO || slot.isOggi) cls.push('oggi');
+    const nomeNonLav = !slot.weekend && nonLavMap[slot.dateISO];
+    if (nomeNonLav) cls.push('nonlav');
+    const attrs = { class:cls.join(' ') };
+    if (nomeNonLav) attrs.title = nomeNonLav;
+    grid.append(el('div', attrs, slot.label));
+  });
+
+  // Posizionamento a istante: x in px dalla mezzanotte del primo slot
+  const originMs = range.start.getTime();
+  const dayMs = 86400000;
+  const nDays = slots.length;
+  const instantX = (dt) => {
+    let days = (dt.getTime() - originMs) / dayMs;
+    if (days < 0) days = 0; else if (days > nDays) days = nDays;
+    return days * slotWidth;
+  };
+  const mkInstant = (iso, hhmm, fallback) => {
+    const d = parseISODate(iso);
+    const parts = String(hhmm || fallback || '00:00').split(':');
+    d.setHours(parseInt(parts[0],10)||0, parseInt(parts[1],10)||0, 0, 0);
+    return d;
+  };
+
+  const BAR_H = 18, GAP = 3, MIN_W = 8;
+
+  mezzi.forEach(m => {
+    // Cella nome mezzo (nome + targa/tipo)
+    const sub = [m.targa, m.tipo].filter(Boolean).join(' · ');
+    grid.append(el('div', {
+      class:'gantt-row-nome',
+      style:'flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;',
+      title: m.nome + (sub ? ' — ' + sub : ''),
+    },
+      el('div', { style:'font-weight:600;line-height:1.1;' }, m.nome || '—'),
+      sub ? el('div', { style:'font-family:DM Mono,monospace;font-size:9px;color:var(--mut);' }, sub) : null,
+    ));
+
+    const track = el('div', { class:'gantt-cmrow',
+      style:`grid-column:2 / span ${slots.length}; position:relative;` });
+
+    // Sfondo colonne (weekend/oggi/festivi/chiusure)
+    slots.forEach((slot, i) => {
+      const nonLav = !slot.weekend && nonLavMap[slot.dateISO];
+      track.append(el('div', {
+        class:'gantt-cmcol' + (slot.weekend?' weekend':'') + (nonLav?' nonlav':'')
+          + ((slot.dateISO===oggiISO||slot.isOggi)?' oggi':''),
+        style:`left:${i*slotWidth}px;width:${slotWidth}px;`,
+        title: nonLav || undefined,
+      }));
+    });
+
+    // Prenotazioni del mezzo che intersecano il range
+    const prens = (state.prenotazioni || [])
+      .filter(p => p.mezzo_id === m.id && p.data_inizio <= rangeEndIso && p.data_fine >= rangeStartIso)
+      .map(p => ({ p,
+        s: mkInstant(p.data_inizio, p.ora_inizio, '00:00'),
+        e: mkInstant(p.data_fine, p.ora_fine, '23:59'),
+        conflitto: false, lane: 0,
+      }))
+      .sort((a,b) => a.s - b.s);
+
+    // Conflitti: sovrapposizione [s,e) sullo stesso mezzo (08–12 e 12–18 non confliggono)
+    for (let i=0;i<prens.length;i++) for (let j=i+1;j<prens.length;j++) {
+      if (prens[i].s < prens[j].e && prens[j].s < prens[i].e) { prens[i].conflitto = true; prens[j].conflitto = true; }
+    }
+
+    // Corsie: le sovrapposte vanno su corsie diverse così sono tutte visibili
+    const laneEnds = [];
+    prens.forEach(x => {
+      let lane = laneEnds.findIndex(end => end <= x.s);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(x.e); }
+      else laneEnds[lane] = x.e;
+      x.lane = lane;
+    });
+    const nLanes = Math.max(1, laneEnds.length);
+
+    // Barre
+    prens.forEach(x => {
+      const p = x.p;
+      const left = instantX(x.s);
+      const width = Math.max(MIN_W, instantX(x.e) - left);
+      const color = TIPO_COLOR[p.tipo] || '#6b6b64';
+      const dest = (typeof getPrenotazioneDestinazione === 'function')
+        ? getPrenotazioneDestinazione(p.id) : { breve:'—', tooltip:'—' };
+      const utilNomi = (state.prenOp || [])
+        .filter(r => r.prenotazione_id === p.id)
+        .map(r => state.utentiById[r.utente_id]?.nome).filter(Boolean);
+      const utilLbl = utilNomi.length ? utilNomi.join(', ') : '—';
+      const lbl = (dest.breve && dest.breve !== '—') ? ('→ ' + dest.breve) : utilLbl;
+      const periodo = p.data_inizio === p.data_fine
+        ? fmtIT(p.data_inizio)
+        : fmtIT(p.data_inizio) + ' → ' + fmtIT(p.data_fine);
+      const orari = (p.ora_inizio || '—') + '–' + (p.ora_fine || '—');
+
+      const bar = el('div', {
+        class:'gantt-cmbar' + (x.conflitto ? ' mzconflict' : ''),
+        style:`left:${left}px;width:${width}px;top:${x.lane*(BAR_H+GAP)}px;height:${BAR_H}px;background:${color};`,
+        title: 'Mezzo: ' + (m.nome || '—')
+          + '\nPeriodo: ' + periodo
+          + '\nOrario: ' + orari
+          + '\nDestinazione:\n' + (dest.tooltip || dest.breve || '—')
+          + '\nOperatori: ' + utilLbl
+          + (x.conflitto ? '\n⚠ SOVRAPPOSIZIONE con un\'altra prenotazione dello stesso mezzo' : '')
+          + '\n(clic per aprire)',
+        onclick: () => openPrenotazioneModal(p),
+      });
+      bar.append(el('div', { class:'gantt-cmbar-txt' }, lbl));
+      track.append(bar);
+    });
+
+    track.style.minHeight = Math.max(38, nLanes*(BAR_H+GAP)+8) + 'px';
+    grid.append(track);
+  });
+
+  wrap.append(grid);
+  root.append(wrap);
 }
 
 function renderCalendar(root) {
