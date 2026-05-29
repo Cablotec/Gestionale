@@ -2359,7 +2359,11 @@ function renderCalMezziBarre(root) {
   // Geometria griglia
   const wrap = el('div', { class:'gantt-wrap' });
   const minSlot = zoom === 'settimana' ? 110 : 26;
-  const dispW = (root.clientWidth || 1100) - 170 - 4;
+  // Larghezza disponibile: misuro un contenitore GIÀ nel DOM (#tab-content),
+  // perché 'root' qui è una sezione non ancora attaccata → clientWidth=0 e
+  // scatterebbe un fallback più stretto della pagina. -170 = colonna nomi.
+  const hostW = ($('#tab-content')?.clientWidth) || root.clientWidth || (window.innerWidth - 48) || 1100;
+  const dispW = hostW - 170 - 4;
   const slotWidth = Math.max(minSlot, Math.floor(dispW / slots.length));
   const grid = el('div', { class:'gantt-grid',
     style:`grid-template-columns:170px repeat(${slots.length}, ${slotWidth}px);` });
