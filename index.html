@@ -10103,7 +10103,7 @@ function kioskRenderOpList() {
   }
 }
 
-function kioskOpCard(o) {
+function kioskOpCard(o, opts = {}) {
   const cli = state.aziende.find(c => c.id === o.cliente_id);
   const art = state.articoli.find(a => a.id === o.articolo_id);
   const oggi = toLocalISO(new Date());
@@ -10178,10 +10178,7 @@ function kioskOpCard(o) {
   // Classe card: base + classe stato (per bordo + tinta)
   const cardClass = 'kiosk-op-card' + (stato !== 'intonsa' ? ' stato-' + stato : '');
 
-  return el('button', {
-    class: cardClass,
-    onclick: () => kioskSelectOperazione(o),
-  },
+  const children = [
     el('div', { class:'kop-cliente' }, cli?.nome || '— senza cliente —'),
     metaParts.length > 0 ? el('div', { class:'kop-meta' }, ...metaParts) : null,
     el('div', { class:'kop-articolo' },
@@ -10190,7 +10187,17 @@ function kioskOpCard(o) {
     ),
     el('div', { class:'kop-bottom' }, ...bottomParts),
     progressRow,
-  );
+  ];
+
+  // Modalità sola lettura: anteprima non cliccabile (es. coda "prossime").
+  if (opts.readonly) {
+    return el('div', { class: cardClass + ' kop-readonly', style:'cursor:default;text-align:left;' }, ...children);
+  }
+
+  return el('button', {
+    class: cardClass,
+    onclick: () => kioskSelectOperazione(o),
+  }, ...children);
 }
 
 function kioskSelectOperazione(o) {
@@ -10495,28 +10502,16 @@ function kioskRenderAttiva() {
     });
 
   if (prossime.length > 0) {
-    const CAP = 5;
-    const sec = el('div', { class:'kiosk-prossime', style:'margin-top:20px;width:100%;' });
+    const CAP = 4;
+    const sec = el('div', { class:'kiosk-prossime', style:'margin-top:24px;width:100%;' });
     sec.append(el('div', {
-      style:'font-size:14px;font-weight:700;color:var(--mut,#888);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;text-align:center;'
-    }, 'Prossime assegnate a te'));
-    prossime.slice(0, CAP).forEach(op => {
-      const cliP = state.aziende.find(c => c.id === op.cliente_id);
-      const artP = state.articoli.find(a => a.id === op.articolo_id);
-      const titolo = (cliP?.nome || '—')
-        + ' · ' + (artP?.codice || '—')
-        + (op.numero_ordine ? (' · ' + op.numero_ordine) : '');
-      const scad = op.scadenza ? ('scad. ' + fmtIT(op.scadenza)) : 'senza scadenza';
-      sec.append(el('div', {
-        style:'border:2px solid var(--brd,#444);border-radius:999px;padding:10px 18px;margin:8px 0;'
-            + 'display:flex;justify-content:space-between;align-items:center;gap:12px;'
-      },
-        el('div', { style:'font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, titolo),
-        el('div', { style:'font-size:13px;color:var(--mut,#888);white-space:nowrap;' }, scad),
-      ));
-    });
+      style:'font-size:13px;font-weight:700;color:var(--mut,#888);text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px;text-align:center;'
+    }, 'Prossime assegnate a te (' + prossime.length + ')'));
+    const lista = el('div', { style:'display:flex;flex-direction:column;gap:12px;align-items:stretch;' });
+    prossime.slice(0, CAP).forEach(op => lista.append(kioskOpCard(op, { readonly: true })));
+    sec.append(lista);
     if (prossime.length > CAP) {
-      sec.append(el('div', { style:'text-align:center;font-size:13px;color:var(--mut,#888);margin-top:6px;' },
+      sec.append(el('div', { style:'text-align:center;font-size:13px;color:var(--mut,#888);margin-top:10px;' },
         '+ altre ' + (prossime.length - CAP) + ' assegnate'));
     }
     root.append(sec);
@@ -12531,7 +12526,7 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
   const body = el('div', { class:'mbody' });
 
   body.append(el('div', { class:'assv2-modal-step' },
-    `${utente.nome} · ${fmtIT(iso)}`));
+    assEsistente ? `${utente.nome} · ${fmtIT(iso)}` : utente.nome));
 
   // Step 1: tipo
   body.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;' }, 'Tipo:'));
@@ -12687,12 +12682,24 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
 
   // Periodo: "ripeti fino al" — solo in inserimento (non in modifica).
   // Se valorizzato, crea una riga per ogni giorno del periodo [iso, fine].
-  let inputFine = null;
+  let inputInizio = null, inputFine = null;
   if (!assEsistente) {
+    inputInizio = el('input', { type:'date', id:'ass-inizio', value: iso });
     inputFine = el('input', { type:'date', id:'ass-fine', min: iso, value: '', onchange: () => refresh() });
+    inputInizio.onchange = () => {
+      // L'inizio guida il minimo della fine; se la fine resta indietro, la azzero.
+      const v = inputInizio.value || iso;
+      inputFine.min = v;
+      if (inputFine.value && inputFine.value < v) inputFine.value = '';
+      refresh();
+    };
     body.append(
       el('div', { class:'field', style:'margin-top:10px;' },
-        el('label', {}, 'Ripeti fino al (opz. — per un periodo)'),
+        el('label', {}, 'Dal'),
+        inputInizio,
+      ),
+      el('div', { class:'field', style:'margin-top:10px;' },
+        el('label', {}, 'Al (opz. — per un periodo)'),
         inputFine,
         el('div', { style:'font-size:11px;color:var(--mut);margin-top:4px;' },
           'Weekend, festivi e chiusure aziendali vengono saltati automaticamente.'),
@@ -12765,20 +12772,21 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
       return;
     }
 
-    // ── NUOVA: singolo giorno oppure periodo [iso, fineIso] ──
+    // ── NUOVA: singolo giorno oppure periodo [inizioIso, fineIso] ──
+    const inizioIso = (inputInizio && inputInizio.value) ? inputInizio.value : iso;
     const fineIso = inputFine ? (inputFine.value || '').trim() : '';
     let giorni = [];
-    if (fineIso && fineIso < iso) {
+    if (fineIso && fineIso < inizioIso) {
       return toast('La data finale deve essere uguale o successiva a quella iniziale', 'err');
-    } else if (fineIso && fineIso > iso) {
-      const d = parseISODate(iso);
+    } else if (fineIso && fineIso > inizioIso) {
+      const d = parseISODate(inizioIso);
       const fine = parseISODate(fineIso);
       while (d <= fine) {
         if (!isGiornoNonLavorativo(d)) giorni.push(toLocalISO(d));
         d.setDate(d.getDate() + 1);
       }
     } else {
-      giorni = [iso];
+      giorni = [inizioIso];
     }
 
     // Salta i giorni già con un'assenza per questa persona (no overwrite).
@@ -12846,10 +12854,11 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     const tipo = state.tipiAssenza.find(t => t.id === tipoSel);
     if (tipo && oreSel !== null) {
       riepilogo.innerHTML = '';
+      const inizioV = (inputInizio && inputInizio.value) ? inputInizio.value : iso;
       const fineV = inputFine ? (inputFine.value || '').trim() : '';
-      const periodo = (fineV && fineV > iso)
-        ? `dal ${fmtIT(iso)} al ${fmtIT(fineV)}`
-        : fmtIT(iso);
+      const periodo = (fineV && fineV > inizioV)
+        ? `dal ${fmtIT(inizioV)} al ${fmtIT(fineV)}`
+        : fmtIT(inizioV);
       riepilogo.append(
         el('span', { style:'color:var(--txt);font-weight:700;' }, `${tipo.nome}: ${oreSel}h`),
         ' · ',
