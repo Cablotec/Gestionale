@@ -843,6 +843,35 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
 <script>
 let sb = null;
 let realtimeChannel = null;
+// Recovery realtime: ri-sottoscrizione automatica + ricarico di recupero.
+let kioskChannel = null;
+let _rtReconnectTimer = null;
+let _kioskRtTimer = null;
+let _rtNeedCatchup = false;
+let _kioskNeedCatchup = false;
+let _rtLivenessTimer = null;
+// Controllo periodico: se il canale non è "joined", lo ricreo. È la rete di
+// sicurezza per i client always-on (es. kiosk su mini PC) che non vanno mai in
+// background e quindi non innescano il recovery legato a visibilitychange.
+function _rtLivenessCheck() {
+  if (!sb) return;
+  const vivo = (ch) => ch && (ch.state === 'joined' || ch.state === 'joining');
+  if (IS_KIOSK) {
+    if (!vivo(kioskChannel) && typeof kioskStartRealtime === 'function') {
+      _kioskNeedCatchup = true;
+      try { if (kioskChannel) sb.removeChannel(kioskChannel); } catch (e) {}
+      kioskChannel = null;
+      kioskStartRealtime();
+    }
+  } else {
+    if (!vivo(realtimeChannel) && typeof startRealtime === 'function') {
+      _rtNeedCatchup = true;
+      try { if (realtimeChannel) sb.removeChannel(realtimeChannel); } catch (e) {}
+      realtimeChannel = null;
+      startRealtime();
+    }
+  }
+}
 const state = {
   session: null, profile: null, profiliById: {}, mezzi: [],
   appInizializzata: false, // true dopo il primo afterLogin completato
@@ -1100,8 +1129,13 @@ async function ricreaConnessione() {
         }
       }
 
-      // 5. Riattiva il realtime sul nuovo client (se eravamo loggati e non kiosk)
-      if (!IS_KIOSK && typeof startRealtime === 'function') {
+      // 5. Riattiva il realtime sul nuovo client (admin O kiosk)
+      if (IS_KIOSK) {
+        kioskChannel = null; // i canali vecchi sono stati rimossi: consenti la ri-sottoscrizione
+        if (typeof kioskStartRealtime === 'function') {
+          try { kioskStartRealtime(); } catch (e) {}
+        }
+      } else if (typeof startRealtime === 'function') {
         try { startRealtime(); } catch (e) {}
       }
 
@@ -1657,6 +1691,7 @@ async function loadAllData() {
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
 function startRealtime() {
   if (realtimeChannel) return; // già attivo
+  if (!_rtLivenessTimer) _rtLivenessTimer = setInterval(_rtLivenessCheck, 45000);
   realtimeChannel = sb.channel('app-changes')
     .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni' },
         (p) => applyChange('prenotazioni', p))
@@ -1696,7 +1731,26 @@ function startRealtime() {
         (p) => applyChange('consegne_commessa', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'spedizioni' },
         (p) => applyChange('spedizioni', p))
-    .subscribe();
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        if (_rtNeedCatchup) {
+          _rtNeedCatchup = false;
+          // Il realtime non riproduce gli eventi persi durante un buco:
+          // ricarico una volta per riallineare la vista alla realtà.
+          if (state.loaded && !IS_KIOSK && typeof loadAllData === 'function') {
+            loadAllData()
+              .then(() => { if (state.currentTab && typeof renderTab === 'function') renderTab(state.currentTab); })
+              .catch(() => {});
+          }
+        }
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        _rtNeedCatchup = true;
+        try { if (realtimeChannel) sb.removeChannel(realtimeChannel); } catch (e) {}
+        realtimeChannel = null;
+        clearTimeout(_rtReconnectTimer);
+        _rtReconnectTimer = setTimeout(() => { if (!realtimeChannel && sb) startRealtime(); }, 3000);
+      }
+    });
 }
 
 function applyChange(tabella, payload) {
@@ -9013,6 +9067,17 @@ async function chiudiSessioniPausaPranzo() {
 
     if (chiuse > 0) {
       console.log(`[pausa pranzo] chiuse ${chiuse} sessioni automaticamente`);
+      // Aggiorno subito la UI di QUESTO client senza aspettare l'eco realtime,
+      // così il timer si ferma anche se il realtime è momentaneamente giù.
+      try {
+        if (IS_KIOSK) {
+          if (typeof kioskLoadAll === 'function') await kioskLoadAll();
+          if (typeof kioskRefreshActive === 'function') kioskRefreshActive();
+        } else if (state.loaded && typeof loadAllData === 'function') {
+          await loadAllData();
+          if (state.currentTab && typeof renderTab === 'function') renderTab(state.currentTab);
+        }
+      } catch (e) { /* refresh best-effort */ }
     }
     return chiuse;
   } catch (e) {
@@ -9201,7 +9266,9 @@ async function kioskLoadAll() {
 }
 
 function kioskStartRealtime() {
-  sb.channel('kiosk-changes')
+  if (kioskChannel) return;
+  if (!_rtLivenessTimer) _rtLivenessTimer = setInterval(_rtLivenessCheck, 45000);
+  kioskChannel = sb.channel('kiosk-changes')
     .on('postgres_changes', { event:'*', schema:'public', table:'mezzi' }, () => {
       kioskLoadAll().then(kioskRefreshActive);
     })
@@ -9226,7 +9293,21 @@ function kioskStartRealtime() {
     .on('postgres_changes', { event:'*', schema:'public', table:'tipi_lavorazione' }, () => {
       kioskLoadAll().then(kioskRefreshActive);
     })
-    .subscribe();
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        if (_kioskNeedCatchup) {
+          _kioskNeedCatchup = false;
+          // Recupero gli eventi persi durante il buco (il realtime non li riproduce).
+          kioskLoadAll().then(kioskRefreshActive).catch(() => {});
+        }
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        _kioskNeedCatchup = true;
+        try { if (kioskChannel) sb.removeChannel(kioskChannel); } catch (e) {}
+        kioskChannel = null;
+        clearTimeout(_kioskRtTimer);
+        _kioskRtTimer = setTimeout(() => { if (!kioskChannel && sb) kioskStartRealtime(); }, 3000);
+      }
+    });
 }
 
 function kioskRefreshActive() {
