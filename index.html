@@ -381,6 +381,17 @@ input.search:focus{border-color:var(--acc);}
 /* Schermata kiosk per lista commesse: il contenuto scorre se è più alto della pagina */
 #kiosk-step-op-list{overflow:hidden;}
 #kiosk-op-list-content{flex:1;overflow-y:auto;padding-right:6px;}
+/* La schermata attiva deve poter scorrere quando la coda "prossime" è lunga */
+#kiosk-attiva-content{flex:1;overflow-y:auto;padding-right:6px;}
+/* Coda "prossime assegnate": riga compatta orizzontale (~metà altezza) */
+.kiosk-prossima-row{background:var(--sur);border:1px solid var(--brd);border-radius:6px;padding:9px 16px;}
+.kpr-main{display:flex;align-items:baseline;justify-content:space-between;gap:14px;}
+.kpr-desc{font-family:'Syne',sans-serif;font-size:19px;font-weight:700;color:var(--txt);line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kpr-scad{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:var(--mut);white-space:nowrap;flex-shrink:0;}
+.kpr-scad.vicina{color:var(--yel);}
+.kpr-scad.passata{color:var(--red);}
+.kpr-meta{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);letter-spacing:.04em;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kpr-meta .acc{color:var(--acc);font-weight:700;}
 /* Griglia commesse: fino a 3 colonne, scende a 2 o 1 se non c'è spazio.
    minmax(320px,1fr) garantisce che ogni card sia di almeno 320px;
    auto-fit + 'fr' fa sì che si distribuiscano sulla larghezza disponibile. */
@@ -10388,6 +10399,40 @@ function kioskGoToAttiva() {
   kioskResetInactivity();
 }
 
+// Riga compatta (anteprima, non cliccabile) per la coda "prossime assegnate":
+// descrizione grande in evidenza + meta orizzontale (codice · cliente · ordine · qty)
+// e scadenza colorata per urgenza. Circa metà altezza della card piena.
+function kioskProssimaRow(op) {
+  const cli = state.aziende.find(c => c.id === op.cliente_id);
+  const art = state.articoli.find(a => a.id === op.articolo_id);
+  const oggi = toLocalISO(new Date());
+  let scadCls = '';
+  if (op.scadenza && op.scadenza < oggi) scadCls = 'passata';
+  else if (op.scadenza) {
+    const diff = (parseISODate(op.scadenza) - new Date()) / 86400000;
+    if (diff <= 3) scadCls = 'vicina';
+  }
+  const desc = (art?.descrizione || '').trim();
+  const titolo = desc || (art?.codice || '— senza codice —');
+
+  // Meta orizzontale: codice (se non è già il titolo) · cliente · ordine · qty
+  const meta = el('div', { class:'kpr-meta' });
+  const parts = [];
+  if (desc && art?.codice) parts.push(el('span', { class:'acc' }, art.codice));
+  if (cli?.nome) parts.push(el('span', {}, cli.nome));
+  if (op.numero_ordine) parts.push(el('span', {}, op.numero_ordine));
+  parts.push(el('span', {}, (op.quantita || 0) + ' pz'));
+  parts.forEach((p, i) => { if (i > 0) meta.append(document.createTextNode('  ·  ')); meta.append(p); });
+
+  return el('div', { class:'kiosk-prossima-row' },
+    el('div', { class:'kpr-main' },
+      el('div', { class:'kpr-desc' }, titolo),
+      op.scadenza ? el('div', { class:'kpr-scad ' + scadCls }, '📅 ' + fmtIT(op.scadenza)) : null,
+    ),
+    meta,
+  );
+}
+
 function kioskRenderAttiva() {
   const u = kioskState.utenteSelezionato;
   if (!u) { kioskGoToId(); return; }
@@ -10502,13 +10547,13 @@ function kioskRenderAttiva() {
     });
 
   if (prossime.length > 0) {
-    const CAP = 4;
+    const CAP = 8;
     const sec = el('div', { class:'kiosk-prossime', style:'margin-top:24px;width:100%;' });
     sec.append(el('div', {
       style:'font-size:13px;font-weight:700;color:var(--mut,#888);text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px;text-align:center;'
     }, 'Prossime assegnate a te (' + prossime.length + ')'));
-    const lista = el('div', { style:'display:flex;flex-direction:column;gap:12px;align-items:stretch;' });
-    prossime.slice(0, CAP).forEach(op => lista.append(kioskOpCard(op, { readonly: true })));
+    const lista = el('div', { style:'display:flex;flex-direction:column;gap:8px;align-items:stretch;' });
+    prossime.slice(0, CAP).forEach(op => lista.append(kioskProssimaRow(op)));
     sec.append(lista);
     if (prossime.length > CAP) {
       sec.append(el('div', { style:'text-align:center;font-size:13px;color:var(--mut,#888);margin-top:10px;' },
