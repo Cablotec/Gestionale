@@ -10473,6 +10473,54 @@ function kioskRenderAttiva() {
       '⏹ Termina lavoro'),
   );
   root.append(actions);
+
+  // ─── Coda: prossime commesse assegnate a questo operatore ───
+  // Operazioni assegnate a lui (opAddetti), ancora aperte, escluse quelle in
+  // corso, ordinate per scadenza. Solo informativo (anteprima della coda).
+  const attiveIds = new Set(
+    state.sessioni.filter(s => s.utente_id === u.id && !s.fine)
+      .map(s => s.operazione_id).filter(Boolean)
+  );
+  const mieIds = new Set(
+    state.opAddetti.filter(r => r.utente_id === u.id).map(r => r.operazione_id)
+  );
+  const prossime = state.operazioni
+    .filter(op => op.stato !== 'spedita' && op.stato !== 'completata')
+    .filter(op => mieIds.has(op.id) && !attiveIds.has(op.id))
+    .sort((a, b) => {
+      if (!a.scadenza && !b.scadenza) return 0;
+      if (!a.scadenza) return 1;
+      if (!b.scadenza) return -1;
+      return a.scadenza < b.scadenza ? -1 : (a.scadenza > b.scadenza ? 1 : 0);
+    });
+
+  if (prossime.length > 0) {
+    const CAP = 5;
+    const sec = el('div', { class:'kiosk-prossime', style:'margin-top:20px;width:100%;' });
+    sec.append(el('div', {
+      style:'font-size:14px;font-weight:700;color:var(--mut,#888);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;text-align:center;'
+    }, 'Prossime assegnate a te'));
+    prossime.slice(0, CAP).forEach(op => {
+      const cliP = state.aziende.find(c => c.id === op.cliente_id);
+      const artP = state.articoli.find(a => a.id === op.articolo_id);
+      const titolo = (cliP?.nome || '—')
+        + ' · ' + (artP?.codice || '—')
+        + (op.numero_ordine ? (' · ' + op.numero_ordine) : '');
+      const scad = op.scadenza ? ('scad. ' + fmtIT(op.scadenza)) : 'senza scadenza';
+      sec.append(el('div', {
+        style:'border:2px solid var(--brd,#444);border-radius:999px;padding:10px 18px;margin:8px 0;'
+            + 'display:flex;justify-content:space-between;align-items:center;gap:12px;'
+      },
+        el('div', { style:'font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, titolo),
+        el('div', { style:'font-size:13px;color:var(--mut,#888);white-space:nowrap;' }, scad),
+      ));
+    });
+    if (prossime.length > CAP) {
+      sec.append(el('div', { style:'text-align:center;font-size:13px;color:var(--mut,#888);margin-top:6px;' },
+        '+ altre ' + (prossime.length - CAP) + ' assegnate'));
+    }
+    root.append(sec);
+  }
 }
 
 function kioskRefreshDurata() {
@@ -12637,6 +12685,21 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     el('textarea', { id:'ass-note', rows:'2' }, assEsistente?.note || ''),
   ));
 
+  // Periodo: "ripeti fino al" — solo in inserimento (non in modifica).
+  // Se valorizzato, crea una riga per ogni giorno del periodo [iso, fine].
+  let inputFine = null;
+  if (!assEsistente) {
+    inputFine = el('input', { type:'date', id:'ass-fine', min: iso, value: '', onchange: () => refresh() });
+    body.append(
+      el('div', { class:'field', style:'margin-top:10px;' },
+        el('label', {}, 'Ripeti fino al (opz. — per un periodo)'),
+        inputFine,
+        el('div', { style:'font-size:11px;color:var(--mut);margin-top:4px;' },
+          'Weekend, festivi e chiusure aziendali vengono saltati automaticamente.'),
+      ),
+    );
+  }
+
   // Riepilogo selezione
   const riepilogo = el('div', {
     style: 'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);padding:8px 10px;background:var(--sur2);border-radius:3px;margin-top:10px;'
@@ -12671,57 +12734,94 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     if (!tipoSel) return toast('Seleziona il tipo', 'err');
     if (oreSel === null || oreSel < 0) return toast('Inserisci le ore', 'err');
 
-    // ── Controllo finestra di apertura ───────────────────────
-    // Per i non-admin: la data deve cadere in un periodo aperto oggi.
-    // Vale per inserimento, modifica ed eliminazione. Gli admin sono esenti.
     const sonoAdmin = state.profile?.ruolo === 'admin';
     const perMeStesso = utente.account_id === state.profile?.id;
-    if (!sonoAdmin && perMeStesso) {
-      const verifica = verificaAccessoAssenza(iso, utente);
-      if (!verifica.ok) {
-        return toast('Inserimento non consentito: ' + verifica.motivo + '.', 'err');
+    const note = (document.getElementById('ass-note').value || '').trim() || null;
+
+    // ── MODIFICA: comportamento invariato (singolo giorno) ──
+    if (assEsistente) {
+      if (!sonoAdmin && perMeStesso) {
+        const verifica = verificaAccessoAssenza(iso, utente);
+        if (!verifica.ok) return toast('Inserimento non consentito: ' + verifica.motivo + '.', 'err');
       }
+      btnSave.disabled = true; btnSave.textContent = 'Salvataggio…';
+      try {
+        const { data, error } = await eseguiConRetry(
+          () => sb.from('assenze').update({ tipo_assenza_id: tipoSel, ore: oreSel, note })
+                  .eq('id', assEsistente.id).select().single(),
+          { label: 'salvataggio assenza' }
+        );
+        if (error) {
+          btnSave.disabled = false; btnSave.textContent = 'Salva';
+          if (error.code === '23505') return toast('Esiste già un\'assenza per questa persona/giorno', 'err');
+          return toast(error.message, 'err');
+        }
+        state.assenze = state.assenze.map(x => x.id === data.id ? data : x);
+        toast('Assenza salvata'); closeModal(); renderTab('cal_assenze');
+      } catch (e) {
+        btnSave.disabled = false; btnSave.textContent = 'Salva';
+        toast('Errore: '+(e.message||e), 'err');
+      }
+      return;
     }
 
-    btnSave.disabled = true;
-    btnSave.textContent = 'Salvataggio…';
-    const note = (document.getElementById('ass-note').value || '').trim() || null;
+    // ── NUOVA: singolo giorno oppure periodo [iso, fineIso] ──
+    const fineIso = inputFine ? (inputFine.value || '').trim() : '';
+    let giorni = [];
+    if (fineIso && fineIso < iso) {
+      return toast('La data finale deve essere uguale o successiva a quella iniziale', 'err');
+    } else if (fineIso && fineIso > iso) {
+      const d = parseISODate(iso);
+      const fine = parseISODate(fineIso);
+      while (d <= fine) {
+        if (!isGiornoNonLavorativo(d)) giorni.push(toLocalISO(d));
+        d.setDate(d.getDate() + 1);
+      }
+    } else {
+      giorni = [iso];
+    }
+
+    // Salta i giorni già con un'assenza per questa persona (no overwrite).
+    let giaPresenti = 0;
+    giorni = giorni.filter(g => { if (getAssenza(utente.id, g)) { giaPresenti++; return false; } return true; });
+
+    // Non-admin per sé stesso: tieni solo i giorni nella finestra consentita.
+    let fuoriFinestra = 0;
+    if (!sonoAdmin && perMeStesso) {
+      giorni = giorni.filter(g => { if (!verificaAccessoAssenza(g, utente).ok) { fuoriFinestra++; return false; } return true; });
+    }
+
+    if (giorni.length === 0) {
+      const motivi = [];
+      if (giaPresenti) motivi.push(`${giaPresenti} già presenti`);
+      if (fuoriFinestra) motivi.push(`${fuoriFinestra} fuori finestra`);
+      return toast('Nessun giorno da inserire' + (motivi.length ? ' ('+motivi.join(', ')+')' : ''), 'err');
+    }
+
+    btnSave.disabled = true; btnSave.textContent = 'Salvataggio…';
+    const rows = giorni.map(g => ({
+      utente_id: utente.id, tipo_assenza_id: tipoSel, data: g,
+      ore: oreSel, stato: 'valida', note, creato_da: state.profile.id,
+    }));
     try {
       const { data, error } = await eseguiConRetry(
-        () => assEsistente
-          ? sb.from('assenze').update({
-              tipo_assenza_id: tipoSel,
-              ore: oreSel,
-              note,
-            }).eq('id', assEsistente.id).select().single()
-          : sb.from('assenze').insert({
-              utente_id: utente.id,
-              tipo_assenza_id: tipoSel,
-              data: iso,
-              ore: oreSel,
-              stato: 'valida',
-              note,
-              creato_da: state.profile.id,
-            }).select().single(),
-        { label: 'salvataggio assenza' }
+        () => sb.from('assenze').insert(rows).select(),
+        { label: 'salvataggio assenze' }
       );
       if (error) {
-        btnSave.disabled = false;
-        btnSave.textContent = 'Salva';
-        if (error.code === '23505') return toast('Esiste già un\'assenza per questa persona/giorno', 'err');
+        btnSave.disabled = false; btnSave.textContent = 'Salva';
+        if (error.code === '23505') return toast('Alcuni giorni hanno già un\'assenza', 'err');
         return toast(error.message, 'err');
       }
-      if (assEsistente) {
-        state.assenze = state.assenze.map(x => x.id === data.id ? data : x);
-      } else {
-        if (!state.assenze.find(x => x.id === data.id)) state.assenze.unshift(data);
-      }
-      toast('Assenza salvata');
-      closeModal();
-      renderTab('cal_assenze');
+      (data || []).forEach(r => { if (!state.assenze.find(x => x.id === r.id)) state.assenze.unshift(r); });
+      let msg = giorni.length === 1 ? 'Assenza salvata' : `${giorni.length} assenze salvate`;
+      const extra = [];
+      if (giaPresenti) extra.push(`${giaPresenti} già presenti saltate`);
+      if (fuoriFinestra) extra.push(`${fuoriFinestra} fuori finestra saltate`);
+      if (extra.length) msg += ' (' + extra.join(', ') + ')';
+      toast(msg); closeModal(); renderTab('cal_assenze');
     } catch (e) {
-      btnSave.disabled = false;
-      btnSave.textContent = 'Salva';
+      btnSave.disabled = false; btnSave.textContent = 'Salva';
       toast('Errore: '+(e.message||e), 'err');
     }
   };
@@ -12746,10 +12846,14 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     const tipo = state.tipiAssenza.find(t => t.id === tipoSel);
     if (tipo && oreSel !== null) {
       riepilogo.innerHTML = '';
+      const fineV = inputFine ? (inputFine.value || '').trim() : '';
+      const periodo = (fineV && fineV > iso)
+        ? `dal ${fmtIT(iso)} al ${fmtIT(fineV)}`
+        : fmtIT(iso);
       riepilogo.append(
         el('span', { style:'color:var(--txt);font-weight:700;' }, `${tipo.nome}: ${oreSel}h`),
-        ' su ',
-        el('span', { style:'color:var(--acc);' }, fmtIT(iso)),
+        ' · ',
+        el('span', { style:'color:var(--acc);' }, periodo),
       );
     } else {
       riepilogo.textContent = 'Seleziona tipo per continuare';
