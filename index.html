@@ -383,15 +383,17 @@ input.search:focus{border-color:var(--acc);}
 #kiosk-op-list-content{flex:1;overflow-y:auto;padding-right:6px;}
 /* La schermata attiva deve poter scorrere quando la coda "prossime" è lunga */
 #kiosk-attiva-content{flex:1;overflow-y:auto;padding-right:6px;}
-/* Coda "prossime assegnate": riga compatta orizzontale (~metà altezza) */
-.kiosk-prossima-row{background:var(--sur);border:1px solid var(--brd);border-radius:6px;padding:9px 16px;}
-.kpr-main{display:flex;align-items:baseline;justify-content:space-between;gap:14px;}
-.kpr-desc{font-family:'Syne',sans-serif;font-size:19px;font-weight:700;color:var(--txt);line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.kpr-scad{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:var(--mut);white-space:nowrap;flex-shrink:0;}
-.kpr-scad.vicina{color:var(--yel);}
-.kpr-scad.passata{color:var(--red);}
-.kpr-meta{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);letter-spacing:.04em;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.kpr-meta .acc{color:var(--acc);font-weight:700;}
+/* Riga "prossime assegnate": contenitore (dentro va il blocco-info standard) */
+.kiosk-prossima-row{background:var(--sur);border:1px solid var(--brd);border-radius:6px;padding:10px 16px;}
+/* Blocco-info STANDARD del kiosk — coerente in tutte le viste */
+.kib-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.kib-cod{flex:1;min-width:0;font-family:'DM Mono',monospace;font-size:20px;font-weight:700;color:var(--txt);line-height:1.15;overflow-wrap:anywhere;}
+.kib-scad{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--mut);white-space:nowrap;flex-shrink:0;padding-top:3px;}
+.kib-scad.vicina{color:var(--yel);}
+.kib-scad.passata{color:var(--red);}
+.kib-desc{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--txt);line-height:1.25;margin-top:3px;}
+.kib-meta{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);letter-spacing:.04em;margin-top:6px;line-height:1.4;}
+.kop-note-row{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* Griglia commesse: fino a 3 colonne, scende a 2 o 1 se non c'è spazio.
    minmax(320px,1fr) garantisce che ogni card sia di almeno 320px;
    auto-fit + 'fr' fa sì che si distribuiscano sulla larghezza disponibile. */
@@ -10114,20 +10116,44 @@ function kioskRenderOpList() {
   }
 }
 
-function kioskOpCard(o, opts = {}) {
-  const cli = state.aziende.find(c => c.id === o.cliente_id);
-  const art = state.articoli.find(a => a.id === o.articolo_id);
-  const oggi = toLocalISO(new Date());
-  let scadCls = '';
-  if (o.scadenza && o.scadenza < oggi) scadCls = 'passata';
-  else if (o.scadenza) {
-    const diff = (parseISODate(o.scadenza) - new Date()) / 86400000;
-    if (diff <= 3) scadCls = 'vicina';
+// Blocco-info STANDARD del kiosk, riusato in tutte le viste per coerenza.
+//   CODICE (grande)                         📅 scadenza (colorata per urgenza)
+//   descrizione (grande)
+//   cliente · OC · OP · Rif. cliente · quantità   (valori; campi vuoti nascosti)
+// opts.scadenza === false → nasconde la scadenza.
+function kioskInfoBlock(op, opts = {}) {
+  const showScad = opts.scadenza !== false;
+  const cli = state.aziende.find(c => c.id === op.cliente_id);
+  const art = state.articoli.find(a => a.id === op.articolo_id);
+
+  let scadEl = null;
+  if (showScad && op.scadenza) {
+    const oggi = toLocalISO(new Date());
+    let scadCls = '';
+    if (op.scadenza < oggi) scadCls = 'passata';
+    else { const diff = (parseISODate(op.scadenza) - new Date()) / 86400000; if (diff <= 3) scadCls = 'vicina'; }
+    scadEl = el('div', { class:'kib-scad ' + scadCls }, '📅 ' + fmtIT(op.scadenza));
   }
 
-  // Determino lo stato di progresso una volta sola — usato sia per la
-  // classe della card (bordo + tinta sfondo) sia per la riga progresso/badge.
-  // Stati possibili: 'intonsa', 'prog-ok', 'prog-vicino', 'prog-sfora', 'noprev'.
+  const parts = [];
+  if (cli?.nome) parts.push(cli.nome);
+  if (op.numero_ordine) parts.push(op.numero_ordine);
+  if (op.numero_op) parts.push(op.numero_op);
+  if (op.riferimento_cliente) parts.push(op.riferimento_cliente);
+  parts.push((op.quantita || 0) + ' pz');
+
+  return el('div', { class:'kib' },
+    el('div', { class:'kib-head' },
+      el('div', { class:'kib-cod' }, art?.codice || '— senza codice —'),
+      scadEl,
+    ),
+    art?.descrizione ? el('div', { class:'kib-desc' }, art.descrizione) : null,
+    el('div', { class:'kib-meta' }, parts.join('  ·  ')),
+  );
+}
+
+function kioskOpCard(o, opts = {}) {
+  // Stato avanzamento: tinta card + barra progresso (solo se commessa iniziata).
   let stato = 'intonsa';
   let oreCons = 0, orePrev = 0, perc = 0;
   if (kioskState.opIniziate.has(o.id)) {
@@ -10141,19 +10167,6 @@ function kioskOpCard(o, opts = {}) {
     } else {
       stato = 'noprev';
     }
-  }
-
-  // Riga "meta" in alto: OP · n° ordine · scadenza
-  const metaParts = [];
-    if (o.numero_ordine) metaParts.push(el('span', { class:'kop-ord' }, o.numero_ordine));
-  if (o.scadenza) metaParts.push(el('span', { class:'kop-scad ' + scadCls }, '📅 ' + fmtIT(o.scadenza)));
-
-  // Riga inferiore: quantità + note (se presenti)
-  const bottomParts = [];
-  bottomParts.push(el('span', { class:'kop-qta' }, (o.quantita || 0) + ' pz'));
-  if (o.note) {
-    // Le note possono essere lunghe: limito a una riga, troncata
-    bottomParts.push(el('span', { class:'kop-note', title: o.note }, '✎ ' + o.note));
   }
 
   // Riga progresso (solo se commessa iniziata)
@@ -10186,25 +10199,16 @@ function kioskOpCard(o, opts = {}) {
     );
   }
 
-  // Classe card: base + classe stato (per bordo + tinta)
-  const cardClass = 'kiosk-op-card' + (stato !== 'intonsa' ? ' stato-' + stato : '');
+  // Nota (extra, solo dove presente)
+  const noteRow = o.note ? el('div', { class:'kop-note-row', title: o.note }, '✎ ' + o.note) : null;
 
-  const children = [
-    el('div', { class:'kop-cliente' }, cli?.nome || '— senza cliente —'),
-    metaParts.length > 0 ? el('div', { class:'kop-meta' }, ...metaParts) : null,
-    el('div', { class:'kop-articolo' },
-      el('div', { class:'kop-cod' }, art?.codice || '—'),
-      art?.descrizione ? el('div', { class:'kop-desc' }, art.descrizione) : null,
-    ),
-    el('div', { class:'kop-bottom' }, ...bottomParts),
-    progressRow,
-  ];
+  const cardClass = 'kiosk-op-card' + (stato !== 'intonsa' ? ' stato-' + stato : '');
+  const children = [ kioskInfoBlock(o), noteRow, progressRow ];
 
   // Modalità sola lettura: anteprima non cliccabile (es. coda "prossime").
   if (opts.readonly) {
     return el('div', { class: cardClass + ' kop-readonly', style:'cursor:default;text-align:left;' }, ...children);
   }
-
   return el('button', {
     class: cardClass,
     onclick: () => kioskSelectOperazione(o),
@@ -10231,14 +10235,10 @@ function kioskRenderTipo() {
   const root = $('#kiosk-tipo-content');
   root.innerHTML = '';
 
-  // Riepilogo operazione
-  const cli = state.aziende.find(c => c.id === o.cliente_id);
-  const art = state.articoli.find(a => a.id === o.articolo_id);
+  // Riepilogo operazione (blocco-info standard)
   root.append(el('div', { style:'background:var(--sur);border:1px solid var(--brd);border-radius:8px;padding:14px 18px;margin-bottom:20px;' },
-    el('div', { style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;' }, 'Operazione selezionata'),
-    el('div', { style:'font-size:18px;font-weight:700;margin-bottom:4px;' }, cli?.nome || '—'),
-    el('div', { style:'font-family:DM Mono,monospace;font-size:13px;color:var(--or);' },
-      (art?.codice || '—') + ' · ' + (o.numero_ordine || '')),
+    el('div', { style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;' }, 'Operazione selezionata'),
+    kioskInfoBlock(o),
   ));
 
   // Griglia tipi attivi
@@ -10399,38 +10399,9 @@ function kioskGoToAttiva() {
   kioskResetInactivity();
 }
 
-// Riga compatta (anteprima, non cliccabile) per la coda "prossime assegnate":
-// descrizione grande in evidenza + meta orizzontale (codice · cliente · ordine · qty)
-// e scadenza colorata per urgenza. Circa metà altezza della card piena.
+// Riga "prossima assegnata": contenitore + blocco-info standard (anteprima).
 function kioskProssimaRow(op) {
-  const cli = state.aziende.find(c => c.id === op.cliente_id);
-  const art = state.articoli.find(a => a.id === op.articolo_id);
-  const oggi = toLocalISO(new Date());
-  let scadCls = '';
-  if (op.scadenza && op.scadenza < oggi) scadCls = 'passata';
-  else if (op.scadenza) {
-    const diff = (parseISODate(op.scadenza) - new Date()) / 86400000;
-    if (diff <= 3) scadCls = 'vicina';
-  }
-  const desc = (art?.descrizione || '').trim();
-  const titolo = desc || (art?.codice || '— senza codice —');
-
-  // Meta orizzontale: codice (se non è già il titolo) · cliente · ordine · qty
-  const meta = el('div', { class:'kpr-meta' });
-  const parts = [];
-  if (desc && art?.codice) parts.push(el('span', { class:'acc' }, art.codice));
-  if (cli?.nome) parts.push(el('span', {}, cli.nome));
-  if (op.numero_ordine) parts.push(el('span', {}, op.numero_ordine));
-  parts.push(el('span', {}, (op.quantita || 0) + ' pz'));
-  parts.forEach((p, i) => { if (i > 0) meta.append(document.createTextNode('  ·  ')); meta.append(p); });
-
-  return el('div', { class:'kiosk-prossima-row' },
-    el('div', { class:'kpr-main' },
-      el('div', { class:'kpr-desc' }, titolo),
-      op.scadenza ? el('div', { class:'kpr-scad ' + scadCls }, '📅 ' + fmtIT(op.scadenza)) : null,
-    ),
-    meta,
-  );
+  return el('div', { class:'kiosk-prossima-row' }, kioskInfoBlock(op));
 }
 
 function kioskRenderAttiva() {
@@ -10496,13 +10467,10 @@ function kioskRenderAttiva() {
     );
   } else {
     card.append(
-      el('div', { class:'kiosk-attiva-cliente' }, cli?.nome || '— senza cliente —'),
-      el('div', { class:'kiosk-attiva-cod' }, art?.codice || '—'),
-      el('div', { class:'kiosk-attiva-tipo' },
+      kioskInfoBlock(o),
+      el('div', { class:'kiosk-attiva-tipo', style:'margin-top:14px;' },
         el('div', { class:'ktipo-color-bar', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
         tipo?.nome || '— tipo sconosciuto —',
-        ' · ',
-        o?.numero_ordine || '—',
       ),
       el('div', { class:'kiosk-attiva-stats' },
         el('div', { class:'kas-block' },
