@@ -936,6 +936,8 @@ const state = {
   opAddetti: [],           // [{operazione_id, utente_id}]
   // Operazioni: fornitori esterni (aziende con is_fornitore=true)
   opFornitori: [],         // [{id, operazione_id, azienda_id, allocazione, creato_il}]
+  // Operazioni: fasi (scomposizione per tipo di lavorazione)
+  opFasi: [],              // [{id, operazione_id, tipo_lavorazione_id, minuti_unitari, ordine, creato_il}]
   // Gantt
   ganttView: 'live',       // 'live' | 'storico'
   ganttZoom: 'mese',       // 'giorno' | 'settimana' | 'mese'
@@ -1634,7 +1636,7 @@ document.addEventListener('click', async (e) => {
 // Avere un solo handler evita race condition tra ricreazione client e refresh.
 
 async function loadAllData() {
-  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, attivitaExtra, assenze, opAddetti, impostazioni, consegneCommessa, opFornitori, spedizioni] = await Promise.all([
+  const [profili, mezzi, utenti, prenotazioni, consegne, prenOp, aziende, articoli, tipiLav, chiusure, operazioni, sessioni, tipiAssenza, attivitaExtra, assenze, opAddetti, impostazioni, consegneCommessa, opFornitori, opFasi, spedizioni] = await Promise.all([
     sb.from('profili').select('*').order('nome'),
     sb.from('mezzi').select('*').order('nome'),
     sb.from('utenti').select('*').order('nome'),
@@ -1654,6 +1656,7 @@ async function loadAllData() {
     sb.from('impostazioni').select('*'),
     sb.from('consegne_commessa').select('*').order('data', { ascending:false }),
     sb.from('operazioni_fornitori').select('*'),
+    sb.from('operazioni_fasi').select('*'),
     sb.from('spedizioni').select('*').order('data', { ascending:false }),
   ]);
   if (profili.error) throw profili.error;
@@ -1675,6 +1678,7 @@ async function loadAllData() {
   if (impostazioni.error) throw impostazioni.error;
   if (consegneCommessa.error) throw consegneCommessa.error;
   if (opFornitori.error) throw opFornitori.error;
+  if (opFasi.error) throw opFasi.error;
   if (spedizioni.error) throw spedizioni.error;
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
@@ -1695,6 +1699,7 @@ async function loadAllData() {
   state.assenze = assenze.data || [];
   state.opAddetti = opAddetti.data || [];
   state.opFornitori = opFornitori.data || [];
+  state.opFasi = opFasi.data || [];
   // Impostazioni: oggetto chiave→valore, comodo da consultare
   state.impostazioni = Object.fromEntries((impostazioni.data||[]).map(r=>[r.chiave, r.valore]));
   state.consegneCommessa = consegneCommessa.data || [];
@@ -1740,6 +1745,8 @@ function startRealtime() {
         (p) => applyChange('operazioni_addetti', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'operazioni_fornitori' },
         (p) => applyChange('operazioni_fornitori', p))
+    .on('postgres_changes', { event:'*', schema:'public', table:'operazioni_fasi' },
+        (p) => applyChange('operazioni_fasi', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'consegne_commessa' },
         (p) => applyChange('consegne_commessa', p))
     .on('postgres_changes', { event:'*', schema:'public', table:'spedizioni' },
@@ -1905,6 +1912,15 @@ function applyChange(tabella, payload) {
       state.opFornitori = state.opFornitori.map(x => x.id === row.id ? row : x);
     } else if (ev === 'DELETE') {
       state.opFornitori = state.opFornitori.filter(x => x.id !== oldRow.id);
+    }
+  } else if (tabella === 'operazioni_fasi') {
+    // PK propria 'id'
+    if (ev === 'INSERT') {
+      if (!state.opFasi.find(x => x.id === row.id)) state.opFasi.push(row);
+    } else if (ev === 'UPDATE') {
+      state.opFasi = state.opFasi.map(x => x.id === row.id ? row : x);
+    } else if (ev === 'DELETE') {
+      state.opFasi = state.opFasi.filter(x => x.id !== oldRow.id);
     }
   } else if (tabella === 'spedizioni') {
     if (ev === 'INSERT') {
@@ -4256,6 +4272,60 @@ function openArticoloModal(a) {
     [inCodice, inDesc, inCategoria, inMinuti, inNote, selAttivo].forEach(i => i.disabled = true);
   }
 
+  // --- Editor fasi: template riusabile, popola articoli.fasi ---
+  const tipiAttivi = (state.tipiLav || []).filter(t => t.attivo !== false)
+    .sort((x, y) => (x.ordine || 0) - (y.ordine || 0));
+  const fasi = (Array.isArray(a.fasi) ? a.fasi.slice() : [])
+    .sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
+    .map(f => ({ tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
+  const notaMinutiDefault = 'Tempo standard per produrre un singolo pezzo di questo codice. '
+    + 'Verrà pre-compilato in automatico nelle nuove commesse. Lascia vuoto se non lo conosci.';
+  const notaMinuti = el('div', { class:'sub', style:'margin-top:4px;' }, notaMinutiDefault);
+  const fasiWrap = el('div', { class:'fasi-list' });
+  function syncMinuti() {
+    if (fasi.length > 0) {
+      const tot = fasi.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
+      inMinuti.value = String(tot);
+      inMinuti.disabled = true;
+      notaMinuti.textContent = 'Totale calcolato dalle fasi (' + tot + ' min/pz). Per cambiarlo, modifica i minuti delle fasi.';
+    } else {
+      inMinuti.disabled = readonly;
+      notaMinuti.textContent = notaMinutiDefault;
+    }
+  }
+  function renderFasi() {
+    fasiWrap.innerHTML = '';
+    if (fasi.length === 0) {
+      fasiWrap.append(el('div', { class:'sub' }, "Nessuna fase: l'articolo usa un tempo unico (i minuti qui sopra)."));
+    }
+    fasi.forEach((f, i) => {
+      const sel = el('select', { style:'flex:1;min-width:0;' },
+        el('option', { value:'' }, '— tipo lavorazione —'),
+        ...tipiAttivi.map(t => el('option', { value:t.id }, t.nome)));
+      sel.value = f.tipo_lavorazione_id || '';
+      sel.disabled = readonly;
+      sel.onchange = () => { f.tipo_lavorazione_id = sel.value || null; };
+      const inMin = el('input', { type:'number', step:'0.5', min:'0', value:String(f.minuti_unitari || 0),
+        placeholder:'min/pz', style:'max-width:90px;' });
+      inMin.disabled = readonly;
+      inMin.oninput = () => { f.minuti_unitari = Number(inMin.value) || 0; syncMinuti(); };
+      const row = el('div', { style:'display:flex;gap:8px;align-items:center;margin:6px 0;' },
+        el('span', { class:'sub', style:'width:20px;flex-shrink:0;' }, '#' + (i + 1)),
+        sel, inMin);
+      if (!readonly) {
+        row.append(el('button', { type:'button', class:'btnsm', style:'flex-shrink:0;',
+          onclick: () => { fasi.splice(i, 1); renderFasi(); syncMinuti(); } }, '✕'));
+      }
+      fasiWrap.append(row);
+    });
+  }
+  const btnAddFase = readonly ? null : el('button', {
+    type:'button', class:'btnsm', style:'margin-top:8px;',
+    onclick: () => { fasi.push({ tipo_lavorazione_id:null, minuti_unitari:0 }); renderFasi(); syncMinuti(); }
+  }, '+ Aggiungi fase');
+  renderFasi();
+  syncMinuti();
+
   form.append(
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Codice *'), inCodice),
@@ -4265,11 +4335,13 @@ function openArticoloModal(a) {
     el('div', { class:'field' }, el('label', {}, 'Categoria'), inCategoria,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Es. "Elettronica", "Meccanica", "Cablaggi" — utile per raggruppamenti futuri.')),
-    el('div', { class:'field' }, el('label', {}, 'Minuti unitari per pezzo'), inMinuti,
+    el('div', { class:'field' }, el('label', {}, 'Minuti unitari per pezzo'), inMinuti, notaMinuti),
+    el('div', { class:'field' },
+      el('label', {}, 'Fasi (opzionale)'),
+      fasiWrap,
+      btnAddFase,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Tempo standard per produrre un singolo pezzo di questo codice. ' +
-        'Verrà pre-compilato in automatico nelle nuove commesse. ' +
-        'Lascia vuoto se ancora non lo conosci.')),
+        'Suddividi il tempo per mansione (es. meccanica → montaggio). Se definite, i "minuti unitari" diventano la somma delle fasi e fanno da template per le nuove commesse.')),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
 
@@ -4282,10 +4354,20 @@ function openArticoloModal(a) {
     const btnSave = el('button', { class:'btnp' }, 'Salva');
     btnSave.onclick = async () => {
       const fd = new FormData(form);
-      const minutiRaw = (fd.get('minuti_unitari') || '').toString().trim();
-      const minutiVal = minutiRaw === '' ? null : Number(minutiRaw);
-      if (minutiRaw !== '' && (!Number.isFinite(minutiVal) || minutiVal < 0)) {
-        return toast('Minuti unitari: valore non valido', 'err');
+      // Fasi valide (con tipo). ordine = posizione in lista.
+      const fasiPayload = fasi
+        .filter(f => f.tipo_lavorazione_id)
+        .map((f, i) => ({ tipo_lavorazione_id: f.tipo_lavorazione_id, minuti_unitari: Number(f.minuti_unitari) || 0, ordine: i + 1 }));
+      // Con fasi, i minuti totali = somma delle fasi; altrimenti il valore manuale.
+      let minutiVal;
+      if (fasiPayload.length > 0) {
+        minutiVal = fasiPayload.reduce((s, f) => s + f.minuti_unitari, 0);
+      } else {
+        const minutiRaw = (fd.get('minuti_unitari') || '').toString().trim();
+        minutiVal = minutiRaw === '' ? null : Number(minutiRaw);
+        if (minutiRaw !== '' && (!Number.isFinite(minutiVal) || minutiVal < 0)) {
+          return toast('Minuti unitari: valore non valido', 'err');
+        }
       }
       // Conferma se il valore minuti cambia su un articolo esistente.
       // Motivo: influenzerà le commesse future create con questo codice.
@@ -4308,6 +4390,7 @@ function openArticoloModal(a) {
         note: (fd.get('note')||'').trim() || null,
         attivo: fd.get('attivo') === 'true',
         minuti_unitari: minutiVal,
+        fasi: fasiPayload,
       };
       if (!payload.codice) return toast('Codice obbligatorio', 'err');
       btnSave.disabled = true;
