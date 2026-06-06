@@ -8161,6 +8161,20 @@ function openOperazioneModal(o) {
               toast('Minuti pagati salvati anche nell\'anagrafica articolo');
             }
           }
+          // Semina anche le FASI sull'articolo SOLO se lì mancano (fasi vuoto),
+          // mai sovrascrivere un template già definito. Stessa logica dei minuti.
+          const templateFasi = fasiComm
+            .filter(f => f.tipo_lavorazione_id)
+            .map((f, i) => ({ tipo_lavorazione_id: f.tipo_lavorazione_id, minuti_unitari: Number(f.minuti_unitari) || 0, ordine: i + 1 }));
+          const artFasiVuote = art && (art.fasi == null || (Array.isArray(art.fasi) && art.fasi.length === 0));
+          if (art && templateFasi.length > 0 && artFasiVuote) {
+            const { data: artF, error: errArtF } = await sb.from('articoli')
+              .update({ fasi: templateFasi }).eq('id', art.id).select().single();
+            if (!errArtF && artF) {
+              state.articoli = state.articoli.map(x => x.id === artF.id ? artF : x);
+              toast('Fasi salvate anche nell\'anagrafica articolo');
+            }
+          }
         } catch (e) { /* best-effort */ }
         // 1) FASI prima di tutto: restituiscono la mappa _k → id reale, che
         //    serve per assegnare il fase_id giusto ad addetti e fornitori.
