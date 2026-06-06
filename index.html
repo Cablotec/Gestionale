@@ -2038,27 +2038,43 @@ function pezziInMagazzino(opId) {
 
 // Sincronizza gli addetti previsti di un'operazione: diff tra vecchi e nuovi
 // Ritorna { error } o {} se ok.
-async function syncOperazioneAddetti(opId, nuoviIds) {
-  const vecchi = getOperazioneAddetti(opId);
-  const daAggiungere = nuoviIds.filter(id => !vecchi.includes(id));
-  const daRimuovere = vecchi.filter(id => !nuoviIds.includes(id));
+async function syncOperazioneAddetti(opId, nuovi) {
+  // `nuovi` = [{ utente_id, fase_id }]. fase_id null = assegnato alla commessa
+  // (comportamento storico). Diff per utente_id: insert / update-fase / delete.
+  const vecchieRighe = (state.opAddetti || []).filter(r => r.operazione_id === opId);
+  const vecchieByUid = Object.fromEntries(vecchieRighe.map(r => [r.utente_id, r]));
+  const nuoviUids = new Set(nuovi.map(n => n.utente_id));
 
-  // Inserisci nuovi
+  // INSERT: utenti nuovi
+  const daAggiungere = nuovi.filter(n => !vecchieByUid[n.utente_id]);
   if (daAggiungere.length) {
-    const rows = daAggiungere.map(uid => ({ operazione_id: opId, utente_id: uid }));
-    const { error } = await sb.from('operazioni_addetti').insert(rows);
+    const rows = daAggiungere.map(n => ({ operazione_id: opId, utente_id: n.utente_id, fase_id: n.fase_id || null }));
+    const { data, error } = await sb.from('operazioni_addetti').insert(rows).select();
     if (error) return { error };
-    // Aggiorna cache locale (il realtime lo farà anche, ma evitiamo flicker)
-    rows.forEach(r => { if (!state.opAddetti.find(x => x.operazione_id===r.operazione_id && x.utente_id===r.utente_id)) state.opAddetti.push(r); });
+    const inseriti = (data && data.length) ? data : rows;
+    inseriti.forEach(r => { if (!state.opAddetti.find(x => x.operazione_id===r.operazione_id && x.utente_id===r.utente_id)) state.opAddetti.push(r); });
   }
-  // Rimuovi vecchi
-  for (const uid of daRimuovere) {
+  // UPDATE: utente già presente ma con fase diversa
+  for (const n of nuovi) {
+    const v = vecchieByUid[n.utente_id];
+    if (!v) continue;
+    if ((v.fase_id || null) === (n.fase_id || null)) continue;
+    const { error } = await sb.from('operazioni_addetti')
+      .update({ fase_id: n.fase_id || null })
+      .eq('operazione_id', opId).eq('utente_id', n.utente_id);
+    if (error) return { error };
+    state.opAddetti = state.opAddetti.map(x =>
+      (x.operazione_id===opId && x.utente_id===n.utente_id) ? { ...x, fase_id: n.fase_id || null } : x);
+  }
+  // DELETE: utenti rimossi
+  const daRimuovere = vecchieRighe.filter(r => !nuoviUids.has(r.utente_id));
+  for (const r of daRimuovere) {
     const { error } = await sb.from('operazioni_addetti')
       .delete()
       .eq('operazione_id', opId)
-      .eq('utente_id', uid);
+      .eq('utente_id', r.utente_id);
     if (error) return { error };
-    state.opAddetti = state.opAddetti.filter(x => !(x.operazione_id===opId && x.utente_id===uid));
+    state.opAddetti = state.opAddetti.filter(x => !(x.operazione_id===opId && x.utente_id===r.utente_id));
   }
   return {};
 }
@@ -2079,6 +2095,7 @@ async function syncOperazioneFornitori(opId, nuovi) {
       azienda_id: n.azienda_id,
       allocazione: 1.0,
       numero_ordine: n.numero_ordine || null,
+      fase_id: n.fase_id || null,
     }));
     const { data, error } = await sb.from('operazioni_fornitori').insert(rows).select();
     if (error) return { error };
@@ -2087,14 +2104,15 @@ async function syncOperazioneFornitori(opId, nuovi) {
     });
   }
 
-  // UPDATE: presenti in entrambi ma con numero_ordine diverso
+  // UPDATE: presenti in entrambi con numero_ordine o fase_id diversi
   for (const n of nuovi) {
     const vecchia = vecchieById[n.azienda_id];
     if (!vecchia) continue; // già gestito da insert
     const nuovoNum = n.numero_ordine || null;
-    if ((vecchia.numero_ordine || null) === nuovoNum) continue; // nessun cambiamento
+    const nuovaFase = n.fase_id || null;
+    if ((vecchia.numero_ordine || null) === nuovoNum && (vecchia.fase_id || null) === nuovaFase) continue;
     const { data, error } = await sb.from('operazioni_fornitori')
-      .update({ numero_ordine: nuovoNum })
+      .update({ numero_ordine: nuovoNum, fase_id: nuovaFase })
       .eq('id', vecchia.id).select().single();
     if (error) return { error };
     state.opFornitori = state.opFornitori.map(x => x.id === vecchia.id ? data : x);
@@ -2111,7 +2129,62 @@ async function syncOperazioneFornitori(opId, nuovi) {
   return {};
 }
 
-// Restituisce etichetta breve + dettaglio della destinazione di una prenotazione.
+// Sincronizza le fasi di un'operazione (operazioni_fasi). Diff per id locale:
+// gli item esistenti hanno `id` → update se cambiati; i nuovi (senza id) → insert;
+// gli id non più presenti → delete. Preservare gli id è importante perché in
+// futuro gli addetti/fornitori vi si agganciano via fase_id.
+// `nuove` = [{_k, id?, tipo_lavorazione_id, minuti_unitari, ordine}]
+// Ritorna { keyToId } con la mappa chiave-locale → id DB di tutte le fasi.
+async function syncOperazioneFasi(opId, nuove) {
+  const vecchieRighe = (state.opFasi || []).filter(r => r.operazione_id === opId);
+  const nuoviIds = new Set(nuove.filter(n => n.id).map(n => n.id));
+  const keyToId = {};
+  nuove.forEach(n => { if (n.id) keyToId[n._k] = n.id; });
+
+  // DELETE: fasi rimosse (cascata pulisce eventuali fase_id collegati)
+  const daRimuovere = vecchieRighe.filter(r => !nuoviIds.has(r.id));
+  for (const r of daRimuovere) {
+    const { error } = await sb.from('operazioni_fasi').delete().eq('id', r.id);
+    if (error) return { error };
+    state.opFasi = state.opFasi.filter(x => x.id !== r.id);
+  }
+
+  // UPDATE: fasi esistenti con valori cambiati
+  for (const n of nuove) {
+    if (!n.id) continue;
+    const vecchia = vecchieRighe.find(r => r.id === n.id);
+    if (!vecchia) continue;
+    const cambiata = (vecchia.tipo_lavorazione_id || null) !== (n.tipo_lavorazione_id || null)
+      || Number(vecchia.minuti_unitari || 0) !== Number(n.minuti_unitari || 0)
+      || Number(vecchia.ordine || 0) !== Number(n.ordine || 0);
+    if (!cambiata) continue;
+    const { data, error } = await sb.from('operazioni_fasi')
+      .update({ tipo_lavorazione_id: n.tipo_lavorazione_id, minuti_unitari: n.minuti_unitari, ordine: n.ordine })
+      .eq('id', n.id).select().single();
+    if (error) return { error };
+    state.opFasi = state.opFasi.map(x => x.id === n.id ? data : x);
+  }
+
+  // INSERT: fasi nuove (senza id). Correlo i record creati al loro _k locale.
+  const daAggiungere = nuove.filter(n => !n.id);
+  if (daAggiungere.length) {
+    const rows = daAggiungere.map(n => ({
+      operazione_id: opId,
+      tipo_lavorazione_id: n.tipo_lavorazione_id,
+      minuti_unitari: n.minuti_unitari,
+      ordine: n.ordine,
+    }));
+    const { data, error } = await sb.from('operazioni_fasi').insert(rows).select();
+    if (error) return { error };
+    (data || []).forEach((r, i) => {
+      if (!state.opFasi.find(x => x.id === r.id)) state.opFasi.push(r);
+      const src = daAggiungere[i];
+      if (src) keyToId[src._k] = r.id;
+    });
+  }
+
+  return { keyToId };
+}
 // Una prenotazione può avere 0..N consegne (tappe). Ogni consegna ha un cliente_id (opz).
 // → { breve: 'TEMA SINERGIE' | 'TEMA SINERGIE +2' | 'Multi-stop' | '—', tooltip: 'lista cli' }
 function getPrenotazioneDestinazione(prenId) {
@@ -4272,31 +4345,42 @@ function openArticoloModal(a) {
     [inCodice, inDesc, inCategoria, inMinuti, inNote, selAttivo].forEach(i => i.disabled = true);
   }
 
-  // --- Editor fasi: template riusabile, popola articoli.fasi ---
+  // --- Editor fasi: scomposizione INTERNA. Non tocca il tempo pagato
+  // (minuti_unitari): mostra solo il confronto somma fasi vs pagato. ---
   const tipiAttivi = (state.tipiLav || []).filter(t => t.attivo !== false)
     .sort((x, y) => (x.ordine || 0) - (y.ordine || 0));
   const fasi = (Array.isArray(a.fasi) ? a.fasi.slice() : [])
     .sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
     .map(f => ({ tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
-  const notaMinutiDefault = 'Tempo standard per produrre un singolo pezzo di questo codice. '
-    + 'Verrà pre-compilato in automatico nelle nuove commesse. Lascia vuoto se non lo conosci.';
-  const notaMinuti = el('div', { class:'sub', style:'margin-top:4px;' }, notaMinutiDefault);
+  const notaMinuti = el('div', { class:'sub', style:'margin-top:4px;' },
+    'Tempo PAGATO per pezzo (lo standard commerciale). Pre-compila le nuove commesse. '
+    + 'Le fasi qui sotto sono la scomposizione interna e dovrebbero starci dentro.');
   const fasiWrap = el('div', { class:'fasi-list' });
-  function syncMinuti() {
-    if (fasi.length > 0) {
-      const tot = fasi.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
-      inMinuti.value = String(tot);
-      inMinuti.disabled = true;
-      notaMinuti.textContent = 'Totale calcolato dalle fasi (' + tot + ' min/pz). Per cambiarlo, modifica i minuti delle fasi.';
+  const notaConfronto = el('div', { class:'sub', style:'margin-top:8px;font-family:DM Mono,monospace;' });
+  function pagatoCorrente() {
+    const v = parseFloat((inMinuti.value || '').toString().replace(',', '.'));
+    return Number.isFinite(v) ? v : null;
+  }
+  function aggiornaConfronto() {
+    if (fasi.length === 0) { notaConfronto.textContent = ''; notaConfronto.style.color = ''; return; }
+    const somma = fasi.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
+    const pagato = pagatoCorrente();
+    if (pagato === null) {
+      notaConfronto.style.color = 'var(--mut)';
+      notaConfronto.textContent = `Somma fasi: ${somma} min/pz · tempo pagato non impostato`;
+    } else if (somma > pagato) {
+      notaConfronto.style.color = 'var(--red)';
+      notaConfronto.textContent = `⚠ Somma fasi ${somma} · pagato ${pagato} · sfori di ${+(somma - pagato).toFixed(2)} min/pz`;
     } else {
-      inMinuti.disabled = readonly;
-      notaMinuti.textContent = notaMinutiDefault;
+      notaConfronto.style.color = 'var(--grn)';
+      notaConfronto.textContent = `Somma fasi ${somma} · pagato ${pagato} · margine ${+(pagato - somma).toFixed(2)} min/pz`;
     }
   }
+  if (!readonly) inMinuti.oninput = aggiornaConfronto;
   function renderFasi() {
     fasiWrap.innerHTML = '';
     if (fasi.length === 0) {
-      fasiWrap.append(el('div', { class:'sub' }, "Nessuna fase: l'articolo usa un tempo unico (i minuti qui sopra)."));
+      fasiWrap.append(el('div', { class:'sub' }, "Nessuna fase: l'articolo usa il solo tempo pagato qui sopra."));
     }
     fasi.forEach((f, i) => {
       const sel = el('select', { style:'flex:1;min-width:0;' },
@@ -4308,23 +4392,23 @@ function openArticoloModal(a) {
       const inMin = el('input', { type:'number', step:'0.5', min:'0', value:String(f.minuti_unitari || 0),
         placeholder:'min/pz', style:'max-width:90px;' });
       inMin.disabled = readonly;
-      inMin.oninput = () => { f.minuti_unitari = Number(inMin.value) || 0; syncMinuti(); };
+      inMin.oninput = () => { f.minuti_unitari = Number(inMin.value) || 0; aggiornaConfronto(); };
       const row = el('div', { style:'display:flex;gap:8px;align-items:center;margin:6px 0;' },
         el('span', { class:'sub', style:'width:20px;flex-shrink:0;' }, '#' + (i + 1)),
         sel, inMin);
       if (!readonly) {
         row.append(el('button', { type:'button', class:'btnsm', style:'flex-shrink:0;',
-          onclick: () => { fasi.splice(i, 1); renderFasi(); syncMinuti(); } }, '✕'));
+          onclick: () => { fasi.splice(i, 1); renderFasi(); aggiornaConfronto(); } }, '✕'));
       }
       fasiWrap.append(row);
     });
   }
   const btnAddFase = readonly ? null : el('button', {
     type:'button', class:'btnsm', style:'margin-top:8px;',
-    onclick: () => { fasi.push({ tipo_lavorazione_id:null, minuti_unitari:0 }); renderFasi(); syncMinuti(); }
+    onclick: () => { fasi.push({ tipo_lavorazione_id:null, minuti_unitari:0 }); renderFasi(); aggiornaConfronto(); }
   }, '+ Aggiungi fase');
   renderFasi();
-  syncMinuti();
+  aggiornaConfronto();
 
   form.append(
     el('div', { class:'frow' },
@@ -4335,13 +4419,14 @@ function openArticoloModal(a) {
     el('div', { class:'field' }, el('label', {}, 'Categoria'), inCategoria,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Es. "Elettronica", "Meccanica", "Cablaggi" — utile per raggruppamenti futuri.')),
-    el('div', { class:'field' }, el('label', {}, 'Minuti unitari per pezzo'), inMinuti, notaMinuti),
+    el('div', { class:'field' }, el('label', {}, 'Minuti unitari per pezzo — tempo pagato'), inMinuti, notaMinuti),
     el('div', { class:'field' },
       el('label', {}, 'Fasi (opzionale)'),
       fasiWrap,
       btnAddFase,
+      notaConfronto,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Suddividi il tempo per mansione (es. meccanica → montaggio). Se definite, i "minuti unitari" diventano la somma delle fasi e fanno da template per le nuove commesse.')),
+        'Scomposizione interna del lavoro per mansione (es. meccanica → montaggio). Fanno da template per le nuove commesse e dovrebbero stare entro il tempo pagato.')),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
 
@@ -4358,16 +4443,11 @@ function openArticoloModal(a) {
       const fasiPayload = fasi
         .filter(f => f.tipo_lavorazione_id)
         .map((f, i) => ({ tipo_lavorazione_id: f.tipo_lavorazione_id, minuti_unitari: Number(f.minuti_unitari) || 0, ordine: i + 1 }));
-      // Con fasi, i minuti totali = somma delle fasi; altrimenti il valore manuale.
-      let minutiVal;
-      if (fasiPayload.length > 0) {
-        minutiVal = fasiPayload.reduce((s, f) => s + f.minuti_unitari, 0);
-      } else {
-        const minutiRaw = (fd.get('minuti_unitari') || '').toString().trim();
-        minutiVal = minutiRaw === '' ? null : Number(minutiRaw);
-        if (minutiRaw !== '' && (!Number.isFinite(minutiVal) || minutiVal < 0)) {
-          return toast('Minuti unitari: valore non valido', 'err');
-        }
+      // minuti_unitari = tempo PAGATO, sempre manuale (mai sovrascritto dalle fasi).
+      const minutiRaw = (fd.get('minuti_unitari') || '').toString().trim();
+      const minutiVal = minutiRaw === '' ? null : Number(minutiRaw);
+      if (minutiRaw !== '' && (!Number.isFinite(minutiVal) || minutiVal < 0)) {
+        return toast('Minuti unitari: valore non valido', 'err');
       }
       // Conferma se il valore minuti cambia su un articolo esistente.
       // Motivo: influenzerà le commesse future create con questo codice.
@@ -6813,12 +6893,57 @@ function openOperazioneModal(o) {
           }
         }
       }
+      // Pre-compila le fasi dal template dell'articolo (solo commessa nuova e
+      // solo se non hai già aggiunto fasi a mano: non sovrascrive le tue).
+      if (isNew && val.mode === 'existing' && val.id && fasiComm.length === 0) {
+        const artF = state.articoli.find(a => a.id === val.id);
+        if (artF && Array.isArray(artF.fasi) && artF.fasi.length) {
+          fasiComm = artF.fasi.slice().sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
+            .map(f => ({ _k: nextFaseKey(), tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
+          if (typeof onFasiChanged === 'function') onFasiChanged();
+        }
+      }
       // Aggiorna indicatore divergenza (se la funzione è già definita)
       if (typeof aggiornaIndicatoreMinuti === 'function') aggiornaIndicatoreMinuti();
       // Trigga il refresh del preview (se la funzione è già definita)
       if (typeof refreshPreview === 'function') refreshPreview();
     },
   });
+
+  // ── Fasi: dati condivisi (la UI delle fasi è più sotto) ─────────────
+  // Servono qui perché addetti e fornitori mostrano una tendina "fase".
+  const tipiAttiviComm = (state.tipiLav || []).filter(t => t.attivo !== false)
+    .sort((x, y) => (x.ordine || 0) - (y.ordine || 0));
+  let faseKeyCounter = 0;
+  const nextFaseKey = () => 'n' + (faseKeyCounter++);
+  let fasiComm = isNew
+    ? []
+    : (state.opFasi || []).filter(f => f.operazione_id === o.id)
+        .sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
+        .map(f => ({ _k: f.id, id: f.id, tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
+  let fasiSeq = !!o.fasi_sequenziali;
+  // Assegnazione addetto → fase: utente_id → _k della fase ('' = tutta la commessa)
+  const addettoFase = {};
+  if (!isNew) {
+    (state.opAddetti || []).filter(r => r.operazione_id === o.id)
+      .forEach(r => { addettoFase[r.utente_id] = r.fase_id || ''; });
+  }
+  const tipoNomeFase = (id) => (tipiAttiviComm.find(t => t.id === id) || {}).nome || 'fase';
+  const fasiAssegnabili = () => fasiComm.filter(f => f.tipo_lavorazione_id);
+  // <select> di scelta fase per un assegnatario (addetto o fornitore).
+  function buildFaseSelect(currentKey, onChange) {
+    const sel = el('select', { style:'max-width:160px;font-size:11px;padding:2px 4px;' },
+      el('option', { value:'' }, 'Tutta la commessa'));
+    fasiComm.forEach((f, i) => {
+      if (!f.tipo_lavorazione_id) return;
+      sel.append(el('option', { value: f._k }, `#${i + 1} ${tipoNomeFase(f.tipo_lavorazione_id)}`));
+    });
+    const valido = currentKey && fasiComm.some(f => f._k === currentKey && f.tipo_lavorazione_id);
+    sel.value = valido ? currentKey : '';
+    sel.disabled = !canEdit;
+    sel.onchange = () => onChange(sel.value || '');
+    return sel;
+  }
 
   // Multi-select addetti (lo stesso pattern di "Chi userà il mezzo")
   const utentiAttiviAdd = state.utenti.filter(u => u.attivo && !isKioskRecord(u));
@@ -6846,17 +6971,22 @@ function openOperazioneModal(o) {
     addettiSel.forEach(uid => {
       const u = utentiAttiviAdd.find(x => x.id === uid);
       if (!u) return;
-      addSelectedWrap.append(el('span', { class:'util-pill' },
-        el('span', {}, u.nome + (u.esterno ? ' ✦' : '')),
-        canEdit ? el('button', {
+      const pill = el('span', { class:'util-pill' },
+        el('span', {}, u.nome + (u.esterno ? ' ✦' : '')));
+      if (fasiAssegnabili().length >= 1) {
+        pill.append(buildFaseSelect(addettoFase[uid] || '', (k) => { addettoFase[uid] = k; }));
+      }
+      if (canEdit) {
+        pill.append(el('button', {
           type:'button', class:'util-pill-x',
           onclick: () => {
             addettiSel = addettiSel.filter(x => x !== uid);
             renderAddSelected(); renderAddDropList();
             if (aggiornaPreviewInizio) aggiornaPreviewInizio();
           },
-        }, '✕') : null,
-      ));
+        }, '✕'));
+      }
+      addSelectedWrap.append(pill);
     });
   };
   const renderAddDropList = () => {
@@ -6901,6 +7031,7 @@ function openOperazioneModal(o) {
       azienda_id: r.azienda_id,
       numero_ordine: r.numero_ordine || '',
       allocazione: r.allocazione || 1.0,
+      fase_k: r.fase_id || '',
     }));
   const aziendeFornitrici = state.aziende.filter(a => a.is_fornitore && a.attivo);
   const forSelectedWrap = el('div', { class:'util-selected', style:'display:flex;flex-direction:column;gap:8px;' });
@@ -6959,6 +7090,10 @@ function openOperazioneModal(o) {
       });
       if (!canEdit) inputNO.disabled = true;
       row.append(inputNO);
+      // Tendina fase (compare solo se la commessa ha fasi assegnabili)
+      if (fasiAssegnabili().length >= 1) {
+        row.append(buildFaseSelect(sel.fase_k || '', (k) => { sel.fase_k = k; }));
+      }
       // Bottone elimina
       if (canEdit) {
         row.append(el('button', {
@@ -7000,6 +7135,7 @@ function openOperazioneModal(o) {
               azienda_id: a.id,
               numero_ordine: '',
               allocazione: 1.0,
+              fase_k: '',
             });
           }
           renderForSelected(); renderForDropList();
@@ -7031,6 +7167,84 @@ function openOperazioneModal(o) {
     el('option', { value:'completo' }, 'Completo'),
   );
   selPrep.value = o.stato_preparazione || 'vuoto';
+
+  // ── Fasi della commessa: editor (dati e helper sono definiti più in alto) ──
+  // Lista fasi (tipo + minuti), confronto col tempo pagato, toggle sequenziale.
+  // L'assegnazione per fase vive nelle tendine di addetti/fornitori (buildFaseSelect).
+  const fasiWrapComm = el('div', { class:'fasi-list' });
+  const notaConfrontoComm = el('div', { class:'sub', style:'margin-top:8px;font-family:monospace;' });
+  const seqChk = el('input', { type:'checkbox' });
+  seqChk.checked = fasiSeq; seqChk.disabled = !canEdit;
+  seqChk.onchange = () => { fasiSeq = seqChk.checked; };
+  const seqRow = el('label', { style:'display:none;align-items:center;gap:8px;margin-top:8px;cursor:pointer;' },
+    seqChk, el('span', { class:'sub' }, 'Fasi in sequenza (catena) — altrimenti in parallelo. Solo pianificazione.'));
+  function pagatoComm() {
+    const mi = form.querySelector('#minuti-input');
+    const v = mi ? parseFloat((mi.value || '').toString().replace(',', '.')) : NaN;
+    return Number.isFinite(v) ? v : null;
+  }
+  function aggiornaConfrontoComm() {
+    seqRow.style.display = (fasiAssegnabili().length >= 2) ? 'flex' : 'none';
+    if (fasiComm.length === 0) { notaConfrontoComm.textContent = ''; notaConfrontoComm.style.color = ''; return; }
+    const somma = fasiComm.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
+    const pagato = pagatoComm();
+    if (pagato === null) {
+      notaConfrontoComm.style.color = 'var(--mut)';
+      notaConfrontoComm.textContent = `Somma fasi: ${somma} min/pz · tempo pagato non impostato`;
+    } else if (somma > pagato) {
+      notaConfrontoComm.style.color = 'var(--red)';
+      notaConfrontoComm.textContent = `⚠ Somma fasi ${somma} · pagato ${pagato} · sfori di ${+(somma - pagato).toFixed(2)} min/pz`;
+    } else {
+      notaConfrontoComm.style.color = 'var(--grn)';
+      notaConfrontoComm.textContent = `Somma fasi ${somma} · pagato ${pagato} · margine ${+(pagato - somma).toFixed(2)} min/pz`;
+    }
+  }
+  // Ripulisce le assegnazioni che puntano a fasi non più valide.
+  function pruneFaseAssegnazioni() {
+    const validi = new Set(fasiAssegnabili().map(f => f._k));
+    Object.keys(addettoFase).forEach(uid => { if (addettoFase[uid] && !validi.has(addettoFase[uid])) addettoFase[uid] = ''; });
+    (fornitoriSel || []).forEach(s => { if (s.fase_k && !validi.has(s.fase_k)) s.fase_k = ''; });
+  }
+  // Quando cambiano le fasi: ridisegno editor, confronto e le tendine "fase" di
+  // addetti/fornitori (le opzioni dipendono dalle fasi correnti).
+  function onFasiChanged() {
+    pruneFaseAssegnazioni();
+    renderFasiComm();
+    aggiornaConfrontoComm();
+    if (typeof renderAddSelected === 'function') renderAddSelected();
+    if (typeof renderForSelected === 'function') renderForSelected();
+  }
+  function renderFasiComm() {
+    fasiWrapComm.innerHTML = '';
+    if (fasiComm.length === 0) {
+      fasiWrapComm.append(el('div', { class:'sub' }, 'Nessuna fase: la commessa usa il solo tempo pagato.'));
+    }
+    fasiComm.forEach((f, i) => {
+      const sel = el('select', { style:'flex:1;min-width:0;' },
+        el('option', { value:'' }, '— tipo lavorazione —'),
+        ...tipiAttiviComm.map(t => el('option', { value:t.id }, t.nome)));
+      sel.value = f.tipo_lavorazione_id || '';
+      sel.disabled = !canEdit;
+      sel.onchange = () => { f.tipo_lavorazione_id = sel.value || null; onFasiChanged(); };
+      const inMin = el('input', { type:'number', step:'0.5', min:'0', value:String(f.minuti_unitari || 0),
+        placeholder:'min/pz', style:'max-width:90px;' });
+      inMin.disabled = !canEdit;
+      inMin.oninput = () => { f.minuti_unitari = Number(inMin.value) || 0; aggiornaConfrontoComm(); };
+      const row = el('div', { style:'display:flex;gap:8px;align-items:center;margin:6px 0;' },
+        el('span', { class:'sub', style:'width:20px;flex-shrink:0;' }, '#' + (i + 1)),
+        sel, inMin);
+      if (canEdit) {
+        row.append(el('button', { type:'button', class:'btnsm', style:'flex-shrink:0;',
+          onclick: () => { fasiComm.splice(i, 1); onFasiChanged(); } }, '✕'));
+      }
+      fasiWrapComm.append(row);
+    });
+  }
+  const btnAddFaseComm = !canEdit ? null : el('button', {
+    type:'button', class:'btnsm', style:'margin-top:8px;',
+    onclick: () => { fasiComm.push({ _k: nextFaseKey(), tipo_lavorazione_id:null, minuti_unitari:0 }); onFasiChanged(); }
+  }, '+ Aggiungi fase');
+  renderFasiComm();
 
   form.append(
     el('div', { class:'frow' },
@@ -7092,6 +7306,10 @@ function openOperazioneModal(o) {
         el('div', { class:'sub', id:'minuti-hint', style:'margin-top:4px;font-size:10px;color:var(--mut);' },
           'Suggerito automaticamente dall\'articolo selezionato.')),
     ),
+    el('div', { class:'field' }, el('label', {}, 'Fasi (opzionale)'),
+      fasiWrapComm, btnAddFaseComm, notaConfrontoComm, seqRow,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Scomposizione interna per mansione. Precompilate dall\'articolo; qui puoi sovrascriverne i minuti per questa commessa. La somma dovrebbe stare entro il tempo pagato.')),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Scadenza'),
         el('input', { type:'date', name:'scadenza', value:o.scadenza||'' })),
@@ -7131,6 +7349,13 @@ function openOperazioneModal(o) {
     el('div', { class:'field' }, el('label', {}, 'Note'),
       el('textarea', { name:'note', rows:'2' }, o.note||'')),
   );
+
+  // Confronto fasi ↔ pagato: aggiorna quando cambi i minuti pagati, e una volta all'avvio.
+  (function () {
+    const mi = form.querySelector('#minuti-input');
+    if (mi) mi.addEventListener('input', aggiornaConfrontoComm);
+    aggiornaConfrontoComm();
+  })();
 
   // Sezione storico (solo se spedita)
   if (!isNew && o.stato === 'spedita') {
@@ -7890,6 +8115,7 @@ function openOperazioneModal(o) {
         stato: fd.get('stato') || 'aperta',
         stato_preparazione: fd.get('stato_preparazione') || 'vuoto',
         note: (fd.get('note')||'').trim() || null,
+        fasi_sequenziali: (fasiComm.filter(f => f.tipo_lavorazione_id).length >= 2) ? fasiSeq : false,
       };
       if (!isNew && o.stato === 'spedita') {
         payload.consegnato_il = fd.get('consegnato_il') || null;
@@ -7921,8 +8147,38 @@ function openOperazioneModal(o) {
         } else {
           state.operazioni = state.operazioni.map(x => x.id === o.id ? data : x);
         }
-        // Sincronizza gli addetti previsti nella tabella ponte
-        const syncRes = await syncOperazioneAddetti(data.id, addettiSel);
+        // Semina i minuti pagati sull'articolo SOLO se mancano in anagrafica
+        // (come cliente/codice: si popola il vuoto, mai si sovrascrive uno standard
+        // già impostato). Best-effort: non blocca il salvataggio della commessa.
+        try {
+          const art = state.articoli.find(x => x.id === articoloId);
+          const minutiCommessa = payload.minuti_unitari;
+          if (art && minutiCommessa > 0 && (art.minuti_unitari == null || art.minuti_unitari === '')) {
+            const { data: artUpd, error: errArtUpd } = await sb.from('articoli')
+              .update({ minuti_unitari: minutiCommessa }).eq('id', art.id).select().single();
+            if (!errArtUpd && artUpd) {
+              state.articoli = state.articoli.map(x => x.id === artUpd.id ? artUpd : x);
+              toast('Minuti pagati salvati anche nell\'anagrafica articolo');
+            }
+          }
+        } catch (e) { /* best-effort */ }
+        // 1) FASI prima di tutto: restituiscono la mappa _k → id reale, che
+        //    serve per assegnare il fase_id giusto ad addetti e fornitori.
+        const fasiPayloadComm = fasiComm
+          .filter(f => f.tipo_lavorazione_id)
+          .map((f, i) => ({ _k: f._k, id: f.id, tipo_lavorazione_id: f.tipo_lavorazione_id, minuti_unitari: Number(f.minuti_unitari) || 0, ordine: i + 1 }));
+        const syncFasi = await syncOperazioneFasi(data.id, fasiPayloadComm);
+        if (syncFasi.error) {
+          stopWatchdog();
+          btnSave.disabled = false; btnSave.textContent = 'Salva';
+          return toast('Operazione salvata, ma errore fasi: '+syncFasi.error.message, 'err');
+        }
+        const faseIdByK = syncFasi.keyToId || {};
+        const resolveFase = (k) => (k && faseIdByK[k]) ? faseIdByK[k] : null;
+
+        // 2) Addetti: ognuno con il suo fase_id (null = tutta la commessa)
+        const addettiPayload = addettiSel.map(uid => ({ utente_id: uid, fase_id: resolveFase(addettoFase[uid]) }));
+        const syncRes = await syncOperazioneAddetti(data.id, addettiPayload);
         if (syncRes.error) {
           stopWatchdog();
           btnSave.disabled = false;
@@ -7948,8 +8204,9 @@ function openOperazioneModal(o) {
           sel.numero_ordine = (n && !soloPrefisso) ? n : '';
         }
 
-        // Sincronizza i fornitori esterni nella tabella ponte
-        const syncFor = await syncOperazioneFornitori(data.id, fornitoriSel);
+        // 3) Fornitori: ognuno con il suo fase_id risolto
+        const fornitoriPayload = fornitoriSel.map(s => ({ ...s, fase_id: resolveFase(s.fase_k) }));
+        const syncFor = await syncOperazioneFornitori(data.id, fornitoriPayload);
         if (syncFor.error) {
           stopWatchdog();
           btnSave.disabled = false;
