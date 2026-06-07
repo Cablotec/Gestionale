@@ -5941,6 +5941,38 @@ function opFineLavoro(op, inizioIso) {
   if (giorni <= 0) return inizioIso;
   return avantiGiorniLavorativi(inizioIso, giorni);
 }
+
+// Finestre temporali di ogni fase di una commessa: { faseId: {inizio, fine,
+// ordine, tipo_lavorazione_id} }. Usa la stessa logica del motore: sequenziale
+// = catena a ritroso dalla scadenza; parallelo = ogni fase a ritroso per sé.
+// Serve al Gantt per posizionare la barra di ciascun addetto sulla SUA fase.
+function opFasiWindows(op) {
+  const fasi = opFasiOf(op);
+  if (!fasi.length || !op.scadenza) return {};
+  const pezzi = op.inizio_manuale
+    ? Number(op.quantita || 0)
+    : Math.max(0, Number(op.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0));
+  const out = {};
+  if (op.fasi_sequenziali) {
+    let cursore = op.scadenza;
+    for (let i = fasi.length - 1; i >= 0; i--) {
+      const f = fasi[i];
+      const ore = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
+      const { addetti, fornitori } = faseAssegnatari(op, f.id);
+      const inizio = inizioPerFase(cursore, ore, addetti, fornitori);
+      out[f.id] = { inizio, fine: cursore, ordine: f.ordine, tipo_lavorazione_id: f.tipo_lavorazione_id };
+      cursore = inizio;
+    }
+  } else {
+    fasi.forEach(f => {
+      const ore = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
+      const { addetti, fornitori } = faseAssegnatari(op, f.id);
+      const inizio = inizioPerFase(op.scadenza, ore, addetti, fornitori);
+      out[f.id] = { inizio, fine: op.scadenza, ordine: f.ordine, tipo_lavorazione_id: f.tipo_lavorazione_id };
+    });
+  }
+  return out;
+}
 function opIsRitardo(op) {
   if (op.stato === 'spedita' || op.stato === 'completata') return false;
   if (!op.scadenza) return false;
@@ -8003,12 +8035,53 @@ function openOperazioneModal(o) {
       minuti_unitari: parseInt(fd.get('minuti_unitari'))||0,
       scadenza: fd.get('scadenza'),
     };
-    const ore = opCalcOre(tmp);
-    const giorni = opCalcGiorni(tmp);
-    // Passo gli array locali (addettiSel + fornitoriSel) come override per
-    // calcolare il preview senza dipendere dal DB (commessa non ancora salvata)
-    const inizioCalc = opCalcInizio(tmp, addettiSel, fornitoriSel);
-    const conAddetti = addettiSel && addettiSel.length > 0;
+    // Fasi LIVE (dal form, non ancora salvate). Se presenti, l'anteprima usa la
+    // SOMMA fasi come volume e calcola l'inizio PER FASE, coerente col motore.
+    const fasiVere = fasiComm.filter(f => f.tipo_lavorazione_id);
+    const conFasi = fasiVere.length > 0;
+    let ore, inizioCalc;
+    if (conFasi) {
+      const minutiEff = fasiVere.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
+      ore = (tmp.quantita * minutiEff) / 60;
+      // Assegnatari per fase dai dati live (addettoFase: uid→_k; fornitoriSel.fase_k),
+      // con ripiego sugli assegnati "a tutta la commessa" (senza fase).
+      const assegnLive = (faseK) => {
+        let add = addettiSel.filter(uid => (addettoFase[uid] || '') === faseK);
+        let forn = fornitoriSel.filter(s => (s.fase_k || '') === faseK).map(s => ({ azienda_id: s.azienda_id, allocazione: s.allocazione }));
+        if (!add.length && !forn.length) {
+          add = addettiSel.filter(uid => !addettoFase[uid]);
+          forn = fornitoriSel.filter(s => !s.fase_k).map(s => ({ azienda_id: s.azienda_id, allocazione: s.allocazione }));
+        }
+        return { add, forn };
+      };
+      if (!tmp.scadenza) {
+        inizioCalc = null;
+      } else if (seqChk.checked && fasiVere.length >= 2) {
+        let cursore = tmp.scadenza;
+        for (let i = fasiVere.length - 1; i >= 0; i--) {
+          const f = fasiVere[i];
+          const oreF = (tmp.quantita * (Number(f.minuti_unitari) || 0)) / 60;
+          const { add, forn } = assegnLive(f._k);
+          cursore = inizioPerFase(cursore, oreF, add, forn);
+        }
+        inizioCalc = cursore;
+      } else {
+        let minIni = tmp.scadenza;
+        fasiVere.forEach(f => {
+          const oreF = (tmp.quantita * (Number(f.minuti_unitari) || 0)) / 60;
+          const { add, forn } = assegnLive(f._k);
+          const ini = inizioPerFase(tmp.scadenza, oreF, add, forn);
+          if (ini < minIni) minIni = ini;
+        });
+        inizioCalc = minIni;
+      }
+    } else {
+      ore = opCalcOre(tmp);
+      // Override locali (addettiSel + fornitoriSel): preview senza dipendere dal DB.
+      inizioCalc = opCalcInizio(tmp, addettiSel, fornitoriSel);
+    }
+    const giorni = Math.ceil(ore / 8);
+    const conAddetti = (addettiSel && addettiSel.length > 0) || conFasi;
 
     // Se il lucchetto è APERTO, aggiorno il campo Inizio col calcolo "live".
     // Se è CHIUSO, lascio quello che c'è (decisione dell'utente).
@@ -8041,9 +8114,13 @@ function openOperazioneModal(o) {
         el('span', { style:'color:var(--acc)' }, 'Giorni lavorativi: '), String(giorni),
       ),
       el('div', { style:'margin-top:4px;font-size:10px;color:var(--mut);' },
-        conAddetti
-          ? 'Inizio calcolato a ritroso dalla scadenza in base alla capacità reale degli addetti assegnati (8h a testa, meno le loro ferie), escludendo weekend, festivi e chiusure aziendali.'
-          : 'Calcolato come quantità × minuti / 60 ore, divisi in giornate da 8h, escludendo weekend, festivi nazionali e chiusure aziendali. Assegna degli addetti per tener conto delle loro ferie.')
+        conFasi
+          ? ('Inizio calcolato per fase — ognuna sulla capacità dei suoi assegnatari — '
+             + (seqChk.checked && fasiVere.length >= 2 ? 'in sequenza' : 'in parallelo')
+             + ', a ritroso dalla scadenza. Le ore sono la somma delle fasi (il tempo pagato resta solo budget).')
+          : (conAddetti
+            ? 'Inizio calcolato a ritroso dalla scadenza in base alla capacità reale degli addetti assegnati (8h a testa, meno le loro ferie), escludendo weekend, festivi e chiusure aziendali.'
+            : 'Calcolato come quantità × minuti / 60 ore, divisi in giornate da 8h, escludendo weekend, festivi nazionali e chiusure aziendali. Assegna degli addetti per tener conto delle loro ferie.'))
     );
 
     // Se l'utente ha forzato l'inizio (lucchetto chiuso): avvisi su tempistiche
@@ -11127,22 +11204,59 @@ function calcolaCaricoUtenteRange(uid, isoStart, isoEnd) {
   state.operazioni
     .filter(o => o.stato === 'aperta' && o.scadenza)
     .forEach(o => {
-      const pesi = pesiEntitaCommessa(o.id);
-      const pesoUtente = pesi.addetti.get(uid);
-      if (!pesoUtente || pesi.totale <= 0) return;
-      const oreTot = opCalcOreResidue(o);
-      if (oreTot <= 0) return;
-      const inizio = opInizio(o);
-      if (!inizio) return;
-      if (o.scadenza < isoStart || inizio > isoEnd) return;
-      // Quota di questo utente sulla commessa = ore_tot × (peso_utente / peso_tot)
-      const orePerAddetto = oreTot * (pesoUtente / pesi.totale);
-      const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerAddetto);
-      Object.keys(distrib).forEach(iso => {
-        if (iso >= isoStart && iso <= isoEnd) {
-          oreCarico += distrib[iso];
-        }
-      });
+      const fasi = opFasiOf(o);
+      const mieRighe = (state.opAddetti || []).filter(r => r.operazione_id === o.id && r.utente_id === uid);
+      if (!mieRighe.length) return;
+      const pezzi = o.inizio_manuale
+        ? Number(o.quantita || 0)
+        : Math.max(0, Number(o.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(o.id) : 0));
+      // Fasi specifiche dell'utente (fase_id valido e ancora esistente)
+      const mieFasi = fasi.length ? mieRighe.map(r => r.fase_id).filter(fid => fid && fasi.some(f => f.id === fid)) : [];
+
+      if (fasi.length && mieFasi.length) {
+        // ── Carico PER FASE: solo le ore delle fasi dell'utente, sulla loro finestra ──
+        if (pezzi <= 0) return;
+        const windows = opFasiWindows(o);
+        const visti = new Set();
+        mieFasi.forEach(fid => {
+          if (visti.has(fid)) return;
+          visti.add(fid);
+          const f = fasi.find(x => x.id === fid);
+          const w = windows[fid];
+          if (!f || !w) return;
+          const oreFase = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
+          if (oreFase <= 0) return;
+          // Peso della fase: addetti (1 cad.) + fornitori (coef × allocazione)
+          const { addetti, fornitori } = faseAssegnatari(o, fid);
+          let totFase = addetti.length * 1.0;
+          fornitori.forEach(fr => {
+            const az = state.aziende.find(a => a.id === fr.azienda_id);
+            const coef = az ? Number(az.coefficiente != null ? az.coefficiente : 1.0) : 1.0;
+            totFase += coef * Number(fr.allocazione != null ? fr.allocazione : 1.0);
+          });
+          if (totFase <= 0) return;
+          const quota = oreFase * (1.0 / totFase);
+          const distrib = distribuisciOreOperazione(w.inizio, w.fine, quota);
+          Object.keys(distrib).forEach(iso => {
+            if (iso >= isoStart && iso <= isoEnd) oreCarico += distrib[iso];
+          });
+        });
+      } else {
+        // ── Aggregato (nessuna fase, o assegnato a livello commessa): come prima ──
+        const pesi = pesiEntitaCommessa(o.id);
+        const pesoUtente = pesi.addetti.get(uid);
+        if (!pesoUtente || pesi.totale <= 0) return;
+        const oreTot = opCalcOreResidue(o);
+        if (oreTot <= 0) return;
+        const inizio = opInizio(o);
+        if (!inizio) return;
+        if (o.scadenza < isoStart || inizio > isoEnd) return;
+        const orePerAddetto = oreTot * (pesoUtente / pesi.totale);
+        const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerAddetto);
+        Object.keys(distrib).forEach(iso => {
+          if (iso >= isoStart && iso <= isoEnd) oreCarico += distrib[iso];
+        });
+      }
     });
 
   const perc = capacitaNetta > 0 ? (oreCarico / capacitaNetta) : 0;
@@ -12039,19 +12153,35 @@ function renderGanttCommesse(root) {
       ),
     ));
 
-    // Commesse assegnate all'operatore che intersecano il range
+    // Commesse assegnate all'operatore che intersecano il range. Con le fasi:
+    // l'operatore occupa la finestra della SUA fase (non l'intera commessa).
     const commesse = [];
     state.operazioni.forEach(o => {
       if (!o.scadenza) return;
-      const addetti = getOperazioneAddetti(o.id);
-      if (!addetti.includes(u.id)) return;
-      const inizio = opInizio(o) || o.scadenza;
-      const fine = opFineLavoro(o, inizio);
-      // Visibile se il blocco di LAVORO [inizio, fine] interseca il range
-      // (prima si filtrava sulla scadenza: una commessa il cui lavoro è tutto
-      // prima della finestra non riguarda l'operatore in questo periodo).
-      if (fine < rangeStartIso || inizio > rangeEndIso) return;
-      commesse.push({ op:o, inizio, scadenza:o.scadenza, fine });
+      const mieRighe = (state.opAddetti || []).filter(r => r.operazione_id === o.id && r.utente_id === u.id);
+      if (!mieRighe.length) return;
+      const fasi = opFasiOf(o);
+      const windows = fasi.length ? opFasiWindows(o) : null;
+      // Fasi specifiche a cui l'operatore è assegnato (fase_id valido)
+      const mieFasi = windows ? mieRighe.map(r => r.fase_id).filter(fid => fid && windows[fid]) : [];
+      if (fasi.length && mieFasi.length) {
+        // Una barra per ciascuna fase dell'operatore, sulla sua finestra
+        const visti = new Set();
+        mieFasi.forEach(fid => {
+          if (visti.has(fid)) return;
+          visti.add(fid);
+          const w = windows[fid];
+          if (w.fine < rangeStartIso || w.inizio > rangeEndIso) return;
+          const tipo = state.tipiLav.find(t => t.id === w.tipo_lavorazione_id);
+          commesse.push({ op:o, inizio:w.inizio, scadenza:o.scadenza, fine:w.fine, faseTipo: tipo || null });
+        });
+      } else {
+        // Nessuna fase, oppure assegnato "a tutta la commessa": intera finestra
+        const inizio = opInizio(o) || o.scadenza;
+        const fine = opFineLavoro(o, inizio);
+        if (fine < rangeStartIso || inizio > rangeEndIso) return;
+        commesse.push({ op:o, inizio, scadenza:o.scadenza, fine, faseTipo: null });
+      }
     });
 
     // Una cella unica che copre tutti gli slot (track per le barre)
@@ -12116,11 +12246,13 @@ function renderGanttCommesse(root) {
 
       const bar = el('div', {
         class: 'gantt-cmbar' + (sfora ? ' sfora' : '') + (attiva ? ' attiva' : ''),
-        style: `left:${left}px;width:${width}px;top:${idx*(BAR_H+GAP)}px;`,
+        style: `left:${left}px;width:${width}px;top:${idx*(BAR_H+GAP)}px;`
+          + (c.faseTipo && c.faseTipo.colore && !sfora ? `background:${c.faseTipo.colore};` : ''),
         title:
           'Commessa ' + (c.op.numero_ordine || '')
           + (cli ? '\nCliente: ' + cli.nome : '')
           + (art ? '\nArticolo: ' + (art.codice || '') : '')
+          + (c.faseTipo ? '\nFase: ' + c.faseTipo.nome : '')
           + '\nPreventivo: ' + prev.toFixed(1) + ' h'
           + '\nConsuntivo: ' + cons.toFixed(1) + ' h'
           + (prev > 0 ? '  (' + Math.round(perc*100) + '%)' : '')
