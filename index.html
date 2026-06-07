@@ -5739,8 +5739,51 @@ const OP_PREP = {
 };
 
 // Calcoli al volo (non in DB)
+// ── Helper modello a fasi ──────────────────────────────────────────
+// Fasi di una commessa, ordinate. [] se non ne ha (→ comportamento classico).
+function opFasiOf(op) {
+  if (!op) return [];
+  return (state.opFasi || []).filter(f => f.operazione_id === op.id)
+    .slice().sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+}
+// Minuti/pezzo "effettivi" per la pianificazione: somma delle fasi se presenti,
+// altrimenti il minuti_unitari (tempo pagato). Il pagato resta solo budget.
+function opMinutiEffettivi(op) {
+  const fasi = opFasiOf(op);
+  if (fasi.length) return fasi.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
+  return Number((op && op.minuti_unitari) || 0);
+}
+// Assegnatari di una fase: i suoi addetti/fornitori (per fase_id). Se la fase
+// non ne ha di propri, ripiega sugli assegnatari "a tutta la commessa" (fase_id nullo).
+function faseAssegnatari(op, faseId) {
+  const add = (state.opAddetti || []).filter(r => r.operazione_id === op.id && r.fase_id === faseId).map(r => r.utente_id);
+  const forn = (state.opFornitori || []).filter(r => r.operazione_id === op.id && r.fase_id === faseId)
+    .map(r => ({ azienda_id: r.azienda_id, allocazione: r.allocazione }));
+  if (add.length === 0 && forn.length === 0) {
+    const addC = (state.opAddetti || []).filter(r => r.operazione_id === op.id && r.fase_id == null).map(r => r.utente_id);
+    const fornC = (state.opFornitori || []).filter(r => r.operazione_id === op.id && r.fase_id == null)
+      .map(r => ({ azienda_id: r.azienda_id, allocazione: r.allocazione }));
+    return { addetti: addC, fornitori: fornC };
+  }
+  return { addetti: add, fornitori: forn };
+}
+// Inizio/fine di una singola fase (a ritroso / in avanti), con fallback 8h/giorno
+// se la fase non ha capacità (nessun assegnatario).
+function inizioPerFase(scadenzaIso, oreFase, addetti, fornitori) {
+  if (oreFase <= 0) return scadenzaIso;
+  if (addetti.length > 0 || fornitori.length > 0) return indietroOreCapacita(scadenzaIso, oreFase, addetti, fornitori);
+  const giorni = Math.ceil(oreFase / 8);
+  return giorni <= 0 ? scadenzaIso : indietroGiorniLavorativi(scadenzaIso, giorni);
+}
+function finePerFase(inizioIso, oreFase, addetti, fornitori) {
+  if (oreFase <= 0) return inizioIso;
+  if (addetti.length > 0 || fornitori.length > 0) return avantiOreCapacita(inizioIso, oreFase, addetti, fornitori);
+  const giorni = Math.ceil(oreFase / 8);
+  return giorni <= 0 ? inizioIso : avantiGiorniLavorativi(inizioIso, giorni);
+}
+
 function opCalcOre(op) {
-  return ((op.quantita || 0) * (op.minuti_unitari || 0)) / 60;
+  return ((op.quantita || 0) * opMinutiEffettivi(op)) / 60;
 }
 
 // Ore di lavoro RESIDUO: pezzi ancora da produrre × minuti_unitari.
@@ -5755,7 +5798,7 @@ function opCalcOreResidue(op) {
   const qtaConsegnata = (typeof quantitaConsegnata === 'function')
     ? quantitaConsegnata(op.id) : 0;
   const residua = Math.max(0, qtaOrd - qtaConsegnata);
-  return (residua * (op.minuti_unitari || 0)) / 60;
+  return (residua * opMinutiEffettivi(op)) / 60;
 }
 
 // Calcola ore reali consuntivate (somma sessioni chiuse + sessioni aperte stimate)
@@ -5778,38 +5821,61 @@ function opCalcGiorni(op) {
 }
 function opCalcInizio(op, addettiOverride, fornitoriOverride) {
   if (!op.scadenza) return null;
-  // Se l'admin ha bloccato manualmente l'inizio, rispettiamo la sua scelta
-  // e calcoliamo sulle ore TOTALI (semantica stabile: lui ha fissato la data
-  // su quel volume di lavoro). Altrimenti usiamo le ore RESIDUE: ha senso
-  // che il calcolo automatico tenga conto del lavoro già prodotto.
+
+  // ── Calcolo PER FASE ──────────────────────────────────────────────
+  // Solo se la commessa ha fasi e NON stiamo usando override (gli override
+  // servono all'anteprima di una commessa non ancora salvata, dove
+  // l'assegnazione per fase non è ancora su DB: lì resta il calcolo aggregato).
+  const fasi = opFasiOf(op);
+  if (fasi.length && !addettiOverride && !fornitoriOverride) {
+    const pezzi = op.inizio_manuale
+      ? Number(op.quantita || 0)
+      : Math.max(0, Number(op.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0));
+    if (pezzi <= 0) return op.scadenza;
+
+    if (op.fasi_sequenziali) {
+      // Catena a ritroso: l'ultima fase finisce alla scadenza, il suo inizio
+      // diventa la "scadenza" della fase precedente, e così via.
+      let cursore = op.scadenza;
+      for (let i = fasi.length - 1; i >= 0; i--) {
+        const f = fasi[i];
+        const ore = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
+        const { addetti, fornitori } = faseAssegnatari(op, f.id);
+        cursore = inizioPerFase(cursore, ore, addetti, fornitori);
+      }
+      return cursore;
+    }
+    // Parallelo: ogni fase a ritroso dalla scadenza; inizio = il più vecchio.
+    let minInizio = op.scadenza;
+    fasi.forEach(f => {
+      const ore = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
+      const { addetti, fornitori } = faseAssegnatari(op, f.id);
+      const ini = inizioPerFase(op.scadenza, ore, addetti, fornitori);
+      if (ini < minInizio) minInizio = ini;
+    });
+    return minInizio;
+  }
+
+  // ── Calcolo AGGREGATO (nessuna fase, oppure anteprima con override) ──
+  // Se l'admin ha bloccato manualmente l'inizio, calcoliamo sulle ore TOTALI;
+  // altrimenti sulle ore RESIDUE (tiene conto del lavoro già prodotto).
   const ore = op.inizio_manuale ? opCalcOre(op) : opCalcOreResidue(op);
   if (ore <= 0) return op.scadenza;
 
-  // addetti / fornitori — override permette al modal di creazione di passare
-  // lo stato locale (commessa non ancora salvata). Altrimenti li cerca dalla cache.
   let addetti = addettiOverride;
   if (!addetti) {
-    addetti = (typeof getOperazioneAddetti === 'function')
-      ? getOperazioneAddetti(op.id) : [];
+    addetti = (typeof getOperazioneAddetti === 'function') ? getOperazioneAddetti(op.id) : [];
   }
   let fornitori = fornitoriOverride;
   if (!fornitori) {
-    fornitori = (typeof getOperazioneFornitoriDettaglio === 'function')
-      ? getOperazioneFornitoriDettaglio(op.id) : [];
+    fornitori = (typeof getOperazioneFornitoriDettaglio === 'function') ? getOperazioneFornitoriDettaglio(op.id) : [];
   }
-  // Normalizza fornitori al formato {azienda_id, allocazione} se è stato
-  // passato come array di soli id (per comodità delle chiamate dal modal)
   if (fornitori.length && typeof fornitori[0] === 'string') {
     fornitori = fornitori.map(id => ({ azienda_id: id, allocazione: 1.0 }));
   }
-
-  // Se almeno una delle due categorie ha capacità, usa il calcolo a ritroso
-  // con capacità reale. Capacità giornaliera fornitore = 8h × coef × allocazione.
   if (addetti.length > 0 || fornitori.length > 0) {
     return indietroOreCapacita(op.scadenza, ore, addetti, fornitori);
   }
-
-  // Nessuno: fallback alla logica classica a giorni (8h standard).
   const giorni = Math.ceil(ore / 8);
   if (giorni <= 0) return op.scadenza;
   return indietroGiorniLavorativi(op.scadenza, giorni);
@@ -5830,6 +5896,36 @@ function opInizio(op) {
 // invece di stiracchiarla fino alla scadenza (che con inizio manuale è arbitraria).
 function opFineLavoro(op, inizioIso) {
   if (!op || !inizioIso) return (op && op.scadenza) || inizioIso;
+
+  const fasi = opFasiOf(op);
+  if (fasi.length) {
+    const pezzi = op.inizio_manuale
+      ? Number(op.quantita || 0)
+      : Math.max(0, Number(op.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0));
+    if (pezzi <= 0) return inizioIso;
+
+    if (op.fasi_sequenziali) {
+      // Catena in avanti: ogni fase parte dove finisce la precedente.
+      let cursore = inizioIso;
+      fasi.forEach(f => {
+        const ore = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
+        const { addetti, fornitori } = faseAssegnatari(op, f.id);
+        cursore = finePerFase(cursore, ore, addetti, fornitori);
+      });
+      return cursore;
+    }
+    // Parallelo: la fine è quella della fase più lunga partendo dall'inizio.
+    let maxFine = inizioIso;
+    fasi.forEach(f => {
+      const ore = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
+      const { addetti, fornitori } = faseAssegnatari(op, f.id);
+      const fine = finePerFase(inizioIso, ore, addetti, fornitori);
+      if (fine > maxFine) maxFine = fine;
+    });
+    return maxFine;
+  }
+
+  // ── aggregato (nessuna fase) ──
   const ore = op.inizio_manuale ? opCalcOre(op) : opCalcOreResidue(op);
   if (ore <= 0) return inizioIso;
   let addetti = (typeof getOperazioneAddetti === 'function') ? getOperazioneAddetti(op.id) : [];
