@@ -933,7 +933,7 @@ const state = {
   assMese: new Date().getMonth(), // 0-11
   assVistaCal: 'mese',     // 'mese' | 'riepilogo'
   // Operazioni: multi-addetto (tabella ponte)
-  opAddetti: [],           // [{operazione_id, utente_id}]
+  opAddetti: [],           // [{operazione_id, utente_id, fase_id, completata_il}]
   // Operazioni: fornitori esterni (aziende con is_fornitore=true)
   opFornitori: [],         // [{id, operazione_id, azienda_id, allocazione, creato_il}]
   // Operazioni: fasi (scomposizione per tipo di lavorazione)
@@ -1892,10 +1892,13 @@ function applyChange(tabella, payload) {
       a.operazione_id === b.operazione_id && a.utente_id === b.utente_id;
     if (ev === 'INSERT') {
       if (!state.opAddetti.find(x => matchKey(x, row))) state.opAddetti.push(row);
+    } else if (ev === 'UPDATE') {
+      // Avvengono UPDATE legittimi: cambio fase_id (sync commessa) e
+      // completata_il (dichiarazione "fase finita" al kiosk).
+      state.opAddetti = state.opAddetti.map(x => matchKey(x, row) ? row : x);
     } else if (ev === 'DELETE') {
       state.opAddetti = state.opAddetti.filter(x => !matchKey(x, oldRow));
     }
-    // UPDATE non dovrebbe mai succedere su una tabella ponte pura
   } else if (tabella === 'consegne_commessa') {
     if (ev === 'INSERT') {
       if (!state.consegneCommessa.find(x => x.id === row.id)) state.consegneCommessa.push(row);
@@ -1996,7 +1999,6 @@ function quantitaResidua(op) {
 // Ritorna l'elenco (leggibile) dei campi mancanti; vuoto = tutto a posto.
 // - Minuti unitari: assente o ≤ 0 (senza non si calcola la durata)
 // - Scadenza: vuota
-// - Numero OP: vuoto
 // - Addetti/Fornitori: manca se NON c'è né un addetto né un fornitore
 //   (ne basta uno dei due per considerare la riga assegnata)
 function opCampiMancanti(op) {
@@ -2004,7 +2006,6 @@ function opCampiMancanti(op) {
   const mancanti = [];
   if (!(Number(op.minuti_unitari) > 0)) mancanti.push('Minuti unitari');
   if (!op.scadenza) mancanti.push('Scadenza');
-  if (!(op.numero_op && String(op.numero_op).trim())) mancanti.push('Numero OP');
   const nAddetti = (typeof getOperazioneAddetti === 'function') ? getOperazioneAddetti(op.id).length : 0;
   const nFornitori = (typeof getOperazioneFornitori === 'function') ? getOperazioneFornitori(op.id).length : 0;
   if (nAddetti === 0 && nFornitori === 0) mancanti.push('Addetto o fornitore');
@@ -6127,6 +6128,8 @@ function renderMagazzino(root) {
   tbl.append(el('thead', {}, el('tr', {},
     el('th', {}, 'Ordine'),
     el('th', {}, 'Pos'),
+    el('th', {}, 'OP'),
+    el('th', {}, 'Rif. cliente'),
     el('th', {}, 'Cliente'),
     el('th', {}, 'Codice'),
     el('th', {}, 'Descrizione'),
@@ -6166,6 +6169,11 @@ function renderMagazzino(root) {
 
     tr.append(el('td', { class:'mono' }, o.numero_ordine || '—'));
     tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.pos || '—'));
+    tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.numero_op || '—'));
+    tr.append(el('td', {
+      style: 'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mut);',
+      title: o.riferimento_cliente || '',
+    }, o.riferimento_cliente || '—'));
     tr.append(el('td', {}, cli?.nome || '—'));
     tr.append(el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'));
 
@@ -8616,6 +8624,9 @@ function renderStorico(root) {
   tbl.append(el('thead', {}, el('tr', {},
     el('th', {}, 'Data sped.'),
     el('th', {}, 'Ordine'),
+    el('th', {}, 'Pos'),
+    el('th', {}, 'OP'),
+    el('th', {}, 'Rif. cliente'),
     el('th', {}, 'Cliente'),
     el('th', {}, 'Codice'),
     el('th', { class:'tr' }, 'Qtà'),
@@ -8648,6 +8659,12 @@ function renderStorico(root) {
     tb.append(el('tr', { class:'spedita' },
       el('td', { class:'mono' }, fmtIT(s.data)),
       el('td', { class:'mono' }, op?.numero_ordine || '—'),
+      el('td', { class:'mono', style:'color:var(--mut);' }, op?.pos || '—'),
+      el('td', { class:'mono', style:'color:var(--mut);' }, op?.numero_op || '—'),
+      el('td', {
+        style:'max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mut);',
+        title: op?.riferimento_cliente || '',
+      }, op?.riferimento_cliente || '—'),
       el('td', {}, cli?.nome || '—'),
       el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
       el('td', { class:'tr mono', style:'font-weight:600;' }, String(s.quantita || 0)),
@@ -10523,6 +10540,7 @@ function kioskFormatDurata(ms) {
 // Stato runtime del flusso commesse
 const kCom = {
   vediAltre: false,       // toggle "cerca altre operazioni"
+  vediCompletate: false,  // toggle sezione "Completate da te"
   search: '',             // testo ricerca
   opSelezionata: null,    // operazione su cui si farà start
 };
@@ -10531,9 +10549,123 @@ const kCom = {
 function kioskGoToCommesse() {
   // Reset stato locale del flusso
   kCom.vediAltre = false;
+  kCom.vediCompletate = false;
   kCom.search = '';
   kCom.opSelezionata = null;
   kioskGoToOpList();
+}
+
+// ─── Fase finita per-persona ─────────────────────────────────────────
+// Modello: un addetto ha UNA sola riga per commessa (PK operazione_id+utente_id),
+// con la sua fase in fase_id. "Fase finita" = completata_il valorizzato su quella
+// riga. La commessa sparisce dai suoi suggerimenti quando la marca finita.
+
+// Riga addetto di un utente su una commessa (al più una).
+function addettoRigaUtenteOp(uid, opId) {
+  return (state.opAddetti || []).find(r => r.utente_id === uid && r.operazione_id === opId) || null;
+}
+// True se l'utente ha dichiarato finita la propria fase su questa commessa.
+function opCompletataDaUtente(uid, opId) {
+  const r = addettoRigaUtenteOp(uid, opId);
+  return !!(r && r.completata_il);
+}
+// Etichetta leggibile della fase di una riga addetto (nome del tipo lavorazione).
+function etichettaFaseAddetto(riga) {
+  if (!riga || !riga.fase_id) return 'la tua fase';
+  const fase = (state.opFasi || []).find(f => f.id === riga.fase_id);
+  if (!fase) return 'la tua fase';
+  const tipo = (state.tipiLav || []).find(t => t.id === fase.tipo_lavorazione_id);
+  return tipo?.nome || 'la tua fase';
+}
+
+// Premuto "Termina lavoro": se è una commessa con una fase ancora da finire,
+// chiedo se ha finito o sospende; altrimenti (attività extra, non assegnato,
+// o già finita) chiudo direttamente come prima.
+function kioskTerminaLavoro(sess) {
+  if (!sess || !sess.operazione_id) { kioskStopSessione(sess, 'pause'); return; }
+  const u = kioskState.utenteSelezionato;
+  const riga = addettoRigaUtenteOp(u?.id, sess.operazione_id);
+  if (!riga || riga.completata_il) { kioskStopSessione(sess, 'pause'); return; }
+  kioskRenderTerminaScelta(sess, riga);
+}
+
+// Schermata di scelta dentro la vista "lavoro attivo".
+function kioskRenderTerminaScelta(sess, riga) {
+  const root = $('#kiosk-attiva-content');
+  if (!root) return;
+  if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
+  root.innerHTML = '';
+  const nomeFase = etichettaFaseAddetto(riga);
+
+  root.append(el('div', {
+    style:'font-family:Syne,sans-serif;font-size:22px;font-weight:700;text-align:center;margin-bottom:8px;'
+  }, 'Hai finito la tua fase?'));
+  root.append(el('div', {
+    style:'text-align:center;color:var(--mut);font-size:14px;line-height:1.5;margin-bottom:24px;'
+  }, 'Fase: ' + nomeFase + '. Se la marchi finita, questa commessa non ti verrà più suggerita '
+     + '(puoi sempre riaprirla da “✓ Completate da te”).'));
+
+  const actions = el('div', { class:'kiosk-attiva-actions' });
+  actions.append(el('button', {
+    class:'kiosk-attiva-btn', style:'background:var(--grn);color:#0f0f0e;',
+    onclick: () => kioskFineFase(sess, riga),
+  }, '✅ Ho finito la mia fase'));
+  actions.append(el('button', {
+    class:'kiosk-attiva-btn pause',
+    onclick: () => kioskStopSessione(sess, 'pause'),
+  }, '⏸ Sospendo, continuo dopo'));
+  root.append(actions);
+
+  root.append(el('div', { style:'text-align:center;margin-top:18px;' },
+    el('button', { class:'kiosk-op-toggle-altre', onclick: () => kioskGoToAttiva() }, '← Annulla')));
+}
+
+// Marca finita la fase dell'utente su questa commessa + chiude la sessione.
+async function kioskFineFase(sess, riga) {
+  const ora = new Date().toISOString();
+  try {
+    const { error: errAdd } = await sb.from('operazioni_addetti')
+      .update({ completata_il: ora })
+      .eq('operazione_id', riga.operazione_id)
+      .eq('utente_id', riga.utente_id);
+    if (errAdd) { kioskBeep('err'); kioskShowError('Errore: ' + errAdd.message); return; }
+    state.opAddetti = state.opAddetti.map(x =>
+      (x.operazione_id === riga.operazione_id && x.utente_id === riga.utente_id)
+        ? { ...x, completata_il: ora } : x);
+
+    const { data: sessChiusa, error: errSess } = await sb.from('sessioni_lavoro')
+      .update({ fine: ora }).eq('id', sess.id).select().single();
+    if (errSess) { kioskBeep('err'); kioskShowError('Errore: ' + errSess.message); return; }
+    state.sessioni = state.sessioni.map(s => s.id === sess.id ? sessChiusa : s);
+
+    if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
+    kioskBeep('ok');
+    const durataS = Math.floor((new Date(sessChiusa.fine) - new Date(sessChiusa.inizio)) / 1000);
+    const h = Math.floor(durataS / 3600), m = Math.floor((durataS % 3600) / 60);
+    const durStr = h > 0 ? h + 'h ' + m + 'm' : m + ' min';
+    kioskShowDone({
+      title: 'Fase completata ✓',
+      detail: etichettaFaseAddetto(riga) + '\nDurata: ' + durStr,
+      ok: true,
+    });
+  } catch (e) {
+    kioskBeep('err'); kioskShowError('Errore di rete: ' + (e.message || e));
+  }
+}
+
+// Ricominciare a lavorare su una commessa che avevo marcato finita la "riapre":
+// azzero completata_il (best-effort, non blocca l'avvio sessione).
+async function kioskRiapriFaseSeCompletata(uid, opId) {
+  const r = addettoRigaUtenteOp(uid, opId);
+  if (!r || !r.completata_il) return;
+  try {
+    const { error } = await sb.from('operazioni_addetti')
+      .update({ completata_il: null })
+      .eq('operazione_id', opId).eq('utente_id', uid);
+    if (error) return;
+    state.opAddetti = state.opAddetti.map(x =>
+      (x.operazione_id === opId && x.utente_id === uid) ? { ...x, completata_il: null } : x);
+  } catch (e) { /* best-effort */ }
 }
 
 // ─── Schermata lista operazioni ───
@@ -10569,7 +10701,10 @@ function kioskRenderOpList() {
   const mieIds = new Set(
     state.opAddetti.filter(r => r.utente_id === u.id).map(r => r.operazione_id)
   );
-  const mie = aperte.filter(o => mieIds.has(o.id));
+  // "mie" = assegnate a me e NON ancora marcate finite da me.
+  // "completateDaMe" = assegnate a me ma con la mia fase già dichiarata finita.
+  const mie = aperte.filter(o => mieIds.has(o.id) && !opCompletataDaUtente(u.id, o.id));
+  const completateDaMe = aperte.filter(o => mieIds.has(o.id) && opCompletataDaUtente(u.id, o.id));
   const altre = aperte.filter(o => !mieIds.has(o.id));
 
   // Box ricerca
@@ -10640,6 +10775,26 @@ function kioskRenderOpList() {
     } else if (q && mieFiltered.length === 0) {
       root.append(el('div', { class:'kiosk-empty' }, 'Nessuna operazione trovata per "' + kCom.search + '"'));
     }
+  }
+
+  // Sezione "Completate da te" (comprimibile): commesse dove l'operatore ha
+  // dichiarato finita la propria fase. Da qui può riaprirne una marcata per
+  // sbaglio: ricominciando a lavorarci (selezione + tipo) il flag si azzera.
+  const completateFiltered = filtra(completateDaMe);
+  if (completateFiltered.length > 0) {
+    const aperta = kCom.vediCompletate || !!q;
+    const sec = el('div', { class:'kiosk-op-section' });
+    sec.append(el('div', {
+      class:'kiosk-op-section-hd',
+      style:'color:var(--grn);border-color:var(--grn);cursor:pointer;',
+      onclick: () => { kCom.vediCompletate = !kCom.vediCompletate; kioskRenderOpList(); },
+    }, (aperta ? '▾' : '▸') + ' ✓ Completate da te (' + completateFiltered.length + ')'));
+    if (aperta) {
+      const grid = el('div', { class:'kiosk-op-grid' });
+      completateFiltered.forEach(o => grid.append(kioskOpCard(o)));
+      sec.append(grid);
+    }
+    root.append(sec);
   }
 }
 
@@ -10813,6 +10968,9 @@ async function kioskSelectTipo(tipo) {
     }
     // Aggiorna cache locale
     if (!state.sessioni.find(s => s.id === data.id)) state.sessioni.unshift(data);
+    // Se l'operatore aveva marcato finita la propria fase su questa commessa,
+    // ricominciare a lavorarci la riapre.
+    await kioskRiapriFaseSeCompletata(u.id, o.id);
     kioskBeep('ok');
     kioskGoToAttiva();
   } catch (e) {
@@ -11016,7 +11174,7 @@ function kioskRenderAttiva() {
   // Bottone azione (uno solo: termina la sessione)
   const actions = el('div', { class:'kiosk-attiva-actions' });
   actions.append(
-    el('button', { class:'kiosk-attiva-btn pause', onclick: () => kioskStopSessione(sess, 'pause') },
+    el('button', { class:'kiosk-attiva-btn pause', onclick: () => kioskTerminaLavoro(sess) },
       '⏹ Termina lavoro'),
   );
   root.append(actions);
@@ -11033,7 +11191,7 @@ function kioskRenderAttiva() {
   );
   const prossime = state.operazioni
     .filter(op => op.stato !== 'spedita' && op.stato !== 'completata')
-    .filter(op => mieIds.has(op.id) && !attiveIds.has(op.id))
+    .filter(op => mieIds.has(op.id) && !attiveIds.has(op.id) && !opCompletataDaUtente(u.id, op.id))
     .sort((a, b) => {
       if (!a.scadenza && !b.scadenza) return 0;
       if (!a.scadenza) return 1;
