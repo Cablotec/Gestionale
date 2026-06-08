@@ -475,6 +475,10 @@ input.search:focus{border-color:var(--acc);}
 .kiosk-tipo-btn:hover,.kiosk-tipo-btn:active{transform:scale(.98);}
 .ktipo-color-bar{width:60px;height:8px;border-radius:4px;}
 .ktipo-name{font-size:22px;font-weight:700;}
+.ktipo-meta{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);}
+.kiosk-tipo-btn.mia-fase{border-width:3px;background:rgba(78,255,163,.08);box-shadow:0 0 0 2px var(--grn) inset;}
+.ktipo-mia-badge{font-family:'DM Mono',monospace;font-size:11px;color:var(--grn);font-weight:700;letter-spacing:.06em;}
+.kiosk-tipo-hint{text-align:center;color:var(--mut);font-size:14px;margin:4px 0 -8px;}
 
 /* Sessione attiva */
 .kiosk-attiva-card{background:var(--sur);border:3px solid var(--grn);border-radius:12px;padding:30px 36px;margin-bottom:20px;}
@@ -2006,18 +2010,35 @@ function quantitaResidua(op) {
 
 // Campi che una commessa DEVE avere compilati per essere pianificabile.
 // Ritorna l'elenco (leggibile) dei campi mancanti; vuoto = tutto a posto.
-// - Minuti unitari: assente o ≤ 0 (senza non si calcola la durata)
+// - Minuti: tempo di lavorazione assente (somma fasi se presenti, altrimenti
+//   il minuti_unitari pagato); senza non si calcola la durata
 // - Scadenza: vuota
-// - Addetti/Fornitori: manca se NON c'è né un addetto né un fornitore
-//   (ne basta uno dei due per considerare la riga assegnata)
+// - Senza fasi → serve almeno un addetto o un fornitore sulla commessa
+// - Con fasi → per OGNI fase: minuti > 0 e almeno un assegnatario
+//   (per-fase o, in ripiego, "a tutta la commessa")
 function opCampiMancanti(op) {
   if (!op) return [];
   const mancanti = [];
-  if (!(Number(op.minuti_unitari) > 0)) mancanti.push('Minuti unitari');
+  const fasi = opFasiOf(op);
+
+  if (!(opMinutiEffettivi(op) > 0)) mancanti.push('Minuti unitari');
   if (!op.scadenza) mancanti.push('Scadenza');
-  const nAddetti = (typeof getOperazioneAddetti === 'function') ? getOperazioneAddetti(op.id).length : 0;
-  const nFornitori = (typeof getOperazioneFornitori === 'function') ? getOperazioneFornitori(op.id).length : 0;
-  if (nAddetti === 0 && nFornitori === 0) mancanti.push('Addetto o fornitore');
+
+  if (fasi.length > 0) {
+    fasi.forEach(f => {
+      const tipo = (state.tipiLav || []).find(t => t.id === f.tipo_lavorazione_id);
+      const nome = tipo?.nome || 'fase';
+      if (!(Number(f.minuti_unitari) > 0)) mancanti.push('Fase «' + nome + '»: minuti a zero');
+      const ass = faseAssegnatari(op, f.id);
+      if (ass.addetti.length === 0 && ass.fornitori.length === 0) {
+        mancanti.push('Fase «' + nome + '»: nessun addetto/fornitore');
+      }
+    });
+  } else {
+    const nAddetti = (typeof getOperazioneAddetti === 'function') ? getOperazioneAddetti(op.id).length : 0;
+    const nFornitori = (typeof getOperazioneFornitori === 'function') ? getOperazioneFornitori(op.id).length : 0;
+    if (nAddetti === 0 && nFornitori === 0) mancanti.push('Addetto o fornitore');
+  }
   return mancanti;
 }
 
@@ -4398,19 +4419,38 @@ function openArticoloModal(a) {
         ...tipiAttivi.map(t => el('option', { value:t.id }, t.nome)));
       sel.value = f.tipo_lavorazione_id || '';
       sel.disabled = readonly;
-      sel.onchange = () => { f.tipo_lavorazione_id = sel.value || null; };
       const inMin = el('input', { type:'number', step:'0.5', min:'0', value:String(f.minuti_unitari || 0),
         placeholder:'min/pz', style:'max-width:90px;' });
       inMin.disabled = readonly;
       inMin.oninput = () => { f.minuti_unitari = Number(inMin.value) || 0; aggiornaConfronto(); };
-      const row = el('div', { style:'display:flex;gap:8px;align-items:center;margin:6px 0;' },
+      // Suggerimento dallo storico per (articolo, tipo) — Tappa 7
+      const sugg = el('div', { class:'sub', style:'font-family:DM Mono,monospace;font-size:11px;flex-basis:100%;margin:0 0 2px 28px;min-height:14px;' });
+      function refreshSugg() {
+        sugg.innerHTML = '';
+        const st = storicoMinutiPz(a.id, f.tipo_lavorazione_id);
+        if (!st) return;
+        const val = Math.round(st.minPz * 10) / 10;
+        sugg.append(el('span', { style:'color:var(--mut);' },
+          'storico ~' + String(val).replace('.', ',') + ' min/pz'));
+        if (!readonly) {
+          sugg.append(el('button', {
+            type:'button', class:'btnsm', style:'margin-left:8px;padding:1px 8px;',
+            title: 'Media su ' + st.nSessioni + ' sessioni · ' + st.nCommesse + ' commesse di questo articolo',
+            onclick: () => { f.minuti_unitari = val; inMin.value = String(val); aggiornaConfronto(); },
+          }, 'usa'));
+        }
+      }
+      sel.onchange = () => { f.tipo_lavorazione_id = sel.value || null; refreshSugg(); aggiornaConfronto(); };
+      const row = el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0;' },
         el('span', { class:'sub', style:'width:20px;flex-shrink:0;' }, '#' + (i + 1)),
         sel, inMin);
       if (!readonly) {
         row.append(el('button', { type:'button', class:'btnsm', style:'flex-shrink:0;',
           onclick: () => { fasi.splice(i, 1); renderFasi(); aggiornaConfronto(); } }, '✕'));
       }
+      row.append(sugg);
       fasiWrap.append(row);
+      refreshSugg();
     });
   }
   const btnAddFase = readonly ? null : el('button', {
@@ -5794,6 +5834,36 @@ function finePerFase(inizioIso, oreFase, addetti, fornitori) {
 
 function opCalcOre(op) {
   return ((op.quantita || 0) * opMinutiEffettivi(op)) / 60;
+}
+
+// ── Tappa 7: suggerimento minuti/pezzo per fase dallo storico ──────────
+// Media storica dei minuti/pezzo per (articolo, tipo lavorazione), dal
+// consuntivo: somma delle durate delle sessioni CHIUSE di quel tipo sulle
+// commesse di quell'articolo, diviso i pezzi prodotti di quelle commesse.
+// Il match è per tipo_lavorazione_id (stabile su tutto lo storico, anche
+// pre-fasi). Ritorna { minPz, nSessioni, nCommesse } o null se non c'è storico.
+function storicoMinutiPz(articoloId, tipoLavId) {
+  if (!articoloId || !tipoLavId) return null;
+  const opIds = new Set((state.operazioni || [])
+    .filter(o => o.articolo_id === articoloId).map(o => o.id));
+  if (opIds.size === 0) return null;
+  const sess = (state.sessioni || []).filter(s =>
+    s.fine && s.tipo_lavorazione_id === tipoLavId && opIds.has(s.operazione_id));
+  if (sess.length === 0) return null;
+  const totSec = sess.reduce((acc, s) => acc + (Number(s.durata_secondi) || 0), 0);
+  if (totSec <= 0) return null;
+  // Pezzi: quantità prodotta (consegnata) delle commesse che hanno avuto
+  // almeno una sessione di questo tipo; ripiego sulla quantità pianificata.
+  const opConSess = new Set(sess.map(s => s.operazione_id));
+  let pezzi = 0;
+  opConSess.forEach(id => {
+    const op = (state.operazioni || []).find(o => o.id === id);
+    if (!op) return;
+    const prod = quantitaConsegnata(id);
+    pezzi += prod > 0 ? prod : Number(op.quantita || 0);
+  });
+  if (pezzi <= 0) return null;
+  return { minPz: (totSec / 60) / pezzi, nSessioni: sess.length, nCommesse: opConSess.size };
 }
 
 // Ore di lavoro RESIDUO: pezzi ancora da produrre × minuti_unitari.
@@ -10930,7 +11000,44 @@ function kioskRenderTipo() {
     kioskInfoBlock(o),
   ));
 
-  // Griglia tipi attivi
+  // ── Se la commessa ha fasi → scelta della FASE (taggata sulla mansione) ──
+  const fasi = opFasiOf(o);
+  if (fasi.length > 0) {
+    const u = kioskState.utenteSelezionato;
+    const miaFaseId = addettoRigaUtenteOp(u?.id, o.id)?.fase_id || null;
+    // La fase assegnata all'operatore va per prima (pre-selezionata),
+    // le altre restano nell'ordine della commessa.
+    const ordinate = fasi.slice().sort((a, b) => {
+      const am = a.id === miaFaseId, bm = b.id === miaFaseId;
+      if (am && !bm) return -1;
+      if (bm && !am) return 1;
+      return (a.ordine || 0) - (b.ordine || 0);
+    });
+
+    root.append(el('div', { class:'kiosk-tipo-hint' },
+      'Scegli la fase su cui timbri' + (miaFaseId ? ' (la tua è evidenziata)' : '') + ':'));
+
+    const grid = el('div', { class:'kiosk-tipo-grid' });
+    ordinate.forEach(f => {
+      const tipo = state.tipiLav.find(t => t.id === f.tipo_lavorazione_id);
+      const col = tipo?.colore || '#6b6b64';
+      const mia = f.id === miaFaseId;
+      grid.append(el('button', {
+        class:'kiosk-tipo-btn' + (mia ? ' mia-fase' : ''),
+        style:'border-color:'+col+';',
+        onclick: () => kioskSelectFase(f),
+      },
+        el('div', { class:'ktipo-color-bar', style:'background:'+col+';' }),
+        el('div', { class:'ktipo-name' }, tipo?.nome || 'Fase'),
+        el('div', { class:'ktipo-meta' }, (Number(f.minuti_unitari) > 0 ? f.minuti_unitari + ' min/pz' : '—')),
+        mia ? el('div', { class:'ktipo-mia-badge' }, '★ La tua fase') : null,
+      ));
+    });
+    root.append(grid);
+    return;
+  }
+
+  // ── Fallback: commessa senza fasi → scelta tipo lavorazione libero ──
   const tipi = state.tipiLav
     .filter(t => t.attivo)
     .sort((a,b) => (a.ordine||0) - (b.ordine||0));
@@ -10955,19 +11062,35 @@ function kioskRenderTipo() {
 }
 
 async function kioskSelectTipo(tipo) {
+  if (!tipo) return;
+  kioskAvviaSessione(tipo.id, null);
+}
+
+// Avvio da scelta FASE: tagga la sessione con la fase e il suo tipo lavorazione.
+function kioskSelectFase(fase) {
+  if (!fase) return;
+  kioskAvviaSessione(fase.tipo_lavorazione_id, fase.id);
+}
+
+// Crea la sessione di lavoro al kiosk. faseId opzionale: la chiave fase_id
+// viene inclusa SOLO se valorizzata, così se la colonna non esiste ancora il
+// flusso classico (tipo libero) continua a funzionare.
+async function kioskAvviaSessione(tipoId, faseId) {
   const u = kioskState.utenteSelezionato;
   const o = kCom.opSelezionata;
-  if (!u || !o || !tipo) return;
+  if (!u || !o || !tipoId) return;
 
-  // Crea sessione
+  const payload = {
+    operazione_id: o.id,
+    utente_id: u.id,
+    tipo_lavorazione_id: tipoId,
+    sede: 'kiosk',
+    inizio: new Date().toISOString(),
+  };
+  if (faseId) payload.fase_id = faseId;
+
   try {
-    const { data, error } = await sb.from('sessioni_lavoro').insert({
-      operazione_id: o.id,
-      utente_id: u.id,
-      tipo_lavorazione_id: tipo.id,
-      sede: 'kiosk',
-      inizio: new Date().toISOString(),
-    }).select().single();
+    const { data, error } = await sb.from('sessioni_lavoro').insert(payload).select().single();
     if (error) {
       kioskBeep('err');
       kioskShowError('Errore: ' + error.message);
@@ -11595,7 +11718,7 @@ function buildLiveCard(u, onClick, opts = {}) {
       el('div', { class:'live-card-durata' + (over ? ' over' : ''), 'data-sess-id': sess.id, 'data-inizio': sess.inizio },
         formatLiveDuration(sess.inizio)),
       el('div', { class:'live-card-warn', style: over ? '' : 'display:none;' },
-        '⚠ Sessione aperta da oltre 6 ore — verificare se è in corso o dimenticata aperta'),
+        '⚠ Sessione aperta da oltre 7 ore — verificare se è in corso o dimenticata aperta'),
     );
   } else {
     // Mostra ultima sessione chiusa oggi se c'è
@@ -11614,12 +11737,12 @@ function buildLiveCard(u, onClick, opts = {}) {
         el('div', { class:'live-card-vuoto', style:'color:var(--txt);' },
           'Totale oggi: ' + formatSecondsHuman(totSecOggi)),
       );
-      // Avviso: oggi ha chiuso almeno una sessione di oltre 6 ore continuative.
+      // Avviso: oggi ha chiuso almeno una sessione di oltre 7 ore continuative.
       // Solo dove richiesto (scheda Live admin), non sul kiosk.
       if (opts.flagLunghe && ultime.some(sessioneTroppoLunga)) {
         card.classList.add('sess-lunga');
         card.append(el('div', { class:'live-card-warn' },
-          '⚠ Oggi una sessione di oltre 6 ore continuative — verificare'));
+          '⚠ Oggi una sessione di oltre 7 ore continuative — verificare'));
       }
     } else {
       card.append(el('div', { class:'live-card-vuoto' }, 'Nessuna sessione oggi'));
@@ -11660,7 +11783,7 @@ function renderGanttLive(root) {
         '⬇ Esporta ore (Excel)')));
   }
 
-  // Banner avviso "sessioni oltre 6h" — in cima, visibile a colpo d'occhio.
+  // Banner avviso "sessioni oltre 7h" — in cima, visibile a colpo d'occhio.
   // Riempito da aggiornaLiveWarnBanner() (al render e dal timer live).
   root.append(el('div', { id:'live-warn-banner', class:'live-warn-banner', style:'display:none;' }));
 
@@ -11701,7 +11824,7 @@ function renderGanttLive(root) {
   // Calcolo iniziale dell'avviso sessioni lunghe
   aggiornaLiveWarnBanner();
 
-  // Timer aggiornamento durate live (+ avviso sessione > 6h)
+  // Timer aggiornamento durate live (+ avviso sessione > 7h)
   ganttLiveTimer = setInterval(() => {
     document.querySelectorAll('.live-card-durata[data-inizio]').forEach(refreshLiveDurationEl);
     aggiornaLiveWarnBanner();
@@ -11989,13 +12112,13 @@ function apriStoricoConsuntivi(utente) {
     );
     body.append(kpis);
 
-    // Avviso riepilogativo: quante sessioni oltre 6h continuative nel periodo,
+    // Avviso riepilogativo: quante sessioni oltre 7h continuative nel periodo,
     // così è visibile senza dover espandere ogni giorno.
     const nLunghe = lista.reduce((acc, g) => acc + g.sessioni.filter(sessioneTroppoLunga).length, 0);
     if (nLunghe > 0) {
       body.append(el('div', { class:'storico-warn-banner' },
         '⚠ ' + nLunghe + (nLunghe === 1 ? ' sessione' : ' sessioni')
-        + ' di oltre 6 ore continuative nel periodo. Verificare se sono reali o timbrature dimenticate aperte.'));
+        + ' di oltre 7 ore continuative nel periodo. Verificare se sono reali o timbrature dimenticate aperte.'));
     }
 
     if (lista.length === 0) {
@@ -12035,10 +12158,10 @@ function apriStoricoConsuntivi(utente) {
       infoParts.push('assenza');
     }
     if (infoParts.length === 0) infoParts.push('—');
-    // Avviso: il giorno contiene almeno una sessione oltre 6h continuative
+    // Avviso: il giorno contiene almeno una sessione oltre 7h continuative
     const giornoHaLunga = g.sessioni.some(sessioneTroppoLunga);
     if (giornoHaLunga) {
-      infoParts.push(el('span', { class:'gg-lunga', title:'Contiene una sessione di oltre 6 ore continuative' }, ' · ⚠ >6h'));
+      infoParts.push(el('span', { class:'gg-lunga', title:'Contiene una sessione di oltre 7 ore continuative' }, ' · ⚠ >7h'));
     }
 
     const hd = el('div', { class:'storico-giorno-hd' },
@@ -12109,7 +12232,7 @@ function apriStoricoConsuntivi(utente) {
       class:'storico-sess' + (aperta ? ' aperta' : '') + (lunga ? ' lunga' : ''),
       style: isAdmin ? 'cursor:pointer;' : undefined,
       title: lunga
-        ? ('⚠ Sessione continua di ' + oreContinue + ' ore (oltre 6h)'
+        ? ('⚠ Sessione continua di ' + oreContinue + ' ore (oltre 7h)'
            + (isAdmin ? ' — clic per modificare i tempi' : ''))
         : (isAdmin ? 'Clic per modificare i tempi di questa sessione' : undefined),
       onclick: isAdmin
@@ -12176,7 +12299,7 @@ function descriviSessione(s) {
 }
 
 // Soglia per l'avviso "sessione unica troppo lunga" sulle card della scheda Live.
-const LIVE_WARN_SESSIONE_SEC = 6 * 3600;
+const LIVE_WARN_SESSIONE_SEC = 7 * 3600;
 
 // Durata continua (orologio) di una sessione: span inizio→fine, o inizio→adesso
 // se ancora aperta. Usata per segnalare le sessioni troppo lunghe nello storico.
@@ -12185,13 +12308,13 @@ function durataSessioneSec(s) {
   const fineMs = s.fine ? new Date(s.fine).getTime() : Date.now();
   return Math.max(0, Math.floor((fineMs - new Date(s.inizio).getTime()) / 1000));
 }
-// True se la sessione è una singola tirata di oltre 6 ore continuative.
+// True se la sessione è una singola tirata di oltre 7 ore continuative.
 function sessioneTroppoLunga(s) {
   return durataSessioneSec(s) >= LIVE_WARN_SESSIONE_SEC;
 }
 
 // Banner riepilogativo in cima alla scheda Live: elenca le sessioni ATTIVE
-// aperte da oltre 6 ore continuative (le stesse che ingialliscono le card),
+// aperte da oltre 7 ore continuative (le stesse che ingialliscono le card),
 // così l'avviso è visibile a colpo d'occhio senza aprire i singoli operatori.
 // Aggiornato sia al render sia dal timer live, per restare coerente con le card.
 function aggiornaLiveWarnBanner() {
@@ -12199,8 +12322,8 @@ function aggiornaLiveWarnBanner() {
   if (!banner) return;
   const oggiIso = toLocalISO(new Date());
   // Raccolgo le sessioni problematiche:
-  //  - APERTE oltre 6h (anche iniziate ieri = caso "dimenticata aperta")
-  //  - CHIUSE oggi oltre 6h (le più vecchie restano nello storico)
+  //  - APERTE oltre 7h (anche iniziate ieri = caso "dimenticata aperta")
+  //  - CHIUSE oggi oltre 7h (le più vecchie restano nello storico)
   const entries = [];
   (state.sessioni || []).forEach(s => {
     if (durataSessioneSec(s) < LIVE_WARN_SESSIONE_SEC) return;
@@ -12229,11 +12352,11 @@ function aggiornaLiveWarnBanner() {
   banner.style.display = '';
   banner.textContent = '⚠ ' + entries.length
     + (entries.length === 1 ? ' sessione' : ' sessioni')
-    + ' oltre 6 ore continuative oggi: ' + txt
+    + ' oltre 7 ore continuative oggi: ' + txt
     + '. Verificare se sono reali o timbrature dimenticate aperte.';
 }
 
-// Aggiorna una cella durata live e, sulla card, l'avviso "sessione > 6h".
+// Aggiorna una cella durata live e, sulla card, l'avviso "sessione > 7h".
 // Usata da entrambi i timer (scheda Live admin + schermata kiosk), così
 // l'avviso compare/sparisce in tempo reale esattamente come la durata.
 function refreshLiveDurationEl(d) {
