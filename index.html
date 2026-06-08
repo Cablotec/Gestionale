@@ -146,6 +146,11 @@ input.search:focus{border-color:var(--acc);}
 .storico-sess .meta{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .storico-sess .dur{font-family:'DM Mono',monospace;font-size:11px;color:var(--txt);font-weight:700;text-align:right;}
 .storico-sess.aperta .dur{color:var(--grn);}
+.storico-sess.lunga{box-shadow:inset 3px 0 0 var(--yel);}
+.storico-sess.lunga .dur{color:var(--yel);}
+.storico-sess .dur .warn-ic{margin-right:3px;}
+.storico-warn-banner{font-family:'DM Mono',monospace;font-size:11px;line-height:1.4;color:var(--yel);background:rgba(255,204,78,.10);border:1px solid var(--yel);border-radius:4px;padding:7px 10px;margin-bottom:12px;}
+.storico-giorno-hd .gg-info .gg-lunga{color:var(--yel);font-weight:700;}
 .storico-sess[title]:hover{background:var(--sur2);border-radius:4px;}
 .storico-ass{display:flex;align-items:center;gap:8px;padding:6px 11px;font-family:'DM Mono',monospace;font-size:11px;background:var(--sur2);}
 .storico-ass .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
@@ -518,7 +523,11 @@ input.search:focus{border-color:var(--acc);}
 .live-card-tipo{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--mut);}
 .live-card-tipo-dot{width:18px;height:5px;border-radius:2px;}
 .live-card-durata{font-family:'DM Mono',monospace;font-size:22px;color:var(--grn);font-weight:500;margin-top:4px;}
+.live-card-durata.over{color:var(--yel);}
+.live-card.sess-lunga{border-color:var(--yel);box-shadow:inset 3px 0 0 var(--yel);}
+.live-card-warn{font-family:'DM Mono',monospace;font-size:10px;line-height:1.35;color:var(--yel);background:rgba(255,204,78,.10);border:1px solid var(--yel);border-radius:4px;padding:5px 8px;margin-top:4px;}
 .live-card-vuoto{font-size:11px;color:var(--mut);font-style:italic;}
+.live-warn-banner{font-family:'DM Mono',monospace;font-size:12px;line-height:1.45;color:var(--yel);background:rgba(255,204,78,.10);border:1px solid var(--yel);border-radius:6px;padding:10px 14px;margin-bottom:14px;}
 
 /* Gantt storico */
 .gantt-wrap{background:var(--sur);border:1px solid var(--brd);border-radius:6px;overflow:auto;position:relative;}
@@ -9721,9 +9730,7 @@ async function kioskInit() {
   // l'utente sta cliccando proprio in quel momento.
   setInterval(() => {
     if ($('#kiosk-step-id').style.display === 'none') return;
-    document.querySelectorAll('#kiosk-utili-grid .live-card-durata[data-inizio]').forEach(d => {
-      d.textContent = formatLiveDuration(d.getAttribute('data-inizio'));
-    });
+    document.querySelectorAll('#kiosk-utili-grid .live-card-durata[data-inizio]').forEach(refreshLiveDurationEl);
   }, 1000);
 
   kioskGoToId();
@@ -11526,7 +11533,7 @@ function renderGanttCommesseTab(root) {
 // Usata sia dalla scheda Live (admin) sia dalla schermata di identificazione
 // del kiosk. Il parametro onClick è opzionale: se passato, la card diventa
 // cliccabile e invoca quel callback al click.
-function buildLiveCard(u, onClick) {
+function buildLiveCard(u, onClick, opts = {}) {
   const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
   const oggiISO = toLocalISO(new Date());
   const assOggi = state.assenze.find(a =>
@@ -11574,6 +11581,9 @@ function buildLiveCard(u, onClick) {
     }, `${tipo?.nome || 'Assenza'} · ${ore}h${assOggi.note ? ' — '+assOggi.note : ''}`));
   } else if (sess) {
     const d = descriviSessione(sess);
+    const secNow = Math.floor((Date.now() - new Date(sess.inizio).getTime()) / 1000);
+    const over = secNow >= LIVE_WARN_SESSIONE_SEC;
+    if (over) card.classList.add('sess-lunga');
     card.append(
       el('div', { class:'live-card-cliente' }, d.titolo),
       // Per attività extra non c'è codice articolo: nascondo quella riga
@@ -11582,8 +11592,10 @@ function buildLiveCard(u, onClick) {
         el('div', { class:'live-card-tipo-dot', style:'background:'+d.colore+';' }),
         d.tipoLabel,
       ),
-      el('div', { class:'live-card-durata', 'data-sess-id': sess.id, 'data-inizio': sess.inizio },
+      el('div', { class:'live-card-durata' + (over ? ' over' : ''), 'data-sess-id': sess.id, 'data-inizio': sess.inizio },
         formatLiveDuration(sess.inizio)),
+      el('div', { class:'live-card-warn', style: over ? '' : 'display:none;' },
+        '⚠ Sessione aperta da oltre 6 ore — verificare se è in corso o dimenticata aperta'),
     );
   } else {
     // Mostra ultima sessione chiusa oggi se c'è
@@ -11602,6 +11614,13 @@ function buildLiveCard(u, onClick) {
         el('div', { class:'live-card-vuoto', style:'color:var(--txt);' },
           'Totale oggi: ' + formatSecondsHuman(totSecOggi)),
       );
+      // Avviso: oggi ha chiuso almeno una sessione di oltre 6 ore continuative.
+      // Solo dove richiesto (scheda Live admin), non sul kiosk.
+      if (opts.flagLunghe && ultime.some(sessioneTroppoLunga)) {
+        card.classList.add('sess-lunga');
+        card.append(el('div', { class:'live-card-warn' },
+          '⚠ Oggi una sessione di oltre 6 ore continuative — verificare'));
+      }
     } else {
       card.append(el('div', { class:'live-card-vuoto' }, 'Nessuna sessione oggi'));
     }
@@ -11641,6 +11660,10 @@ function renderGanttLive(root) {
         '⬇ Esporta ore (Excel)')));
   }
 
+  // Banner avviso "sessioni oltre 6h" — in cima, visibile a colpo d'occhio.
+  // Riempito da aggiornaLiveWarnBanner() (al render e dal timer live).
+  root.append(el('div', { id:'live-warn-banner', class:'live-warn-banner', style:'display:none;' }));
+
   root.append(el('div', { class:'kpis' },
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Operatori al lavoro'),
       el('div', { class:'kv kg' }, String(attivi)+' / '+String(totOperatori))),
@@ -11656,7 +11679,7 @@ function renderGanttLive(root) {
 
   const buildCardUtente = (u) => {
     // Click apre il pannello laterale con lo storico consuntivi di quell'utente.
-    grid.append(buildLiveCard(u, () => apriStoricoConsuntivi(u)));
+    grid.append(buildLiveCard(u, () => apriStoricoConsuntivi(u), { flagLunghe: true }));
   };
 
   // Per ogni gruppo con utenti: emetto un separatore a tutta larghezza,
@@ -11675,11 +11698,13 @@ function renderGanttLive(root) {
     root.append(grid);
   }
 
-  // Timer aggiornamento durate live
+  // Calcolo iniziale dell'avviso sessioni lunghe
+  aggiornaLiveWarnBanner();
+
+  // Timer aggiornamento durate live (+ avviso sessione > 6h)
   ganttLiveTimer = setInterval(() => {
-    document.querySelectorAll('.live-card-durata[data-inizio]').forEach(d => {
-      d.textContent = formatLiveDuration(d.getAttribute('data-inizio'));
-    });
+    document.querySelectorAll('.live-card-durata[data-inizio]').forEach(refreshLiveDurationEl);
+    aggiornaLiveWarnBanner();
   }, 1000);
 }
 
@@ -11964,6 +11989,15 @@ function apriStoricoConsuntivi(utente) {
     );
     body.append(kpis);
 
+    // Avviso riepilogativo: quante sessioni oltre 6h continuative nel periodo,
+    // così è visibile senza dover espandere ogni giorno.
+    const nLunghe = lista.reduce((acc, g) => acc + g.sessioni.filter(sessioneTroppoLunga).length, 0);
+    if (nLunghe > 0) {
+      body.append(el('div', { class:'storico-warn-banner' },
+        '⚠ ' + nLunghe + (nLunghe === 1 ? ' sessione' : ' sessioni')
+        + ' di oltre 6 ore continuative nel periodo. Verificare se sono reali o timbrature dimenticate aperte.'));
+    }
+
     if (lista.length === 0) {
       body.append(el('div', { class:'storico-empty' },
         'Nessuna sessione né assenza nel periodo selezionato.'));
@@ -12001,6 +12035,11 @@ function apriStoricoConsuntivi(utente) {
       infoParts.push('assenza');
     }
     if (infoParts.length === 0) infoParts.push('—');
+    // Avviso: il giorno contiene almeno una sessione oltre 6h continuative
+    const giornoHaLunga = g.sessioni.some(sessioneTroppoLunga);
+    if (giornoHaLunga) {
+      infoParts.push(el('span', { class:'gg-lunga', title:'Contiene una sessione di oltre 6 ore continuative' }, ' · ⚠ >6h'));
+    }
 
     const hd = el('div', { class:'storico-giorno-hd' },
       el('div', { class:'gg-data' },
@@ -12064,10 +12103,15 @@ function apriStoricoConsuntivi(utente) {
     // sessione. Dopo il salvataggio/eliminazione riapro questo stesso drawer
     // (le modal non si impilano) così l'admin resta nel contesto dell'operatore.
     const isAdmin = state.profile?.ruolo === 'admin';
+    const lunga = sessioneTroppoLunga(s);
+    const oreContinue = (dur / 3600).toFixed(1).replace('.', ',');
     const row = el('div', {
-      class:'storico-sess' + (aperta ? ' aperta' : ''),
+      class:'storico-sess' + (aperta ? ' aperta' : '') + (lunga ? ' lunga' : ''),
       style: isAdmin ? 'cursor:pointer;' : undefined,
-      title: isAdmin ? 'Clic per modificare i tempi di questa sessione' : undefined,
+      title: lunga
+        ? ('⚠ Sessione continua di ' + oreContinue + ' ore (oltre 6h)'
+           + (isAdmin ? ' — clic per modificare i tempi' : ''))
+        : (isAdmin ? 'Clic per modificare i tempi di questa sessione' : undefined),
       onclick: isAdmin
         ? () => openSessioneModal(s, () => apriStoricoConsuntivi(utente))
         : null,
@@ -12077,7 +12121,9 @@ function apriStoricoConsuntivi(utente) {
         el('div', { class:'commessa' }, d.titolo),
         el('div', { class:'meta' }, metaStr),
       ),
-      el('div', { class:'dur' }, formatSecondsHuman(dur) + (aperta ? ' ●' : '')),
+      el('div', { class:'dur' },
+        lunga ? el('span', { class:'warn-ic' }, '⚠') : null,
+        formatSecondsHuman(dur) + (aperta ? ' ●' : '')),
     );
     return row;
   }
@@ -12127,6 +12173,81 @@ function descriviSessione(s) {
     attivita:   null,
     tipoLav:    tipo || null,
   };
+}
+
+// Soglia per l'avviso "sessione unica troppo lunga" sulle card della scheda Live.
+const LIVE_WARN_SESSIONE_SEC = 6 * 3600;
+
+// Durata continua (orologio) di una sessione: span inizio→fine, o inizio→adesso
+// se ancora aperta. Usata per segnalare le sessioni troppo lunghe nello storico.
+function durataSessioneSec(s) {
+  if (!s || !s.inizio) return 0;
+  const fineMs = s.fine ? new Date(s.fine).getTime() : Date.now();
+  return Math.max(0, Math.floor((fineMs - new Date(s.inizio).getTime()) / 1000));
+}
+// True se la sessione è una singola tirata di oltre 6 ore continuative.
+function sessioneTroppoLunga(s) {
+  return durataSessioneSec(s) >= LIVE_WARN_SESSIONE_SEC;
+}
+
+// Banner riepilogativo in cima alla scheda Live: elenca le sessioni ATTIVE
+// aperte da oltre 6 ore continuative (le stesse che ingialliscono le card),
+// così l'avviso è visibile a colpo d'occhio senza aprire i singoli operatori.
+// Aggiornato sia al render sia dal timer live, per restare coerente con le card.
+function aggiornaLiveWarnBanner() {
+  const banner = document.getElementById('live-warn-banner');
+  if (!banner) return;
+  const oggiIso = toLocalISO(new Date());
+  // Raccolgo le sessioni problematiche:
+  //  - APERTE oltre 6h (anche iniziate ieri = caso "dimenticata aperta")
+  //  - CHIUSE oggi oltre 6h (le più vecchie restano nello storico)
+  const entries = [];
+  (state.sessioni || []).forEach(s => {
+    if (durataSessioneSec(s) < LIVE_WARN_SESSIONE_SEC) return;
+    const aperta = !s.fine;
+    const iniziataOggi = (s.inizio || '').substring(0, 10) === oggiIso;
+    if (!aperta && !iniziataOggi) return;
+    const u = (state.utenti || []).find(x => x.id === s.utente_id);
+    entries.push({
+      nome: u?.nome || '—',
+      aperta,
+      durata: aperta
+        ? formatLiveDuration(s.inizio)
+        : (formatSecondsHuman(durataSessioneSec(s)) || '').trim(),
+    });
+  });
+  if (entries.length === 0) {
+    banner.style.display = 'none';
+    banner.textContent = '';
+    return;
+  }
+  // Aperte prima (azione immediata), poi chiuse.
+  entries.sort((a, b) => (a.aperta === b.aperta) ? 0 : (a.aperta ? -1 : 1));
+  const txt = entries
+    .map(e => e.nome + ' (' + (e.aperta ? 'aperta ' : 'chiusa ') + e.durata + ')')
+    .join(', ');
+  banner.style.display = '';
+  banner.textContent = '⚠ ' + entries.length
+    + (entries.length === 1 ? ' sessione' : ' sessioni')
+    + ' oltre 6 ore continuative oggi: ' + txt
+    + '. Verificare se sono reali o timbrature dimenticate aperte.';
+}
+
+// Aggiorna una cella durata live e, sulla card, l'avviso "sessione > 6h".
+// Usata da entrambi i timer (scheda Live admin + schermata kiosk), così
+// l'avviso compare/sparisce in tempo reale esattamente come la durata.
+function refreshLiveDurationEl(d) {
+  const inizio = d.getAttribute('data-inizio');
+  d.textContent = formatLiveDuration(inizio);
+  const sec = Math.floor((Date.now() - new Date(inizio).getTime()) / 1000);
+  const over = sec >= LIVE_WARN_SESSIONE_SEC;
+  d.classList.toggle('over', over);
+  const card = d.closest('.live-card');
+  if (card) {
+    card.classList.toggle('sess-lunga', over);
+    const warn = card.querySelector('.live-card-warn');
+    if (warn) warn.style.display = over ? '' : 'none';
+  }
 }
 
 function formatLiveDuration(inizioISO) {
