@@ -422,11 +422,15 @@ input.search:focus{border-color:var(--acc);}
   border-left:4px solid var(--brd);border-radius:7px;padding:11px 16px;cursor:pointer;
   color:var(--txt);font-family:inherit;display:flex;flex-direction:column;gap:6px;transition:all .12s;}
 .kiosk-op-row:hover,.kiosk-op-row:active{border-color:var(--acc);background:rgba(212,255,78,.05);}
+.kiosk-op-row.kio-draggable{cursor:grab;}
+.kiosk-op-row.kio-draggable:active{cursor:grabbing;}
+.kiosk-op-row.dragging{opacity:.45;border-color:var(--acc);}
 .kiosk-op-row.stato-prog-ok{border-left-color:var(--grn);}
 .kiosk-op-row.stato-prog-vicino{border-left-color:var(--yel);}
 .kiosk-op-row.stato-prog-sfora{border-left-color:var(--red);}
 .kiosk-op-row.stato-noprev{border-left-color:var(--yel);}
 .kop-row-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;}
+.kop-reopen-btn{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:var(--acc);background:rgba(212,255,78,.08);border:1px solid var(--acc);border-radius:6px;padding:6px 12px;cursor:pointer;flex-shrink:0;}
 .kop-prep-inline{display:flex;align-items:center;font-family:'DM Mono',monospace;font-size:12px;color:var(--txt);}
 .kop-prog-chip{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--grn);flex-shrink:0;}
 .kop-prog-chip.vicino{color:var(--yel);}
@@ -823,10 +827,9 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
   <!-- Schermata 1: identificazione -->
   <div id="kiosk-step-id" class="kiosk-step">
     <div class="kiosk-prompt">
-      <div class="kiosk-prompt-big">Avvicina il tuo badge</div>
-      <div class="kiosk-prompt-sub">oppure tocca il tuo nome qui sotto</div>
+      <div class="kiosk-prompt-big">Tocca il tuo nome</div>
+      <div class="kiosk-prompt-sub">per iniziare</div>
     </div>
-    <input type="text" id="kiosk-rfid-input" class="kiosk-hidden-input" autocomplete="off">
     <div class="kiosk-grid" id="kiosk-utili-grid"></div>
   </div>
 
@@ -3355,13 +3358,12 @@ function renderOperatori(root) {
   ));
 
   root.append(el('div', { class:'sub', style:'margin-bottom:12px;' },
-    'Anagrafica delle persone (operatori, uffici, esterni). Un utente può avere un account login collegato, oppure usare solo il badge al kiosk.'));
+    'Anagrafica delle persone (operatori, uffici, esterni). Un utente può avere un account login collegato, oppure selezionare il proprio nome al kiosk.'));
 
   const tw = el('div', { class:'tw' });
   const tbl = el('table', { class:'rt' });
   tbl.append(el('thead', {}, el('tr', {},
     el('th', {}, 'Nome'),
-    el('th', {}, 'Badge NFC'),
     el('th', {}, 'Tipo'),
     el('th', {}, 'Gruppo'),
     el('th', {}, 'Account login'),
@@ -3431,7 +3433,6 @@ function renderOperatori(root) {
 
     tb.append(el('tr', {},
       el('td', {}, u.nome),
-      el('td', { class:'mono' }, u.numero_badge || '—'),
       el('td', {}, u.esterno
         ? el('span', { class:'badge byel' }, 'esterno')
         : el('span', { class:'badge bblu' }, 'interno')),
@@ -3674,7 +3675,7 @@ function openResetPasswordModal(u, account) {
 
 function openOperatoreModal(u) {
   const isNew = !u;
-  u = u || { nome:'', numero_badge:'', email:'', account_id:null, attivo:true, esterno:false, note:'' };
+  u = u || { nome:'', email:'', account_id:null, attivo:true, esterno:false, note:'' };
   const accountsLiberi = Object.values(state.profiliById)
     .filter(p => !isKioskRecord(p))
     .filter(p => !state.utenti.find(x => x.account_id === p.id && x.id !== u.id));
@@ -3696,11 +3697,6 @@ function openOperatoreModal(u) {
   form.append(
     el('div', { class:'field' }, el('label', {}, 'Nome *'),
       el('input', { type:'text', name:'nome', required:'true', value:u.nome })),
-    el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Numero Badge NFC'),
-        el('input', { type:'text', name:'numero_badge', value:u.numero_badge||'',
-                      placeholder:'es. 0001234567' })),
-    ),
     el('div', { class:'field' }, el('label', {}, 'Account login collegato (opz.)'),
       selAccount,
       el('div', { class:'sub', style:'margin-top:4px;' },
@@ -3730,7 +3726,6 @@ function openOperatoreModal(u) {
       const fd = new FormData(form);
       const payload = {
         nome: (fd.get('nome')||'').trim(),
-        numero_badge: (fd.get('numero_badge')||'').trim() || null,
         account_id: fd.get('account_id') || null,
         note: (fd.get('note')||'').trim() || null,
         attivo: fd.get('attivo') === 'true',
@@ -3742,7 +3737,6 @@ function openOperatoreModal(u) {
         { label: 'salvataggio utenti' }
       );
       if (error) {
-        if (error.message.includes('badge_uniq')) return toast('Numero badge già in uso', 'err');
         if (error.message.includes('account_uniq')) return toast('Account già collegato a un altro utente', 'err');
         return toast(error.message, 'err');
       }
@@ -9849,7 +9843,7 @@ async function openPrenotazioneModal(p) {
 // KIOSK MODE — terminale check-out mezzi per mini-PC sede
 // ═══════════════════════════════════════════════════════════
 const kioskState = {
-  utenteSelezionato: null,    // { id, nome, numero_badge }
+  utenteSelezionato: null,    // { id, nome }
   authorId: null,              // id profilo loggato (autore prenotazioni, FK profili)
   isAdmin: false,              // true se chi ha aperto il kiosk è un admin
   mezzoInUscita: null,         // mezzo in fase di check-out (in attesa rientro previsto)
@@ -9857,8 +9851,6 @@ const kioskState = {
   opOreCons: {},               // operazione_id → ore consuntivate (sessioni chiuse)
   inactivityTimer: null,
   doneTimer: null,
-  rfidBuffer: '',
-  rfidBufferTimer: null,
 };
 
 const KIOSK_INACTIVITY_MS = 30000;     // torna alla schermata 1 dopo 30s di inattività (mouse fermo, niente tasti)
@@ -10030,16 +10022,6 @@ async function kioskInit() {
   setInterval(kioskUpdateClock, 1000);
   kioskUpdateClock();
 
-  // Cattura input RFID globale
-  document.addEventListener('keydown', kioskRfidListener);
-  // Riassicura focus sull'input nascosto
-  setInterval(() => {
-    if ($('#kiosk-screen').style.display !== 'none' &&
-        document.activeElement?.id !== 'kiosk-rfid-input') {
-      $('#kiosk-rfid-input').focus();
-    }
-  }, 1000);
-
   // Pausa pranzo automatica: check iniziale + ricorrente ogni minuto
   chiudiSessioniPausaPranzo();
   setInterval(chiudiSessioniPausaPranzo, PAUSA_CHECK_MS);
@@ -10202,42 +10184,6 @@ function kioskRefreshActive() {
   else if ($('#kiosk-step-attiva').style.display !== 'none') kioskRenderAttiva();
 }
 
-// ─── Listener RFID: cattura sequenze di cifre seguite da Invio ───
-function kioskRfidListener(e) {
-  // Ignora se siamo nella schermata di conferma
-  if ($('#kiosk-step-done').style.display !== 'none') return;
-  // Ignora se l'evento viene da un input attivo (ma il nostro è hidden)
-  const tag = (e.target.tagName || '').toLowerCase();
-  if (tag === 'input' && e.target.id !== 'kiosk-rfid-input') return;
-
-  if (e.key === 'Enter') {
-    if (kioskState.rfidBuffer.length >= 4) {
-      const code = kioskState.rfidBuffer;
-      kioskState.rfidBuffer = '';
-      kioskHandleBadge(code);
-    } else {
-      kioskState.rfidBuffer = '';
-    }
-    e.preventDefault();
-    return;
-  }
-  if (/^\d$/.test(e.key)) {
-    kioskState.rfidBuffer += e.key;
-    clearTimeout(kioskState.rfidBufferTimer);
-    kioskState.rfidBufferTimer = setTimeout(() => { kioskState.rfidBuffer = ''; }, 200);
-  }
-}
-
-function kioskHandleBadge(code) {
-  // Cerca per numero_badge
-  const u = state.utenti.find(x => (x.numero_badge||'').replace(/^0+/,'') === code.replace(/^0+/,''));
-  if (!u) {
-    kioskShowError('Badge non riconosciuto');
-    return;
-  }
-  kioskSelectUtente(u);
-}
-
 function kioskShowError(msg) {
   // Toast di errore in basso, autodismiss
   const ex = $('#kiosk-toast');
@@ -10275,7 +10221,6 @@ function kioskGoToId() {
   kioskHideAllSteps();
   $('#kiosk-step-id').style.display = 'flex';
   kioskRenderId();
-  $('#kiosk-rfid-input').focus();
 }
 
 function kioskRenderId() {
@@ -11244,6 +11189,16 @@ async function kioskFineFase(sess, riga) {
   }
 }
 
+// Ripristino esplicito dalla sezione "Completate da te": annulla la
+// dichiarazione "ho finito la mia fase" senza dover ricominciare a lavorare.
+async function kioskRiapriManuale(opId) {
+  const u = kioskState.utenteSelezionato;
+  if (!u) return;
+  await kioskRiapriFaseSeCompletata(u.id, opId);
+  kioskBeep('ok');
+  kioskRenderOpList();
+}
+
 // Ricominciare a lavorare su una commessa che avevo marcato finita la "riapre":
 // azzero completata_il (best-effort, non blocca l'avvio sessione).
 async function kioskRiapriFaseSeCompletata(uid, opId) {
@@ -11265,6 +11220,44 @@ function kioskGoToOpList() {
   $('#kiosk-step-op-list').style.display = 'flex';
   kioskRenderOpList();
   kioskResetInactivity();
+}
+
+// Rende le schede di una griglia trascinabili (drag mouse) per riordinarle.
+// Un clic breve resta un clic (avvia il lavoro); un trascinamento riordina.
+// Al rilascio salva la priorità (ordine = 1..N) e ridisegna.
+function kioskAttachReorder(grid) {
+  let dragging = null;
+  [...grid.children].forEach(row => {
+    row.setAttribute('draggable', 'true');
+    row.classList.add('kio-draggable');
+    row.addEventListener('dragstart', (e) => {
+      dragging = row;
+      row.classList.add('dragging');
+      try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
+    });
+    row.addEventListener('dragend', async () => {
+      row.classList.remove('dragging');
+      dragging = null;
+      const ids = [...grid.children].map(r => r.dataset.opid).filter(Boolean);
+      try {
+        const n = await persistPriorita(ids.map((id, i) => ({ id, priorita: i + 1 })));
+        if (n > 0) { toast('Priorità aggiornata', 'ok'); kioskRenderOpList(); }
+      } catch (e) { toast('Errore: ' + (e.message || e), 'err'); }
+    });
+  });
+  grid.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (!dragging) return;
+    const others = [...grid.querySelectorAll('.kio-draggable:not(.dragging)')];
+    let after = null, best = -Infinity;
+    others.forEach(r => {
+      const b = r.getBoundingClientRect();
+      const off = e.clientY - b.top - b.height / 2;
+      if (off < 0 && off > best) { best = off; after = r; }
+    });
+    if (after == null) grid.appendChild(dragging);
+    else grid.insertBefore(dragging, after);
+  });
 }
 
 function kioskRenderOpList() {
@@ -11294,45 +11287,8 @@ function kioskRenderOpList() {
   const altre = aperte.filter(o => !mieIds.has(o.id));
 
   // Solo gli admin (sessione loggata come admin) possono riordinare la coda
-  // dell'operatore per trascinamento. Sui terminali di reparto (account kiosk)
-  // questo non compare.
+  // dell'operatore trascinando le schede direttamente nella lista.
   const isAdmin = !!kioskState.isAdmin;
-
-  // ── MODALITÀ RIORDINO (admin) ──────────────────────────────────────
-  if (isAdmin && kCom.riordino) {
-    // Di norma riordina le commesse assegnate all'operatore; se non ne ha,
-    // ripiega su tutte le commesse aperte (così non è mai un vicolo cieco).
-    const daRiordinare = mie.length > 0 ? mie : aperte;
-    const suTutte = mie.length === 0;
-    root.append(el('div', { class:'kiosk-op-section-hd', style:'color:var(--acc);' },
-      '⠿ Riordina priorità — ' + u.nome));
-    root.append(el('div', { class:'prio-hint' },
-      suTutte
-        ? (u.nome + ' non ha commesse assegnate: stai riordinando tutte le commesse aperte. '
-           + 'L\'ordine imposta la priorità globale che pilota le code al kiosk.')
-        : ('Trascina le commesse assegnate a ' + u.nome + ' per dare priorità: '
-           + 'l\'ordine pilota la sua coda al kiosk (e la priorità globale della commessa).')));
-    if (daRiordinare.length === 0) {
-      root.append(el('div', { class:'kiosk-empty', style:'padding:20px;' },
-        'Nessuna commessa aperta da riordinare.'));
-    }
-    const rl = buildPrioList(daRiordinare);
-    root.append(rl.el);
-    const foot = el('div', { style:'display:flex;gap:10px;justify-content:flex-end;margin-top:18px;' });
-    foot.append(el('button', { class:'kiosk-op-toggle-altre',
-      onclick: () => { kCom.riordino = false; kioskRenderOpList(); } }, 'Annulla'));
-    foot.append(el('button', { class:'kiosk-tipo-btn', style:'padding:10px 22px;background:var(--grn);color:#0f0f0e;border-color:var(--grn);',
-      onclick: async () => {
-        try {
-          const n = await persistPriorita(rl.order().map((id, i) => ({ id, priorita:i + 1 })));
-          if (n > 0) toast('Priorità aggiornata', 'ok');
-        } catch (e) { toast('Errore: ' + (e.message || e), 'err'); }
-        kCom.riordino = false;
-        kioskRenderOpList();
-      } }, '✓ Fatto'));
-    root.append(foot);
-    return;
-  }
 
   // Box ricerca
   const searchBox = el('div', { class:'kiosk-op-search-box' });
@@ -11355,14 +11311,6 @@ function kioskRenderOpList() {
     onclick: () => { kCom.vediAltre = !kCom.vediAltre; kioskRenderOpList(); }
   }, kCom.vediAltre ? '✕ Nascondi altre' : '+ Vedi tutte');
   searchBox.append(toggleBtn);
-
-  // Riordino priorità: sempre disponibile per gli admin.
-  if (isAdmin) {
-    searchBox.append(el('button', { class:'kiosk-op-toggle-altre',
-      style:'border-color:var(--acc);color:var(--acc);',
-      onclick: () => { kCom.riordino = true; kioskRenderOpList(); }
-    }, '⠿ Riordina priorità'));
-  }
 
   root.append(searchBox);
 
@@ -11388,8 +11336,18 @@ function kioskRenderOpList() {
   if (mieFiltered.length > 0) {
     const sec = el('div', { class:'kiosk-op-section' });
     sec.append(el('div', { class:'kiosk-op-section-hd' }, '⭐ Le tue operazioni assegnate'));
+    // Admin: trascina le schede per riordinare (drag col mouse). Solo senza
+    // ricerca attiva, così si riordina l'elenco completo e non un sottoinsieme.
+    const dndOn = isAdmin && !q;
+    if (dndOn) sec.append(el('div', { class:'prio-hint', style:'margin:-2px 0 10px;' },
+      '⠿ Trascina le schede per dare priorità (un clic breve avvia il lavoro).'));
     const grid = el('div', { class:'kiosk-op-grid' });
-    mieFiltered.forEach(o => grid.append(kioskOpCard(o)));
+    mieFiltered.forEach(o => {
+      const card = kioskOpCard(o);
+      card.dataset.opid = o.id;
+      grid.append(card);
+    });
+    if (dndOn) kioskAttachReorder(grid);
     sec.append(grid);
     root.append(sec);
   } else if (!q && !kCom.vediAltre) {
@@ -11426,7 +11384,7 @@ function kioskRenderOpList() {
     }, (aperta ? '▾' : '▸') + ' ✓ Completate da te (' + completateFiltered.length + ')'));
     if (aperta) {
       const grid = el('div', { class:'kiosk-op-grid' });
-      completateFiltered.forEach(o => grid.append(kioskOpCard(o)));
+      completateFiltered.forEach(o => grid.append(kioskOpCard(o, { readonly: true, reopen: true })));
       sec.append(grid);
     }
     root.append(sec);
@@ -11513,7 +11471,15 @@ function kioskOpCard(o, opts = {}) {
     'Materiale: ' + (OP_PREP[prepKey]?.label || '—'),
   );
 
-  const footer = el('div', { class:'kop-row-foot' }, prepInline, progEl);
+  // Pulsante "Riapri" per le schede completate (annulla "ho finito la mia fase").
+  const footRight = opts.reopen
+    ? el('div', { style:'display:flex;align-items:center;gap:10px;flex-shrink:0;' },
+        progEl,
+        el('button', { class:'kop-reopen-btn',
+          onclick: (e) => { e.stopPropagation(); kioskRiapriManuale(o.id); } },
+          '↩ Riapri'))
+    : progEl;
+  const footer = el('div', { class:'kop-row-foot' }, prepInline, footRight);
   const rowClass = 'kiosk-op-row' + (stato !== 'intonsa' ? ' stato-' + stato : '');
   const children = [ kioskInfoBlock(o), noteRow, footer, progBar ];
 
