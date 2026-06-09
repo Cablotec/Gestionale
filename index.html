@@ -6466,33 +6466,18 @@ function openFiltroClientiPopup(anchorBtn, opts) {
   }, 0);
 }
 
-// Modale "Ordina priorità": riordino per trascinamento delle commesse aperte.
-// La priorità (numero, 1 = più alta) determina l'ordinamento al kiosk
-// (lista commesse + "Prossime assegnate"). Null = nessuna → in coda per scadenza.
-function openPrioritaModal() {
-  let arr = state.operazioni
-    .filter(o => o.stato !== 'spedita' && o.stato !== 'completata')
-    .slice()
-    .sort(cmpCommessaKiosk);
-
-  const modal = el('div', { class:'modal' });
-  modal.append(el('div', { class:'mhd' },
-    el('h2', {}, 'Ordina priorità commesse'),
-    el('button', { class:'mclose', onclick: closeModal }, '✕'),
-  ));
-  const body = el('div', { class:'mbody' });
-  body.append(el('div', { class:'prio-hint' },
-    'Trascina le righe per dare priorità: quelle in alto compaiono per prime al kiosk '
-    + '(lista commesse e "Prossime assegnate a te"). Le commesse aggiunte in seguito '
-    + 'finiscono in coda finché non riordini.'));
-
+// Lista riordinabile per trascinamento (drag nativo, mouse). Usata sia dal
+// gestionale sia dal kiosk, così il riordino è identico nei due posti.
+// items: array di operazioni. Ritorna { el, order } dove order() ridà gli id
+// nell'ordine corrente.
+function buildPrioList(items) {
+  let arr = items.slice();
   const list = el('div', { class:'prio-list' });
-
-  function rebuildArrFromDom() {
+  function rebuild() {
     const ids = [...list.querySelectorAll('.prio-row')].map(r => r.dataset.id);
     arr = ids.map(id => arr.find(o => o.id === id)).filter(Boolean);
   }
-  function renderList() {
+  function render() {
     list.innerHTML = '';
     arr.forEach((op, i) => {
       const cli = state.aziende.find(c => c.id === op.cliente_id);
@@ -6509,11 +6494,7 @@ function openPrioritaModal() {
       );
       row.dataset.id = op.id;
       row.addEventListener('dragstart', () => row.classList.add('dragging'));
-      row.addEventListener('dragend', () => {
-        row.classList.remove('dragging');
-        rebuildArrFromDom();
-        renderList();
-      });
+      row.addEventListener('dragend', () => { row.classList.remove('dragging'); rebuild(); render(); });
       list.append(row);
     });
   }
@@ -6531,20 +6512,57 @@ function openPrioritaModal() {
     if (after == null) list.appendChild(dragging);
     else list.insertBefore(dragging, after);
   });
+  render();
+  return { el: list, order: () => { rebuild(); return arr.map(o => o.id); } };
+}
 
-  renderList();
-  body.append(list);
+// Persiste solo le priorità cambiate e aggiorna la cache locale. Ritorna il
+// numero di righe cambiate. NON ridisegna (lascia decidere al chiamante).
+async function persistPriorita(coppie) {
+  const cambiate = coppie.filter(c => {
+    const op = state.operazioni.find(o => o.id === c.id);
+    return op && (op.priorita ?? null) !== (c.priorita ?? null);
+  });
+  if (cambiate.length === 0) return 0;
+  await Promise.all(cambiate.map(c =>
+    sb.from('operazioni').update({ priorita: c.priorita }).eq('id', c.id)));
+  cambiate.forEach(c => {
+    const op = state.operazioni.find(o => o.id === c.id);
+    if (op) op.priorita = c.priorita;
+  });
+  return cambiate.length;
+}
+
+// Modale "Ordina priorità" (gestionale): riordino di tutte le commesse aperte.
+function openPrioritaModal() {
+  const items = state.operazioni
+    .filter(o => o.stato !== 'spedita' && o.stato !== 'completata')
+    .slice()
+    .sort(cmpCommessaKiosk);
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Ordina priorità commesse'),
+    el('button', { class:'mclose', onclick: closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+  body.append(el('div', { class:'prio-hint' },
+    'Trascina le righe per dare priorità: quelle in alto compaiono per prime al kiosk '
+    + '(lista commesse e "Prossime assegnate a te"). Le commesse aggiunte in seguito '
+    + 'finiscono in coda finché non riordini.'));
+
+  const rl = buildPrioList(items);
+  body.append(rl.el);
 
   const footer = el('div', { style:'display:flex;gap:10px;justify-content:space-between;margin-top:18px;flex-wrap:wrap;' });
   footer.append(el('button', { class:'btng', onclick: () => {
     if (!confirm('Azzerare la priorità di tutte le commesse?\nTornano all\'ordine per scadenza.')) return;
-    salvaPriorita(arr.map(o => ({ id:o.id, priorita:null })));
+    salvaPriorita(items.map(o => ({ id:o.id, priorita:null })));
   } }, 'Azzera priorità'));
   const dx = el('div', { style:'display:flex;gap:10px;' });
   dx.append(el('button', { class:'btng', onclick: closeModal }, 'Annulla'));
   dx.append(el('button', { class:'btnp', onclick: () => {
-    rebuildArrFromDom();
-    salvaPriorita(arr.map((o, i) => ({ id:o.id, priorita:i + 1 })));
+    salvaPriorita(rl.order().map((id, i) => ({ id, priorita:i + 1 })));
   } }, 'Salva ordine'));
   footer.append(dx);
   body.append(footer);
@@ -6553,21 +6571,11 @@ function openPrioritaModal() {
   openModal(modal);
 }
 
-// Persiste solo le priorità cambiate, aggiorna la cache locale e ridisegna.
+// Salvataggio dal modale gestionale: persiste, chiude e ridisegna la tab.
 async function salvaPriorita(coppie) {
-  const cambiate = coppie.filter(c => {
-    const op = state.operazioni.find(o => o.id === c.id);
-    return op && (op.priorita ?? null) !== (c.priorita ?? null);
-  });
-  if (cambiate.length === 0) { closeModal(); return; }
   try {
-    await Promise.all(cambiate.map(c =>
-      sb.from('operazioni').update({ priorita: c.priorita }).eq('id', c.id)));
-    cambiate.forEach(c => {
-      const op = state.operazioni.find(o => o.id === c.id);
-      if (op) op.priorita = c.priorita;
-    });
-    toast('Priorità aggiornata', 'ok');
+    const n = await persistPriorita(coppie);
+    if (n > 0) toast('Priorità aggiornata', 'ok');
     closeModal();
     if (state.currentTab && typeof renderTab === 'function') renderTab(state.currentTab);
   } catch (e) {
@@ -10755,6 +10763,7 @@ function kioskFormatDurata(ms) {
 const kCom = {
   vediAltre: false,       // toggle "cerca altre operazioni"
   vediCompletate: false,  // toggle sezione "Completate da te"
+  riordino: false,        // modalità riordino priorità (solo admin)
   search: '',             // testo ricerca
   opSelezionata: null,    // operazione su cui si farà start
 };
@@ -10764,6 +10773,7 @@ function kioskGoToCommesse() {
   // Reset stato locale del flusso
   kCom.vediAltre = false;
   kCom.vediCompletate = false;
+  kCom.riordino = false;
   kCom.search = '';
   kCom.opSelezionata = null;
   kioskGoToOpList();
@@ -10931,6 +10941,40 @@ function kioskRenderOpList() {
   const completateDaMe = aperte.filter(o => mieIds.has(o.id) && opCompletataDaUtente(u.id, o.id));
   const altre = aperte.filter(o => !mieIds.has(o.id));
 
+  // Solo gli admin (sessione loggata come admin) possono riordinare la coda
+  // dell'operatore per trascinamento. Sui terminali di reparto (account kiosk)
+  // questo non compare.
+  const isAdmin = state.profile?.ruolo === 'admin';
+
+  // ── MODALITÀ RIORDINO (admin) ──────────────────────────────────────
+  if (isAdmin && kCom.riordino) {
+    root.append(el('div', { class:'kiosk-op-section-hd', style:'color:var(--acc);' },
+      '⠿ Riordina priorità — ' + u.nome));
+    root.append(el('div', { class:'prio-hint' },
+      'Trascina le commesse assegnate a ' + u.nome + ' per dare priorità: '
+      + 'l\'ordine pilota la sua coda al kiosk (e la priorità globale della commessa).'));
+    if (mie.length === 0) {
+      root.append(el('div', { class:'kiosk-empty', style:'padding:20px;' },
+        'Nessuna commessa assegnata da riordinare.'));
+    }
+    const rl = buildPrioList(mie);
+    root.append(rl.el);
+    const foot = el('div', { style:'display:flex;gap:10px;justify-content:flex-end;margin-top:18px;' });
+    foot.append(el('button', { class:'kiosk-op-toggle-altre',
+      onclick: () => { kCom.riordino = false; kioskRenderOpList(); } }, 'Annulla'));
+    foot.append(el('button', { class:'kiosk-tipo-btn', style:'padding:10px 22px;background:var(--grn);color:#0f0f0e;border-color:var(--grn);',
+      onclick: async () => {
+        try {
+          const n = await persistPriorita(rl.order().map((id, i) => ({ id, priorita:i + 1 })));
+          if (n > 0) toast('Priorità aggiornata', 'ok');
+        } catch (e) { toast('Errore: ' + (e.message || e), 'err'); }
+        kCom.riordino = false;
+        kioskRenderOpList();
+      } }, '✓ Fatto'));
+    root.append(foot);
+    return;
+  }
+
   // Box ricerca
   const searchBox = el('div', { class:'kiosk-op-search-box' });
   const inp = el('input', {
@@ -10952,6 +10996,14 @@ function kioskRenderOpList() {
     onclick: () => { kCom.vediAltre = !kCom.vediAltre; kioskRenderOpList(); }
   }, kCom.vediAltre ? '✕ Nascondi altre' : '+ Vedi tutte');
   searchBox.append(toggleBtn);
+
+  // Riordino priorità: solo admin, e solo se ci sono commesse assegnate.
+  if (isAdmin && mie.length > 0) {
+    searchBox.append(el('button', { class:'kiosk-op-toggle-altre',
+      style:'border-color:var(--acc);color:var(--acc);',
+      onclick: () => { kCom.riordino = true; kioskRenderOpList(); }
+    }, '⠿ Riordina priorità'));
+  }
 
   root.append(searchBox);
 
