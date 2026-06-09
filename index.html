@@ -763,11 +763,45 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
 .asscal-legend .lg-item{display:inline-flex;align-items:center;gap:5px;}
 .asscal-legend .lg-swatch{display:inline-block;width:16px;height:10px;border-radius:2px;}
 .kiosk-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;padding:14px 24px;border-radius:6px;font-family:'Syne',sans-serif;font-size:15px;font-weight:600;z-index:10000;box-shadow:0 4px 20px rgba(0,0,0,.4);}
+/* ── KIOSK su TABLET (701–1024px): riduzione moderata ── */
+@media (min-width:701px) and (max-width:1024px){
+  .kiosk-menu-btn{padding:34px 24px;}
+  .kmb-icon{font-size:56px;}
+  .kmb-label{font-size:26px;}
+  .kiosk-done-card{padding:36px 30px;}
+}
+/* ── KIOSK su SMARTPHONE (≤700px): compatto ── */
 @media (max-width:700px){
+  #kiosk-screen{padding:12px 12px;}
+  .kiosk-header{padding-bottom:12px;margin-bottom:16px;}
   .kiosk-title{font-size:22px;}
-  .kiosk-clock{font-size:24px;}
+  .kiosk-clock{font-size:22px;}
+  .kiosk-prompt{margin:12px 0 18px;}
   .kiosk-prompt-big{font-size:22px;}
-  .kiosk-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));}
+  .kiosk-prompt-sub{font-size:12px;}
+  .kiosk-greet-name{font-size:20px;}
+  .kiosk-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+  .kiosk-tile{padding:14px 10px;min-height:72px;}
+  .kiosk-tile-name{font-size:15px;}
+  /* Menu: pulsanti molto più compatti */
+  .kiosk-menu-grid{gap:12px;padding:12px 0;}
+  .kiosk-menu-btn{padding:22px 16px;gap:8px;}
+  .kmb-icon{font-size:44px;}
+  .kmb-label{font-size:22px;}
+  .kmb-sub{font-size:11px;}
+  /* Selezione tipo/fase */
+  .kiosk-tipo-grid{gap:12px;padding:16px 0;}
+  .kiosk-tipo-btn{padding:20px 14px;}
+  .ktipo-name{font-size:18px;}
+  /* Sessione attiva: i due pulsanti vanno in colonna */
+  .kiosk-attiva-actions{grid-template-columns:1fr;}
+  /* Conferma */
+  .kiosk-done-card{padding:28px 20px;}
+  .kiosk-done-icon{font-size:44px;margin-bottom:14px;}
+  .kiosk-done-msg{font-size:22px;}
+  .kiosk-done-detail{font-size:13px;}
+  /* Codice commessa nelle righe un filo più piccolo */
+  .kib-cod{font-size:17px;}
 }
 
 </style>
@@ -8744,7 +8778,11 @@ async function renderPrelievi(root) {
     const op = state.operazioni.find(o => o.id === p.operazione_id);
     const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
     const art = state.articoli.find(a => a.id === p.articolo_id);
-    const dt = p.creato_il ? (fmtIT(p.creato_il.substring(0, 10)) + ' ' + p.creato_il.substring(11, 16)) : '—';
+    let dt = '—';
+    if (p.creato_il) {
+      const d = new Date(p.creato_il);
+      if (!isNaN(d)) dt = fmtIT(toLocalISO(d)) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes());
+    }
     tb.append(el('tr', {},
       el('td', { class:'mono' }, dt),
       el('td', {}, u?.nome || '—'),
@@ -8755,7 +8793,9 @@ async function renderPrelievi(root) {
     ));
   });
   tbl.append(tb);
-  root.append(tbl);
+  const tw = el('div', { class:'tw' });
+  tw.append(tbl);
+  root.append(tw);
 }
 
 function renderStorico(root) {
@@ -10250,13 +10290,9 @@ function kioskRenderId() {
 function kioskSelectUtente(u) {
   kioskState.utenteSelezionato = u;
   kioskBeep('ok');
-  // Se ha una sessione lavoro aperta, va direttamente lì
-  const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
-  if (sess) {
-    kioskGoToAttiva();
-  } else {
-    kioskGoToMenu();
-  }
+  // Va sempre al menu: così può scegliere (riprendere il lavoro, fare un
+  // prelievo, ecc.) anche se ha già una sessione aperta.
+  kioskGoToMenu();
 }
 
 // ─── SCHERMATA MENU (Mezzi / Commesse) ───
@@ -10265,6 +10301,29 @@ function kioskGoToMenu() {
   $('#kiosk-step-menu').style.display = 'flex';
   const u = kioskState.utenteSelezionato;
   if (u) $('#kiosk-menu-name').textContent = 'Ciao ' + u.nome;
+
+  // Se l'operatore ha una sessione di lavoro aperta, mostra in cima al menu un
+  // pulsante "Riprendi lavoro" — senza obbligarlo: può comunque fare un prelievo.
+  const grid = $('#kiosk-step-menu .kiosk-menu-grid');
+  const old = $('#kiosk-menu-resume');
+  if (old) old.remove();
+  if (grid && u) {
+    const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
+    if (sess) {
+      const op = sess.operazione_id ? state.operazioni.find(o => o.id === sess.operazione_id) : null;
+      const art = op ? state.articoli.find(a => a.id === op.articolo_id) : null;
+      const sub = op ? (art?.codice || op.numero_ordine || 'commessa in corso') : 'attività in corso';
+      const btn = el('button', {
+        id:'kiosk-menu-resume', class:'kiosk-menu-btn',
+        style:'border-color:var(--grn);background:rgba(78,255,163,.06);',
+        onclick: kioskGoToAttiva,
+      },
+        el('div', { class:'kmb-icon' }, '▶'),
+        el('div', { class:'kmb-label' }, 'Riprendi lavoro'),
+        el('div', { class:'kmb-sub' }, sub));
+      grid.insertBefore(btn, grid.firstChild);
+    }
+  }
   kioskResetInactivity();
 }
 
@@ -10318,15 +10377,7 @@ function kioskRenderPrelComm() {
   root.append(searchBox);
 
   const q = prelState.search.toLowerCase();
-  const filt = aperte.filter(o => {
-    if (!q) return true;
-    const cli = state.aziende.find(c => c.id === o.cliente_id);
-    const art = state.articoli.find(a => a.id === o.articolo_id);
-    return (o.numero_ordine||'').toLowerCase().includes(q)
-        || (cli?.nome||'').toLowerCase().includes(q)
-        || (art?.codice||'').toLowerCase().includes(q)
-        || (art?.descrizione||'').toLowerCase().includes(q);
-  });
+  const filt = aperte.filter(o => kioskMatchCommessa(o, q));
 
   if (filt.length === 0) {
     root.append(el('div', { class:'kiosk-empty', style:'padding:20px;' }, 'Nessuna commessa trovata.'));
@@ -11018,9 +11069,11 @@ function kioskShowDone({ title, detail, ok }) {
 }
 
 // ─── Inattività ───
+// Disabilitato: il kiosk NON torna più da solo alla schermata iniziale dopo un
+// periodo di fermo (rischiava di interrompere operazioni lunghe come il prelievo
+// con scansione QR). La funzione resta come no-op per non toccare i call-site.
 function kioskResetInactivity() {
   clearTimeout(kioskState.inactivityTimer);
-  kioskState.inactivityTimer = setTimeout(kioskGoToId, KIOSK_INACTIVITY_MS);
 }
 // True se l'utente è in una schermata "attiva" del kiosk dove ha senso
 // che il timer di inattività sia in funzione e venga resettato dagli eventi.
@@ -11317,16 +11370,7 @@ function kioskRenderOpList() {
   const q = kCom.search.toLowerCase();
   const filtra = (lista) => {
     if (!q) return lista;
-    return lista.filter(o => {
-      const cli = state.aziende.find(c => c.id === o.cliente_id);
-      const art = state.articoli.find(a => a.id === o.articolo_id);
-      return (o.numero_ordine||'').toLowerCase().includes(q)
-          || (o.pos||'').toLowerCase().includes(q)
-          || (cli?.nome||'').toLowerCase().includes(q)
-          || (art?.codice||'').toLowerCase().includes(q)
-          || (art?.descrizione||'').toLowerCase().includes(q)
-          || (o.note||'').toLowerCase().includes(q);
-    });
+    return lista.filter(o => kioskMatchCommessa(o, q));
   };
 
   const mieFiltered = filtra(mie);
@@ -11425,6 +11469,25 @@ function kioskInfoBlock(op, opts = {}) {
     art?.descrizione ? el('div', { class:'kib-desc' }, art.descrizione) : null,
     el('div', { class:'kib-meta' }, parts.join('  ·  ')),
   );
+}
+
+// Match ricerca kiosk: confronta la query con TUTTI i campi visibili nella riga
+// commessa — cliente, ordine, OP, rif. cliente, pos, codice, descrizione,
+// quantità, scadenza, materiale (prep) e note.
+function kioskMatchCommessa(o, q) {
+  const ql = (q || '').toLowerCase().trim();
+  if (!ql) return true;
+  const cli = state.aziende.find(c => c.id === o.cliente_id);
+  const art = state.articoli.find(a => a.id === o.articolo_id);
+  const prep = (typeof OP_PREP !== 'undefined' && OP_PREP[o.stato_preparazione || 'vuoto']?.label) || '';
+  const campi = [
+    cli?.nome, o.numero_ordine, o.numero_op, o.riferimento_cliente, o.pos,
+    art?.codice, art?.descrizione, o.note,
+    (o.quantita != null ? o.quantita + ' pz' : ''),
+    (o.scadenza ? fmtIT(o.scadenza) : ''), o.scadenza,
+    prep, prep ? ('materiale ' + prep) : '',
+  ];
+  return campi.some(v => (v || '').toString().toLowerCase().includes(ql));
 }
 
 function kioskOpCard(o, opts = {}) {
