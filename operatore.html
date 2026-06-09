@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#161614">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Operatore — Cablotec</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
+:root{
+  --bg:#161614; --sur:#1f1f1c; --sur2:#262622; --brd:#3a3a34;
+  --txt:#eaeae4; --mut:#8a8a80; --acc:#d4ff4e;
+  --grn:#5ad45a; --red:#ff5a5a; --yel:#ffd45a; --blu:#5aa5ff;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;}
+body{
+  background:var(--bg); color:var(--txt);
+  font-family:'Syne',sans-serif; font-size:15px;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  display:flex; flex-direction:column;
+}
+button{font-family:inherit;}
+
+/* ── Header ── */
+.hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px 12px;border-bottom:2px solid var(--acc);}
+.hdr-title{font-size:18px;font-weight:800;letter-spacing:-.01em;}
+.hdr-title span{color:var(--acc);}
+.hdr-right{display:flex;align-items:center;gap:8px;}
+.hdr-op{font-family:'DM Mono',monospace;font-size:12px;color:var(--bg);background:var(--acc);border:none;border-radius:20px;padding:7px 14px;font-weight:700;cursor:pointer;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.hdr-btn{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;width:38px;height:34px;font-size:16px;cursor:pointer;}
+
+/* ── Step ── */
+.step{flex:1;display:none;flex-direction:column;overflow:hidden;padding:14px 14px 18px;}
+.step.on{display:flex;}
+.step-title{font-size:16px;font-weight:700;margin-bottom:12px;text-align:center;}
+
+/* ── Boot ── */
+.boot{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--mut);text-align:center;padding:24px;}
+.boot .big{font-size:18px;color:var(--txt);font-weight:700;}
+.spin{width:34px;height:34px;border:3px solid var(--brd);border-top-color:var(--acc);border-radius:50%;animation:sp 1s linear infinite;}
+@keyframes sp{to{transform:rotate(360deg)}}
+.boot button{background:var(--acc);color:var(--bg);border:none;border-radius:8px;padding:12px 24px;font-weight:700;font-size:15px;cursor:pointer;}
+
+/* ── Operatori ── */
+.op-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;overflow-y:auto;align-content:start;flex:1;padding-bottom:8px;}
+.op-tile{background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:18px 10px;text-align:center;font-size:15px;font-weight:700;color:var(--txt);cursor:pointer;min-height:64px;display:flex;align-items:center;justify-content:center;}
+.op-tile:active{border-color:var(--acc);background:rgba(212,255,78,.06);}
+.op-tile.last{border-color:var(--acc);}
+
+/* ── Home: liste commesse ── */
+.search{width:100%;background:var(--sur);border:1px solid var(--brd);border-radius:10px;color:var(--txt);font-family:'DM Mono',monospace;font-size:14px;padding:13px 14px;margin-bottom:12px;outline:none;}
+.search:focus{border-color:var(--acc);}
+.scroll{flex:1;overflow-y:auto;padding-bottom:10px;}
+.sec-hd{font-family:'DM Mono',monospace;font-size:10px;color:var(--acc);letter-spacing:.1em;text-transform:uppercase;margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--acc);}
+.sec-hd.dim{color:var(--mut);border-color:var(--brd);}
+.comm-list{display:flex;flex-direction:column;gap:8px;}
+.comm-row{position:relative;background:var(--sur);border:1px solid var(--brd);border-radius:10px;padding:12px 14px;text-align:left;cursor:pointer;color:var(--txt);width:100%;}
+.comm-row:active{border-color:var(--acc);background:rgba(212,255,78,.06);}
+.cr-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+.cr-cod{font-family:'DM Mono',monospace;font-size:16px;font-weight:700;}
+.cr-cli{font-size:12px;color:var(--mut);}
+.cr-sub{font-size:12px;color:var(--mut);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cr-meta{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;}
+.cr-scad.late{color:var(--red);font-weight:700;}
+.cr-reopen{position:absolute;top:10px;right:10px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--acc);background:rgba(212,255,78,.08);border:1px solid var(--acc);border-radius:6px;padding:5px 10px;cursor:pointer;}
+.toggle-btn{width:100%;background:var(--sur2);border:1px dashed var(--brd);color:var(--mut);border-radius:10px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;margin-top:12px;}
+.empty{color:var(--mut);text-align:center;padding:26px 12px;font-size:13px;}
+
+/* ── Scelta fase/tipo ── */
+.fase-info{background:var(--sur);border:1px solid var(--brd);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
+.fase-hint{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);text-align:center;margin-bottom:10px;}
+.fase-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:9px;padding-bottom:8px;}
+.fase-btn{position:relative;display:flex;align-items:center;gap:12px;background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:16px 14px;cursor:pointer;color:var(--txt);text-align:left;width:100%;}
+.fase-btn:active{filter:brightness(1.15);}
+.fase-btn.mia{border-color:var(--acc);}
+.fase-color{width:8px;align-self:stretch;border-radius:4px;flex-shrink:0;}
+.fase-name{font-size:16px;font-weight:700;flex:1;}
+.fase-meta{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
+.fase-mia-tag{position:absolute;top:-9px;right:10px;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:var(--bg);background:var(--acc);border-radius:6px;padding:2px 8px;}
+.back-link{background:none;border:none;color:var(--mut);font-size:14px;font-weight:700;cursor:pointer;padding:10px;margin-top:4px;}
+
+/* ── Sessione attiva ── */
+.att-card{background:var(--sur);border:3px solid var(--grn);border-radius:14px;padding:18px 16px;margin-bottom:14px;}
+.att-tipo{display:flex;align-items:center;gap:10px;margin-top:12px;font-weight:700;}
+.att-stats{display:flex;gap:12px;margin-top:14px;}
+.att-block{flex:1;background:var(--sur2);border-radius:10px;padding:10px;text-align:center;}
+.att-label{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;}
+.att-value{font-family:'DM Mono',monospace;font-size:21px;font-weight:700;margin-top:4px;}
+.att-actions{display:flex;flex-direction:column;gap:10px;}
+.att-btn{padding:17px;font-size:15px;font-weight:800;border:none;border-radius:10px;cursor:pointer;text-transform:uppercase;letter-spacing:.04em;}
+.att-btn.fine{background:var(--grn);color:#0f0f0e;}
+.att-btn.pausa{background:var(--yel);color:#0f0f0e;}
+.att-btn.ghost{background:var(--sur2);color:var(--txt);border:1px solid var(--brd);text-transform:none;}
+.att-warn{background:rgba(255,212,90,.08);border:1px solid var(--yel);color:var(--yel);border-radius:10px;padding:10px 12px;font-size:12px;margin-bottom:12px;}
+
+/* ── Conferma ── */
+.done{flex:1;display:flex;align-items:center;justify-content:center;padding:20px;}
+.done-card{background:var(--sur);border:3px solid var(--grn);border-radius:14px;padding:30px 26px;text-align:center;max-width:340px;width:100%;}
+.done-card.err{border-color:var(--red);}
+.done-icon{font-size:46px;color:var(--grn);margin-bottom:12px;}
+.done-card.err .done-icon{color:var(--red);}
+.done-msg{font-size:20px;font-weight:800;margin-bottom:8px;}
+.done-detail{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);white-space:pre-line;}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-title">⏱ Cablotec <span>Operatore</span></div>
+  <div class="hdr-right">
+    <button class="hdr-op" id="hdr-op" style="display:none" onclick="goOperatore()">—</button>
+    <button class="hdr-btn" title="Aggiorna" onclick="ricarica()">⟳</button>
+  </div>
+</div>
+
+<!-- Boot -->
+<div class="step on" id="step-boot">
+  <div class="boot" id="boot-box"><div class="spin"></div><div>Connessione…</div></div>
+</div>
+
+<!-- 1. Operatore -->
+<div class="step" id="step-op">
+  <div class="step-title">Chi sei?</div>
+  <div class="op-grid" id="op-grid"></div>
+</div>
+
+<!-- 2. Home: le mie commesse -->
+<div class="step" id="step-home">
+  <input type="text" class="search" id="home-search" placeholder="🔍 Cerca commessa…">
+  <div class="scroll" id="home-list"></div>
+</div>
+
+<!-- 3. Scelta fase / tipo -->
+<div class="step" id="step-fase">
+  <div class="fase-info" id="fase-info"></div>
+  <div class="fase-hint" id="fase-hint"></div>
+  <div class="fase-list" id="fase-list"></div>
+  <button class="back-link" onclick="goHome()">‹ Indietro</button>
+</div>
+
+<!-- 4. Sessione attiva -->
+<div class="step" id="step-att">
+  <div class="step-title" id="att-title">Stai lavorando</div>
+  <div class="scroll" id="att-content"></div>
+</div>
+
+<!-- 5. Conferma -->
+<div class="step" id="step-done">
+  <div class="done"><div class="done-card" id="done-card"></div></div>
+</div>
+
+<script>
+// ═══════════════ CONFIG (stesso backend del gestionale) ═══════════════
+const SUPABASE_URL      = "https://cuiakdyatsuhioyubpne.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1aWFrZHlhdHN1aGlveXVicG5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjQ0NDYsImV4cCI6MjA5MzA0MDQ0Nn0.kaC1n1ABHxxcUAOIcxQlUxQva25KBKWOTJbPSo9C-l8";
+const APP_EMAIL    = 'kiosk@cablotec.local';
+const APP_PASSWORD = 'kiosk-cablotec-2026';
+const SEDE_TIMBRO  = 'mobile';   // marca le sessioni avviate dal telefono
+
+// ═══════════════ Manifest PWA ═══════════════
+(function(){
+  const icon = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">' +
+    '<rect width="512" height="512" rx="96" fill="#161614"/>' +
+    '<circle cx="256" cy="276" r="150" fill="none" stroke="#d4ff4e" stroke-width="30"/>' +
+    '<path d="M256 276V176M256 276l70 50" stroke="#d4ff4e" stroke-width="28" stroke-linecap="round"/>' +
+    '<path d="M196 96h120" stroke="#d4ff4e" stroke-width="30" stroke-linecap="round"/>' +
+    '</svg>');
+  const manifest = {
+    name: 'Cablotec Operatore',
+    short_name: 'Operatore',
+    start_url: location.href.split('#')[0],
+    scope: location.href.replace(/[^/]*$/, ''),
+    display: 'standalone',
+    background_color: '#161614',
+    theme_color: '#161614',
+    icons: [{ src: icon, sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+  };
+  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = URL.createObjectURL(blob);
+  document.head.appendChild(link);
+})();
+
+// ═══════════════ Stato ═══════════════
+const $ = s => document.querySelector(s);
+let sb = null;
+const state = {
+  utenti: [], operazioni: [], aziende: [], articoli: [],
+  tipiLav: [], opFasi: [], opAddetti: [], sessioni: [], attivita: [],
+  operatore: null, opSel: null,
+  search: '', vediAltre: false,
+  timer: null,
+};
+
+function show(id) {
+  if (state.timer) { clearInterval(state.timer); state.timer = null; }
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('on'));
+  $('#' + id).classList.add('on');
+}
+
+function elx(tag, attrs = {}, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') n.className = v;
+    else if (k.startsWith('on')) n[k] = v;
+    else n.setAttribute(k, v);
+  }
+  for (const c of children) if (c != null) n.append(c.nodeType ? c : document.createTextNode(c));
+  return n;
+}
+const fmtT = d => String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+const fmtIT = iso => { if (!iso) return '—'; const [y,m,g] = iso.split('-'); return g + '/' + m + '/' + y; };
+
+// ═══════════════ Boot e dati ═══════════════
+async function boot() {
+  const box = $('#boot-box');
+  try {
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const { data: sess } = await sb.auth.getSession();
+    if (!sess?.session) {
+      const { error } = await sb.auth.signInWithPassword({ email: APP_EMAIL, password: APP_PASSWORD });
+      if (error) throw new Error('Login fallito: ' + error.message);
+    }
+    await loadData();
+    const lastId = localStorage.getItem('oper_op');
+    state.operatore = state.utenti.find(u => u.id === lastId) || null;
+    aggiornaHeader();
+    if (state.operatore) goHome(); else goOperatore();
+  } catch (e) {
+    box.innerHTML = '';
+    box.append(elx('div', { class:'big' }, '✕ Errore di avvio'),
+               elx('div', {}, String(e.message || e)),
+               elx('button', { onclick: () => location.reload() }, 'Riprova'));
+  }
+}
+
+async function loadData() {
+  const [ut, op, az, ar, tl, fs, ad, se, ax] = await Promise.all([
+    sb.from('utenti').select('id,nome,attivo,email').order('nome'),
+    sb.from('operazioni').select('*').not('stato', 'in', '("spedita","completata")'),
+    sb.from('aziende').select('id,nome'),
+    sb.from('articoli').select('id,codice,descrizione'),
+    sb.from('tipi_lavorazione').select('id,nome,colore,attivo,ordine'),
+    sb.from('operazioni_fasi').select('*'),
+    sb.from('operazioni_addetti').select('*'),
+    sb.from('sessioni_lavoro').select('*').is('fine', null),
+    sb.from('attivita_extra').select('id,nome,colore'),
+  ]);
+  for (const r of [ut, op, az, ar, tl, fs, ad, se]) if (r.error) throw r.error;
+  state.utenti = (ut.data || []).filter(u => u.attivo !== false &&
+    (u.email || '').toLowerCase() !== APP_EMAIL.toLowerCase());
+  state.operazioni = op.data || [];
+  state.aziende = az.data || [];
+  state.articoli = ar.data || [];
+  state.tipiLav = tl.data || [];
+  state.opFasi = fs.data || [];
+  state.opAddetti = ad.data || [];
+  state.sessioni = se.data || [];
+  state.attivita = ax.data || [];   // best-effort (tabella opzionale)
+}
+
+async function ricarica() {
+  try { await loadData(); } catch (e) { /* mantengo i dati vecchi */ }
+  // Re-render della schermata corrente
+  if ($('#step-home').classList.contains('on')) renderHome();
+  else if ($('#step-att').classList.contains('on')) goAttiva();
+  else if ($('#step-op').classList.contains('on')) goOperatore();
+}
+// Quando l'app torna in primo piano, riallinea i dati (sessioni potrebbero
+// essere cambiate dal kiosk di reparto o dal gestionale).
+let lastVis = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && Date.now() - lastVis > 5000) {
+    lastVis = Date.now(); ricarica();
+  }
+});
+
+function aggiornaHeader() {
+  const b = $('#hdr-op');
+  if (state.operatore) { b.style.display = ''; b.textContent = state.operatore.nome; }
+  else b.style.display = 'none';
+}
+
+// ═══════════════ Helper dominio (allineati al kiosk) ═══════════════
+function cmpCommessa(a, b) {
+  const pa = a.priorita, pb = b.priorita;
+  const aHas = pa != null && pa !== '', bHas = pb != null && pb !== '';
+  if (aHas && bHas && Number(pa) !== Number(pb)) return Number(pa) - Number(pb);
+  if (aHas && !bHas) return -1;
+  if (!aHas && bHas) return 1;
+  if (!a.scadenza && !b.scadenza) return 0;
+  if (!a.scadenza) return 1;
+  if (!b.scadenza) return -1;
+  return a.scadenza < b.scadenza ? -1 : (a.scadenza > b.scadenza ? 1 : 0);
+}
+const rigaAddetto = (uid, opId) =>
+  state.opAddetti.find(r => r.utente_id === uid && r.operazione_id === opId) || null;
+const opCompletataDaMe = (uid, opId) => !!(rigaAddetto(uid, opId)?.completata_il);
+const fasiDi = (o) => state.opFasi
+  .filter(f => f.operazione_id === o.id)
+  .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+function matchCommessa(o, q) {
+  if (!q) return true;
+  const cli = state.aziende.find(c => c.id === o.cliente_id);
+  const art = state.articoli.find(a => a.id === o.articolo_id);
+  return [(o.numero_ordine||''), (o.numero_op||''), (o.rif_cliente||''), (o.posizione||''),
+          (cli?.nome||''), (art?.codice||''), (art?.descrizione||''), (o.note||'')]
+    .some(s => String(s).toLowerCase().includes(q));
+}
+function infoCommessa(o) {
+  const cli = state.aziende.find(c => c.id === o.cliente_id);
+  const art = state.articoli.find(a => a.id === o.articolo_id);
+  const oggi = new Date().toISOString().slice(0, 10);
+  return elx('div', {},
+    elx('div', { class:'cr-top' },
+      elx('span', { class:'cr-cod' }, art?.codice || o.numero_ordine || '—'),
+      elx('span', { class:'cr-cli' }, cli?.nome || ''),
+    ),
+    elx('div', { class:'cr-sub' },
+      'Ord. ' + (o.numero_ordine || '—')
+      + (o.numero_op ? ' · OP ' + o.numero_op : '')
+      + (art?.descrizione ? ' · ' + art.descrizione : '')),
+    elx('div', { class:'cr-meta' },
+      elx('span', {}, 'Qtà ' + (o.quantita ?? '—')),
+      elx('span', { class: 'cr-scad' + (o.scadenza && o.scadenza < oggi ? ' late' : '') },
+        'Scad. ' + fmtIT(o.scadenza)),
+    ),
+  );
+}
+
+// ═══════════════ 1. Operatore ═══════════════
+function goOperatore() {
+  show('step-op');
+  const grid = $('#op-grid');
+  grid.innerHTML = '';
+  const lastId = localStorage.getItem('oper_op');
+  state.utenti.forEach(u => {
+    grid.append(elx('button', {
+      class: 'op-tile' + (u.id === lastId ? ' last' : ''),
+      onclick: () => {
+        state.operatore = u;
+        localStorage.setItem('oper_op', u.id);
+        aggiornaHeader();
+        goHome();
+      },
+    }, u.nome));
+  });
+  if (state.utenti.length === 0) grid.append(elx('div', { class:'empty' }, 'Nessun operatore attivo trovato.'));
+}
+
+// ═══════════════ 2. Home ═══════════════
+function goHome() {
+  const u = state.operatore;
+  if (!u) { goOperatore(); return; }
+  // Se ho una sessione aperta vado dritto lì
+  const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
+  if (sess) { goAttiva(); return; }
+  state.opSel = null;
+  show('step-home');
+  const inp = $('#home-search');
+  inp.value = state.search;
+  inp.oninput = () => { state.search = inp.value; renderHome(); };
+  renderHome();
+}
+
+function renderHome() {
+  const u = state.operatore;
+  const root = $('#home-list');
+  root.innerHTML = '';
+  const q = (state.search || '').toLowerCase();
+
+  const aperte = state.operazioni.slice().sort(cmpCommessa);
+  const mieIds = new Set(state.opAddetti.filter(r => r.utente_id === u.id).map(r => r.operazione_id));
+  const mie = aperte.filter(o => mieIds.has(o.id) && !opCompletataDaMe(u.id, o.id) && matchCommessa(o, q));
+  const completate = aperte.filter(o => mieIds.has(o.id) && opCompletataDaMe(u.id, o.id) && matchCommessa(o, q));
+  const altre = aperte.filter(o => !mieIds.has(o.id) && matchCommessa(o, q));
+
+  // Le mie
+  root.append(elx('div', { class:'sec-hd' }, '⭐ Le tue commesse (' + mie.length + ')'));
+  if (mie.length === 0) root.append(elx('div', { class:'empty' }, q ? 'Nessuna corrispondenza.' : 'Nessuna commessa assegnata a te.'));
+  else {
+    const l = elx('div', { class:'comm-list' });
+    mie.forEach(o => l.append(elx('button', { class:'comm-row', onclick: () => goFase(o) }, infoCommessa(o))));
+    root.append(l);
+  }
+
+  // Completate da me (con Riapri)
+  if (completate.length > 0) {
+    root.append(elx('div', { class:'sec-hd dim' }, '✓ Completate da te (' + completate.length + ')'));
+    const l = elx('div', { class:'comm-list' });
+    completate.forEach(o => {
+      const row = elx('div', { class:'comm-row', style:'cursor:default;opacity:.75;' }, infoCommessa(o));
+      row.append(elx('button', { class:'cr-reopen', onclick: (e) => { e.stopPropagation(); riapriFase(o.id); } }, '↩ Riapri'));
+      l.append(row);
+    });
+    root.append(l);
+  }
+
+  // Altre (toggle, oppure sempre visibili se sto cercando)
+  if (q || state.vediAltre) {
+    root.append(elx('div', { class:'sec-hd dim' }, 'Altre commesse aperte (' + altre.length + ')'));
+    if (altre.length === 0) root.append(elx('div', { class:'empty' }, 'Nessuna.'));
+    else {
+      const l = elx('div', { class:'comm-list' });
+      altre.forEach(o => l.append(elx('button', { class:'comm-row', onclick: () => goFase(o) }, infoCommessa(o))));
+      root.append(l);
+    }
+    if (!q) root.append(elx('button', { class:'toggle-btn', onclick: () => { state.vediAltre = false; renderHome(); } }, 'Nascondi le altre'));
+  } else {
+    root.append(elx('button', { class:'toggle-btn', onclick: () => { state.vediAltre = true; renderHome(); } },
+      'Vedi tutte le commesse aperte (' + altre.length + ')'));
+  }
+}
+
+async function riapriFase(opId) {
+  const u = state.operatore;
+  try {
+    const { error } = await sb.from('operazioni_addetti')
+      .update({ completata_il: null })
+      .eq('operazione_id', opId).eq('utente_id', u.id);
+    if (error) throw error;
+    state.opAddetti = state.opAddetti.map(x =>
+      (x.operazione_id === opId && x.utente_id === u.id) ? { ...x, completata_il: null } : x);
+    renderHome();
+  } catch (e) { alert('Errore: ' + (e.message || e)); }
+}
+
+// ═══════════════ 3. Scelta fase / tipo ═══════════════
+function goFase(o) {
+  state.opSel = o;
+  show('step-fase');
+  const info = $('#fase-info'); info.innerHTML = ''; info.append(infoCommessa(o));
+  const hint = $('#fase-hint');
+  const list = $('#fase-list'); list.innerHTML = '';
+  const u = state.operatore;
+
+  const fasi = fasiDi(o);
+  if (fasi.length > 0) {
+    const miaFaseId = rigaAddetto(u.id, o.id)?.fase_id || null;
+    hint.textContent = 'Scegli la fase su cui timbri' + (miaFaseId ? ' (la tua è evidenziata)' : '') + ':';
+    const ordinate = fasi.slice().sort((a, b) => {
+      const am = a.id === miaFaseId, bm = b.id === miaFaseId;
+      if (am && !bm) return -1;
+      if (bm && !am) return 1;
+      return (a.ordine || 0) - (b.ordine || 0);
+    });
+    ordinate.forEach(f => {
+      const tipo = state.tipiLav.find(t => t.id === f.tipo_lavorazione_id);
+      const col = tipo?.colore || '#6b6b64';
+      const mia = f.id === miaFaseId;
+      list.append(elx('button', { class:'fase-btn' + (mia ? ' mia' : ''), onclick: () => avvia(f.tipo_lavorazione_id, f.id) },
+        elx('div', { class:'fase-color', style:'background:' + col + ';' }),
+        elx('div', { class:'fase-name' }, tipo?.nome || 'Fase'),
+        elx('div', { class:'fase-meta' }, Number(f.minuti_unitari) > 0 ? f.minuti_unitari + ' min/pz' : ''),
+        mia ? elx('div', { class:'fase-mia-tag' }, '★ LA TUA FASE') : null,
+      ));
+    });
+    return;
+  }
+
+  // Fallback: nessuna fase → tipo lavorazione libero
+  hint.textContent = 'Che lavorazione fai su questa commessa?';
+  const tipi = state.tipiLav.filter(t => t.attivo !== false)
+    .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+  if (tipi.length === 0) { list.append(elx('div', { class:'empty' }, 'Nessun tipo di lavorazione configurato.')); return; }
+  tipi.forEach(t => {
+    list.append(elx('button', { class:'fase-btn', onclick: () => avvia(t.id, null) },
+      elx('div', { class:'fase-color', style:'background:' + (t.colore || '#6b6b64') + ';' }),
+      elx('div', { class:'fase-name' }, t.nome),
+    ));
+  });
+}
+
+async function avvia(tipoId, faseId) {
+  const u = state.operatore, o = state.opSel;
+  if (!u || !o || !tipoId) return;
+  const payload = {
+    operazione_id: o.id,
+    utente_id: u.id,
+    tipo_lavorazione_id: tipoId,
+    sede: SEDE_TIMBRO,
+    inizio: new Date().toISOString(),
+  };
+  if (faseId) payload.fase_id = faseId;
+  try {
+    const { data, error } = await sb.from('sessioni_lavoro').insert(payload).select().single();
+    if (error) throw error;
+    state.sessioni.unshift(data);
+    // Se avevo marcato finita la mia fase su questa commessa, riaprirla
+    const r = rigaAddetto(u.id, o.id);
+    if (r?.completata_il) await riapriFaseSilenziosa(u.id, o.id);
+    beep('ok');
+    goAttiva();
+  } catch (e) {
+    beep('err');
+    showDone(false, 'Errore avvio', String(e.message || e), () => goFase(o));
+  }
+}
+async function riapriFaseSilenziosa(uid, opId) {
+  try {
+    await sb.from('operazioni_addetti').update({ completata_il: null })
+      .eq('operazione_id', opId).eq('utente_id', uid);
+    state.opAddetti = state.opAddetti.map(x =>
+      (x.operazione_id === opId && x.utente_id === uid) ? { ...x, completata_il: null } : x);
+  } catch (_) {}
+}
+
+// ═══════════════ 4. Sessione attiva ═══════════════
+function durataStr(inizio) {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(inizio).getTime()) / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return (h > 0 ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+}
+
+function goAttiva() {
+  const u = state.operatore;
+  const sess = state.sessioni.find(s => s.utente_id === u?.id && !s.fine);
+  if (!sess) { goHome(); return; }
+  show('step-att');
+  $('#att-title').textContent = 'Stai lavorando, ' + u.nome;
+  const root = $('#att-content');
+  root.innerHTML = '';
+
+  const isExtra = !!sess.attivita_id;
+  const o = !isExtra ? state.operazioni.find(x => x.id === sess.operazione_id) : null;
+  const att = isExtra ? state.attivita.find(x => x.id === sess.attivita_id) : null;
+  const tipo = state.tipiLav.find(t => t.id === sess.tipo_lavorazione_id);
+  const inizio = new Date(sess.inizio);
+
+  // Avviso sessione molto vecchia
+  const ageH = (Date.now() - inizio.getTime()) / 3600000;
+  if (ageH > 12) {
+    root.append(elx('div', { class:'att-warn' },
+      '⚠ Sessione aperta da più di 12 ore (iniziata il ' + fmtIT(sess.inizio.slice(0, 10)) + ' alle ' + fmtT(inizio) + ').'));
+  }
+
+  const card = elx('div', { class:'att-card' });
+  if (isExtra) {
+    card.append(elx('div', { class:'cr-cod' }, att?.nome || 'Attività extra'));
+  } else if (o) {
+    card.append(infoCommessa(o));
+  }
+  card.append(
+    elx('div', { class:'att-tipo' },
+      elx('div', { class:'fase-color', style:'width:8px;height:22px;background:' + (tipo?.colore || att?.colore || '#6b6b64') + ';' }),
+      tipo?.nome || (isExtra ? 'Attività extra' : '—'),
+    ),
+    elx('div', { class:'att-stats' },
+      elx('div', { class:'att-block' },
+        elx('div', { class:'att-label' }, 'Iniziato alle'),
+        elx('div', { class:'att-value' }, fmtT(inizio))),
+      elx('div', { class:'att-block' },
+        elx('div', { class:'att-label' }, 'Durata'),
+        elx('div', { class:'att-value', id:'att-durata' }, durataStr(sess.inizio))),
+    ),
+  );
+  root.append(card);
+
+  // Azioni: come al kiosk — se ho una fase assegnata non ancora finita,
+  // distinguo "ho finito" da "sospendo"; altrimenti solo termina.
+  const actions = elx('div', { class:'att-actions' });
+  const riga = !isExtra ? rigaAddetto(u.id, sess.operazione_id) : null;
+  if (riga && !riga.completata_il) {
+    actions.append(
+      elx('button', { class:'att-btn fine', onclick: () => fineFase(sess, riga) }, '✅ Ho finito la mia fase'),
+      elx('button', { class:'att-btn pausa', onclick: () => stopSessione(sess) }, '⏸ Sospendo (continuerò dopo)'),
+    );
+  } else {
+    actions.append(
+      elx('button', { class:'att-btn pausa', onclick: () => stopSessione(sess) }, '⏹ Termina lavoro'),
+    );
+  }
+  root.append(actions);
+
+  state.timer = setInterval(() => {
+    const e = $('#att-durata');
+    if (e) e.textContent = durataStr(sess.inizio);
+  }, 1000);
+}
+
+function durataFineStr(sess) {
+  const s = Math.floor((new Date(sess.fine) - new Date(sess.inizio)) / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h > 0 ? h + 'h ' + m + 'm' : m + ' min';
+}
+
+async function stopSessione(sess) {
+  try {
+    const { data, error } = await sb.from('sessioni_lavoro')
+      .update({ fine: new Date().toISOString() }).eq('id', sess.id).select().single();
+    if (error) throw error;
+    state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
+    beep('ok');
+    showDone(true, 'Sessione sospesa', 'Durata: ' + durataFineStr(data), goHome);
+  } catch (e) {
+    beep('err');
+    showDone(false, 'Errore', String(e.message || e), goAttiva);
+  }
+}
+
+async function fineFase(sess, riga) {
+  const ora = new Date().toISOString();
+  try {
+    const { error: e1 } = await sb.from('operazioni_addetti')
+      .update({ completata_il: ora })
+      .eq('operazione_id', riga.operazione_id).eq('utente_id', riga.utente_id);
+    if (e1) throw e1;
+    state.opAddetti = state.opAddetti.map(x =>
+      (x.operazione_id === riga.operazione_id && x.utente_id === riga.utente_id)
+        ? { ...x, completata_il: ora } : x);
+    const { data, error: e2 } = await sb.from('sessioni_lavoro')
+      .update({ fine: ora }).eq('id', sess.id).select().single();
+    if (e2) throw e2;
+    state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
+    beep('ok');
+    showDone(true, 'Fase completata ✓', 'Durata: ' + durataFineStr(data), goHome);
+  } catch (e) {
+    beep('err');
+    showDone(false, 'Errore', String(e.message || e), goAttiva);
+  }
+}
+
+// ═══════════════ 5. Conferma ═══════════════
+let doneTimer = null;
+function showDone(ok, title, detail, dopo) {
+  show('step-done');
+  const card = $('#done-card');
+  card.className = 'done-card' + (ok ? '' : ' err');
+  card.innerHTML = '';
+  card.append(
+    elx('div', { class:'done-icon' }, ok ? '✓' : '✕'),
+    elx('div', { class:'done-msg' }, title),
+    elx('div', { class:'done-detail' }, detail || ''),
+  );
+  clearTimeout(doneTimer);
+  doneTimer = setTimeout(dopo || goHome, ok ? 2200 : 3500);
+}
+
+// ═══════════════ Beep ═══════════════
+let audioCtx = null;
+function beep(kind) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.connect(g); g.connect(audioCtx.destination);
+    o.frequency.value = kind === 'ok' ? 880 : 220;
+    g.gain.setValueAtTime(.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001, audioCtx.currentTime + .18);
+    o.start(); o.stop(audioCtx.currentTime + .2);
+  } catch (_) {}
+}
+if (navigator.vibrate) document.addEventListener('click', () => {}, { passive: true });
+
+boot();
+</script>
+</body>
+</html>
