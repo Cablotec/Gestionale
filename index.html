@@ -9851,6 +9851,7 @@ async function openPrenotazioneModal(p) {
 const kioskState = {
   utenteSelezionato: null,    // { id, nome, numero_badge }
   authorId: null,              // id profilo loggato (autore prenotazioni, FK profili)
+  isAdmin: false,              // true se chi ha aperto il kiosk è un admin
   mezzoInUscita: null,         // mezzo in fase di check-out (in attesa rientro previsto)
   opIniziate: new Set(),       // id operazioni con almeno una sessione chiusa
   opOreCons: {},               // operazione_id → ore consuntivate (sessioni chiuse)
@@ -10008,6 +10009,18 @@ async function kioskInit() {
   } catch (e) {
     kioskState.authorId = null;
   }
+
+  // Verifico se chi ha aperto il kiosk è un admin (per i comandi riservati,
+  // es. il riordino priorità). Sui terminali con account kiosk dedicato il
+  // ruolo non è admin, quindi i comandi restano nascosti.
+  kioskState.isAdmin = false;
+  try {
+    if (kioskState.authorId) {
+      const { data: prof } = await sb.from('profili')
+        .select('ruolo').eq('id', kioskState.authorId).maybeSingle();
+      kioskState.isAdmin = (prof?.ruolo === 'admin');
+    }
+  } catch (e) { kioskState.isAdmin = false; }
 
   // Carica dati iniziali
   await kioskLoadAll();
@@ -11283,20 +11296,27 @@ function kioskRenderOpList() {
   // Solo gli admin (sessione loggata come admin) possono riordinare la coda
   // dell'operatore per trascinamento. Sui terminali di reparto (account kiosk)
   // questo non compare.
-  const isAdmin = state.profile?.ruolo === 'admin';
+  const isAdmin = !!kioskState.isAdmin;
 
   // ── MODALITÀ RIORDINO (admin) ──────────────────────────────────────
   if (isAdmin && kCom.riordino) {
+    // Di norma riordina le commesse assegnate all'operatore; se non ne ha,
+    // ripiega su tutte le commesse aperte (così non è mai un vicolo cieco).
+    const daRiordinare = mie.length > 0 ? mie : aperte;
+    const suTutte = mie.length === 0;
     root.append(el('div', { class:'kiosk-op-section-hd', style:'color:var(--acc);' },
       '⠿ Riordina priorità — ' + u.nome));
     root.append(el('div', { class:'prio-hint' },
-      'Trascina le commesse assegnate a ' + u.nome + ' per dare priorità: '
-      + 'l\'ordine pilota la sua coda al kiosk (e la priorità globale della commessa).'));
-    if (mie.length === 0) {
+      suTutte
+        ? (u.nome + ' non ha commesse assegnate: stai riordinando tutte le commesse aperte. '
+           + 'L\'ordine imposta la priorità globale che pilota le code al kiosk.')
+        : ('Trascina le commesse assegnate a ' + u.nome + ' per dare priorità: '
+           + 'l\'ordine pilota la sua coda al kiosk (e la priorità globale della commessa).')));
+    if (daRiordinare.length === 0) {
       root.append(el('div', { class:'kiosk-empty', style:'padding:20px;' },
-        'Nessuna commessa assegnata da riordinare.'));
+        'Nessuna commessa aperta da riordinare.'));
     }
-    const rl = buildPrioList(mie);
+    const rl = buildPrioList(daRiordinare);
     root.append(rl.el);
     const foot = el('div', { style:'display:flex;gap:10px;justify-content:flex-end;margin-top:18px;' });
     foot.append(el('button', { class:'kiosk-op-toggle-altre',
@@ -11336,8 +11356,8 @@ function kioskRenderOpList() {
   }, kCom.vediAltre ? '✕ Nascondi altre' : '+ Vedi tutte');
   searchBox.append(toggleBtn);
 
-  // Riordino priorità: solo admin, e solo se ci sono commesse assegnate.
-  if (isAdmin && mie.length > 0) {
+  // Riordino priorità: sempre disponibile per gli admin.
+  if (isAdmin) {
     searchBox.append(el('button', { class:'kiosk-op-toggle-altre',
       style:'border-color:var(--acc);color:var(--acc);',
       onclick: () => { kCom.riordino = true; kioskRenderOpList(); }
