@@ -11471,9 +11471,10 @@ function kioskInfoBlock(op, opts = {}) {
   );
 }
 
-// Match ricerca kiosk: confronta la query con TUTTI i campi visibili nella riga
-// commessa — cliente, ordine, OP, rif. cliente, pos, codice, descrizione,
-// quantità, scadenza, materiale (prep) e note.
+// Match ricerca kiosk: confronta la query con i campi identificativi e testuali
+// visibili nella riga commessa — cliente, ordine, OP, rif. cliente, pos, codice,
+// descrizione, note e stato materiale. (Quantità e scadenza esclusi di proposito:
+// numeri come "5" generavano troppe corrispondenze spurie.)
 function kioskMatchCommessa(o, q) {
   const ql = (q || '').toLowerCase().trim();
   if (!ql) return true;
@@ -11483,8 +11484,6 @@ function kioskMatchCommessa(o, q) {
   const campi = [
     cli?.nome, o.numero_ordine, o.numero_op, o.riferimento_cliente, o.pos,
     art?.codice, art?.descrizione, o.note,
-    (o.quantita != null ? o.quantita + ' pz' : ''),
-    (o.scadenza ? fmtIT(o.scadenza) : ''), o.scadenza,
     prep, prep ? ('materiale ' + prep) : '',
   ];
   return campi.some(v => (v || '').toString().toLowerCase().includes(ql));
