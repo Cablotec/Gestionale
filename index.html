@@ -8,6 +8,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
@@ -431,6 +432,27 @@ input.search:focus{border-color:var(--acc);}
 .kop-prog-chip.vicino{color:var(--yel);}
 .kop-prog-chip.sfora{color:var(--red);}
 .kop-rowbar{position:relative;height:6px;background:var(--sur2);border-radius:4px;overflow:hidden;margin-top:2px;}
+/* Prelievo magazzino (scanner QR) */
+.prel-scan-wrap{position:relative;max-width:520px;margin:0 auto 14px;}
+.prel-scan-video{width:100%;border-radius:12px;background:#000;display:block;aspect-ratio:4/3;object-fit:cover;}
+.prel-scan-frame{position:absolute;inset:14%;border:3px solid var(--acc);border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,.22);pointer-events:none;}
+.prel-status{text-align:center;font-family:'DM Mono',monospace;font-size:13px;color:var(--mut);margin-bottom:14px;min-height:18px;padding:0 12px;}
+.prel-status.ok{color:var(--grn);}
+.prel-status.err{color:var(--red);}
+.prel-manual{display:flex;gap:8px;max-width:520px;margin:0 auto 16px;}
+.prel-manual input{flex:1;}
+.prel-list{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:8px;}
+.prel-row{display:flex;align-items:center;gap:12px;background:var(--sur);border:1px solid var(--brd);border-radius:8px;padding:10px 14px;}
+.prel-row-main{flex:1;min-width:0;}
+.prel-row-cod{font-family:'DM Mono',monospace;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.prel-row-desc{font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.prel-qty{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.prel-qty button{width:40px;height:40px;border-radius:8px;border:1px solid var(--brd);background:var(--sur2);color:var(--txt);font-size:22px;line-height:1;cursor:pointer;}
+.prel-qty .val{font-family:'DM Mono',monospace;font-size:18px;font-weight:700;min-width:34px;text-align:center;}
+.prel-row-del{background:none;border:none;color:var(--red);font-size:18px;cursor:pointer;flex-shrink:0;}
+.prel-save-bar{max-width:640px;margin:18px auto 0;display:flex;gap:12px;}
+.prel-save-bar .salva{flex:1;padding:16px;border-radius:10px;font-family:inherit;font-size:18px;font-weight:700;cursor:pointer;border:none;background:var(--grn);color:#0f0f0e;}
+.prel-save-bar .salva:disabled{opacity:.4;cursor:not-allowed;}
 /* Attività extra: griglia più semplice (card più piccole, nessuna meta complicata) */
 .kiosk-attivita-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;
   max-width:1100px;margin:0 auto;}
@@ -839,6 +861,11 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
         <div class="kmb-label">Attività extra</div>
         <div class="kmb-sub">Pulizia, riunioni, formazione…</div>
       </button>
+      <button class="kiosk-menu-btn" onclick="kioskGoToPrelievo()">
+        <div class="kmb-icon">📦</div>
+        <div class="kmb-label">Prelievo magazzino</div>
+        <div class="kmb-sub">Scansiona gli articoli prelevati</div>
+      </button>
     </div>
   </div>
 
@@ -890,6 +917,24 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
   <!-- Schermata 3: conferma -->
   <div id="kiosk-step-done" class="kiosk-step" style="display:none">
     <div class="kiosk-done" id="kiosk-done-msg"></div>
+  </div>
+
+  <!-- Prelievo magazzino: selezione commessa -->
+  <div id="kiosk-step-prel-comm" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name">Prelievo — scegli la commessa</div>
+      <button class="kiosk-cancel" onclick="kioskGoToMenu()">Indietro</button>
+    </div>
+    <div id="kiosk-prel-comm-content"></div>
+  </div>
+
+  <!-- Prelievo magazzino: scanner QR + lista articoli -->
+  <div id="kiosk-step-prel-scan" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name" id="kiosk-prel-scan-name">Prelievo</div>
+      <button class="kiosk-cancel" onclick="kioskGoToPrelievo()">Indietro</button>
+    </div>
+    <div id="kiosk-prel-scan-content"></div>
   </div>
 </div>
 
@@ -2396,6 +2441,7 @@ const TAB_STRUCTURE = {
     tabs: [
       { id: 'pianificazione', label: 'Pianificazione', adminOnly: false },
       { id: 'magazzino',      label: 'Magazzino',      adminOnly: false },
+      { id: 'prelievi',       label: 'Prelievi',       adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
       { id: 'gantt_live',     label: 'Live',           adminOnly: false },
       { id: 'gantt_commesse', label: 'Gantt',          adminOnly: false },
@@ -2501,6 +2547,7 @@ function renderTab(name) {
     else if (name === 'operatori')    renderOperatori(root);
     else if (name === 'pianificazione') renderPianificazione(root);
     else if (name === 'magazzino') renderMagazzino(root);
+    else if (name === 'prelievi') renderPrelievi(root);
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt_live') renderGanttLiveTab(root);
     else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
@@ -8672,6 +8719,51 @@ function calcRitardoGiorni(o) {
   return Math.round((cons - scad) / 86400000);
 }
 
+// Vista admin/consultazione dei prelievi registrati dal kiosk magazzino.
+async function renderPrelievi(root) {
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Prelievi magazzino')));
+  const info = el('div', { class:'sub', style:'margin:4px 0 14px;color:var(--mut);' }, 'Caricamento…');
+  root.append(info);
+
+  let dati = [];
+  try {
+    const { data, error } = await sb.from('prelievi_magazzino')
+      .select('*').order('creato_il', { ascending: false }).limit(500);
+    if (error) throw error;
+    dati = data || [];
+  } catch (e) {
+    info.textContent = 'Errore nel caricamento dei prelievi: ' + (e.message || e)
+      + ' (verifica che la tabella prelievi_magazzino esista).';
+    return;
+  }
+  if (dati.length === 0) { info.textContent = 'Nessun prelievo registrato.'; return; }
+  info.textContent = dati.length + ' prelievi più recenti.';
+
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Data/ora'), el('th', {}, 'Operatore'), el('th', {}, 'Commessa'),
+    el('th', {}, 'Cliente'), el('th', {}, 'Articolo'), el('th', { class:'tr' }, 'Qtà'))));
+  const tb = el('tbody');
+  dati.forEach(p => {
+    const u = (state.utentiById && state.utentiById[p.utente_id]) || state.utenti.find(x => x.id === p.utente_id);
+    const op = state.operazioni.find(o => o.id === p.operazione_id);
+    const cli = op ? state.aziende.find(c => c.id === op.cliente_id) : null;
+    const art = state.articoli.find(a => a.id === p.articolo_id);
+    const dt = p.creato_il ? (fmtIT(p.creato_il.substring(0, 10)) + ' ' + p.creato_il.substring(11, 16)) : '—';
+    tb.append(el('tr', {},
+      el('td', { class:'mono' }, dt),
+      el('td', {}, u?.nome || '—'),
+      el('td', { class:'mono' }, op?.numero_ordine || '—'),
+      el('td', {}, cli?.nome || '—'),
+      el('td', {}, (art?.codice || p.codice_scansionato || '—') + (art?.descrizione ? ' · ' + art.descrizione : '')),
+      el('td', { class:'tr mono' }, String(p.quantita ?? '')),
+    ));
+  });
+  tbl.append(tb);
+  root.append(tbl);
+}
+
 function renderStorico(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.stoSearch || '').toLowerCase();
@@ -10222,10 +10314,257 @@ function kioskGoToMezzi() {
   kioskGoToAction();
 }
 
+// ════════════════ PRELIEVO MAGAZZINO (kiosk) ════════════════
+const prelState = {
+  operazione: null,   // commessa per cui si preleva
+  righe: [],          // [{ articolo, codice, quantita }]
+  search: '',
+  stream: null,       // MediaStream fotocamera
+  rafId: null,        // loop di scansione
+  detector: null,     // BarcodeDetector se disponibile
+  lastCode: null,     // anti-doppione fotocamera
+  lastTime: 0,
+};
+
+// Entry: selezione commessa per cui si preleva
+function kioskGoToPrelievo() {
+  prelStopCamera();
+  prelState.operazione = null;
+  prelState.righe = [];
+  prelState.search = '';
+  kioskHideAllSteps();
+  $('#kiosk-step-prel-comm').style.display = 'flex';
+  kioskRenderPrelComm();
+  kioskResetInactivity();
+}
+
+function kioskRenderPrelComm() {
+  const root = $('#kiosk-prel-comm-content');
+  if (!root) return;
+  root.innerHTML = '';
+  const aperte = state.operazioni
+    .filter(o => o.stato !== 'spedita' && o.stato !== 'completata')
+    .slice().sort(cmpCommessaKiosk);
+
+  const searchBox = el('div', { class:'kiosk-op-search-box' });
+  const inp = el('input', {
+    type:'text', placeholder:'🔍 Cerca commessa (codice, ordine, cliente)…',
+    value: prelState.search,
+    oninput: (e) => {
+      prelState.search = e.target.value;
+      kioskRenderPrelComm();
+      setTimeout(() => { const n = root.querySelector('.kiosk-op-search-box input'); if (n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 0);
+    },
+  });
+  searchBox.append(inp);
+  root.append(searchBox);
+
+  const q = prelState.search.toLowerCase();
+  const filt = aperte.filter(o => {
+    if (!q) return true;
+    const cli = state.aziende.find(c => c.id === o.cliente_id);
+    const art = state.articoli.find(a => a.id === o.articolo_id);
+    return (o.numero_ordine||'').toLowerCase().includes(q)
+        || (cli?.nome||'').toLowerCase().includes(q)
+        || (art?.codice||'').toLowerCase().includes(q)
+        || (art?.descrizione||'').toLowerCase().includes(q);
+  });
+
+  if (filt.length === 0) {
+    root.append(el('div', { class:'kiosk-empty', style:'padding:20px;' }, 'Nessuna commessa trovata.'));
+    return;
+  }
+  const grid = el('div', { class:'kiosk-op-grid' });
+  filt.forEach(o => grid.append(el('button', {
+    class:'kiosk-op-row', onclick: () => kioskPrelievoStart(o),
+  }, kioskInfoBlock(o))));
+  root.append(grid);
+}
+
+function kioskPrelievoStart(o) {
+  prelState.operazione = o;
+  prelState.righe = [];
+  kioskHideAllSteps();
+  $('#kiosk-step-prel-scan').style.display = 'flex';
+  const u = kioskState.utenteSelezionato;
+  $('#kiosk-prel-scan-name').textContent = 'Prelievo' + (u ? ' — ' + u.nome : '');
+  kioskRenderPrelScan();
+  prelStartCamera();
+  kioskResetInactivity();
+}
+
+function kioskRenderPrelScan() {
+  const root = $('#kiosk-prel-scan-content');
+  if (!root) return;
+  root.innerHTML = '';
+  const o = prelState.operazione;
+  const art = o ? state.articoli.find(a => a.id === o.articolo_id) : null;
+  const cli = o ? state.aziende.find(c => c.id === o.cliente_id) : null;
+
+  root.append(el('div', { style:'text-align:center;color:var(--mut);font-size:13px;margin-bottom:12px;' },
+    'Commessa: ' + (o?.numero_ordine || '—') + (cli ? ' · ' + cli.nome : '') + (art ? ' · ' + art.codice : '')));
+
+  const wrap = el('div', { class:'prel-scan-wrap' });
+  const video = el('video', { id:'prel-video', class:'prel-scan-video', playsinline:'true' });
+  wrap.append(video, el('div', { class:'prel-scan-frame' }));
+  root.append(wrap);
+  root.append(el('div', { id:'prel-status', class:'prel-status' }, 'Inquadra il QR dell\'articolo…'));
+
+  // Aggiunta manuale (fallback se il QR non legge)
+  const manualInp = el('input', { type:'text', placeholder:'…oppure digita il codice articolo' });
+  const manualBtn = el('button', { class:'btng', onclick: () => {
+    const code = manualInp.value.trim();
+    if (code) { prelOnDetect(code, true); manualInp.value=''; manualInp.focus(); }
+  } }, 'Aggiungi');
+  manualInp.addEventListener('keydown', (e) => { if (e.key==='Enter'){ e.preventDefault(); manualBtn.onclick(); } });
+  root.append(el('div', { class:'prel-manual' }, manualInp, manualBtn));
+
+  root.append(el('div', { class:'prel-list', id:'prel-list' }));
+  prelRenderList();
+
+  const bar = el('div', { class:'prel-save-bar' });
+  const salvaBtn = el('button', { class:'salva', id:'prel-salva', onclick: prelSalva }, '✓ Salva prelievo');
+  salvaBtn.disabled = prelState.righe.length === 0;
+  bar.append(salvaBtn);
+  root.append(bar);
+}
+
+function prelRenderList() {
+  const list = $('#prel-list');
+  if (!list) return;
+  list.innerHTML = '';
+  if (prelState.righe.length === 0) {
+    list.append(el('div', { class:'kiosk-empty', style:'padding:14px;' }, 'Nessun articolo ancora. Scansiona un QR o aggiungi a mano.'));
+  }
+  prelState.righe.forEach((r, i) => {
+    list.append(el('div', { class:'prel-row' },
+      el('div', { class:'prel-row-main' },
+        el('div', { class:'prel-row-cod' }, r.articolo?.codice || r.codice || '—'),
+        el('div', { class:'prel-row-desc' }, r.articolo?.descrizione || (r.articolo ? '' : '(codice non in anagrafica)')),
+      ),
+      el('div', { class:'prel-qty' },
+        el('button', { onclick: () => prelSetQta(i, r.quantita - 1) }, '−'),
+        el('span', { class:'val' }, String(r.quantita)),
+        el('button', { onclick: () => prelSetQta(i, r.quantita + 1) }, '+'),
+      ),
+      el('button', { class:'prel-row-del', onclick: () => { prelState.righe.splice(i,1); prelRenderList(); } }, '✕'),
+    ));
+  });
+  const b = $('#prel-salva'); if (b) b.disabled = prelState.righe.length === 0;
+}
+
+function prelSetQta(i, q) {
+  if (q <= 0) prelState.righe.splice(i, 1);
+  else prelState.righe[i].quantita = q;
+  prelRenderList();
+}
+
+// Risolve un codice (scansionato o digitato) e aggiunge/incrementa la riga.
+function prelOnDetect(code, manuale) {
+  const now = Date.now();
+  const norm = (code || '').trim();
+  if (!norm) return;
+  if (!manuale && norm === prelState.lastCode && (now - prelState.lastTime) < 1500) return;
+  prelState.lastCode = norm; prelState.lastTime = now;
+
+  const art = state.articoli.find(a => (a.codice || '').trim().toLowerCase() === norm.toLowerCase());
+  const esistente = prelState.righe.find(r =>
+    (art && r.articolo && r.articolo.id === art.id) || (!art && r.codice === norm && !r.articolo));
+  if (esistente) esistente.quantita += 1;
+  else prelState.righe.push({ articolo: art || null, codice: norm, quantita: 1 });
+  prelRenderList();
+
+  const st = $('#prel-status');
+  if (st) {
+    if (art) { st.className = 'prel-status ok'; st.textContent = '✓ ' + art.codice + (art.descrizione ? ' — ' + art.descrizione : ''); }
+    else { st.className = 'prel-status err'; st.textContent = '⚠ "' + norm + '" non in anagrafica (aggiunto comunque)'; }
+  }
+  kioskBeep(art ? 'ok' : 'err');
+}
+
+async function prelStartCamera() {
+  const video = $('#prel-video');
+  if (!video) return;
+  const st = $('#prel-status');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if (st) { st.className='prel-status err'; st.textContent='Fotocamera non disponibile su questo dispositivo/browser. Usa l\'aggiunta manuale.'; }
+    return;
+  }
+  try {
+    video.muted = true;
+    video.setAttribute('playsinline', '');
+    prelState.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = prelState.stream;
+    await video.play();
+  } catch (e) {
+    if (st) { st.className='prel-status err'; st.textContent='Fotocamera non accessibile (' + (e.name||e.message||e) + '). Serve HTTPS + permesso. Puoi aggiungere a mano.'; }
+    return;
+  }
+  if ('BarcodeDetector' in window) {
+    try { prelState.detector = new window.BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { prelState.detector = null; }
+  }
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const loop = async () => {
+    if (!prelState.stream) return;
+    if (video.readyState >= 2 && video.videoWidth) {
+      try {
+        if (prelState.detector) {
+          const codes = await prelState.detector.detect(video);
+          if (codes && codes.length) prelOnDetect(codes[0].rawValue, false);
+        } else if (typeof jsQR === 'function') {
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const res = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+          if (res && res.data) prelOnDetect(res.data, false);
+        }
+      } catch (e) { /* salta frame */ }
+    }
+    prelState.rafId = requestAnimationFrame(loop);
+  };
+  prelState.rafId = requestAnimationFrame(loop);
+}
+
+function prelStopCamera() {
+  if (typeof prelState === 'undefined' || !prelState) return;
+  if (prelState.rafId) { cancelAnimationFrame(prelState.rafId); prelState.rafId = null; }
+  if (prelState.stream) { prelState.stream.getTracks().forEach(t => t.stop()); prelState.stream = null; }
+  prelState.detector = null;
+  const v = $('#prel-video'); if (v) v.srcObject = null;
+}
+
+async function prelSalva() {
+  const o = prelState.operazione;
+  const u = kioskState.utenteSelezionato;
+  if (!o || prelState.righe.length === 0) return;
+  const rows = prelState.righe.map(r => ({
+    operazione_id: o.id,
+    articolo_id: r.articolo?.id || null,
+    codice_scansionato: r.codice || r.articolo?.codice || null,
+    utente_id: u?.id || null,
+    quantita: r.quantita,
+  }));
+  try {
+    const { error } = await sb.from('prelievi_magazzino').insert(rows);
+    if (error) { kioskBeep('err'); kioskShowError('Errore salvataggio: ' + error.message); return; }
+    prelStopCamera();
+    kioskBeep('ok');
+    const n = rows.length, tot = prelState.righe.reduce((s, r) => s + r.quantita, 0);
+    prelState.righe = [];
+    kioskShowDone({ title: 'Prelievo registrato ✓', detail: n + ' articol' + (n===1?'o':'i') + ' · ' + tot + ' pz totali', ok: true });
+  } catch (e) {
+    kioskBeep('err'); kioskShowError('Errore di rete: ' + (e.message || e));
+  }
+}
+
 function kioskHideAllSteps() {
+  // Spegne sempre la fotocamera del prelievo quando si cambia schermata.
+  if (typeof prelStopCamera === 'function') prelStopCamera();
   ['kiosk-step-id','kiosk-step-action','kiosk-step-menu',
    'kiosk-step-op-list','kiosk-step-tipo','kiosk-step-attiva',
-   'kiosk-step-attivita-list','kiosk-step-mezzo-rientro','kiosk-step-done'].forEach(id => {
+   'kiosk-step-attivita-list','kiosk-step-mezzo-rientro','kiosk-step-done',
+   'kiosk-step-prel-comm','kiosk-step-prel-scan'].forEach(id => {
     const e = $('#'+id); if (e) e.style.display = 'none';
   });
 }
