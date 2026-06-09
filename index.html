@@ -348,10 +348,6 @@ input.search:focus{border-color:var(--acc);}
 .kiosk-exit{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);text-decoration:none;letter-spacing:.1em;text-transform:uppercase;padding:4px 10px;border:1px solid var(--brd);border-radius:3px;transition:all .15s;}
 .kiosk-exit:hover{color:var(--txt);border-color:var(--mut);}
 .kiosk-step{flex:1;display:flex;flex-direction:column;overflow:hidden;}
-.kiosk-prompt{text-align:center;margin:20px 0 28px;}
-.kiosk-prompt-big{font-size:30px;font-weight:700;letter-spacing:-.01em;}
-.kiosk-prompt-sub{font-family:'DM Mono',monospace;font-size:13px;color:var(--mut);margin-top:8px;letter-spacing:.08em;}
-.kiosk-hidden-input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;}
 .kiosk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;overflow-y:auto;padding:4px;flex:1;align-content:start;}
 .kiosk-tile{background:var(--sur);border:2px solid var(--brd);border-radius:8px;padding:18px 14px;cursor:pointer;text-align:center;transition:all .15s;user-select:none;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:90px;}
 .kiosk-tile:hover,.kiosk-tile:active{border-color:var(--acc);background:rgba(212,255,78,.05);transform:scale(.98);}
@@ -547,6 +543,7 @@ input.search:focus{border-color:var(--acc);}
 .kiosk-attiva-btn{padding:24px;font-family:'Syne',sans-serif;font-size:17px;font-weight:700;border:none;border-radius:8px;cursor:pointer;text-transform:uppercase;letter-spacing:.05em;transition:all .15s;}
 .kiosk-attiva-btn.pause{background:var(--yel);color:#0f0f0e;}
 .kiosk-attiva-btn.switch{background:var(--blu);color:#fff;}
+.kiosk-attiva-btn.prel{background:var(--sur2);color:var(--txt);border:1px solid var(--brd);}
 .kiosk-attiva-btn:hover,.kiosk-attiva-btn:active{filter:brightness(1.1);transform:scale(.99);}
 
 /* Warning sessione dimenticata */
@@ -763,11 +760,44 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
 .asscal-legend .lg-item{display:inline-flex;align-items:center;gap:5px;}
 .asscal-legend .lg-swatch{display:inline-block;width:16px;height:10px;border-radius:2px;}
 .kiosk-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;padding:14px 24px;border-radius:6px;font-family:'Syne',sans-serif;font-size:15px;font-weight:600;z-index:10000;box-shadow:0 4px 20px rgba(0,0,0,.4);}
+/* ── KIOSK su TABLET (701–1024px): riduzione moderata ── */
+@media (min-width:701px) and (max-width:1024px){
+  .kiosk-menu-btn{padding:34px 24px;}
+  .kmb-icon{font-size:56px;}
+  .kmb-label{font-size:26px;}
+  .kiosk-done-card{padding:36px 30px;}
+}
+/* ── KIOSK su SMARTPHONE (≤700px): compatto ── */
 @media (max-width:700px){
+  #kiosk-screen{padding:12px 12px;}
+  .kiosk-header{padding-bottom:12px;margin-bottom:16px;}
   .kiosk-title{font-size:22px;}
-  .kiosk-clock{font-size:24px;}
-  .kiosk-prompt-big{font-size:22px;}
-  .kiosk-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));}
+  .kiosk-clock{font-size:22px;}
+  .kiosk-greet-name{font-size:20px;}
+  .kiosk-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+  .kiosk-tile{padding:14px 10px;min-height:72px;}
+  .kiosk-tile-name{font-size:15px;}
+  /* Menu: pulsanti molto più compatti */
+  .kiosk-menu-grid{gap:12px;padding:12px 0;}
+  .kiosk-menu-btn{padding:22px 16px;gap:8px;}
+  .kmb-icon{font-size:44px;}
+  .kmb-label{font-size:22px;}
+  .kmb-sub{font-size:11px;}
+  /* Selezione tipo/fase */
+  .kiosk-tipo-grid{gap:12px;padding:16px 0;}
+  .kiosk-tipo-btn{padding:20px 14px;}
+  .ktipo-name{font-size:18px;}
+  /* Sessione attiva: pulsanti in colonna, card e statistiche compatte */
+  .kiosk-attiva-actions{grid-template-columns:1fr;}
+  .kiosk-attiva-btn{padding:18px;font-size:15px;}
+  .kiosk-attiva-card{padding:18px 14px;}
+  /* Conferma */
+  .kiosk-done-card{padding:28px 20px;}
+  .kiosk-done-icon{font-size:44px;margin-bottom:14px;}
+  .kiosk-done-msg{font-size:22px;}
+  .kiosk-done-detail{font-size:13px;}
+  /* Codice commessa nelle righe un filo più piccolo */
+  .kib-cod{font-size:17px;}
 }
 
 </style>
@@ -826,10 +856,6 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
 
   <!-- Schermata 1: identificazione -->
   <div id="kiosk-step-id" class="kiosk-step">
-    <div class="kiosk-prompt">
-      <div class="kiosk-prompt-big">Tocca il tuo nome</div>
-      <div class="kiosk-prompt-sub">per iniziare</div>
-    </div>
     <div class="kiosk-grid" id="kiosk-utili-grid"></div>
   </div>
 
@@ -935,7 +961,7 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
   <div id="kiosk-step-prel-scan" class="kiosk-step" style="display:none">
     <div class="kiosk-greet">
       <div class="kiosk-greet-name" id="kiosk-prel-scan-name">Prelievo</div>
-      <button class="kiosk-cancel" onclick="kioskGoToPrelievo()">Indietro</button>
+      <button class="kiosk-cancel" onclick="kioskPrelIndietro()">Indietro</button>
     </div>
     <div id="kiosk-prel-scan-content"></div>
   </div>
@@ -10286,6 +10312,7 @@ const prelState = {
   detector: null,     // BarcodeDetector se disponibile
   lastCode: null,     // anti-doppione fotocamera
   lastTime: 0,
+  ritorno: null,      // 'attiva' = lanciato dalla sessione attiva (torna lì)
 };
 
 // Entry: selezione commessa per cui si preleva
@@ -10294,6 +10321,7 @@ function kioskGoToPrelievo() {
   prelState.operazione = null;
   prelState.righe = [];
   prelState.search = '';
+  prelState.ritorno = null;
   kioskHideAllSteps();
   $('#kiosk-step-prel-comm').style.display = 'flex';
   kioskRenderPrelComm();
@@ -10343,9 +10371,10 @@ function kioskRenderPrelComm() {
   root.append(grid);
 }
 
-function kioskPrelievoStart(o) {
+function kioskPrelievoStart(o, ritorno) {
   prelState.operazione = o;
   prelState.righe = [];
+  prelState.ritorno = ritorno || null;
   kioskHideAllSteps();
   $('#kiosk-step-prel-scan').style.display = 'flex';
   const u = kioskState.utenteSelezionato;
@@ -10353,6 +10382,12 @@ function kioskPrelievoStart(o) {
   kioskRenderPrelScan();
   prelStartCamera();
   kioskResetInactivity();
+}
+
+// "Indietro" dallo scanner: torna da dove si era partiti.
+function kioskPrelIndietro() {
+  if (prelState.ritorno === 'attiva') { prelState.ritorno = null; kioskGoToAttiva(); }
+  else kioskGoToPrelievo();
 }
 
 function kioskRenderPrelScan() {
@@ -10514,7 +10549,15 @@ async function prelSalva() {
     kioskBeep('ok');
     const n = rows.length, tot = prelState.righe.reduce((s, r) => s + r.quantita, 0);
     prelState.righe = [];
-    kioskShowDone({ title: 'Prelievo registrato ✓', detail: n + ' articol' + (n===1?'o':'i') + ' · ' + tot + ' pz totali', ok: true });
+    const tornaAttiva = prelState.ritorno === 'attiva';
+    prelState.ritorno = null;
+    kioskShowDone({
+      title: 'Prelievo registrato ✓',
+      detail: n + ' articol' + (n===1?'o':'i') + ' · ' + tot + ' pz totali'
+        + (tornaAttiva ? '\nTorni alla tua sessione (mai interrotta).' : ''),
+      ok: true,
+      dopo: tornaAttiva ? kioskGoToAttiva : null,
+    });
   } catch (e) {
     kioskBeep('err'); kioskShowError('Errore di rete: ' + (e.message || e));
   }
@@ -11005,7 +11048,7 @@ async function kioskConfirmRientro(pren) {
 }
 
 // ─── SCHERMATA 3: conferma ───
-function kioskShowDone({ title, detail, ok }) {
+function kioskShowDone({ title, detail, ok, dopo }) {
   clearTimeout(kioskState.inactivityTimer);
   $('#kiosk-step-id').style.display = 'none';
   $('#kiosk-step-action').style.display = 'none';
@@ -11018,7 +11061,7 @@ function kioskShowDone({ title, detail, ok }) {
     el('div', { class:'kiosk-done-detail', style:'white-space:pre-line' }, detail || ''),
   ));
   clearTimeout(kioskState.doneTimer);
-  kioskState.doneTimer = setTimeout(kioskGoToId, KIOSK_DONE_MS);
+  kioskState.doneTimer = setTimeout(dopo || kioskGoToId, KIOSK_DONE_MS);
 }
 
 // ─── Inattività ───
@@ -11826,8 +11869,15 @@ function kioskRenderAttiva() {
   }
   root.append(card);
 
-  // Bottone azione (uno solo: termina la sessione)
+  // Azioni: termina sessione + (solo su commessa) prelievo materiale senza
+  // interrompere il lavoro: la sessione resta aperta, si scansiona e si torna.
   const actions = el('div', { class:'kiosk-attiva-actions' });
+  if (!isAttivitaExtra && o) {
+    actions.append(
+      el('button', { class:'kiosk-attiva-btn prel', onclick: () => kioskPrelievoStart(o, 'attiva') },
+        '📦 Prelievo materiale'),
+    );
+  }
   actions.append(
     el('button', { class:'kiosk-attiva-btn pause', onclick: () => kioskTerminaLavoro(sess) },
       '⏹ Termina lavoro'),
