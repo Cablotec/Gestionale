@@ -240,6 +240,16 @@ input.search:focus{border-color:var(--acc);}
 .prep-dot.vuoto{background:var(--mut);}
 .prep-dot.parziale{background:var(--yel);}
 .prep-dot.completo{background:var(--grn);}
+.prio-hint{font-size:13px;color:var(--mut);margin-bottom:14px;line-height:1.5;}
+.prio-list{display:flex;flex-direction:column;gap:6px;}
+.prio-row{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--sur);border:1px solid var(--brd);border-radius:7px;cursor:grab;user-select:none;}
+.prio-row.dragging{opacity:.45;border-color:var(--acc);}
+.prio-grip{color:var(--mut);font-size:17px;line-height:1;flex-shrink:0;}
+.prio-num{font-family:'DM Mono',monospace;font-size:12px;color:var(--acc);width:28px;flex-shrink:0;text-align:right;}
+.prio-main{flex:1;min-width:0;overflow:hidden;}
+.prio-code{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.prio-sub{font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.prio-scad{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);flex-shrink:0;}
 .calc-cell{color:var(--mut);font-family:'DM Mono',monospace;font-size:10px;}
 .calc-cell.over-budget{color:var(--red)!important;font-weight:700;background:rgba(255,78,107,.08);}
 .scadenza-vicina{color:var(--yel);font-weight:600;}
@@ -399,11 +409,27 @@ input.search:focus{border-color:var(--acc);}
 .kib-desc{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--txt);line-height:1.25;margin-top:3px;}
 .kib-meta{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);letter-spacing:.04em;margin-top:6px;line-height:1.4;}
 .kop-note-row{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kop-prep-row{font-family:'DM Mono',monospace;font-size:13px;color:var(--txt);display:flex;align-items:center;}
+.kop-prep-row .prep-dot{width:12px;height:12px;}
 /* Griglia commesse: fino a 3 colonne, scende a 2 o 1 se non c'è spazio.
    minmax(320px,1fr) garantisce che ogni card sia di almeno 320px;
    auto-fit + 'fr' fa sì che si distribuiscano sulla larghezza disponibile. */
-.kiosk-op-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;
+.kiosk-op-grid{display:flex;flex-direction:column;gap:8px;
   max-width:1320px;margin:0 auto;}
+/* Selezione commessa a righe (stile elenco compatto). */
+.kiosk-op-row{width:100%;text-align:left;background:var(--sur);border:1px solid var(--brd);
+  border-left:4px solid var(--brd);border-radius:7px;padding:11px 16px;cursor:pointer;
+  color:var(--txt);font-family:inherit;display:flex;flex-direction:column;gap:6px;transition:all .12s;}
+.kiosk-op-row:hover,.kiosk-op-row:active{border-color:var(--acc);background:rgba(212,255,78,.05);}
+.kiosk-op-row.stato-prog-ok{border-left-color:var(--grn);}
+.kiosk-op-row.stato-prog-vicino{border-left-color:var(--yel);}
+.kiosk-op-row.stato-prog-sfora{border-left-color:var(--red);}
+.kiosk-op-row.stato-noprev{border-left-color:var(--yel);}
+.kop-row-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;}
+.kop-prep-inline{display:flex;align-items:center;font-family:'DM Mono',monospace;font-size:12px;color:var(--txt);}
+.kop-prog-chip{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--grn);flex-shrink:0;}
+.kop-prog-chip.vicino{color:var(--yel);}
+.kop-prog-chip.sfora{color:var(--red);}
 /* Attività extra: griglia più semplice (card più piccole, nessuna meta complicata) */
 .kiosk-attivita-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;
   max-width:1100px;margin:0 auto;}
@@ -6439,6 +6465,115 @@ function openFiltroClientiPopup(anchorBtn, opts) {
   }, 0);
 }
 
+// Modale "Ordina priorità": riordino per trascinamento delle commesse aperte.
+// La priorità (numero, 1 = più alta) determina l'ordinamento al kiosk
+// (lista commesse + "Prossime assegnate"). Null = nessuna → in coda per scadenza.
+function openPrioritaModal() {
+  let arr = state.operazioni
+    .filter(o => o.stato !== 'spedita' && o.stato !== 'completata')
+    .slice()
+    .sort(cmpCommessaKiosk);
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Ordina priorità commesse'),
+    el('button', { class:'mclose', onclick: closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+  body.append(el('div', { class:'prio-hint' },
+    'Trascina le righe per dare priorità: quelle in alto compaiono per prime al kiosk '
+    + '(lista commesse e "Prossime assegnate a te"). Le commesse aggiunte in seguito '
+    + 'finiscono in coda finché non riordini.'));
+
+  const list = el('div', { class:'prio-list' });
+
+  function rebuildArrFromDom() {
+    const ids = [...list.querySelectorAll('.prio-row')].map(r => r.dataset.id);
+    arr = ids.map(id => arr.find(o => o.id === id)).filter(Boolean);
+  }
+  function renderList() {
+    list.innerHTML = '';
+    arr.forEach((op, i) => {
+      const cli = state.aziende.find(c => c.id === op.cliente_id);
+      const art = state.articoli.find(a => a.id === op.articolo_id);
+      const row = el('div', { class:'prio-row', draggable:'true' },
+        el('span', { class:'prio-grip' }, '⠿'),
+        el('span', { class:'prio-num' }, String(i + 1)),
+        el('div', { class:'prio-main' },
+          el('div', { class:'prio-code' }, art?.codice || op.numero_ordine || '—'),
+          el('div', { class:'prio-sub' },
+            (cli?.nome || '—') + (op.numero_ordine ? ' · ' + op.numero_ordine : '')),
+        ),
+        el('div', { class:'prio-scad' }, op.scadenza ? fmtIT(op.scadenza) : '—'),
+      );
+      row.dataset.id = op.id;
+      row.addEventListener('dragstart', () => row.classList.add('dragging'));
+      row.addEventListener('dragend', () => {
+        row.classList.remove('dragging');
+        rebuildArrFromDom();
+        renderList();
+      });
+      list.append(row);
+    });
+  }
+  list.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const dragging = list.querySelector('.dragging');
+    if (!dragging) return;
+    const others = [...list.querySelectorAll('.prio-row:not(.dragging)')];
+    let after = null, best = -Infinity;
+    others.forEach(r => {
+      const box = r.getBoundingClientRect();
+      const off = e.clientY - box.top - box.height / 2;
+      if (off < 0 && off > best) { best = off; after = r; }
+    });
+    if (after == null) list.appendChild(dragging);
+    else list.insertBefore(dragging, after);
+  });
+
+  renderList();
+  body.append(list);
+
+  const footer = el('div', { style:'display:flex;gap:10px;justify-content:space-between;margin-top:18px;flex-wrap:wrap;' });
+  footer.append(el('button', { class:'btng', onclick: () => {
+    if (!confirm('Azzerare la priorità di tutte le commesse?\nTornano all\'ordine per scadenza.')) return;
+    salvaPriorita(arr.map(o => ({ id:o.id, priorita:null })));
+  } }, 'Azzera priorità'));
+  const dx = el('div', { style:'display:flex;gap:10px;' });
+  dx.append(el('button', { class:'btng', onclick: closeModal }, 'Annulla'));
+  dx.append(el('button', { class:'btnp', onclick: () => {
+    rebuildArrFromDom();
+    salvaPriorita(arr.map((o, i) => ({ id:o.id, priorita:i + 1 })));
+  } }, 'Salva ordine'));
+  footer.append(dx);
+  body.append(footer);
+
+  modal.append(body);
+  openModal(modal);
+}
+
+// Persiste solo le priorità cambiate, aggiorna la cache locale e ridisegna.
+async function salvaPriorita(coppie) {
+  const cambiate = coppie.filter(c => {
+    const op = state.operazioni.find(o => o.id === c.id);
+    return op && (op.priorita ?? null) !== (c.priorita ?? null);
+  });
+  if (cambiate.length === 0) { closeModal(); return; }
+  try {
+    await Promise.all(cambiate.map(c =>
+      sb.from('operazioni').update({ priorita: c.priorita }).eq('id', c.id)));
+    cambiate.forEach(c => {
+      const op = state.operazioni.find(o => o.id === c.id);
+      if (op) op.priorita = c.priorita;
+    });
+    toast('Priorità aggiornata', 'ok');
+    closeModal();
+    if (state.currentTab && typeof renderTab === 'function') renderTab(state.currentTab);
+  } catch (e) {
+    toast('Errore salvataggio priorità: ' + (e.message || e), 'err');
+  }
+}
+
 function renderPianificazione(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.opSearch || '').toLowerCase();
@@ -6559,6 +6694,7 @@ function renderPianificazione(root) {
   );
   if (isAdmin) {
     toolbar.append(el('button', { class:'btnp', onclick:()=>openOperazioneModal() }, '+ Nuova Operazione'));
+    toolbar.append(el('button', { class:'btng', onclick:()=>openPrioritaModal() }, '⠿ Ordina priorità'));
     const fileImp = el('input', {
       type:'file', accept:'.xlsx,.xls', style:'display:none;',
       onchange: (e) => { if (e.target.files[0]) operazioniImportExcel(e.target.files[0]); e.target.value=''; },
@@ -10655,6 +10791,21 @@ function etichettaFaseAddetto(riga) {
   return tipo?.nome || 'la tua fase';
 }
 
+// Ordinamento commesse al kiosk: prima la priorità impostata dall'admin
+// (numero più basso = più in alto; senza priorità in coda), poi per scadenza.
+function cmpCommessaKiosk(a, b) {
+  const pa = a.priorita, pb = b.priorita;
+  const aHas = pa != null && pa !== '';
+  const bHas = pb != null && pb !== '';
+  if (aHas && bHas && Number(pa) !== Number(pb)) return Number(pa) - Number(pb);
+  if (aHas && !bHas) return -1;
+  if (!aHas && bHas) return 1;
+  if (!a.scadenza && !b.scadenza) return 0;
+  if (!a.scadenza) return 1;
+  if (!b.scadenza) return -1;
+  return a.scadenza < b.scadenza ? -1 : (a.scadenza > b.scadenza ? 1 : 0);
+}
+
 // Premuto "Termina lavoro": se è una commessa con una fase ancora da finire,
 // chiedo se ha finito o sospende; altrimenti (attività extra, non assegnato,
 // o già finita) chiudo direttamente come prima.
@@ -10763,17 +10914,12 @@ function kioskRenderOpList() {
 
   // Operazioni aperte = non spedite e non completate
   // (al kiosk si timbra solo su quelle ancora in lavorazione).
-  // Ordinamento: scadenza crescente (le più urgenti in cima),
+  // Ordinamento: priorità admin, poi scadenza crescente (urgenti in cima),
   // commesse senza scadenza in fondo
   const aperte = state.operazioni
     .filter(o => o.stato !== 'spedita' && o.stato !== 'completata')
     .slice()
-    .sort((a, b) => {
-      if (!a.scadenza && !b.scadenza) return 0;
-      if (!a.scadenza) return 1;
-      if (!b.scadenza) return -1;
-      return a.scadenza < b.scadenza ? -1 : (a.scadenza > b.scadenza ? 1 : 0);
-    });
+    .sort(cmpCommessaKiosk);
   // Set degli id operazione dove questo utente è tra gli addetti previsti
   const mieIds = new Set(
     state.opAddetti.filter(r => r.utente_id === u.id).map(r => r.operazione_id)
@@ -10912,7 +11058,7 @@ function kioskInfoBlock(op, opts = {}) {
 }
 
 function kioskOpCard(o, opts = {}) {
-  // Stato avanzamento: tinta card + barra progresso (solo se commessa iniziata).
+  // Stato avanzamento (se la commessa è già stata iniziata).
   let stato = 'intonsa';
   let oreCons = 0, orePrev = 0, perc = 0;
   if (kioskState.opIniziate.has(o.id)) {
@@ -10920,7 +11066,7 @@ function kioskOpCard(o, opts = {}) {
     orePrev = ((o.quantita || 0) * (o.minuti_unitari || 0)) / 60;
     if (orePrev > 0) {
       perc = oreCons / orePrev;
-      if (perc > 1.0)      stato = 'prog-sfora';
+      if (perc > 1.0)       stato = 'prog-sfora';
       else if (perc >= 0.9) stato = 'prog-vicino';
       else                  stato = 'prog-ok';
     } else {
@@ -10928,48 +11074,43 @@ function kioskOpCard(o, opts = {}) {
     }
   }
 
-  // Riga progresso (solo se commessa iniziata)
-  let progressRow = null;
+  // Indicatore avanzamento compatto a destra della riga.
+  let progEl = null;
   if (stato === 'prog-ok' || stato === 'prog-vicino' || stato === 'prog-sfora') {
     const percRound = Math.round(perc * 100);
-    const fillW = Math.min(100, perc * 100);
-    const fillCls = stato === 'prog-sfora' ? 'sfora'
-                  : stato === 'prog-vicino' ? 'vicino' : '';
-    const valCls = stato === 'prog-sfora' ? 'sfora' : '';
-    progressRow = el('div', {
-      class:'kop-progress',
-      title: oreCons.toFixed(1) + 'h consuntivate su ' + orePrev.toFixed(1) + 'h preventivate'
+    const chipCls = stato === 'prog-sfora' ? 'sfora' : stato === 'prog-vicino' ? 'vicino' : '';
+    progEl = el('span', {
+      class:'kop-prog-chip ' + chipCls,
+      title: oreCons.toFixed(1) + 'h su ' + orePrev.toFixed(1) + 'h preventivate'
         + (perc > 1.0 ? ' (sforamento +' + (oreCons - orePrev).toFixed(1) + 'h)' : ''),
-    },
-      el('div', { class:'kop-progress-bar' },
-        el('div', { class:'kop-progress-fill ' + fillCls, style:'width:'+fillW+'%;' })),
-      el('div', { class:'kop-progress-val ' + valCls }, percRound + '%'),
-    );
+    }, percRound + '%');
   } else if (stato === 'noprev') {
-    // Caso anomalo: iniziata ma senza preventivo. Da segnalare al responsabile.
-    progressRow = el('div', {
-      class:'kop-noprev',
-      title: 'Questa commessa è stata iniziata ma non ha minuti unitari impostati. '
-        + 'Aggiornare in pianificazione per avere il preventivo ore.',
-    },
-      el('span', {}, '⚠'),
-      el('span', { style:'flex:1;' }, 'INIZIATA · NO PREVENTIVO'),
-      el('span', {}, oreCons.toFixed(1) + 'h'),
-    );
+    progEl = el('span', {
+      class:'kop-prog-chip sfora',
+      title: 'Iniziata senza minuti unitari: nessun preventivo ore. Aggiornare in pianificazione.',
+    }, '⚠ no prev.');
   }
 
   // Nota (extra, solo dove presente)
   const noteRow = o.note ? el('div', { class:'kop-note-row', title: o.note }, '✎ ' + o.note) : null;
 
-  const cardClass = 'kiosk-op-card' + (stato !== 'intonsa' ? ' stato-' + stato : '');
-  const children = [ kioskInfoBlock(o), noteRow, progressRow ];
+  // Stato preparazione materiale (richiesto dalla produzione): pallino + etichetta.
+  const prepKey = o.stato_preparazione || 'vuoto';
+  const prepInline = el('div', { class:'kop-prep-inline' },
+    el('span', { class:'prep-dot ' + (OP_PREP[prepKey]?.classe || 'vuoto') }),
+    'Materiale: ' + (OP_PREP[prepKey]?.label || '—'),
+  );
 
-  // Modalità sola lettura: anteprima non cliccabile (es. coda "prossime").
+  const footer = el('div', { class:'kop-row-foot' }, prepInline, progEl);
+  const rowClass = 'kiosk-op-row' + (stato !== 'intonsa' ? ' stato-' + stato : '');
+  const children = [ kioskInfoBlock(o), noteRow, footer ];
+
+  // Modalità sola lettura: riga non cliccabile.
   if (opts.readonly) {
-    return el('div', { class: cardClass + ' kop-readonly', style:'cursor:default;text-align:left;' }, ...children);
+    return el('div', { class: rowClass, style:'cursor:default;' }, ...children);
   }
   return el('button', {
-    class: cardClass,
+    class: rowClass,
     onclick: () => kioskSelectOperazione(o),
   }, ...children);
 }
@@ -11322,12 +11463,7 @@ function kioskRenderAttiva() {
   const prossime = state.operazioni
     .filter(op => op.stato !== 'spedita' && op.stato !== 'completata')
     .filter(op => mieIds.has(op.id) && !attiveIds.has(op.id) && !opCompletataDaUtente(u.id, op.id))
-    .sort((a, b) => {
-      if (!a.scadenza && !b.scadenza) return 0;
-      if (!a.scadenza) return 1;
-      if (!b.scadenza) return -1;
-      return a.scadenza < b.scadenza ? -1 : (a.scadenza > b.scadenza ? 1 : 0);
-    });
+    .sort(cmpCommessaKiosk);
 
   if (prossime.length > 0) {
     const CAP = 8;
