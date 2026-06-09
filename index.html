@@ -430,6 +430,7 @@ input.search:focus{border-color:var(--acc);}
 .kop-prog-chip{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--grn);flex-shrink:0;}
 .kop-prog-chip.vicino{color:var(--yel);}
 .kop-prog-chip.sfora{color:var(--red);}
+.kop-rowbar{position:relative;height:6px;background:var(--sur2);border-radius:4px;overflow:hidden;margin-top:2px;}
 /* Attività extra: griglia più semplice (card più piccole, nessuna meta complicata) */
 .kiosk-attivita-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;
   max-width:1100px;margin:0 auto;}
@@ -11074,16 +11075,16 @@ function kioskOpCard(o, opts = {}) {
     }
   }
 
-  // Indicatore avanzamento compatto a destra della riga.
-  let progEl = null;
+  // Indicatore avanzamento compatto a destra della riga + barra in fondo.
+  let progEl = null, progBar = null;
   if (stato === 'prog-ok' || stato === 'prog-vicino' || stato === 'prog-sfora') {
     const percRound = Math.round(perc * 100);
     const chipCls = stato === 'prog-sfora' ? 'sfora' : stato === 'prog-vicino' ? 'vicino' : '';
-    progEl = el('span', {
-      class:'kop-prog-chip ' + chipCls,
-      title: oreCons.toFixed(1) + 'h su ' + orePrev.toFixed(1) + 'h preventivate'
-        + (perc > 1.0 ? ' (sforamento +' + (oreCons - orePrev).toFixed(1) + 'h)' : ''),
-    }, percRound + '%');
+    const tip = oreCons.toFixed(1) + 'h su ' + orePrev.toFixed(1) + 'h preventivate'
+      + (perc > 1.0 ? ' (sforamento +' + (oreCons - orePrev).toFixed(1) + 'h)' : '');
+    progEl = el('span', { class:'kop-prog-chip ' + chipCls, title: tip }, percRound + '%');
+    progBar = el('div', { class:'kop-rowbar', title: tip },
+      el('div', { class:'kop-progress-fill ' + chipCls, style:'width:' + Math.min(100, perc * 100) + '%;' }));
   } else if (stato === 'noprev') {
     progEl = el('span', {
       class:'kop-prog-chip sfora',
@@ -11103,7 +11104,7 @@ function kioskOpCard(o, opts = {}) {
 
   const footer = el('div', { class:'kop-row-foot' }, prepInline, progEl);
   const rowClass = 'kiosk-op-row' + (stato !== 'intonsa' ? ' stato-' + stato : '');
-  const children = [ kioskInfoBlock(o), noteRow, footer ];
+  const children = [ kioskInfoBlock(o), noteRow, footer, progBar ];
 
   // Modalità sola lettura: riga non cliccabile.
   if (opts.readonly) {
@@ -11357,7 +11358,9 @@ function kioskGoToAttiva() {
 
 // Riga "prossima assegnata": contenitore + blocco-info standard (anteprima).
 function kioskProssimaRow(op) {
-  return el('div', { class:'kiosk-prossima-row' }, kioskInfoBlock(op));
+  // Stesse informazioni delle righe di selezione (prep materiale, avanzamento,
+  // bordo di stato), ma in sola lettura: schermate simili = stesse info.
+  return kioskOpCard(op, { readonly: true });
 }
 
 function kioskRenderAttiva() {
