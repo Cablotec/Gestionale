@@ -54,8 +54,6 @@ button{font-family:inherit;}
 .op-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;overflow-y:auto;align-content:start;flex:1;padding-bottom:8px;}
 .op-tile{background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:18px 10px;text-align:center;font-size:15px;font-weight:700;color:var(--txt);cursor:pointer;min-height:64px;display:flex;align-items:center;justify-content:center;}
 .op-tile:active{border-color:var(--acc);background:rgba(212,255,78,.06);}
-.op-tile.last{border-color:var(--acc);}
-.op-tile.last::after{content:'ultimo';display:block;font-family:'DM Mono',monospace;font-size:9px;color:var(--acc);margin-left:6px;}
 
 /* ── Ricerca + lista commesse ── */
 .search{width:100%;background:var(--sur);border:1px solid var(--brd);border-radius:10px;color:var(--txt);font-family:'DM Mono',monospace;font-size:14px;padding:13px 14px;margin-bottom:12px;outline:none;}
@@ -74,6 +72,9 @@ button{font-family:inherit;}
 .scan-wrap{position:relative;border-radius:14px;overflow:hidden;background:#000;}
 .scan-wrap video{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;}
 .scan-frame{position:absolute;inset:16%;border:3px solid var(--acc);border-radius:14px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.25);}
+.scan-pause{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);}
+.scan-pause.on{display:flex;}
+.scan-pause button{background:var(--acc);color:var(--bg);border:none;border-radius:12px;padding:16px 22px;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);}
 .scan-status{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);text-align:center;min-height:17px;margin:10px 4px;}
 .scan-status.ok{color:var(--grn);}
 .scan-status.err{color:var(--red);}
@@ -142,6 +143,9 @@ button{font-family:inherit;}
   <div class="scan-wrap">
     <video id="video" playsinline muted></video>
     <div class="scan-frame"></div>
+    <div class="scan-pause" id="scan-pause">
+      <button onclick="riprendiScan()">📷 Scansiona il prossimo</button>
+    </div>
   </div>
   <div class="scan-status" id="scan-status">Inquadra il QR dell'articolo…</div>
   <div class="manual">
@@ -205,7 +209,20 @@ const state = {
   search: '',
   stream: null, rafId: null, detector: null,
   lastCode: null, lastTime: 0,
+  paused: false,      // dopo ogni lettura lo scanner si ferma finché non si riprende
 };
+
+function pausaScan() {
+  state.paused = true;
+  const v = $('#video'); if (v && !v.paused) v.pause();   // congela il fotogramma letto
+  $('#scan-pause')?.classList.add('on');
+}
+function riprendiScan() {
+  state.paused = false;
+  state.lastCode = null;                                   // ripartenza pulita
+  $('#scan-pause')?.classList.remove('on');
+  const v = $('#video'); if (v && v.srcObject) v.play().catch(() => {});
+}
 
 function show(id) {
   stopCamera();
@@ -224,11 +241,10 @@ async function boot() {
       if (error) throw new Error('Login fallito: ' + error.message);
     }
     await loadData();
-    // Operatore ricordato dall'ultima volta
-    const lastId = localStorage.getItem('prel_op');
-    state.operatore = state.utenti.find(u => u.id === lastId) || null;
+    // Telefono condiviso: si chiede sempre chi sei a ogni apertura.
+    state.operatore = null;
     aggiornaHeader();
-    if (state.operatore) goCommessa(); else goOperatore();
+    goOperatore();
   } catch (e) {
     box.innerHTML = '';
     box.append(elx('div', { class:'big' }, '✕ Errore di avvio'),
@@ -289,11 +305,10 @@ function goOperatore() {
   show('step-op');
   const grid = $('#op-grid');
   grid.innerHTML = '';
-  const lastId = localStorage.getItem('prel_op');
   state.utenti.forEach(u => {
     grid.append(elx('button', {
-      class: 'op-tile' + (u.id === lastId ? ' last' : ''),
-      onclick: () => { state.operatore = u; localStorage.setItem('prel_op', u.id); aggiornaHeader(); goCommessa(); },
+      class: 'op-tile',
+      onclick: () => { state.operatore = u; aggiornaHeader(); goCommessa(); },
     }, u.nome));
   });
   if (state.utenti.length === 0) grid.append(elx('div', { class:'empty' }, 'Nessun operatore attivo trovato.'));
@@ -355,6 +370,8 @@ function goScan(o) {
   $('#scan-status').className = 'scan-status';
   $('#scan-status').textContent = "Inquadra il QR dell'articolo…";
   $('#manual-code').value = '';
+  state.paused = false;
+  $('#scan-pause')?.classList.remove('on');
   renderRows();
   startCamera();
 }
@@ -404,6 +421,7 @@ function onDetect(code, manuale) {
   const now = Date.now();
   const norm = (code || '').trim();
   if (!norm) return;
+  if (!manuale && state.paused) return;                    // in pausa: ignora
   if (!manuale && norm === state.lastCode && (now - state.lastTime) < 1500) return;
   state.lastCode = norm; state.lastTime = now;
 
@@ -419,6 +437,7 @@ function onDetect(code, manuale) {
   else { st.className = 'scan-status err'; st.textContent = '⚠ "' + norm + '" non in anagrafica (aggiunto comunque)'; }
   beep(art ? 'ok' : 'err');
   if (navigator.vibrate) navigator.vibrate(art ? 40 : [60, 60, 60]);
+  if (!manuale) pausaScan();   // si riprende solo toccando "Scansiona il prossimo"
 }
 
 async function startCamera() {
@@ -445,7 +464,7 @@ async function startCamera() {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const loop = async () => {
     if (!state.stream) return;
-    if (video.readyState >= 2 && video.videoWidth) {
+    if (!state.paused && video.readyState >= 2 && video.videoWidth) {
       try {
         if (state.detector) {
           const codes = await state.detector.detect(video);
