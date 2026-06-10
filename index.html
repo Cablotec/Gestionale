@@ -8693,8 +8693,10 @@ function calcRitardoGiorni(o) {
   return Math.round((cons - scad) / 86400000);
 }
 
-// Vista admin/consultazione dei prelievi registrati dal kiosk magazzino.
+// Vista admin/consultazione dei prelievi registrati dall'app magazzino.
+let _prelSeq = 0; // guardia anti-doppione: solo l'ultima invocazione disegna
 async function renderPrelievi(root) {
+  const mySeq = ++_prelSeq;
   root.innerHTML = '';
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Prelievi magazzino')));
   const info = el('div', { class:'sub', style:'margin:4px 0 14px;color:var(--mut);' }, 'Caricamento…');
@@ -8707,17 +8709,25 @@ async function renderPrelievi(root) {
     if (error) throw error;
     dati = data || [];
   } catch (e) {
+    if (mySeq !== _prelSeq) return;
     info.textContent = 'Errore nel caricamento dei prelievi: ' + (e.message || e)
       + ' (verifica che la tabella prelievi_magazzino esista).';
     return;
   }
+  // Se nel frattempo la scheda è stata ridisegnata (cambio tab e ritorno),
+  // questa invocazione è vecchia: non deve appendere nulla.
+  if (mySeq !== _prelSeq || !root.isConnected) return;
+
   if (dati.length === 0) { info.textContent = 'Nessun prelievo registrato.'; return; }
   info.textContent = dati.length + ' prelievi più recenti.';
 
+  const isAdmin = state.profile?.ruolo === 'admin';
   const tbl = el('table', { class:'rt' });
-  tbl.append(el('thead', {}, el('tr', {},
-    el('th', {}, 'Data/ora'), el('th', {}, 'Operatore'), el('th', {}, 'Commessa'),
-    el('th', {}, 'Cliente'), el('th', {}, 'Articolo'), el('th', { class:'tr' }, 'Qtà'))));
+  const headCells = [
+    el('th', {}, 'Data/ora'), el('th', {}, 'Operatore'), el('th', {}, 'OP'),
+    el('th', {}, 'Cliente'), el('th', {}, 'Articolo'), el('th', { class:'tr' }, 'Qtà')];
+  if (isAdmin) headCells.push(el('th', { class:'tc' }, 'Azioni'));
+  tbl.append(el('thead', {}, el('tr', {}, ...headCells)));
   const tb = el('tbody');
   dati.forEach(p => {
     const u = (state.utentiById && state.utentiById[p.utente_id]) || state.utenti.find(x => x.id === p.utente_id);
@@ -8729,17 +8739,120 @@ async function renderPrelievi(root) {
       const d = new Date(p.creato_il);
       if (!isNaN(d)) dt = fmtIT(toLocalISO(d)) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes());
     }
-    tb.append(el('tr', {},
+    const cells = [
       el('td', { class:'mono' }, dt),
       el('td', {}, u?.nome || '—'),
-      el('td', { class:'mono' }, op?.numero_ordine || '—'),
+      el('td', { class:'mono' }, op?.numero_op || '—'),
       el('td', {}, cli?.nome || '—'),
       el('td', {}, (art?.codice || p.codice_scansionato || '—') + (art?.descrizione ? ' · ' + art.descrizione : '')),
       el('td', { class:'tr mono' }, String(p.quantita ?? '')),
-    ));
+    ];
+    if (isAdmin) {
+      cells.push(el('td', { class:'tc' },
+        el('button', { class:'btng', style:'padding:4px 9px;margin-right:6px;',
+          onclick: () => openPrelievoModal(p, () => renderTab(state.currentTab)) }, '✎'),
+        el('button', { class:'btng', style:'padding:4px 9px;color:var(--red);',
+          onclick: async () => {
+            if (!confirm('Eliminare questo prelievo?')) return;
+            const { error } = await sb.from('prelievi_magazzino').delete().eq('id', p.id);
+            if (error) toast('Errore: ' + error.message, 'err');
+            else { toast('Prelievo eliminato', 'ok'); renderTab(state.currentTab); }
+          } }, '🗑'),
+      ));
+    }
+    tb.append(el('tr', {}, ...cells));
   });
   tbl.append(tb);
-  root.append(tbl);
+  const tw = el('div', { class:'tw' });
+  tw.append(tbl);
+  root.append(tw);
+}
+
+// Modale admin per modificare un prelievo (tutti i campi).
+function openPrelievoModal(p, refresh) {
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Modifica prelievo'),
+    el('button', { class:'mclose', onclick: closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+
+  // Data/ora in locale per l'input datetime-local
+  let dtVal = '';
+  if (p.creato_il) {
+    const d = new Date(p.creato_il);
+    if (!isNaN(d)) dtVal = toLocalISO(d) + 'T' + z(d.getHours()) + ':' + z(d.getMinutes());
+  }
+  const inpData = el('input', { type:'datetime-local', value: dtVal });
+
+  // Operatore
+  const selUte = el('select', {});
+  state.utenti.filter(u => !isKioskRecord(u))
+    .forEach(u => selUte.append(el('option', { value: u.id }, u.nome)));
+  selUte.value = p.utente_id || '';
+
+  // Commessa (ordinate: più recenti prima, mostra OP + ordine + cliente)
+  const selOp = el('select', {});
+  selOp.append(el('option', { value:'' }, '— nessuna —'));
+  state.operazioni.slice()
+    .sort((a, b) => (b.numero_ordine || '').localeCompare(a.numero_ordine || ''))
+    .forEach(o => {
+      const cli = state.aziende.find(c => c.id === o.cliente_id);
+      const label = (o.numero_op ? 'OP ' + o.numero_op + ' · ' : '')
+        + (o.numero_ordine || '—') + (cli ? ' · ' + cli.nome : '');
+      selOp.append(el('option', { value: o.id }, label));
+    });
+  selOp.value = p.operazione_id || '';
+
+  // Articolo (anagrafica) + codice libero per i fuori-anagrafica
+  const selArt = el('select', {});
+  selArt.append(el('option', { value:'' }, '— non in anagrafica (usa codice) —'));
+  state.articoli.slice()
+    .sort((a, b) => (a.codice || '').localeCompare(b.codice || ''))
+    .forEach(a => selArt.append(el('option', { value: a.id },
+      a.codice + (a.descrizione ? ' · ' + a.descrizione : ''))));
+  selArt.value = p.articolo_id || '';
+  const inpCod = el('input', { type:'text', value: p.codice_scansionato || '',
+    placeholder:'codice scansionato/libero' });
+
+  // Quantità
+  const inpQta = el('input', { type:'number', step:'any', min:'0', value: String(p.quantita ?? 1) });
+
+  body.append(
+    el('div', { class:'field' }, el('label', {}, 'Data e ora'), inpData),
+    el('div', { class:'field' }, el('label', {}, 'Operatore'), selUte),
+    el('div', { class:'field' }, el('label', {}, 'Commessa'), selOp),
+    el('div', { class:'field' }, el('label', {}, 'Articolo (anagrafica)'), selArt),
+    el('div', { class:'field' }, el('label', {}, 'Codice scansionato'), inpCod),
+    el('div', { class:'field' }, el('label', {}, 'Quantità'), inpQta),
+  );
+  modal.append(body);
+
+  modal.append(el('div', { class:'mfoot' },
+    el('button', { class:'btng', onclick: closeModal }, 'Annulla'),
+    el('button', { class:'btnp', onclick: async () => {
+      const qta = parseFloat(inpQta.value);
+      if (!(qta > 0)) return toast('Quantità non valida', 'err');
+      const payload = {
+        utente_id: selUte.value || null,
+        operazione_id: selOp.value || null,
+        articolo_id: selArt.value || null,
+        codice_scansionato: inpCod.value.trim() || null,
+        quantita: qta,
+      };
+      if (inpData.value) {
+        const d = new Date(inpData.value);
+        if (!isNaN(d)) payload.creato_il = d.toISOString();
+      }
+      const { error } = await sb.from('prelievi_magazzino')
+        .update(payload).eq('id', p.id);
+      if (error) return toast('Errore: ' + error.message, 'err');
+      toast('Prelievo aggiornato', 'ok');
+      closeModal();
+      if (refresh) refresh();
+    } }, 'Salva'),
+  ));
+  openModal(modal);
 }
 
 function renderStorico(root) {
