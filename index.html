@@ -160,6 +160,23 @@ input.search:focus{border-color:var(--acc);}
 .mclose:hover{color:var(--txt);}
 .mbody{padding:16px 18px;overflow-y:auto;flex:1;}
 .mfoot{padding:11px 18px;border-top:1px solid var(--brd);display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;flex-wrap:wrap;}
+/* ── Modal commessa: header riassuntivo + schede ── */
+.opsum{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;background:var(--sur2);border:1px solid var(--brd);border-radius:8px;padding:10px 14px;margin-bottom:12px;}
+.opsum-cod{font-family:'DM Mono',monospace;font-size:16px;font-weight:700;display:flex;align-items:center;flex-wrap:wrap;}
+.opsum-sub{font-size:11px;color:var(--mut);margin-top:3px;}
+.opsum-right{display:flex;flex-direction:column;align-items:flex-end;gap:5px;}
+.opsum-scad{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
+.opsum-scad.late{color:var(--red);font-weight:700;}
+.opsum-ore{display:flex;align-items:center;gap:8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
+.opsum-orebar{width:90px;height:8px;background:var(--bg);border:1px solid var(--brd);border-radius:4px;overflow:hidden;}
+.opsum-orefill{height:100%;background:var(--blu);}
+.opsum-orefill.over{background:var(--red);}
+.optabs{display:flex;gap:4px;border-bottom:1px solid var(--brd);margin-bottom:14px;flex-wrap:wrap;}
+.optab-btn{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:8px 12px;cursor:pointer;}
+.optab-btn.act{color:var(--acc);border-bottom-color:var(--acc);}
+.optab-btn:hover{color:var(--txt);}
+.optab-panel{display:none;}
+.optab-panel.on{display:block;}
 
 /* Form fields */
 .field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
@@ -1010,7 +1027,7 @@ const state = {
   ganttView: 'live',       // 'live' | 'storico'
   ganttZoom: 'mese',       // 'giorno' | 'settimana' | 'mese'
   ganttCursor: new Date(), // data centrale visualizzazione
-  ganttFiltroOperatore: '', // id operatore o '' per tutti
+  ganttStatiVisibili: null, // Set di stati commessa visibili nel Gantt (null = tutti, inizializzato al primo render)
   // Stato kiosk runtime
   kioskOp: null,           // operazione selezionata nel flusso commesse
   kioskMode: null,         // 'menu' | 'mezzi' | 'commesse-list' | 'commesse-tipo' | 'commesse-attiva'
@@ -5943,6 +5960,28 @@ function opCalcOreReali(op) {
   });
   return totSec / 3600;
 }
+// ── Ore di una SINGOLA fase ────────────────────────────────────────────
+// Preventivo: quantità × minuti unitari della fase.
+function faseCalcOre(op, fase) {
+  return ((op.quantita || 0) * (Number(fase?.minuti_unitari) || 0)) / 60;
+}
+// Consuntivo: sessioni della commessa attribuibili alla fase. Match per
+// fase_id quando presente (sessioni nuove); ripiego sul tipo di lavorazione
+// per le sessioni storiche registrate prima dell'introduzione di fase_id.
+function faseSessioneMatch(s, fase) {
+  if (!fase) return false;
+  if (s.fase_id) return s.fase_id === fase.id;
+  return s.tipo_lavorazione_id === fase.tipo_lavorazione_id;
+}
+function faseCalcOreReali(op, fase) {
+  let totSec = 0;
+  state.sessioni.forEach(s => {
+    if (s.operazione_id !== op.id || !faseSessioneMatch(s, fase)) return;
+    if (s.fine) totSec += (s.durata_secondi || 0);
+    else totSec += Math.max(0, Math.floor((Date.now() - new Date(s.inizio).getTime()) / 1000));
+  });
+  return totSec / 3600;
+}
 function opCalcGiorni(op) {
   const ore = opCalcOre(op);
   return Math.ceil(ore / 8); // 8 ore al giorno, arrotondato per eccesso
@@ -7627,7 +7666,14 @@ function openOperazioneModal(o) {
   }, '+ Aggiungi fase');
   renderFasiComm();
 
-  form.append(
+  // ── Struttura a schede: i pannelli vivono DENTRO il form, così FormData
+  // legge anche i campi delle schede non visibili al momento del salvataggio.
+  const pDati = el('div', { class:'optab-panel on' });
+  const pLav  = el('div', { class:'optab-panel' });
+  const pProd = el('div', { class:'optab-panel' });
+  const pCons = el('div', { class:'optab-panel' });
+
+  pDati.append(
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Cliente *'), acCliente.container),
       el('div', { class:'field' }, el('label', {}, 'Codice articolo *'), acArticolo.container),
@@ -7687,10 +7733,6 @@ function openOperazioneModal(o) {
         el('div', { class:'sub', id:'minuti-hint', style:'margin-top:4px;font-size:10px;color:var(--mut);' },
           'Suggerito automaticamente dall\'articolo selezionato.')),
     ),
-    el('div', { class:'field' }, el('label', {}, 'Fasi (opzionale)'),
-      fasiWrapComm, btnAddFaseComm, notaConfrontoComm, seqRow,
-      el('div', { class:'sub', style:'margin-top:4px;' },
-        'Scomposizione interna per mansione. Precompilate dall\'articolo; qui puoi sovrascriverne i minuti per questa commessa. La somma dovrebbe stare entro il tempo pagato.')),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Scadenza'),
         el('input', { type:'date', name:'scadenza', value:o.scadenza||'' })),
@@ -7713,8 +7755,17 @@ function openOperazioneModal(o) {
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Consegna materiali entro'),
         el('input', { type:'date', name:'cl_consegna_materiali', value:o.cl_consegna_materiali||'' })),
-      el('div', { class:'field' }),
+      el('div', { class:'field' }, el('label', {}, 'Stato'), selStato),
     ),
+    el('div', { class:'field' }, el('label', {}, 'Note'),
+      el('textarea', { name:'note', rows:'2' }, o.note||'')),
+  );
+
+  pLav.append(
+    el('div', { class:'field' }, el('label', {}, 'Fasi (opzionale)'),
+      fasiWrapComm, btnAddFaseComm, notaConfrontoComm, seqRow,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Scomposizione interna per mansione. Precompilate dall\'articolo; qui puoi sovrascriverne i minuti per questa commessa. La somma dovrebbe stare entro il tempo pagato.')),
     el('div', { class:'field' }, el('label', {}, 'Addetti previsti'),
       addSelectedWrap, addDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
@@ -7724,11 +7775,9 @@ function openOperazioneModal(o) {
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Ditte terze che contribuiscono alla lavorazione (con coefficiente di capacità).')),
     el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Stato'), selStato),
       el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
+      el('div', { class:'field' }),
     ),
-    el('div', { class:'field' }, el('label', {}, 'Note'),
-      el('textarea', { name:'note', rows:'2' }, o.note||'')),
   );
 
   // Confronto fasi ↔ pagato: aggiorna quando cambi i minuti pagati, e una volta all'avvio.
@@ -7740,7 +7789,7 @@ function openOperazioneModal(o) {
 
   // Sezione storico (solo se spedita)
   if (!isNew && o.stato === 'spedita') {
-    form.append(
+    pDati.append(
       el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
         '── Dati consegna ──'),
       el('div', { class:'frow' },
@@ -7767,17 +7816,17 @@ function openOperazioneModal(o) {
     const perc = orePrev > 0 ? Math.round((oreReali / orePrev) * 100) : 0;
     const overBudget = orePrev > 0 && oreReali > orePrev;
 
-    form.append(
+    pCons.append(
       el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
         '── Sessioni di lavoro ──'),
     );
 
     if (sessOp.length === 0) {
-      form.append(el('div', { style:'color:var(--mut);font-size:11px;padding:8px 0;' },
+      pCons.append(el('div', { style:'color:var(--mut);font-size:11px;padding:8px 0;' },
         'Nessuna sessione registrata. Le sessioni si creano dal kiosk quando un operatore inizia un lavoro.'));
     } else {
       // Riepilogo totali
-      form.append(el('div', {
+      pCons.append(el('div', {
         style: 'background:var(--sur2);border:1px solid '+(overBudget?'var(--red)':'var(--brd)')+';border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;',
       },
         el('div', { style:'display:flex;justify-content:space-between;gap:14px;' },
@@ -7830,7 +7879,7 @@ function openOperazioneModal(o) {
         );
         sessList.append(row);
       });
-      form.append(sessList);
+      pCons.append(sessList);
     }
   }
 
@@ -7840,7 +7889,7 @@ function openOperazioneModal(o) {
   // Validazioni: data obbligatoria, quantità > 0, quantità <= residuo.
   // Al raggiungimento del 100% propone di marcare la commessa come 'completata'.
   if (!isNew) {
-    form.append(
+    pProd.append(
       el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
         '── Produzione ──'),
     );
@@ -7848,7 +7897,7 @@ function openOperazioneModal(o) {
     // Container che ri-renderizza solo la sezione consegne dopo ogni operazione
     // (insert/delete), senza ricostruire l'intero modal.
     const consegneBox = el('div');
-    form.append(consegneBox);
+    pProd.append(consegneBox);
 
     const renderConsegne = () => {
       consegneBox.innerHTML = '';
@@ -8050,13 +8099,13 @@ function openOperazioneModal(o) {
   // Al raggiungimento del 100% spedito, marca automaticamente la commessa
   // come 'spedita' (sincronizzazione automatica dello stato).
   if (!isNew) {
-    form.append(
+    pProd.append(
       el('div', { style:'margin-top:14px;padding-top:14px;border-top:1px solid var(--brd);font-family:monospace;font-size:11px;font-weight:600;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;' },
         '── Spedizioni ──'),
     );
 
     const spedBox = el('div', { style:'margin-top:8px;' });
-    form.append(spedBox);
+    pProd.append(spedBox);
 
     const renderSpedizioni = () => {
       spedBox.innerHTML = '';
@@ -8435,8 +8484,65 @@ function openOperazioneModal(o) {
   // Espongo lo stato del lucchetto al salvataggio
   form._inizioBloccato = () => inizioBloccato;
 
-  form.appendChild(previewBox);
+  pDati.appendChild(previewBox);
 
+  // ── Header riassuntivo (solo commesse esistenti): colpo d'occhio ──
+  if (!isNew) {
+    const art = state.articoli.find(a => a.id === o.articolo_id);
+    const cli = state.aziende.find(c => c.id === o.cliente_id);
+    const stDef = OP_STATI[o.stato] || { label: o.stato, color: 'var(--mut)', badge: 'bgry' };
+    const oggiISO = toLocalISO(new Date());
+    const scadLate = o.scadenza && o.scadenza < oggiISO && o.stato !== 'spedita';
+    const prev = opCalcOre(o), cons = opCalcOreReali(o);
+    const percOre = prev > 0 ? Math.min(100, Math.round(cons / prev * 100)) : 0;
+    const overOre = prev > 0 && cons > prev;
+    body.append(el('div', { class:'opsum' },
+      el('div', { class:'opsum-main' },
+        el('div', { class:'opsum-cod' },
+          (art?.codice || '—'),
+          el('span', { class:'badge ' + stDef.badge, style:'margin-left:8px;' }, stDef.label)),
+        el('div', { class:'opsum-sub' },
+          (cli?.nome || '—')
+          + ' · Ord. ' + (o.numero_ordine || '—')
+          + (o.numero_op ? ' · OP ' + o.numero_op : '')
+          + ' · Qtà ' + (o.quantita ?? '—')),
+      ),
+      el('div', { class:'opsum-right' },
+        el('div', { class:'opsum-scad' + (scadLate ? ' late' : '') },
+          'Scad. ' + fmtIT(o.scadenza || '') + (scadLate ? ' ⚠' : '')),
+        el('div', { class:'opsum-ore', title:'Ore consuntivate / preventivate' },
+          el('div', { class:'opsum-orebar' },
+            el('div', { class:'opsum-orefill' + (overOre ? ' over' : ''), style:'width:' + percOre + '%;' })),
+          el('span', {}, cons.toFixed(1) + '/' + prev.toFixed(1) + 'h')),
+      ),
+    ));
+  }
+
+  // ── Barra schede ──
+  const tabs = [
+    { id:'dati', label:'Dati', panel:pDati },
+    { id:'lav', label:'Lavorazione', panel:pLav },
+  ];
+  if (!isNew) {
+    tabs.push({ id:'prod', label:'Produzione & Spedizioni', panel:pProd });
+    tabs.push({ id:'cons', label:'Consuntivo', panel:pCons });
+  }
+  const tabBar = el('div', { class:'optabs' });
+  const tabBtns = {};
+  const switchTab = (id) => {
+    tabs.forEach(t => {
+      t.panel.classList.toggle('on', t.id === id);
+      tabBtns[t.id].classList.toggle('act', t.id === id);
+    });
+  };
+  tabs.forEach(t => {
+    tabBtns[t.id] = el('button', { type:'button', class:'optab-btn' + (t.id === 'dati' ? ' act' : ''),
+      onclick: () => switchTab(t.id) }, t.label);
+    tabBar.append(tabBtns[t.id]);
+  });
+  body.append(tabBar);
+
+  form.append(pDati, pLav, pProd, pCons);
   body.append(form);
   modal.append(body);
 
@@ -8446,6 +8552,15 @@ function openOperazioneModal(o) {
   }
 
   const foot = el('div', { class:'mfoot' });
+  if (isAdmin && !isNew) {
+    foot.append(el('button', {
+      class:'btng', style:'color:var(--red);border-color:var(--red);margin-right:auto;',
+      onclick: async () => {
+        await deleteOperazione(o);   // chiede conferma; se annullata non succede nulla
+        if (!state.operazioni.find(x => x.id === o.id)) closeModal();
+      },
+    }, '🗑 Elimina'));
+  }
   foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
   if (isAdmin) {
     const btnSave = el('button', { class:'btnp' }, 'Salva');
@@ -12781,24 +12896,37 @@ function renderGanttCommesse(root) {
     ),
   );
 
-  const opChoices = state.utenti
-    .filter(u => u.attivo && !isKioskRecord(u))
-    .sort((a,b) => a.nome.localeCompare(b.nome));
-  const selOper = el('select', {
-    style:'background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:5px 10px;border-radius:3px;font-family:DM Mono,monospace;font-size:11px;',
-    onchange: (e) => { state.ganttFiltroOperatore = e.target.value; renderTab('gantt_commesse'); }
-  },
-    el('option', { value:'' }, '— Tutti gli operatori —'),
-    ...opChoices.map(u => el('option', { value:u.id }, u.nome + (u.esterno ? ' ✦' : '')))
-  );
-  selOper.value = state.ganttFiltroOperatore || '';
-  navToolbar.append(selOper);
+  // Filtro per stato commessa: chip on/off per ciascuno stato.
+  // Default: tutti visibili. La selezione vive in state.ganttStatiVisibili (Set).
+  if (!(state.ganttStatiVisibili instanceof Set)) {
+    state.ganttStatiVisibili = new Set(Object.keys(OP_STATI));
+  }
+  const statiVis = state.ganttStatiVisibili;
+  const chipBar = el('div', { style:'display:flex;gap:6px;flex-wrap:wrap;align-items:center;' });
+  Object.entries(OP_STATI).forEach(([key, def]) => {
+    const on = statiVis.has(key);
+    chipBar.append(el('button', {
+      style: 'display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:20px;cursor:pointer;'
+        + `font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.03em;`
+        + (on
+          ? `background:var(--sur2);border:1px solid ${def.color};color:var(--txt);`
+          : 'background:transparent;border:1px solid var(--brd);color:var(--mut);opacity:.55;'),
+      title: (on ? 'Nascondi' : 'Mostra') + ' le commesse in stato ' + def.label.toLowerCase(),
+      onclick: () => {
+        if (statiVis.has(key)) statiVis.delete(key); else statiVis.add(key);
+        renderTab('gantt_commesse');
+      },
+    },
+      el('span', { style:`width:9px;height:9px;border-radius:50%;background:${on ? def.color : 'var(--brd)'};flex-shrink:0;` }),
+      def.label,
+    ));
+  });
+  navToolbar.append(chipBar);
   root.append(navToolbar);
 
-  let operatori = opChoices;
-  if (state.ganttFiltroOperatore) {
-    operatori = operatori.filter(u => u.id === state.ganttFiltroOperatore);
-  }
+  const operatori = state.utenti
+    .filter(u => u.attivo && !isKioskRecord(u))
+    .sort((a,b) => a.nome.localeCompare(b.nome));
   if (operatori.length === 0) {
     root.append(el('div', { class:'empty' }, 'Nessun utente'));
     return;
@@ -12926,6 +13054,7 @@ function renderGanttCommesse(root) {
     const commesse = [];
     state.operazioni.forEach(o => {
       if (!o.scadenza) return;
+      if (!statiVis.has(o.stato || 'aperta')) return;   // filtro per stato
       const mieRighe = (state.opAddetti || []).filter(r => r.operazione_id === o.id && r.utente_id === u.id);
       if (!mieRighe.length) return;
       const fasi = opFasiOf(o);
@@ -12941,7 +13070,8 @@ function renderGanttCommesse(root) {
           const w = windows[fid];
           if (w.fine < rangeStartIso || w.inizio > rangeEndIso) return;
           const tipo = state.tipiLav.find(t => t.id === w.tipo_lavorazione_id);
-          commesse.push({ op:o, inizio:w.inizio, scadenza:o.scadenza, fine:w.fine, faseTipo: tipo || null });
+          const f = fasi.find(x => x.id === fid) || null;
+          commesse.push({ op:o, inizio:w.inizio, scadenza:o.scadenza, fine:w.fine, faseTipo: tipo || null, fase: f });
         });
       } else {
         // Nessuna fase, oppure assegnato "a tutta la commessa": intera finestra
@@ -13003,11 +13133,17 @@ function renderGanttCommesse(root) {
       const left = iStart * slotWidth;
       const width = Math.max(slotWidth, (iEnd - iStart + 1) * slotWidth);
 
-      const prev = opCalcOre(c.op);
-      const cons = opCalcOreReali(c.op);
+      // Per le barre di FASE: ore della fase (preventivo = qta × min fase,
+      // consuntivo = sessioni attribuibili alla fase). Per le barre intere:
+      // ore di tutta la commessa, come prima.
+      const isFase = !!c.fase;
+      const prev = isFase ? faseCalcOre(c.op, c.fase) : opCalcOre(c.op);
+      const cons = isFase ? faseCalcOreReali(c.op, c.fase) : opCalcOreReali(c.op);
       const perc = prev > 0 ? cons / prev : 0;
       const sfora = prev > 0 && cons > prev + 0.05;
-      const attiva = opConSessioneAperta.has(c.op.id);
+      const attiva = isFase
+        ? state.sessioni.some(s => !s.fine && s.operazione_id === c.op.id && faseSessioneMatch(s, c.fase))
+        : opConSessioneAperta.has(c.op.id);
 
       const art = state.articoli.find(a => a.id === c.op.articolo_id);
       const cli = state.aziende.find(x => x.id === c.op.cliente_id);
@@ -13021,8 +13157,8 @@ function renderGanttCommesse(root) {
           + (cli ? '\nCliente: ' + cli.nome : '')
           + (art ? '\nArticolo: ' + (art.codice || '') : '')
           + (c.faseTipo ? '\nFase: ' + c.faseTipo.nome : '')
-          + '\nPreventivo: ' + prev.toFixed(1) + ' h'
-          + '\nConsuntivo: ' + cons.toFixed(1) + ' h'
+          + '\nPreventivo' + (isFase ? ' fase' : '') + ': ' + prev.toFixed(1) + ' h'
+          + '\nConsuntivo' + (isFase ? ' fase' : '') + ': ' + cons.toFixed(1) + ' h'
           + (prev > 0 ? '  (' + Math.round(perc*100) + '%)' : '')
           + (sfora ? '\n⚠ SFORAMENTO: +' + (cons-prev).toFixed(1) + ' h' : '')
           + (attiva ? '\n● lavorazione in corso' : '')
