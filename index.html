@@ -1713,7 +1713,7 @@ async function afterLogin() {
 document.addEventListener('click', async (e) => {
   if (e.target.id === 'btn-logout') await sb.auth.signOut();
   if (e.target.id === 'btn-theme') toggleTheme();
-  if (e.target.id === 'btn-kiosk') location.href = './?kiosk';
+  if (e.target.id === 'btn-kiosk') location.href = './kiosk.html';
 });
 
 // NOTA: gli handler 'visibilitychange' e 'online' sono ora gestiti centralmente
@@ -5912,23 +5912,36 @@ function storicoMinutiPz(articoloId, tipoLavId) {
   const opIds = new Set((state.operazioni || [])
     .filter(o => o.articolo_id === articoloId).map(o => o.id));
   if (opIds.size === 0) return null;
-  const sess = (state.sessioni || []).filter(s =>
-    s.fine && s.tipo_lavorazione_id === tipoLavId && opIds.has(s.operazione_id));
-  if (sess.length === 0) return null;
-  const totSec = sess.reduce((acc, s) => acc + (Number(s.durata_secondi) || 0), 0);
-  if (totSec <= 0) return null;
-  // Pezzi: quantità prodotta (consegnata) delle commesse che hanno avuto
-  // almeno una sessione di questo tipo; ripiego sulla quantità pianificata.
-  const opConSess = new Set(sess.map(s => s.operazione_id));
-  let pezzi = 0;
-  opConSess.forEach(id => {
+  // Raggruppo i secondi delle sessioni CHIUSE per commessa.
+  const secPerOp = {}, nSessPerOp = {};
+  (state.sessioni || []).forEach(s => {
+    if (!s.fine || s.tipo_lavorazione_id !== tipoLavId || !opIds.has(s.operazione_id)) return;
+    secPerOp[s.operazione_id] = (secPerOp[s.operazione_id] || 0) + (Number(s.durata_secondi) || 0);
+    nSessPerOp[s.operazione_id] = (nSessPerOp[s.operazione_id] || 0) + 1;
+  });
+  // Una commessa entra nello storico solo se i suoi pezzi sono affidabili:
+  //  - spedita/completata → pezzi = prodotti (o pianificati come ripiego);
+  //  - ancora aperta → SOLO se ha produzione registrata (pezzi = prodotti).
+  // Le commesse aperte senza lotti vengono escluse del tutto (ore parziali
+  // su pezzi totali falserebbero la media al ribasso).
+  let totSec = 0, pezzi = 0, nSessioni = 0, nCommesse = 0;
+  Object.keys(secPerOp).forEach(id => {
     const op = (state.operazioni || []).find(o => o.id === id);
     if (!op) return;
     const prod = quantitaConsegnata(id);
-    pezzi += prod > 0 ? prod : Number(op.quantita || 0);
+    const chiusa = op.stato === 'spedita' || op.stato === 'completata';
+    let pz = 0;
+    if (chiusa) pz = prod > 0 ? prod : Number(op.quantita || 0);
+    else if (prod > 0) pz = prod;
+    else return; // aperta senza produzione: esclusa
+    if (pz <= 0) return;
+    totSec += secPerOp[id];
+    pezzi += pz;
+    nSessioni += nSessPerOp[id];
+    nCommesse += 1;
   });
-  if (pezzi <= 0) return null;
-  return { minPz: (totSec / 60) / pezzi, nSessioni: sess.length, nCommesse: opConSess.size };
+  if (totSec <= 0 || pezzi <= 0) return null;
+  return { minPz: (totSec / 60) / pezzi, nSessioni, nCommesse };
 }
 
 // Ore di lavoro RESIDUO: pezzi ancora da produrre × minuti_unitari.
@@ -8793,6 +8806,32 @@ function openOperazioneModal(o) {
     btnSave.onclick = async () => {
       const fd = new FormData(form);
 
+      // ── Guardia: completare/spedire una commessa con sessioni APERTE
+      // bloccava gli operatori al kiosk. Avvisa chi sta salvando e, se
+      // conferma, chiude le sessioni adesso (le ore restano registrate).
+      const nuovoStato = selStato.value;
+      if (!isNew && (nuovoStato === 'completata' || nuovoStato === 'spedita')) {
+        const sessAperte = (state.sessioni || []).filter(s => !s.fine && s.operazione_id === o.id);
+        if (sessAperte.length > 0) {
+          const nomi = sessAperte.map(s =>
+            state.utenti.find(u => u.id === s.utente_id)?.nome || '?').join(', ');
+          const ok = confirm(
+            `⚠ Su questa commessa ${sessAperte.length === 1 ? 'c\'è 1 sessione di lavoro APERTA' : 'ci sono ' + sessAperte.length + ' sessioni di lavoro APERTE'}:\n`
+            + nomi + '\n\n'
+            + `Confermando, le sessioni verranno chiuse adesso (le ore restano registrate) e la commessa passerà a "${OP_STATI[nuovoStato]?.label || nuovoStato}".\n\n`
+            + 'Annulla se preferisci che gli operatori terminino prima dal kiosk.');
+          if (!ok) return;
+          const oraISO = new Date().toISOString();
+          for (const s of sessAperte) {
+            const { data: chiusa, error: eCh } = await sb.from('sessioni_lavoro')
+              .update({ fine: oraISO }).eq('id', s.id).select().single();
+            if (eCh) return toast('Errore chiusura sessione: ' + eCh.message, 'err');
+            state.sessioni = state.sessioni.map(x => x.id === s.id ? chiusa : x);
+          }
+          toast(`${sessAperte.length === 1 ? 'Sessione chiusa' : sessAperte.length + ' sessioni chiuse'} (${nomi})`, 'ok');
+        }
+      }
+
       // Risolvi cliente e articolo: se nuovi, creali al volo in anagrafica
       const cliVal = acCliente.getValue();
       const artVal = acArticolo.getValue();
@@ -9013,6 +9052,21 @@ function openOperazioneModal(o) {
 }
 
 async function deleteOperazione(o) {
+  // Sessioni aperte: chiuderle PRIMA di eliminare, sia per non bloccare i
+  // kiosk sia per preservare le ore (la cancellazione potrebbe propagarsi).
+  const sessAperte = (state.sessioni || []).filter(s => !s.fine && s.operazione_id === o.id);
+  if (sessAperte.length > 0) {
+    const nomi = sessAperte.map(s =>
+      state.utenti.find(u => u.id === s.utente_id)?.nome || '?').join(', ');
+    if (!confirm(`⚠ Su questa commessa ${sessAperte.length === 1 ? 'c\'è 1 sessione APERTA' : 'ci sono ' + sessAperte.length + ' sessioni APERTE'} (${nomi}).\n\nConfermando verranno chiuse adesso e poi potrai eliminare la commessa.`)) return;
+    const oraISO = new Date().toISOString();
+    for (const s of sessAperte) {
+      const { data: chiusa, error: eCh } = await sb.from('sessioni_lavoro')
+        .update({ fine: oraISO }).eq('id', s.id).select().single();
+      if (eCh) return toast('Errore chiusura sessione: ' + eCh.message, 'err');
+      state.sessioni = state.sessioni.map(x => x.id === s.id ? chiusa : x);
+    }
+  }
   if (!confirm(`Eliminare questa operazione?\n${o.numero_ordine || ''}`)) return;
   const { data, error } = await sb.from('operazioni').delete().eq('id', o.id).select();
   if (error) return toast(error.message, 'err');
@@ -11994,7 +12048,12 @@ function kioskRenderAttiva() {
     );
   } else {
     card.append(
-      kioskInfoBlock(o),
+      o ? kioskInfoBlock(o)
+        : el('div', { class:'kiosk-attiva-cliente' },
+            '⚠ Commessa non più disponibile',
+            el('div', { style:'font-size:12px;color:var(--mut);font-weight:400;margin-top:6px;' },
+              'Probabilmente è stata completata o spedita dal gestionale mentre lavoravi. '
+              + 'Termina pure la sessione: le ore restano registrate.')),
       el('div', { class:'kiosk-attiva-tipo', style:'margin-top:14px;' },
         el('div', { class:'ktipo-color-bar', style:'background:'+(tipo?.colore||'#6b6b64')+';' }),
         tipo?.nome || '— tipo sconosciuto —',
