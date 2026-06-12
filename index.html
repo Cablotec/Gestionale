@@ -1972,9 +1972,12 @@ function applyChange(tabella, payload) {
       state.assenze = state.assenze.filter(x => x.id !== oldRow.id);
     }
   } else if (tabella === 'operazioni_addetti') {
-    // PK composta (operazione_id, utente_id) — no campo id
+    // PK surrogata `id` (più righe per utente+commessa: una per fase).
+    // Ripiego sulla tripla per righe pre-migrazione senza id in cache.
     const matchKey = (a, b) =>
-      a.operazione_id === b.operazione_id && a.utente_id === b.utente_id;
+      (a.id && b.id) ? a.id === b.id
+      : a.operazione_id === b.operazione_id && a.utente_id === b.utente_id
+        && (a.fase_id || null) === (b.fase_id || null);
     if (ev === 'INSERT') {
       if (!state.opAddetti.find(x => matchKey(x, row))) state.opAddetti.push(row);
     } else if (ev === 'UPDATE') {
@@ -2142,42 +2145,40 @@ function pezziInMagazzino(opId) {
 // Sincronizza gli addetti previsti di un'operazione: diff tra vecchi e nuovi
 // Ritorna { error } o {} se ok.
 async function syncOperazioneAddetti(opId, nuovi) {
-  // `nuovi` = [{ utente_id, fase_id }]. fase_id null = assegnato alla commessa
-  // (comportamento storico). Diff per utente_id: insert / update-fase / delete.
+  // `nuovi` = [{ utente_id, fase_id }]. fase_id null = assegnato alla commessa.
+  // Un utente può comparire più volte con fasi DIVERSE (es. cablaggio +
+  // collaudo). Il diff è quindi per coppia (utente_id, fase_id): le coppie
+  // invariate restano intatte (preservando completata_il), le nuove vengono
+  // inserite, quelle sparite eliminate.
+  const chiave = (r) => r.utente_id + '|' + (r.fase_id || '');
   const vecchieRighe = (state.opAddetti || []).filter(r => r.operazione_id === opId);
-  const vecchieByUid = Object.fromEntries(vecchieRighe.map(r => [r.utente_id, r]));
-  const nuoviUids = new Set(nuovi.map(n => n.utente_id));
+  const vecchieByKey = Object.fromEntries(vecchieRighe.map(r => [chiave(r), r]));
+  const nuoveKeys = new Set(nuovi.map(chiave));
 
-  // INSERT: utenti nuovi
-  const daAggiungere = nuovi.filter(n => !vecchieByUid[n.utente_id]);
+  // INSERT: coppie nuove
+  const daAggiungere = nuovi.filter(n => !vecchieByKey[chiave(n)]);
   if (daAggiungere.length) {
     const rows = daAggiungere.map(n => ({ operazione_id: opId, utente_id: n.utente_id, fase_id: n.fase_id || null }));
     const { data, error } = await sb.from('operazioni_addetti').insert(rows).select();
     if (error) return { error };
     const inseriti = (data && data.length) ? data : rows;
-    inseriti.forEach(r => { if (!state.opAddetti.find(x => x.operazione_id===r.operazione_id && x.utente_id===r.utente_id)) state.opAddetti.push(r); });
+    inseriti.forEach(r => {
+      if (!state.opAddetti.find(x => x.operazione_id === r.operazione_id
+          && x.utente_id === r.utente_id && (x.fase_id || null) === (r.fase_id || null))) {
+        state.opAddetti.push(r);
+      }
+    });
   }
-  // UPDATE: utente già presente ma con fase diversa
-  for (const n of nuovi) {
-    const v = vecchieByUid[n.utente_id];
-    if (!v) continue;
-    if ((v.fase_id || null) === (n.fase_id || null)) continue;
-    const { error } = await sb.from('operazioni_addetti')
-      .update({ fase_id: n.fase_id || null })
-      .eq('operazione_id', opId).eq('utente_id', n.utente_id);
-    if (error) return { error };
-    state.opAddetti = state.opAddetti.map(x =>
-      (x.operazione_id===opId && x.utente_id===n.utente_id) ? { ...x, fase_id: n.fase_id || null } : x);
-  }
-  // DELETE: utenti rimossi
-  const daRimuovere = vecchieRighe.filter(r => !nuoviUids.has(r.utente_id));
+  // DELETE: coppie rimosse
+  const daRimuovere = vecchieRighe.filter(r => !nuoveKeys.has(chiave(r)));
   for (const r of daRimuovere) {
-    const { error } = await sb.from('operazioni_addetti')
-      .delete()
-      .eq('operazione_id', opId)
-      .eq('utente_id', r.utente_id);
+    let q = sb.from('operazioni_addetti').delete()
+      .eq('operazione_id', opId).eq('utente_id', r.utente_id);
+    q = r.fase_id ? q.eq('fase_id', r.fase_id) : q.is('fase_id', null);
+    const { error } = await q;
     if (error) return { error };
-    state.opAddetti = state.opAddetti.filter(x => !(x.operazione_id===opId && x.utente_id===r.utente_id));
+    state.opAddetti = state.opAddetti.filter(x => !(x.operazione_id === opId
+      && x.utente_id === r.utente_id && (x.fase_id || null) === (r.fase_id || null)));
   }
   return {};
 }
@@ -6690,27 +6691,21 @@ function openGeneraFasiModal() {
   });
 
   // Operatore abituale per ciascuna fase: chi ha più ore storiche su quella
-  // coppia articolo+tipo. Vincolo del modello: un addetto = UNA fase per
-  // commessa → se la stessa persona è la migliore su più fasi, va dove ha
-  // più ore e le altre fasi prendono il successivo candidato libero.
+  // coppia articolo+tipo. La stessa persona può coprire PIÙ fasi della
+  // stessa commessa (es. cablaggio + collaudo).
   const utenteOk = (uid) => {
     const u = state.utenti.find(x => x.id === uid);
     return u && u.attivo !== false && !isKioskRecord(u);
   };
   proposte.forEach(p => {
-    const pool = [];
-    p.fasi.forEach((f, i) => {
-      Object.entries(oreStoricheUtenti(p.o.articolo_id, f.tipo_lavorazione_id))
+    p.fasi.forEach(f => {
+      const migliori = Object.entries(oreStoricheUtenti(p.o.articolo_id, f.tipo_lavorazione_id))
         .filter(([uid]) => utenteOk(uid))
-        .forEach(([uid, sec]) => pool.push({ i, uid, sec }));
-    });
-    pool.sort((a, b) => b.sec - a.sec);
-    const fasiFatte = new Set(), utentiUsati = new Set();
-    pool.forEach(c => {
-      if (fasiFatte.has(c.i) || utentiUsati.has(c.uid)) return;
-      fasiFatte.add(c.i); utentiUsati.add(c.uid);
-      p.fasi[c.i]._utente_id = c.uid;
-      p.fasi[c.i]._utenteNome = state.utenti.find(u => u.id === c.uid)?.nome || '?';
+        .sort((a, b) => b[1] - a[1]);
+      if (migliori.length) {
+        f._utente_id = migliori[0][0];
+        f._utenteNome = state.utenti.find(u => u.id === migliori[0][0])?.nome || '?';
+      }
     });
   });
 
@@ -6794,21 +6789,27 @@ function openGeneraFasiModal() {
       });
       okN++;
 
-      // Assegnazioni proposte (operatore abituale → fase). Se la persona è
-      // già tra gli addetti della commessa aggiorno la sua riga (fase_id),
-      // altrimenti la aggiungo. PK composta (operazione_id, utente_id).
+      // Assegnazioni proposte (operatore abituale → fase). Se la persona ha
+      // una riga "tutta la commessa" (fase_id null) la raffino alla fase;
+      // altrimenti aggiungo una riga: con il nuovo modello può averne più
+      // d'una (una per fase).
       for (let i = 0; i < p.fasi.length; i++) {
         const f = p.fasi[i], rec = nuoveFasi[i];
         if (!f._utente_id || !rec) continue;
-        const esiste = (state.opAddetti || []).find(r =>
-          r.operazione_id === p.o.id && r.utente_id === f._utente_id);
-        if (esiste) {
-          const { error: e2 } = await sb.from('operazioni_addetti')
-            .update({ fase_id: rec.id })
-            .eq('operazione_id', p.o.id).eq('utente_id', f._utente_id);
+        const rigaNull = (state.opAddetti || []).find(r =>
+          r.operazione_id === p.o.id && r.utente_id === f._utente_id && !r.fase_id);
+        const giaSuFase = (state.opAddetti || []).find(r =>
+          r.operazione_id === p.o.id && r.utente_id === f._utente_id && r.fase_id === rec.id);
+        if (giaSuFase) continue;
+        if (rigaNull) {
+          let q = sb.from('operazioni_addetti').update({ fase_id: rec.id });
+          q = rigaNull.id ? q.eq('id', rigaNull.id)
+            : q.eq('operazione_id', p.o.id).eq('utente_id', f._utente_id).is('fase_id', null);
+          const { error: e2 } = await q;
           if (!e2) {
             state.opAddetti = state.opAddetti.map(r =>
-              (r.operazione_id === p.o.id && r.utente_id === f._utente_id)
+              (rigaNull.id ? r.id === rigaNull.id
+                : (r.operazione_id === p.o.id && r.utente_id === f._utente_id && !r.fase_id))
                 ? { ...r, fase_id: rec.id } : r);
             assN++;
           }
@@ -7582,10 +7583,13 @@ function openOperazioneModal(o) {
         .map(f => ({ _k: f.id, id: f.id, tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
   let fasiSeq = !!o.fasi_sequenziali;
   // Assegnazione addetto → fase: utente_id → _k della fase ('' = tutta la commessa)
-  const addettoFase = {};
+  const addettoFase = {};   // uid → ARRAY di chiavi fase ([] = tutta la commessa)
   if (!isNew) {
     (state.opAddetti || []).filter(r => r.operazione_id === o.id)
-      .forEach(r => { addettoFase[r.utente_id] = r.fase_id || ''; });
+      .forEach(r => {
+        if (!addettoFase[r.utente_id]) addettoFase[r.utente_id] = [];
+        if (r.fase_id) addettoFase[r.utente_id].push(r.fase_id);
+      });
   }
   const tipoNomeFase = (id) => (tipiAttiviComm.find(t => t.id === id) || {}).nome || 'fase';
   const fasiAssegnabili = () => fasiComm.filter(f => f.tipo_lavorazione_id);
@@ -7602,6 +7606,37 @@ function openOperazioneModal(o) {
     sel.disabled = !canEdit;
     sel.onchange = () => onChange(sel.value || '');
     return sel;
+  }
+  // Chip multi-fase per un ADDETTO: ogni fase è un interruttore on/off.
+  // Nessuna fase accesa = assegnato a tutta la commessa. Un operatore può
+  // quindi coprire più fasi (es. cablaggio + collaudo) sulla stessa commessa.
+  function buildFaseChips(uid) {
+    const wrap = el('span', { style:'display:inline-flex;gap:3px;flex-wrap:wrap;align-items:center;' });
+    const keys = () => addettoFase[uid] || (addettoFase[uid] = []);
+    const ridisegna = () => {
+      wrap.innerHTML = '';
+      fasiComm.forEach((f, i) => {
+        if (!f.tipo_lavorazione_id) return;
+        const on = keys().includes(f._k);
+        wrap.append(el('button', {
+          type:'button',
+          style:'font-size:10px;padding:2px 7px;border-radius:10px;cursor:pointer;font-family:DM Mono,monospace;'
+            + (on ? 'background:var(--acc);color:var(--bg);border:1px solid var(--acc);font-weight:700;'
+                  : 'background:transparent;color:var(--mut);border:1px solid var(--brd);'),
+          title: (on ? 'Togli da' : 'Assegna a') + ' #' + (i+1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id),
+          onclick: () => {
+            if (!canEdit) return;
+            addettoFase[uid] = on ? keys().filter(k => k !== f._k) : [...keys(), f._k];
+            ridisegna();
+          },
+        }, '#' + (i + 1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id)));
+      });
+      if (keys().length === 0) {
+        wrap.append(el('span', { style:'font-size:10px;color:var(--mut);font-family:DM Mono,monospace;' }, 'tutta la commessa'));
+      }
+    };
+    ridisegna();
+    return wrap;
   }
 
   // Multi-select addetti (lo stesso pattern di "Chi userà il mezzo")
@@ -7633,7 +7668,7 @@ function openOperazioneModal(o) {
       const pill = el('span', { class:'util-pill' },
         el('span', {}, u.nome + (u.esterno ? ' ✦' : '')));
       if (fasiAssegnabili().length >= 1) {
-        pill.append(buildFaseSelect(addettoFase[uid] || '', (k) => { addettoFase[uid] = k; }));
+        pill.append(buildFaseChips(uid));
       }
       if (canEdit) {
         pill.append(el('button', {
@@ -8996,8 +9031,13 @@ function openOperazioneModal(o) {
         const faseIdByK = syncFasi.keyToId || {};
         const resolveFase = (k) => (k && faseIdByK[k]) ? faseIdByK[k] : null;
 
-        // 2) Addetti: ognuno con il suo fase_id (null = tutta la commessa)
-        const addettiPayload = addettiSel.map(uid => ({ utente_id: uid, fase_id: resolveFase(addettoFase[uid]) }));
+        // 2) Addetti: una riga per coppia (utente, fase). Nessuna fase
+        //    selezionata = una riga con fase_id null (tutta la commessa).
+        const addettiPayload = addettiSel.flatMap(uid => {
+          const keys = (addettoFase[uid] || []).filter(k => resolveFase(k));
+          if (keys.length === 0) return [{ utente_id: uid, fase_id: null }];
+          return keys.map(k => ({ utente_id: uid, fase_id: resolveFase(k) }));
+        });
         const syncRes = await syncOperazioneAddetti(data.id, addettiPayload);
         if (syncRes.error) {
           stopWatchdog();
@@ -9593,6 +9633,24 @@ async function quickStato(op, nuovoStato) {
 // anche operazioni.stato = 'spedita' (sincronizzazione automatica) e copia
 // `consegnato_il = data` per compatibilità con lo Storico.
 // Il nome "quickSpedizione" è mantenuto come alias per non rompere i call site.
+// Ripara lo stato di una commessa spedita per intero nei fatti ma rimasta
+// in uno stato diverso da 'spedita' (così va in Storico). consegnato_il:
+// data dell'ultima spedizione registrata, oppure quella già presente, oppure oggi.
+async function quickFixStatoSpedita(o) {
+  const spedizioniOp = (state.spedizioni || [])
+    .filter(s => s.operazione_id === o.id && s.data)
+    .sort((a, b) => (a.data < b.data ? 1 : -1));
+  const dataCons = o.consegnato_il || spedizioniOp[0]?.data || toLocalISO(new Date());
+  const { data: opAgg, error } = await sb.from('operazioni').update({
+    stato: 'spedita',
+    consegnato_il: dataCons,
+  }).eq('id', o.id).select().single();
+  if (error) return toast('Errore aggiornamento stato: ' + error.message, 'err');
+  state.operazioni = state.operazioni.map(x => x.id === o.id ? opAgg : x);
+  toast('Commessa marcata SPEDITA · ora è nello Storico', 'ok');
+  renderTab(state.currentTab);
+}
+
 function quickRegistraSpedizione(o) {
   const oggi = toLocalISO(new Date());
   const ritardo = o.scadenza && o.scadenza < oggi;
@@ -9608,7 +9666,19 @@ function quickRegistraSpedizione(o) {
   // Caso limite: niente in magazzino → niente da spedire
   if (pronti <= 0) {
     if (daSpedire <= 0) {
-      toast('Questa commessa è già stata spedita per intero.', 'err');
+      // Spedita per intero NEI FATTI ma con stato non allineato (es. rimasta
+      // 'completata' per spedizioni storiche pre-sincronizzazione): qui non
+      // c'è nulla da spedire, ma lo stato va riparato, altrimenti la commessa
+      // resta in Pianificazione invece di andare in Storico.
+      if (o.stato !== 'spedita') {
+        const ok = confirm(
+          'Questa commessa risulta già spedita per intero (' + totSped + '/' + qtaOrd + ' pz), '
+          + 'ma il suo stato è ancora "' + (OP_STATI[o.stato]?.label || o.stato) + '".\n\n'
+          + 'Vuoi marcarla come SPEDITA così va in Storico?');
+        if (ok) quickFixStatoSpedita(o);
+      } else {
+        toast('Questa commessa è già stata spedita per intero.', 'err');
+      }
     } else {
       toast('Nulla in magazzino da spedire. Registra prima la produzione.', 'err');
     }
@@ -11330,10 +11400,36 @@ function kioskGoToCommesse() {
 function addettoRigaUtenteOp(uid, opId) {
   return (state.opAddetti || []).find(r => r.utente_id === uid && r.operazione_id === opId) || null;
 }
-// True se l'utente ha dichiarato finita la propria fase su questa commessa.
+// Tutte le righe dell'utente su questa commessa (può averne più d'una: una per fase).
+function addettoRigheUtenteOp(uid, opId) {
+  return (state.opAddetti || []).filter(r => r.utente_id === uid && r.operazione_id === opId);
+}
+// True se l'utente ha dichiarato finite TUTTE le proprie fasi su questa commessa.
 function opCompletataDaUtente(uid, opId) {
-  const r = addettoRigaUtenteOp(uid, opId);
-  return !!(r && r.completata_il);
+  const righe = addettoRigheUtenteOp(uid, opId);
+  return righe.length > 0 && righe.every(r => r.completata_il);
+}
+// Riga addetto pertinente alla sessione in corso: match per fase_id della
+// sessione, poi per tipo di lavorazione della fase, poi — se l'utente ha una
+// sola riga non completata — quella. Altrimenti null (niente "ho finito").
+function rigaPerSessione(uid, sess) {
+  if (!sess || !sess.operazione_id) return null;
+  const righe = addettoRigheUtenteOp(uid, sess.operazione_id);
+  if (righe.length === 0) return null;
+  if (sess.fase_id) {
+    const r = righe.find(x => x.fase_id === sess.fase_id);
+    if (r) return r;
+  }
+  if (sess.tipo_lavorazione_id) {
+    const r = righe.find(x => {
+      if (!x.fase_id) return false;
+      const f = (state.opFasi || []).find(ff => ff.id === x.fase_id);
+      return f && f.tipo_lavorazione_id === sess.tipo_lavorazione_id;
+    });
+    if (r) return r;
+  }
+  const incomplete = righe.filter(x => !x.completata_il);
+  return incomplete.length === 1 ? incomplete[0] : null;
 }
 // Etichetta leggibile della fase di una riga addetto (nome del tipo lavorazione).
 function etichettaFaseAddetto(riga) {
@@ -11365,7 +11461,7 @@ function cmpCommessaKiosk(a, b) {
 function kioskTerminaLavoro(sess) {
   if (!sess || !sess.operazione_id) { kioskStopSessione(sess, 'pause'); return; }
   const u = kioskState.utenteSelezionato;
-  const riga = addettoRigaUtenteOp(u?.id, sess.operazione_id);
+  const riga = rigaPerSessione(u?.id, sess);
   if (!riga || riga.completata_il) { kioskStopSessione(sess, 'pause'); return; }
   kioskRenderTerminaScelta(sess, riga);
 }
@@ -11377,14 +11473,20 @@ function kioskRenderTerminaScelta(sess, riga) {
   if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
   root.innerHTML = '';
   const nomeFase = etichettaFaseAddetto(riga);
+  const nomeUtente = (state.utenti.find(x => x.id === riga.utente_id)
+    || kioskState.utenteSelezionato || {}).nome || '';
 
+  // Il nome è in evidenza APPOSTA: su un kiosk condiviso questa scelta agisce
+  // sull'utente selezionato sullo schermo, non su chi fisicamente preme.
   root.append(el('div', {
     style:'font-family:Syne,sans-serif;font-size:22px;font-weight:700;text-align:center;margin-bottom:8px;'
-  }, 'Hai finito la tua fase?'));
+  }, 'Hai finito la tua fase' + (nomeUtente ? ', ' + nomeUtente : '') + '?'));
   root.append(el('div', {
     style:'text-align:center;color:var(--mut);font-size:14px;line-height:1.5;margin-bottom:24px;'
-  }, 'Fase: ' + nomeFase + '. Se la marchi finita, questa commessa non ti verrà più suggerita '
-     + '(puoi sempre riaprirla da “✓ Completate da te”).'));
+  }, 'Fase: ' + nomeFase + (nomeUtente ? ' · Operatore: ' + nomeUtente : '')
+     + '. Se la marchi finita, questa commessa non ti verrà più suggerita '
+     + '(puoi sempre riaprirla da “✓ Completate da te”). '
+     + 'Se NON sei ' + (nomeUtente || 'questo operatore') + ', premi Annulla.'));
 
   const actions = el('div', { class:'kiosk-attiva-actions' });
   actions.append(el('button', {
@@ -11401,17 +11503,22 @@ function kioskRenderTerminaScelta(sess, riga) {
     el('button', { class:'kiosk-op-toggle-altre', onclick: () => kioskGoToAttiva() }, '← Annulla')));
 }
 
-// Marca finita la fase dell'utente su questa commessa + chiude la sessione.
+// Marca finita LA fase dell'utente (solo quella riga) + chiude la sessione.
 async function kioskFineFase(sess, riga) {
   const ora = new Date().toISOString();
   try {
-    const { error: errAdd } = await sb.from('operazioni_addetti')
-      .update({ completata_il: ora })
-      .eq('operazione_id', riga.operazione_id)
-      .eq('utente_id', riga.utente_id);
+    let q = sb.from('operazioni_addetti').update({ completata_il: ora });
+    if (riga.id) q = q.eq('id', riga.id);
+    else {
+      q = q.eq('operazione_id', riga.operazione_id).eq('utente_id', riga.utente_id);
+      q = riga.fase_id ? q.eq('fase_id', riga.fase_id) : q.is('fase_id', null);
+    }
+    const { error: errAdd } = await q;
     if (errAdd) { kioskBeep('err'); kioskShowError('Errore: ' + errAdd.message); return; }
     state.opAddetti = state.opAddetti.map(x =>
-      (x.operazione_id === riga.operazione_id && x.utente_id === riga.utente_id)
+      (riga.id ? x.id === riga.id
+        : (x.operazione_id === riga.operazione_id && x.utente_id === riga.utente_id
+           && (x.fase_id || null) === (riga.fase_id || null)))
         ? { ...x, completata_il: ora } : x);
 
     const { data: sessChiusa, error: errSess } = await sb.from('sessioni_lavoro')
@@ -11444,18 +11551,29 @@ async function kioskRiapriManuale(opId) {
   kioskRenderOpList();
 }
 
-// Ricominciare a lavorare su una commessa che avevo marcato finita la "riapre":
-// azzero completata_il (best-effort, non blocca l'avvio sessione).
-async function kioskRiapriFaseSeCompletata(uid, opId) {
-  const r = addettoRigaUtenteOp(uid, opId);
-  if (!r || !r.completata_il) return;
+// Ricominciare a lavorare su una fase che avevo marcato finita la "riapre".
+// faseId valorizzato → riapre solo quella riga; null → riapre tutte le righe
+// completate dell'utente sulla commessa (es. ↩ Riapri dalla lista).
+async function kioskRiapriFaseSeCompletata(uid, opId, faseId) {
+  const righe = addettoRigheUtenteOp(uid, opId).filter(r => r.completata_il
+    && (faseId === undefined || faseId === null || r.fase_id === faseId));
+  if (righe.length === 0) return;
   try {
-    const { error } = await sb.from('operazioni_addetti')
-      .update({ completata_il: null })
-      .eq('operazione_id', opId).eq('utente_id', uid);
-    if (error) return;
-    state.opAddetti = state.opAddetti.map(x =>
-      (x.operazione_id === opId && x.utente_id === uid) ? { ...x, completata_il: null } : x);
+    for (const r of righe) {
+      let q = sb.from('operazioni_addetti').update({ completata_il: null });
+      if (r.id) q = q.eq('id', r.id);
+      else {
+        q = q.eq('operazione_id', opId).eq('utente_id', uid);
+        q = r.fase_id ? q.eq('fase_id', r.fase_id) : q.is('fase_id', null);
+      }
+      const { error } = await q;
+      if (error) continue;
+      state.opAddetti = state.opAddetti.map(x =>
+        (r.id ? x.id === r.id
+          : (x.operazione_id === opId && x.utente_id === uid
+             && (x.fase_id || null) === (r.fase_id || null)))
+          ? { ...x, completata_il: null } : x);
+    }
   } catch (e) { /* best-effort */ }
 }
 
@@ -11527,9 +11645,17 @@ function kioskRenderOpList() {
   );
   // "mie" = assegnate a me e NON ancora marcate finite da me.
   // "completateDaMe" = assegnate a me ma con la mia fase già dichiarata finita.
-  const mie = aperte.filter(o => mieIds.has(o.id) && !opCompletataDaUtente(u.id, o.id));
-  const completateDaMe = aperte.filter(o => mieIds.has(o.id) && opCompletataDaUtente(u.id, o.id));
-  const altre = aperte.filter(o => !mieIds.has(o.id));
+  // Rete di sicurezza: una commessa su cui HO UNA SESSIONE APERTA resta
+  // sempre tra le mie, anche se la fase risultasse marcata finita (es. per
+  // un tocco sbagliato sul kiosk condiviso): finché lavoro, la vedo.
+  const conMiaSessione = new Set(state.sessioni
+    .filter(s => !s.fine && s.utente_id === u.id && s.operazione_id)
+    .map(s => s.operazione_id));
+  const mie = aperte.filter(o => (mieIds.has(o.id) && !opCompletataDaUtente(u.id, o.id))
+    || conMiaSessione.has(o.id));
+  const completateDaMe = aperte.filter(o => mieIds.has(o.id)
+    && opCompletataDaUtente(u.id, o.id) && !conMiaSessione.has(o.id));
+  const altre = aperte.filter(o => !mieIds.has(o.id) && !conMiaSessione.has(o.id));
 
   // Solo gli admin (sessione loggata come admin) possono riordinare la coda
   // dell'operatore trascinando le schede direttamente nella lista.
@@ -11768,24 +11894,25 @@ function kioskRenderTipo() {
   const fasi = opFasiOf(o);
   if (fasi.length > 0) {
     const u = kioskState.utenteSelezionato;
-    const miaFaseId = addettoRigaUtenteOp(u?.id, o.id)?.fase_id || null;
-    // La fase assegnata all'operatore va per prima (pre-selezionata),
-    // le altre restano nell'ordine della commessa.
+    // L'operatore può avere PIÙ fasi assegnate (es. cablaggio + collaudo):
+    // le evidenzio tutte e le porto in cima, nell'ordine della commessa.
+    const mieFasiIds = new Set(addettoRigheUtenteOp(u?.id, o.id)
+      .map(r => r.fase_id).filter(Boolean));
     const ordinate = fasi.slice().sort((a, b) => {
-      const am = a.id === miaFaseId, bm = b.id === miaFaseId;
+      const am = mieFasiIds.has(a.id), bm = mieFasiIds.has(b.id);
       if (am && !bm) return -1;
       if (bm && !am) return 1;
       return (a.ordine || 0) - (b.ordine || 0);
     });
 
     root.append(el('div', { class:'kiosk-tipo-hint' },
-      'Scegli la fase su cui timbri' + (miaFaseId ? ' (la tua è evidenziata)' : '') + ':'));
+      'Scegli la fase su cui timbri' + (mieFasiIds.size ? ' (le tue sono evidenziate)' : '') + ':'));
 
     const grid = el('div', { class:'kiosk-tipo-grid' });
     ordinate.forEach(f => {
       const tipo = state.tipiLav.find(t => t.id === f.tipo_lavorazione_id);
       const col = tipo?.colore || '#6b6b64';
-      const mia = f.id === miaFaseId;
+      const mia = mieFasiIds.has(f.id);
       grid.append(el('button', {
         class:'kiosk-tipo-btn' + (mia ? ' mia-fase' : ''),
         style:'border-color:'+col+';',
@@ -11862,9 +11989,9 @@ async function kioskAvviaSessione(tipoId, faseId) {
     }
     // Aggiorna cache locale
     if (!state.sessioni.find(s => s.id === data.id)) state.sessioni.unshift(data);
-    // Se l'operatore aveva marcato finita la propria fase su questa commessa,
-    // ricominciare a lavorarci la riapre.
-    await kioskRiapriFaseSeCompletata(u.id, o.id);
+    // Se l'operatore aveva marcato finita la fase che sta riavviando,
+    // ricominciare a lavorarci la riapre (solo quella).
+    await kioskRiapriFaseSeCompletata(u.id, o.id, payload.fase_id || null);
     kioskBeep('ok');
     kioskGoToAttiva();
   } catch (e) {

@@ -347,7 +347,34 @@ function cmpCommessa(a, b) {
 }
 const rigaAddetto = (uid, opId) =>
   state.opAddetti.find(r => r.utente_id === uid && r.operazione_id === opId) || null;
-const opCompletataDaMe = (uid, opId) => !!(rigaAddetto(uid, opId)?.completata_il);
+// Tutte le righe dell'utente sulla commessa (può averne più d'una: una per fase).
+const righeAddetto = (uid, opId) =>
+  state.opAddetti.filter(r => r.utente_id === uid && r.operazione_id === opId);
+// Completata da me = TUTTE le mie fasi dichiarate finite.
+const opCompletataDaMe = (uid, opId) => {
+  const righe = righeAddetto(uid, opId);
+  return righe.length > 0 && righe.every(r => r.completata_il);
+};
+// Riga pertinente alla sessione: per fase_id, poi per tipo, poi l'unica incompleta.
+function rigaPerSessione(uid, sess) {
+  if (!sess || !sess.operazione_id) return null;
+  const righe = righeAddetto(uid, sess.operazione_id);
+  if (righe.length === 0) return null;
+  if (sess.fase_id) {
+    const r = righe.find(x => x.fase_id === sess.fase_id);
+    if (r) return r;
+  }
+  if (sess.tipo_lavorazione_id) {
+    const r = righe.find(x => {
+      if (!x.fase_id) return false;
+      const f = state.opFasi.find(ff => ff.id === x.fase_id);
+      return f && f.tipo_lavorazione_id === sess.tipo_lavorazione_id;
+    });
+    if (r) return r;
+  }
+  const inc = righe.filter(x => !x.completata_il);
+  return inc.length === 1 ? inc[0] : null;
+}
 const fasiDi = (o) => state.opFasi
   .filter(f => f.operazione_id === o.id)
   .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
@@ -422,9 +449,15 @@ function renderHome() {
 
   const aperte = state.operazioni.slice().sort(cmpCommessa);
   const mieIds = new Set(state.opAddetti.filter(r => r.utente_id === u.id).map(r => r.operazione_id));
-  const mie = aperte.filter(o => mieIds.has(o.id) && !opCompletataDaMe(u.id, o.id) && matchCommessa(o, q));
-  const completate = aperte.filter(o => mieIds.has(o.id) && opCompletataDaMe(u.id, o.id) && matchCommessa(o, q));
-  const altre = aperte.filter(o => !mieIds.has(o.id) && matchCommessa(o, q));
+  // Rete di sicurezza: commessa con MIA sessione aperta sempre tra le mie.
+  const conMiaSessione = new Set(state.sessioni
+    .filter(s => !s.fine && s.utente_id === u.id && s.operazione_id)
+    .map(s => s.operazione_id));
+  const mie = aperte.filter(o => ((mieIds.has(o.id) && !opCompletataDaMe(u.id, o.id))
+    || conMiaSessione.has(o.id)) && matchCommessa(o, q));
+  const completate = aperte.filter(o => mieIds.has(o.id) && opCompletataDaMe(u.id, o.id)
+    && !conMiaSessione.has(o.id) && matchCommessa(o, q));
+  const altre = aperte.filter(o => !mieIds.has(o.id) && !conMiaSessione.has(o.id) && matchCommessa(o, q));
 
   // Le mie
   root.append(elx('div', { class:'sec-hd' }, '⭐ Le tue commesse (' + mie.length + ')'));
@@ -487,10 +520,10 @@ function goFase(o) {
 
   const fasi = fasiDi(o);
   if (fasi.length > 0) {
-    const miaFaseId = rigaAddetto(u.id, o.id)?.fase_id || null;
-    hint.textContent = 'Scegli la fase su cui timbri' + (miaFaseId ? ' (la tua è evidenziata)' : '') + ':';
+    const mieFasiIds = new Set(righeAddetto(u.id, o.id).map(r => r.fase_id).filter(Boolean));
+    hint.textContent = 'Scegli la fase su cui timbri' + (mieFasiIds.size ? ' (le tue sono evidenziate)' : '') + ':';
     const ordinate = fasi.slice().sort((a, b) => {
-      const am = a.id === miaFaseId, bm = b.id === miaFaseId;
+      const am = mieFasiIds.has(a.id), bm = mieFasiIds.has(b.id);
       if (am && !bm) return -1;
       if (bm && !am) return 1;
       return (a.ordine || 0) - (b.ordine || 0);
@@ -498,7 +531,7 @@ function goFase(o) {
     ordinate.forEach(f => {
       const tipo = state.tipiLav.find(t => t.id === f.tipo_lavorazione_id);
       const col = tipo?.colore || '#6b6b64';
-      const mia = f.id === miaFaseId;
+      const mia = mieFasiIds.has(f.id);
       list.append(elx('button', { class:'fase-btn' + (mia ? ' mia' : ''), onclick: () => avvia(f.tipo_lavorazione_id, f.id) },
         elx('div', { class:'fase-color', style:'background:' + col + ';' }),
         elx('div', { class:'fase-name' }, tipo?.nome || 'Fase'),
@@ -537,9 +570,9 @@ async function avvia(tipoId, faseId) {
     const { data, error } = await sb.from('sessioni_lavoro').insert(payload).select().single();
     if (error) throw error;
     state.sessioni.unshift(data);
-    // Se avevo marcato finita la mia fase su questa commessa, riaprirla
-    const r = rigaAddetto(u.id, o.id);
-    if (r?.completata_il) await riapriFaseSilenziosa(u.id, o.id);
+    // Se avevo marcato finita LA fase che sto riavviando, riaprirla
+    const r = righeAddetto(u.id, o.id).find(x => faseId ? x.fase_id === faseId : x.completata_il);
+    if (r?.completata_il) await riapriFaseSilenziosa(u.id, o.id, r);
     beep('ok');
     goAttiva();
   } catch (e) {
@@ -547,12 +580,20 @@ async function avvia(tipoId, faseId) {
     showDone(false, 'Errore avvio', String(e.message || e), () => goFase(o));
   }
 }
-async function riapriFaseSilenziosa(uid, opId) {
+async function riapriFaseSilenziosa(uid, opId, riga) {
   try {
-    await sb.from('operazioni_addetti').update({ completata_il: null })
-      .eq('operazione_id', opId).eq('utente_id', uid);
+    let q = sb.from('operazioni_addetti').update({ completata_il: null });
+    if (riga?.id) q = q.eq('id', riga.id);
+    else {
+      q = q.eq('operazione_id', opId).eq('utente_id', uid);
+      if (riga?.fase_id) q = q.eq('fase_id', riga.fase_id);
+    }
+    await q;
     state.opAddetti = state.opAddetti.map(x =>
-      (x.operazione_id === opId && x.utente_id === uid) ? { ...x, completata_il: null } : x);
+      (riga?.id ? x.id === riga.id
+        : (x.operazione_id === opId && x.utente_id === uid
+           && (!riga?.fase_id || x.fase_id === riga.fase_id)))
+        ? { ...x, completata_il: null } : x);
   } catch (_) {}
 }
 
@@ -616,7 +657,7 @@ function goAttiva() {
   // Azioni: come al kiosk — se ho una fase assegnata non ancora finita,
   // distinguo "ho finito" da "sospendo"; altrimenti solo termina.
   const actions = elx('div', { class:'att-actions' });
-  const riga = !isExtra ? rigaAddetto(u.id, sess.operazione_id) : null;
+  const riga = !isExtra ? rigaPerSessione(u.id, sess) : null;
   if (riga && !riga.completata_il) {
     actions.append(
       elx('button', { class:'att-btn fine', onclick: () => fineFase(sess, riga) }, '✅ Ho finito la mia fase'),
@@ -658,12 +699,18 @@ async function stopSessione(sess) {
 async function fineFase(sess, riga) {
   const ora = new Date().toISOString();
   try {
-    const { error: e1 } = await sb.from('operazioni_addetti')
-      .update({ completata_il: ora })
-      .eq('operazione_id', riga.operazione_id).eq('utente_id', riga.utente_id);
+    let q = sb.from('operazioni_addetti').update({ completata_il: ora });
+    if (riga.id) q = q.eq('id', riga.id);
+    else {
+      q = q.eq('operazione_id', riga.operazione_id).eq('utente_id', riga.utente_id);
+      q = riga.fase_id ? q.eq('fase_id', riga.fase_id) : q.is('fase_id', null);
+    }
+    const { error: e1 } = await q;
     if (e1) throw e1;
     state.opAddetti = state.opAddetti.map(x =>
-      (x.operazione_id === riga.operazione_id && x.utente_id === riga.utente_id)
+      (riga.id ? x.id === riga.id
+        : (x.operazione_id === riga.operazione_id && x.utente_id === riga.utente_id
+           && (x.fase_id || null) === (riga.fase_id || null)))
         ? { ...x, completata_il: ora } : x);
     const { data, error: e2 } = await sb.from('sessioni_lavoro')
       .update({ fine: ora }).eq('id', sess.id).select().single();
