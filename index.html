@@ -7632,7 +7632,7 @@ function openOperazioneModal(o) {
         }, '#' + (i + 1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id)));
       });
       if (keys().length === 0) {
-        wrap.append(el('span', { style:'font-size:10px;color:var(--mut);font-family:DM Mono,monospace;' }, 'tutta la commessa'));
+        wrap.append(el('span', { style:'font-size:10px;color:var(--mut);font-family:DM Mono,monospace;font-style:italic;opacity:.7;' }, 'tutta la commessa'));
       }
     };
     ridisegna();
@@ -7658,6 +7658,7 @@ function openOperazioneModal(o) {
 
   const renderAddSelected = () => {
     addSelectedWrap.innerHTML = '';
+    addSelectedWrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
     if (addettiSel.length === 0) {
       addSelectedWrap.append(el('span', { class:'util-empty' }, 'Nessun addetto previsto'));
       return;
@@ -7665,14 +7666,23 @@ function openOperazioneModal(o) {
     addettiSel.forEach(uid => {
       const u = utentiAttiviAdd.find(x => x.id === uid);
       if (!u) return;
-      const pill = el('span', { class:'util-pill' },
-        el('span', {}, u.nome + (u.esterno ? ' ✦' : '')));
+      // Una riga intera per addetto: nome a sinistra, chip fasi al centro,
+      // ✕ in fondo ben staccata (per non toccarla per sbaglio coi chip).
+      const row = el('div', { style:'display:flex;align-items:center;gap:10px;background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:7px 10px;width:100%;' },
+        el('span', { style:'font-weight:600;flex-shrink:0;min-width:110px;' },
+          u.nome + (u.esterno ? ' ✦' : '')));
       if (fasiAssegnabili().length >= 1) {
-        pill.append(buildFaseChips(uid));
+        const chips = buildFaseChips(uid);
+        chips.style.flex = '1';
+        row.append(chips);
+      } else {
+        row.append(el('span', { style:'flex:1;' }));
       }
       if (canEdit) {
-        pill.append(el('button', {
+        row.append(el('button', {
           type:'button', class:'util-pill-x',
+          style:'margin-left:auto;flex-shrink:0;padding:4px 8px;',
+          title:'Rimuovi ' + u.nome + ' dalla commessa',
           onclick: () => {
             addettiSel = addettiSel.filter(x => x !== uid);
             renderAddSelected(); renderAddDropList();
@@ -7680,7 +7690,7 @@ function openOperazioneModal(o) {
           },
         }, '✕'));
       }
-      addSelectedWrap.append(pill);
+      addSelectedWrap.append(row);
     });
   };
   const renderAddDropList = () => {
@@ -7870,8 +7880,9 @@ function openOperazioneModal(o) {
   const seqChk = el('input', { type:'checkbox' });
   seqChk.checked = fasiSeq; seqChk.disabled = !canEdit;
   seqChk.onchange = () => { fasiSeq = seqChk.checked; };
-  const seqRow = el('label', { style:'display:none;align-items:center;gap:8px;margin-top:8px;cursor:pointer;' },
-    seqChk, el('span', { class:'sub' }, 'Fasi in sequenza (catena) — altrimenti in parallelo. Solo pianificazione.'));
+  const seqRow = el('label', { style:'display:none;align-items:center;gap:8px;margin-top:8px;cursor:pointer;justify-content:flex-start;' },
+    seqChk, el('span', { style:'font-size:11px;color:var(--mut);text-transform:none;letter-spacing:0;text-align:left;' },
+      'Fasi in sequenza (catena) — altrimenti in parallelo. Solo pianificazione.'));
   function pagatoComm() {
     const mi = form.querySelector('#minuti-input');
     const v = mi ? parseFloat((mi.value || '').toString().replace(',', '.')) : NaN;
@@ -7896,7 +7907,11 @@ function openOperazioneModal(o) {
   // Ripulisce le assegnazioni che puntano a fasi non più valide.
   function pruneFaseAssegnazioni() {
     const validi = new Set(fasiAssegnabili().map(f => f._k));
-    Object.keys(addettoFase).forEach(uid => { if (addettoFase[uid] && !validi.has(addettoFase[uid])) addettoFase[uid] = ''; });
+    Object.keys(addettoFase).forEach(uid => {
+      const v = addettoFase[uid];
+      const arr = Array.isArray(v) ? v : (v ? [v] : []);
+      addettoFase[uid] = arr.filter(k => validi.has(k));
+    });
     (fornitoriSel || []).forEach(s => { if (s.fase_k && !validi.has(s.fase_k)) s.fase_k = ''; });
   }
   // Quando cambiano le fasi: ridisegno editor, confronto e le tendine "fase" di
@@ -7926,7 +7941,8 @@ function openOperazioneModal(o) {
       inMin.oninput = () => { f.minuti_unitari = Number(inMin.value) || 0; aggiornaConfrontoComm(); };
       const row = el('div', { style:'display:flex;gap:8px;align-items:center;margin:6px 0;' },
         el('span', { class:'sub', style:'width:20px;flex-shrink:0;' }, '#' + (i + 1)),
-        sel, inMin);
+        sel, inMin,
+        el('span', { class:'sub', style:'flex-shrink:0;font-size:10px;' }, 'min/pz'));
       if (canEdit) {
         row.append(el('button', { type:'button', class:'btnsm', style:'flex-shrink:0;',
           onclick: () => { fasiComm.splice(i, 1); onFasiChanged(); } }, '✕'));
@@ -7942,10 +7958,13 @@ function openOperazioneModal(o) {
 
   // ── Struttura a schede: i pannelli vivono DENTRO il form, così FormData
   // legge anche i campi delle schede non visibili al momento del salvataggio.
+  // Vengono agganciati SUBITO al form (prima di riempirli), così tutti i
+  // form.querySelector(...) dei blocchi di setup trovano i campi.
   const pDati = el('div', { class:'optab-panel on' });
   const pLav  = el('div', { class:'optab-panel' });
   const pProd = el('div', { class:'optab-panel' });
   const pCons = el('div', { class:'optab-panel' });
+  form.append(pDati, pLav, pProd, pCons);
 
   pDati.append(
     el('div', { class:'frow' },
@@ -7976,8 +7995,8 @@ function openOperazioneModal(o) {
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Numero OP'),
         el('input', { type:'text', name:'numero_op',
-          value: o.numero_op || (new Date().getFullYear() + '/OP/'),
-          placeholder:'es. 2026/OP/00001',
+          value: o.numero_op || '',
+          placeholder:'es. 2026/OP/00001 (opzionale)',
           pattern:'\\d{4}/OP/\\d{5}',
           title:'Formato richiesto: AAAA/OP/NNNNN (opzionale)',
           // Al blur: stesso pattern del numero ordine ma per OP.
@@ -7997,7 +8016,7 @@ function openOperazioneModal(o) {
       el('div', { class:'field' }, el('label', {}, 'Quantità *'),
         el('input', { type:'number', name:'quantita', value:String(o.quantita||1), min:'1', required:'true' })),
       el('div', { class:'field' },
-        el('label', { id:'minuti-label' }, 'Minuti unitari',
+        el('label', { id:'minuti-label' }, 'Minuti unitari (tempo pagato)',
           el('span', { id:'minuti-diff', style:'color:var(--yel);margin-left:4px;display:none;', title:'Valore diverso dal default dell\'articolo (clicca per ripristinare)' }, '*')),
         el('input', {
           type:'number', name:'minuti_unitari', id:'minuti-input',
@@ -8785,6 +8804,7 @@ function openOperazioneModal(o) {
         el('div', { class:'opsum-scad' + (scadLate ? ' late' : '') },
           'Scad. ' + fmtIT(o.scadenza || '') + (scadLate ? ' ⚠' : '')),
         el('div', { class:'opsum-ore', title:'Ore consuntivate / preventivate' },
+          el('span', { style:'font-size:9px;letter-spacing:.08em;text-transform:uppercase;' }, 'ore'),
           el('div', { class:'opsum-orebar' },
             el('div', { class:'opsum-orefill' + (overOre ? ' over' : ''), style:'width:' + percOre + '%;' })),
           el('span', {}, cons.toFixed(1) + '/' + prev.toFixed(1) + 'h')),
@@ -8816,7 +8836,6 @@ function openOperazioneModal(o) {
   });
   body.append(tabBar);
 
-  form.append(pDati, pLav, pProd, pCons);
   body.append(form);
   modal.append(body);
 
