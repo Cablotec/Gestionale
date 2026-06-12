@@ -168,9 +168,10 @@ input.search:focus{border-color:var(--acc);}
 .opsum-scad{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
 .opsum-scad.late{color:var(--red);font-weight:700;}
 .opsum-ore{display:flex;align-items:center;gap:8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
-.opsum-orebar{width:90px;height:8px;background:var(--bg);border:1px solid var(--brd);border-radius:4px;overflow:hidden;}
+.opsum-orebar{width:110px;height:8px;background:var(--bg);border:1px solid var(--brd);border-radius:4px;overflow:hidden;position:relative;}
 .opsum-orefill{height:100%;background:var(--blu);}
 .opsum-orefill.over{background:var(--red);}
+.opsum-oretick{position:absolute;top:-1px;bottom:-1px;width:2px;background:var(--acc);}
 .optabs{display:flex;gap:4px;border-bottom:1px solid var(--brd);margin-bottom:14px;flex-wrap:wrap;}
 .optab-btn{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:8px 12px;cursor:pointer;}
 .optab-btn.act{color:var(--acc);border-bottom-color:var(--acc);}
@@ -7583,13 +7584,19 @@ function openOperazioneModal(o) {
         .map(f => ({ _k: f.id, id: f.id, tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
   let fasiSeq = !!o.fasi_sequenziali;
   // Assegnazione addetto → fase: utente_id → _k della fase ('' = tutta la commessa)
-  const addettoFase = {};   // uid → ARRAY di chiavi fase ([] = tutta la commessa)
+  const addettoFase = {};   // uid → ARRAY di chiavi fase
   if (!isNew) {
+    const tutteKeys = () => fasiComm.filter(f => f.tipo_lavorazione_id).map(f => f._k);
+    const haNull = {};
     (state.opAddetti || []).filter(r => r.operazione_id === o.id)
       .forEach(r => {
         if (!addettoFase[r.utente_id]) addettoFase[r.utente_id] = [];
         if (r.fase_id) addettoFase[r.utente_id].push(r.fase_id);
+        else haNull[r.utente_id] = true;
       });
+    // "Tutta la commessa" (fase_id null) viene reso ESPLICITO: tutte le fasi
+    // accese. Più chiaro a video e, al salvataggio, una riga per fase.
+    Object.keys(haNull).forEach(uid => { addettoFase[uid] = tutteKeys(); });
   }
   const tipoNomeFase = (id) => (tipiAttiviComm.find(t => t.id === id) || {}).nome || 'fase';
   const fasiAssegnabili = () => fasiComm.filter(f => f.tipo_lavorazione_id);
@@ -7626,6 +7633,10 @@ function openOperazioneModal(o) {
           title: (on ? 'Togli da' : 'Assegna a') + ' #' + (i+1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id),
           onclick: () => {
             if (!canEdit) return;
+            if (on && keys().length === 1) {
+              toast('Almeno una fase: per toglierlo dalla commessa usa la \u2715', 'err');
+              return;
+            }
             addettoFase[uid] = on ? keys().filter(k => k !== f._k) : [...keys(), f._k];
             ridisegna();
           },
@@ -7710,7 +7721,12 @@ function openOperazioneModal(o) {
         onclick: () => {
           if (!canEdit) return;
           if (isSel) addettiSel = addettiSel.filter(x => x !== u.id);
-          else addettiSel.push(u.id);
+          else {
+            addettiSel.push(u.id);
+            // Un addetto appena aggiunto parte assegnato a TUTTE le fasi
+            // (esplicito): poi si tolgono quelle che non lo riguardano.
+            addettoFase[u.id] = fasiAssegnabili().map(f => f._k);
+          }
           renderAddSelected(); renderAddDropList();
           if (aggiornaPreviewInizio) aggiornaPreviewInizio();
         },
@@ -7910,7 +7926,11 @@ function openOperazioneModal(o) {
     Object.keys(addettoFase).forEach(uid => {
       const v = addettoFase[uid];
       const arr = Array.isArray(v) ? v : (v ? [v] : []);
-      addettoFase[uid] = arr.filter(k => validi.has(k));
+      const puliti = arr.filter(k => validi.has(k));
+      // Se la pulizia lascia l'addetto senza fasi ma le fasi esistono,
+      // torna a "tutte" (esplicito) per non creare lo stato ambiguo.
+      addettoFase[uid] = (puliti.length === 0 && validi.size > 0)
+        ? [...validi] : puliti;
     });
     (fornitoriSel || []).forEach(s => { if (s.fase_k && !validi.has(s.fase_k)) s.fase_k = ''; });
   }
@@ -8113,6 +8133,43 @@ function openOperazioneModal(o) {
       el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
         '── Sessioni di lavoro ──'),
     );
+
+    // ── Riepilogo per FASE: quale ha sforato e quale no ──
+    const fasiOp = (state.opFasi || [])
+      .filter(f => f.operazione_id === o.id)
+      .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+    if (fasiOp.length > 0) {
+      const box = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;' });
+      box.append(el('div', { style:'color:var(--mut);font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;' }, 'Riepilogo per fase'));
+      let sommaConsFasi = 0;
+      fasiOp.forEach((f, i) => {
+        const tipo = state.tipiLav.find(t => t.id === f.tipo_lavorazione_id);
+        const fPrev = faseCalcOre(o, f);
+        const fCons = faseCalcOreReali(o, f);
+        sommaConsFasi += fCons;
+        const fPerc = fPrev > 0 ? Math.round(fCons / fPrev * 100) : 0;
+        const sfora = fPrev > 0 && fCons > fPrev + 0.05;
+        box.append(el('div', { style:'display:flex;align-items:center;gap:10px;padding:3px 0;' },
+          el('span', { style:'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + (tipo?.colore || '#6b6b64') + ';' }),
+          el('span', { style:'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' },
+            '#' + (i + 1) + ' ' + (tipo?.nome || 'Fase')),
+          el('span', { style:'color:' + (sfora ? 'var(--red)' : 'var(--mut)') + ';flex-shrink:0;' },
+            fCons.toFixed(1) + ' / ' + fPrev.toFixed(1) + 'h'
+            + (fPrev > 0 ? ' (' + fPerc + '%)' : '')
+            + (sfora ? ' ⚠ +' + (fCons - fPrev).toFixed(1) + 'h' : ' ✓')),
+        ));
+      });
+      // Ore non attribuibili a nessuna fase (tipi diversi, sessioni anomale)
+      const fuori = Math.max(0, opCalcOreReali(o) - sommaConsFasi);
+      if (fuori > 0.05) {
+        box.append(el('div', { style:'display:flex;align-items:center;gap:10px;padding:3px 0;color:var(--yel);' },
+          el('span', { style:'width:10px;height:10px;flex-shrink:0;text-align:center;' }, '?'),
+          el('span', { style:'flex:1;' }, 'Fuori fase (tipo non riconducibile)'),
+          el('span', { style:'flex-shrink:0;' }, fuori.toFixed(1) + 'h'),
+        ));
+      }
+      pCons.append(box);
+    }
 
     if (sessOp.length === 0) {
       pCons.append(el('div', { style:'color:var(--mut);font-size:11px;padding:8px 0;' },
@@ -8777,7 +8834,9 @@ function openOperazioneModal(o) {
   // Espongo lo stato del lucchetto al salvataggio
   form._inizioBloccato = () => inizioBloccato;
 
-  pDati.appendChild(previewBox);
+  // previewBox non più mostrato: le ore stimate sono già nell'header
+  // riassuntivo. refreshPreview continua a scrivere su un nodo staccato
+  // (innocuo) — utile se in futuro lo si vuole riattivare.
 
   // ── Header riassuntivo (solo commesse esistenti): colpo d'occhio ──
   if (!isNew) {
@@ -8787,8 +8846,25 @@ function openOperazioneModal(o) {
     const oggiISO = toLocalISO(new Date());
     const scadLate = o.scadenza && o.scadenza < oggiISO && o.stato !== 'spedita';
     const prev = opCalcOre(o), cons = opCalcOreReali(o);
-    const percOre = prev > 0 ? Math.min(100, Math.round(cons / prev * 100)) : 0;
-    const overOre = prev > 0 && cons > prev;
+    // Tempo pagato della commessa (budget): se presente è il 100% della barra,
+    // con una tacca al preventivo interno (somma fasi). Senza pagato, la barra
+    // torna al solo confronto consuntivo/preventivo.
+    const pagatoOre = (Number(o.minuti_unitari) > 0 && Number(o.quantita) > 0)
+      ? (Number(o.minuti_unitari) * Number(o.quantita)) / 60 : 0;
+    const base = pagatoOre > 0 ? pagatoOre : prev;
+    const percOre = base > 0 ? Math.min(100, Math.round(cons / base * 100)) : 0;
+    const overOre = base > 0 && cons > base;
+    const tackPrev = (pagatoOre > 0 && prev > 0)
+      ? Math.min(100, Math.round(prev / pagatoOre * 100)) : null;
+    const barInner = [
+      el('div', { class:'opsum-orefill' + (overOre ? ' over' : ''), style:'width:' + percOre + '%;' }),
+    ];
+    if (tackPrev !== null) {
+      barInner.push(el('div', {
+        class:'opsum-oretick', style:'left:' + tackPrev + '%;',
+        title:'Preventivo fasi: ' + prev.toFixed(1) + 'h',
+      }));
+    }
     body.append(el('div', { class:'opsum' },
       el('div', { class:'opsum-main' },
         el('div', { class:'opsum-cod' },
@@ -8803,11 +8879,14 @@ function openOperazioneModal(o) {
       el('div', { class:'opsum-right' },
         el('div', { class:'opsum-scad' + (scadLate ? ' late' : '') },
           'Scad. ' + fmtIT(o.scadenza || '') + (scadLate ? ' ⚠' : '')),
-        el('div', { class:'opsum-ore', title:'Ore consuntivate / preventivate' },
+        el('div', { class:'opsum-ore', title: pagatoOre > 0
+            ? 'Consuntivo ' + cons.toFixed(1) + 'h · tacca = preventivo fasi ' + prev.toFixed(1) + 'h · 100% = tempo pagato ' + pagatoOre.toFixed(1) + 'h'
+            : 'Ore consuntivate / preventivate' },
           el('span', { style:'font-size:9px;letter-spacing:.08em;text-transform:uppercase;' }, 'ore'),
-          el('div', { class:'opsum-orebar' },
-            el('div', { class:'opsum-orefill' + (overOre ? ' over' : ''), style:'width:' + percOre + '%;' })),
-          el('span', {}, cons.toFixed(1) + '/' + prev.toFixed(1) + 'h')),
+          el('div', { class:'opsum-orebar' }, ...barInner),
+          el('span', {}, pagatoOre > 0
+            ? cons.toFixed(1) + 'h · fasi ' + prev.toFixed(1) + ' · pag. ' + pagatoOre.toFixed(1)
+            : cons.toFixed(1) + '/' + prev.toFixed(1) + 'h')),
       ),
     ));
   }
