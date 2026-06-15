@@ -249,7 +249,7 @@ input.search:focus{border-color:var(--acc);}
 .op-table td{padding:4px 8px;vertical-align:middle;}
 .op-table tr.in-ritardo td{background:rgba(255,78,107,.06);}
 .op-table tr.in-ritardo td:first-child{box-shadow:inset 3px 0 0 var(--red);}
-.op-table tr.spedita td{opacity:.55;text-decoration:line-through;text-decoration-thickness:1px;}
+.op-table tr.spedita td{opacity:.7;}
 .op-cell-inline{cursor:pointer;padding:3px 6px;border-radius:2px;transition:background .1s;}
 .op-cell-inline:hover{background:rgba(212,255,78,.08);}
 .op-cell-inline.editing{padding:0;background:transparent;}
@@ -2035,7 +2035,10 @@ function loadPrenotazioneOperatori(prenId) {
 
 // Restituisce gli id degli addetti previsti di un'operazione (dalla cache, sync)
 function getOperazioneAddetti(opId) {
-  return state.opAddetti.filter(r => r.operazione_id === opId).map(r => r.utente_id);
+  // Un utente può avere PIÙ righe (una per fase): qui serve l'elenco delle
+  // PERSONE, una volta sola. Le fasi vengono raccolte separatamente in
+  // addettoFase. (Deduplica anche eventuali doppioni dati legacy.)
+  return [...new Set(state.opAddetti.filter(r => r.operazione_id === opId).map(r => r.utente_id))];
 }
 
 // ============================================================
@@ -5921,21 +5924,15 @@ function storicoMinutiPz(articoloId, tipoLavId) {
     secPerOp[s.operazione_id] = (secPerOp[s.operazione_id] || 0) + (Number(s.durata_secondi) || 0);
     nSessPerOp[s.operazione_id] = (nSessPerOp[s.operazione_id] || 0) + 1;
   });
-  // Una commessa entra nello storico solo se i suoi pezzi sono affidabili:
-  //  - spedita/completata → pezzi = prodotti (o pianificati come ripiego);
-  //  - ancora aperta → SOLO se ha produzione registrata (pezzi = prodotti).
-  // Le commesse aperte senza lotti vengono escluse del tutto (ore parziali
-  // su pezzi totali falserebbero la media al ribasso).
+  // Una commessa entra nello storico SOLO se è 'spedita': dato definitivo,
+  // pezzi e ore consolidati e non più in movimento. Così le medie usate per
+  // generare le fasi non cambiano più man mano che le commesse procedono.
   let totSec = 0, pezzi = 0, nSessioni = 0, nCommesse = 0;
   Object.keys(secPerOp).forEach(id => {
     const op = (state.operazioni || []).find(o => o.id === id);
-    if (!op) return;
+    if (!op || op.stato !== 'spedita') return;
     const prod = quantitaConsegnata(id);
-    const chiusa = op.stato === 'spedita' || op.stato === 'completata';
-    let pz = 0;
-    if (chiusa) pz = prod > 0 ? prod : Number(op.quantita || 0);
-    else if (prod > 0) pz = prod;
-    else return; // aperta senza produzione: esclusa
+    const pz = prod > 0 ? prod : Number(op.quantita || 0);
     if (pz <= 0) return;
     totSec += secPerOp[id];
     pezzi += pz;
@@ -9394,6 +9391,7 @@ function renderStorico(root) {
   const filtroMese = state.stoMese || null;
   const filtroAddetto = state.stoAddetto || '';
   const filtroPunt = state.stoPunt || 'all';
+  const filtroSfora = state.stoSfora || false;   // solo spedizioni di commesse che hanno sforato il pagato
 
   // Vista evento-centrica: ogni riga è UNA spedizione (dalla tabella `spedizioni`).
   // Una commessa con N spedizioni parziali appare N volte (una riga per evento).
@@ -9430,6 +9428,17 @@ function renderStorico(root) {
   };
   if (filtroPunt === 'puntuali') list = list.filter(s => (ritardoSped(s)||0) <= 0);
   else if (filtroPunt === 'ritardo') list = list.filter(s => (ritardoSped(s)||0) > 0);
+
+  // Sforamento tempo pagato: consuntivo reale (ore) della commessa > tempo
+  // pagato (minuti_unitari × quantità). Solo commesse con pagato impostato.
+  const haSforato = (op) => {
+    if (!op) return false;
+    const pagatoOre = (Number(op.minuti_unitari) > 0 && Number(op.quantita) > 0)
+      ? (Number(op.minuti_unitari) * Number(op.quantita)) / 60 : 0;
+    if (pagatoOre <= 0) return false;
+    return opCalcOreReali(op) > pagatoOre + 0.01;
+  };
+  if (filtroSfora) list = list.filter(s => haSforato(opById[s.operazione_id]));
 
   // Ricerca: DDT, destinatario, note, ordine, OP, rif. cliente, pos, cliente, codice, descrizione
   if (search) {
@@ -9513,6 +9522,13 @@ function renderStorico(root) {
       onclick: () => { state.stoPunt = opt.id; renderTab('storico'); }
     }, opt.label));
   });
+  // Toggle: solo commesse che hanno sforato il tempo pagato
+  puntChips.append(el('div', {
+    class: 'chip' + (filtroSfora ? ' act' : ''),
+    style: filtroSfora ? 'border-color:var(--red);color:var(--red);' : '',
+    title: 'Mostra solo le commesse il cui consuntivo ha superato il tempo pagato',
+    onclick: () => { state.stoSfora = !state.stoSfora; renderTab('storico'); }
+  }, '⚠ Sforate pagato'));
   root.append(puntChips);
 
   // Toolbar con filtro clienti (multi) / addetto + ricerca
@@ -9574,6 +9590,7 @@ function renderStorico(root) {
     el('th', {}, 'Destinatario'),
     el('th', {}, 'Note'),
     el('th', {}, 'Scadenza'),
+    el('th', { class:'tr' }, 'Ore (cons/pag.)'),
     el('th', { class:'tc' }, 'Esito'),
     el('th', { class:'tc' }, 'Azioni'),
   )));
@@ -9618,6 +9635,15 @@ function renderStorico(root) {
         title: s.note || '',
       }, s.note || '—'),
       el('td', { class:'mono' }, op?.scadenza ? fmtIT(op.scadenza) : '—'),
+      (() => {
+        const pagatoOre = (op && Number(op.minuti_unitari) > 0 && Number(op.quantita) > 0)
+          ? (Number(op.minuti_unitari) * Number(op.quantita)) / 60 : 0;
+        if (!op || pagatoOre <= 0) return el('td', { class:'tr mono', style:'color:var(--mut);' }, '—');
+        const cons = opCalcOreReali(op);
+        const sfora = cons > pagatoOre + 0.01;
+        return el('td', { class:'tr mono', style: sfora ? 'color:var(--red);font-weight:700;' : 'color:var(--mut);' },
+          cons.toFixed(1) + '/' + pagatoOre.toFixed(1) + (sfora ? ' ⚠' : ''));
+      })(),
       el('td', { class:'tc' }, esitoBadge),
       el('td', { class:'tc' },
         el('button', { class:'btnsm',
