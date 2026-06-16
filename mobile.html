@@ -69,6 +69,42 @@ button{font-family:inherit;}
 .login-err{color:#ff6b5e;font-size:13px;text-align:center;min-height:18px;margin:8px 0;}
 .login-hi{font-size:15px;font-weight:700;text-align:center;margin:6px 0 12px;}
 .login-msg{color:var(--acc);font-size:13px;text-align:center;padding:6px 0 12px;}
+
+/* ── Gate login (a tutto schermo) / App ── */
+#auth-screen{flex:1;display:none;flex-direction:column;align-items:center;justify-content:center;padding:28px 24px;}
+#app-screen{flex:1;display:none;flex-direction:column;min-height:0;}
+.auth-box{width:100%;max-width:330px;display:flex;flex-direction:column;gap:12px;}
+.auth-logo{font-size:26px;font-weight:800;text-align:center;letter-spacing:-.01em;margin-bottom:2px;}
+.auth-logo span{color:var(--acc);}
+.auth-sub{font-size:12px;color:var(--mut);text-align:center;margin:-6px 0 8px;}
+.auth-boot{display:flex;flex-direction:column;align-items:center;gap:14px;color:var(--mut);}
+.auth-foot{font-size:11px;color:var(--mut);text-align:center;line-height:1.6;margin-top:10px;}
+
+/* ── Mezzi / prenotazioni ── */
+.mezzi-cta{width:100%;background:var(--acc);color:var(--bg);border:none;border-radius:10px;padding:14px;font-weight:700;font-size:15px;cursor:pointer;margin-bottom:14px;}
+.mezzo-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;flex:none;}
+.cr-line1{display:flex;align-items:center;font-size:15px;font-weight:700;}
+.cr-del{margin-top:8px;background:rgba(255,107,94,.1);border:1px solid #ff6b5e;color:#ff6b5e;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;}
+.mz-field{margin-bottom:12px;}
+.mz-label{font-family:'DM Mono',monospace;font-size:10px;color:var(--acc);letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px;display:block;}
+.mz-row{display:flex;gap:10px;}
+.mz-row .mz-field{flex:1;}
+.mz-input{width:100%;background:var(--sur);border:1px solid var(--brd);border-radius:10px;color:var(--txt);font-family:'DM Mono',monospace;font-size:14px;padding:12px;outline:none;}
+.mz-input:focus{border-color:var(--acc);}
+.mz-avail{background:var(--sur2);border:1px solid var(--brd);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--mut);margin-bottom:12px;}
+.mz-avail .ok{color:var(--acc);font-weight:700;}
+.mz-avail .busy{color:#ff6b5e;}
+.mz-busy-row{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);margin-top:4px;}
+.mz-chip{display:inline-flex;align-items:center;gap:6px;background:var(--sur2);border:1px solid var(--brd);border-radius:16px;padding:5px 10px;font-size:12px;margin:0 6px 8px 0;}
+.mz-chip-x{background:none;border:none;color:var(--mut);cursor:pointer;font-size:13px;padding:0;line-height:1;}
+.mz-droplist{max-height:170px;overflow-y:auto;border:1px solid var(--brd);border-radius:10px;margin-top:6px;background:var(--sur);}
+.mz-drop-row{padding:11px 12px;cursor:pointer;border-bottom:1px solid var(--brd);font-size:14px;}
+.mz-drop-row:last-child{border-bottom:none;}
+.mz-drop-row:active{background:rgba(212,255,78,.06);}
+.fr-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;}
+.fr-chip{background:transparent;border:2px solid var(--brd);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:700;cursor:pointer;}
+.fr-stepper{display:flex;align-items:center;gap:8px;}
+.fr-step{width:42px;height:42px;font-size:20px;font-weight:700;background:var(--sur2);border:2px solid var(--brd);color:var(--txt);border-radius:8px;cursor:pointer;}
 .scroll{flex:1;overflow-y:auto;padding-bottom:10px;}
 .sec-hd{font-family:'DM Mono',monospace;font-size:10px;color:var(--acc);letter-spacing:.1em;text-transform:uppercase;margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--acc);}
 .sec-hd.dim{color:var(--mut);border-color:var(--brd);}
@@ -124,6 +160,12 @@ button{font-family:inherit;}
 </head>
 <body>
 
+<!-- Gate di login: a tutto schermo, PRIMA dell'app (come nel gestionale) -->
+<div id="auth-screen"></div>
+
+<!-- App vera e propria: nascosta finché non si è loggati -->
+<div id="app-screen">
+
 <div class="hdr">
   <div class="hdr-title">📱 Cablotec <span>Mobile</span></div>
   <div class="hdr-right">
@@ -136,17 +178,6 @@ button{font-family:inherit;}
   <button class="mnav-btn act" id="nav-lavoro" onclick="navTo('lavoro')">⏱ Lavoro</button>
   <button class="mnav-btn" id="nav-mezzi" onclick="navTo('mezzi')">🚐 Mezzi</button>
   <button class="mnav-btn" id="nav-ferie" onclick="navTo('ferie')">🏖 Ferie</button>
-</div>
-
-<!-- Boot -->
-<div class="step on" id="step-boot">
-  <div class="boot" id="boot-box"><div class="spin"></div><div>Connessione…</div></div>
-</div>
-
-<!-- 1. Login -->
-<div class="step" id="step-op">
-  <div class="step-title" id="op-title">Accedi</div>
-  <div class="op-grid" id="op-grid"></div>
 </div>
 
 <!-- 2. Home: le mie commesse -->
@@ -174,21 +205,16 @@ button{font-family:inherit;}
   <div class="done"><div class="done-card" id="done-card"></div></div>
 </div>
 
-<!-- Sezioni future -->
+<!-- Sezione Mezzi (renderizzata da JS) -->
 <div class="step" id="step-mezzi">
-  <div class="soon">
-    <div class="big">🚐</div>
-    <div class="ttl">Prenotazione mezzi</div>
-    <div>In arrivo su mobile.<br>Per ora prenota dal kiosk di reparto.</div>
-  </div>
+  <div id="mezzi-root" class="scroll"></div>
 </div>
+<!-- Sezione Ferie (renderizzata da JS) -->
 <div class="step" id="step-ferie">
-  <div class="soon">
-    <div class="big">🏖</div>
-    <div class="ttl">Ferie e permessi</div>
-    <div>In arrivo su mobile.</div>
-  </div>
+  <div id="ferie-root" class="scroll"></div>
 </div>
+
+</div><!-- /#app-screen -->
 
 <script>
 // ═══════════════ CONFIG (stesso backend del gestionale) ═══════════════
@@ -227,9 +253,13 @@ const SEDE_TIMBRO  = 'mobile';   // marca le sessioni avviate dal telefono
 // ═══════════════ Stato ═══════════════
 const $ = s => document.querySelector(s);
 let sb = null;
+let mezziVista = 'lista';   // 'lista' | 'form' — vista corrente della sezione Mezzi
+let ferieVista = 'lista';   // 'lista' | 'form' — vista corrente della sezione Ferie
 const state = {
-  utenti: [], operazioni: [], aziende: [], articoli: [],
+  utenti: [], utentiById: {}, operazioni: [], aziende: [], articoli: [],
   tipiLav: [], opFasi: [], opAddetti: [], sessioni: [], attivita: [],
+  mezzi: [], prenotazioni: [], prenOp: [], consegne: [],
+  tipiAssenza: [], assenze: [], impostazioni: {}, chiusure: [],
   operatore: null, opSel: null,
   search: '', vediAltre: false,
   timer: null,
@@ -248,8 +278,8 @@ function show(id) {
 
 // Navigazione tra le sezioni dell'app (Lavoro / Mezzi / Ferie).
 function navTo(sez) {
-  if (sez === 'mezzi') { show('step-mezzi'); return; }
-  if (sez === 'ferie') { show('step-ferie'); return; }
+  if (sez === 'mezzi') { mezziVista = 'lista'; show('step-mezzi'); renderMezzi(); return; }
+  if (sez === 'ferie') { ferieVista = 'lista'; show('step-ferie'); renderFerie(); return; }
   goHome();   // 'lavoro': home timbrature (o sessione attiva se aperta)
 }
 
@@ -265,10 +295,17 @@ function elx(tag, attrs = {}, ...children) {
 }
 const fmtT = d => String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
 const fmtIT = iso => { if (!iso) return '—'; const [y,m,g] = iso.split('-'); return g + '/' + m + '/' + y; };
+const todayISO = () => { const d = new Date(); const z = n => String(n).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); };
+const TIPI_MEZZI = [
+  { id:'trasferta', label:'Trasferta' },
+  { id:'consegna', label:'Consegna' },
+  { id:'manutenzione', label:'Manutenzione' },
+  { id:'altro', label:'Altro' },
+];
 
 // ═══════════════ Boot e dati ═══════════════
 async function boot() {
-  const box = $('#boot-box');
+  showAuthBoot();
   try {
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const { data: sd } = await sb.auth.getSession();
@@ -278,32 +315,61 @@ async function boot() {
     // Sessione di un account operatore reale già salvata sul telefono → entra diretto.
     // (L'account tecnico condiviso 'kiosk@…' non è un login valido qui.)
     if (sessione && emailSess && emailSess !== APP_EMAIL.toLowerCase()) {
-      await loadData();
-      state.operatore = state.utenti.find(u => u.account_id === sessione.user.id) || null;
-      if (state.operatore) { aggiornaHeader(); goHome(); return; }
-      // Account loggato ma non collegato a un operatore attivo.
+      if (await entra(sessione.user.id)) return;
       await sb.auth.signOut().catch(() => {});
-      goLogin('Questo account non è collegato a un operatore. Contatta l\'ufficio.');
+      renderAuth('Questo account non è collegato a un operatore. Contatta l\'ufficio.');
       return;
     }
 
-    // Nessuna sessione utile (o vecchia sessione dell'account condiviso): pulisco e mostro il login.
+    // Nessuna sessione utile (o vecchia sessione condivisa): pulisco e mostro il gate.
     if (sessione) await sb.auth.signOut().catch(() => {});
-    aggiornaHeader();
-    goLogin();
+    renderAuth();
   } catch (e) {
-    box.innerHTML = '';
-    box.append(elx('div', { class:'big' }, '✕ Errore di avvio'),
-               elx('div', {}, String(e.message || e)),
-               elx('button', { onclick: () => location.reload() }, 'Riprova'));
+    renderAuthError(e);
   }
+}
+
+// Carica i dati, mappa l'account loggato all'operatore e rivela l'app.
+// Ritorna false se l'account non è collegato a nessun operatore.
+async function entra(userId) {
+  await loadData();
+  state.operatore = state.utenti.find(u => u.account_id === userId) || null;
+  if (!state.operatore) return false;
+  showApp();
+  aggiornaHeader();
+  goHome();
+  return true;
+}
+
+// Mostra il gate a tutto schermo (nasconde l'app).
+function showAuthBoot() {
+  $('#app-screen').style.display = 'none';
+  const root = $('#auth-screen');
+  root.style.display = 'flex';
+  root.innerHTML = '';
+  root.append(elx('div', { class:'auth-boot' },
+    elx('div', { class:'spin' }), elx('div', {}, 'Connessione…')));
+}
+function showApp() {
+  $('#auth-screen').style.display = 'none';
+  $('#app-screen').style.display = 'flex';
+}
+function renderAuthError(e) {
+  $('#app-screen').style.display = 'none';
+  const root = $('#auth-screen');
+  root.style.display = 'flex';
+  root.innerHTML = '';
+  root.append(elx('div', { class:'auth-box' },
+    elx('div', { class:'auth-logo' }, '✕ Errore di avvio'),
+    elx('div', { class:'auth-sub' }, String(e?.message || e)),
+    elx('button', { class:'login-go', onclick: () => location.reload() }, 'Riprova')));
 }
 
 async function loadData() {
   const [ut, op, az, ar, tl, fs, ad, se, ax] = await Promise.all([
-    sb.from('utenti').select('id,nome,attivo,email,account_id').order('nome'),
+    sb.from('utenti').select('id,nome,attivo,email,account_id,gruppo').order('nome'),
     sb.from('operazioni').select('*').not('stato', 'in', '("spedita","completata")'),
-    sb.from('aziende').select('id,nome'),
+    sb.from('aziende').select('id,nome,citta,provincia,attivo'),
     sb.from('articoli').select('id,codice,descrizione'),
     sb.from('tipi_lavorazione').select('id,nome,colore,attivo,ordine'),
     sb.from('operazioni_fasi').select('*'),
@@ -314,6 +380,7 @@ async function loadData() {
   for (const r of [ut, op, az, ar, tl, fs, ad, se]) if (r.error) throw r.error;
   state.utenti = (ut.data || []).filter(u => u.attivo !== false &&
     (u.email || '').toLowerCase() !== APP_EMAIL.toLowerCase());
+  state.utentiById = Object.fromEntries(state.utenti.map(u => [u.id, u]));
   state.operazioni = op.data || [];
   state.aziende = az.data || [];
   state.articoli = ar.data || [];
@@ -322,6 +389,45 @@ async function loadData() {
   state.opAddetti = ad.data || [];
   state.sessioni = se.data || [];
   state.attivita = ax.data || [];   // best-effort (tabella opzionale)
+  await loadMezziData();
+  await loadFerieData();
+}
+
+// Dati per la sezione Ferie. Best-effort. Carico tipi, le assenze valide
+// dall'inizio dell'anno (per lista + dedup), impostazioni (finestre/esenti)
+// e chiusure aziendali (per saltare i giorni non lavorativi).
+async function loadFerieData() {
+  try {
+    const annoIso = todayISO().slice(0, 4) + '-01-01';
+    const [ta, as, im, ch] = await Promise.all([
+      sb.from('tipi_assenza').select('*').order('ordine'),
+      sb.from('assenze').select('*').eq('stato', 'valida').gte('data', annoIso),
+      sb.from('impostazioni').select('*'),
+      sb.from('chiusure').select('*'),
+    ]);
+    state.tipiAssenza = ta.data || [];
+    state.assenze = as.data || [];
+    state.impostazioni = Object.fromEntries((im.data || []).map(r => [r.chiave, r.valore]));
+    state.chiusure = ch.data || [];
+  } catch (e) { /* best-effort: la timbratura funziona comunque */ }
+}
+
+// Dati per la sezione Mezzi. Best-effort: se falliscono, la timbratura funziona
+// comunque. Carico solo le prenotazioni da oggi in poi (disponibilità + le mie).
+async function loadMezziData() {
+  try {
+    const oggi = todayISO();
+    const [mz, pr, pu, co] = await Promise.all([
+      sb.from('mezzi').select('*').order('nome'),
+      sb.from('prenotazioni').select('*').gte('data_fine', oggi),
+      sb.from('prenotazioni_utenti').select('*'),
+      sb.from('consegne').select('*'),
+    ]);
+    state.mezzi = mz.data || [];
+    state.prenotazioni = pr.data || [];
+    state.prenOp = pu.data || [];
+    state.consegne = co.data || [];
+  } catch (e) { /* best-effort */ }
 }
 
 async function ricarica() {
@@ -329,6 +435,8 @@ async function ricarica() {
   // Re-render della schermata corrente
   if ($('#step-home').classList.contains('on')) renderHome();
   else if ($('#step-att').classList.contains('on')) goAttiva();
+  else if ($('#step-mezzi').classList.contains('on') && mezziVista === 'lista') renderMezzi();
+  else if ($('#step-ferie').classList.contains('on') && ferieVista === 'lista') renderFerie();
 }
 // Quando l'app torna in primo piano, riallinea i dati (sessioni potrebbero
 // essere cambiate dal kiosk di reparto o dal gestionale).
@@ -419,16 +527,23 @@ function infoCommessa(o) {
   );
 }
 
-// ═══════════════ 1. Login (email + password) ═══════════════
-// Login standard col PROPRIO account Supabase. La sessione resta salvata sul
-// telefono (login una volta sola). Dopo l'accesso mappo l'account all'operatore
-// via utenti.account_id, così la timbratura è personale senza scelta utente.
-function goLogin(msg) {
-  show('step-op');
-  const title = $('#op-title'); if (title) title.textContent = 'Accedi';
-  const grid = $('#op-grid');
-  grid.style.display = 'block';   // form a colonna singola, non griglia
-  grid.innerHTML = '';
+// ═══════════════ 1. Login — gate a tutto schermo (email + password) ═══════════════
+// Login standard col PROPRIO account Supabase, mostrato PRIMA dell'app (come nel
+// gestionale): finché non si è loggati, header e sezioni restano nascosti.
+// La sessione resta salvata sul telefono → login una volta sola. Dopo l'accesso
+// mappo l'account all'operatore via utenti.account_id, così la timbratura è
+// personale senza scelta utente.
+function renderAuth(msg) {
+  $('#app-screen').style.display = 'none';
+  const root = $('#auth-screen');
+  root.style.display = 'flex';
+  root.innerHTML = '';
+
+  const box = elx('div', { class:'auth-box' });
+  box.append(
+    elx('div', { class:'auth-logo' }, '📱 Cablotec ', elx('span', {}, 'Mobile')),
+    elx('div', { class:'auth-sub' }, 'Accedi col tuo account'),
+  );
 
   const inEmail = elx('input', { type:'email', class:'search', placeholder:'Email',
     autocomplete:'username', autocapitalize:'none', spellcheck:'false' });
@@ -448,16 +563,13 @@ function goLogin(msg) {
     try {
       const { data, error } = await sb.auth.signInWithPassword({ email, password: pwd });
       if (error) throw error;
-      await loadData();
-      state.operatore = state.utenti.find(u => u.account_id === data.user.id) || null;
-      if (!state.operatore) {
+      const ok = await entra(data.user.id);
+      if (!ok) {
         await sb.auth.signOut().catch(() => {});
         throw new Error('Questo account non è collegato a un operatore. Contatta l\'ufficio.');
       }
       try { localStorage.setItem('oper_email', email); } catch (_) {}
       beep('ok');
-      aggiornaHeader();
-      goHome();
     } catch (e) {
       btn.disabled = false; btn.textContent = 'Entra';
       const m = e.message || String(e);
@@ -470,25 +582,666 @@ function goLogin(msg) {
   inPwd.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
   btn.onclick = doLogin;
 
-  if (msg) grid.append(elx('div', { class:'login-msg' }, msg));
-  grid.append(inEmail, inPwd, err, btn);
+  if (msg) box.append(elx('div', { class:'login-msg' }, msg));
+  box.append(inEmail, inPwd, err, btn);
+  box.append(elx('div', { class:'auth-foot' }, 'Gli account vengono creati dall\'ufficio.'));
+
+  root.append(box);
   setTimeout(() => { try { (inEmail.value ? inPwd : inEmail).focus(); } catch (_) {} }, 50);
 }
 
-// Logout: esce dall'account e torna alla schermata di accesso.
+// Logout: esce dall'account e torna al gate di accesso.
 async function logout() {
   const nome = state.operatore?.nome || '';
   if (!confirm('Vuoi uscire' + (nome ? ', ' + nome : '') + '?')) return;
   try { await sb.auth.signOut(); } catch (_) {}
   state.operatore = null; state.opSel = null;
   aggiornaHeader();
-  goLogin();
+  renderAuth();
+}
+
+// ═══════════════ Mezzi / prenotazioni ═══════════════
+const mezzoById = id => (state.mezzi || []).find(m => m.id === id) || null;
+const clienteById = id => (state.aziende || []).find(a => a.id === id) || null;
+
+// Destinazione breve di una prenotazione (dalla prima consegna collegata).
+function destinazioneBreve(prenId) {
+  const cs = (state.consegne || []).filter(c => c.prenotazione_id === prenId);
+  if (cs.length === 0) return '—';
+  const c0 = cs[0];
+  const cli = c0.cliente_id ? clienteById(c0.cliente_id) : null;
+  const base = cli ? cli.nome : (c0.descrizione || '—');
+  return cs.length > 1 ? base + ' +' + (cs.length - 1) : base;
+}
+// Prenotazioni di un mezzo che toccano un dato giorno (per la disponibilità).
+function prenotazioniMezzoGiorno(mezzoId, data) {
+  return (state.prenotazioni || [])
+    .filter(p => p.mezzo_id === mezzoId && p.data_inizio <= data && p.data_fine >= data)
+    .sort((a, b) => (a.ora_inizio || '').localeCompare(b.ora_inizio || ''));
+}
+
+// Conflitti — portati dal gestionale (intervalli semiaperti [inizio, fine)).
+function checkSovrapposizioni(mezzoId, dataInizio, dataFine, escludiId, oraInizio, oraFine) {
+  const aInizio = new Date(dataInizio + 'T' + (oraInizio || '00:00'));
+  const aFine = new Date(dataFine + 'T' + (oraFine || '23:59'));
+  const usaOrari = !isNaN(aInizio.getTime()) && !isNaN(aFine.getTime());
+  return (state.prenotazioni || []).filter(p => {
+    if (p.mezzo_id !== mezzoId) return false;
+    if (escludiId && p.id === escludiId) return false;
+    if (!(p.data_inizio <= dataFine && p.data_fine >= dataInizio)) return false;
+    if (usaOrari) {
+      const bInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
+      const bFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
+      if (!isNaN(bInizio.getTime()) && !isNaN(bFine.getTime())) return aInizio < bFine && bInizio < aFine;
+    }
+    return true;
+  });
+}
+function checkSovrapposizioniOperatori(utentiIds, dataInizio, dataFine, escludiId, oraInizio, oraFine) {
+  const ids = new Set(utentiIds || []);
+  if (ids.size === 0) return [];
+  const aInizio = new Date(dataInizio + 'T' + (oraInizio || '00:00'));
+  const aFine = new Date(dataFine + 'T' + (oraFine || '23:59'));
+  const usaOrari = !isNaN(aInizio.getTime()) && !isNaN(aFine.getTime());
+  const res = [];
+  (state.prenotazioni || []).forEach(p => {
+    if (escludiId && p.id === escludiId) return;
+    const comuni = (state.prenOp || [])
+      .filter(r => r.prenotazione_id === p.id && ids.has(r.utente_id)).map(r => r.utente_id);
+    if (comuni.length === 0) return;
+    if (!(p.data_inizio <= dataFine && p.data_fine >= dataInizio)) return;
+    if (usaOrari) {
+      const bInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
+      const bFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
+      if (!isNaN(bInizio.getTime()) && !isNaN(bFine.getTime())) { if (!(aInizio < bFine && bInizio < aFine)) return; }
+    }
+    res.push({ pren: p, operatori: comuni });
+  });
+  return res;
+}
+
+// ─── Lista "Le mie prenotazioni" ───
+function renderMezzi() {
+  mezziVista = 'lista';
+  const root = $('#mezzi-root');
+  if (!root) return;
+  if (!state.operatore) { renderAuth(); return; }
+  root.innerHTML = '';
+  root.append(elx('button', { class:'mezzi-cta', onclick: () => renderPrenotaForm() }, '+ Prenota un mezzo'));
+
+  if ((state.mezzi || []).length === 0) {
+    root.append(elx('div', { class:'empty' }, 'Mezzi non disponibili al momento.'));
+    return;
+  }
+
+  const accId = state.operatore.account_id;
+  const oggi = todayISO();
+  const mieIds = new Set((state.prenOp || [])
+    .filter(r => r.utente_id === state.operatore.id).map(r => r.prenotazione_id));
+  const mie = (state.prenotazioni || [])
+    .filter(p => (p.data_fine || p.data_inizio) >= oggi)
+    .filter(p => mieIds.has(p.id) || p.utente_id === accId)
+    .sort((a, b) => (a.data_inizio + (a.ora_inizio || '')).localeCompare(b.data_inizio + (b.ora_inizio || '')));
+
+  root.append(elx('div', { class:'sec-hd' }, 'Le mie prenotazioni'));
+  if (mie.length === 0) {
+    root.append(elx('div', { class:'empty' }, 'Nessuna prenotazione in programma.'));
+    return;
+  }
+  mie.forEach(p => root.append(prenotazioneCard(p)));
+}
+
+function prenotazioneCard(p) {
+  const m = mezzoById(p.mezzo_id);
+  const tipo = TIPI_MEZZI.find(t => t.id === p.tipo);
+  const periodo = p.data_inizio === p.data_fine ? fmtIT(p.data_inizio)
+    : fmtIT(p.data_inizio) + ' → ' + fmtIT(p.data_fine);
+  const orari = (p.ora_inizio && p.ora_fine) ? p.ora_inizio + '–' + p.ora_fine : '';
+  const nomi = (state.prenOp || []).filter(r => r.prenotazione_id === p.id)
+    .map(r => state.utentiById[r.utente_id]?.nome).filter(Boolean).join(', ');
+  const dest = destinazioneBreve(p.id);
+  const sonoCreatore = p.utente_id === state.operatore.account_id;
+
+  const card = elx('div', { class:'comm-row' });
+  card.append(
+    elx('div', { class:'cr-line1' },
+      elx('span', { class:'mezzo-dot', style:'background:' + (m?.colore || '#6b6b64') + ';' }),
+      elx('span', {}, m ? m.nome : 'Mezzo')),
+    elx('div', { class:'cr-meta' }, '📅 ' + periodo + (orari ? ' · ' + orari : '')),
+  );
+  const sub = (tipo ? tipo.label : '') + (dest && dest !== '—' ? ' · ' + dest : '');
+  if (sub.trim()) card.append(elx('div', { class:'cr-sub' }, sub));
+  if (nomi) card.append(elx('div', { class:'cr-sub' }, '👥 ' + nomi));
+  if (sonoCreatore) {
+    card.append(elx('button', { class:'cr-del',
+      onclick: (e) => { e.stopPropagation(); annullaPrenotazione(p); } }, '✕ Annulla'));
+  }
+  return card;
+}
+
+async function annullaPrenotazione(p) {
+  if (!confirm('Annullare questa prenotazione?')) return;
+  try {
+    const { error } = await sb.from('prenotazioni').delete().eq('id', p.id);
+    if (error) throw error;
+    state.prenotazioni = state.prenotazioni.filter(x => x.id !== p.id);
+    state.prenOp = state.prenOp.filter(r => r.prenotazione_id !== p.id);
+    state.consegne = state.consegne.filter(c => c.prenotazione_id !== p.id);
+    beep('ok'); renderMezzi();
+  } catch (e) { beep('err'); alert('Errore: ' + (e.message || e)); }
+}
+
+// ─── Form di prenotazione ───
+function renderPrenotaForm() {
+  mezziVista = 'form';
+  const root = $('#mezzi-root');
+  root.innerHTML = '';
+  const mezziAttivi = (state.mezzi || []).filter(m => m.attivo);
+
+  root.append(elx('button', { class:'back-link',
+    onclick: () => renderMezzi() }, '‹ Indietro'));
+
+  if (mezziAttivi.length === 0) {
+    root.append(elx('div', { class:'empty' }, 'Nessun mezzo attivo. Chiedi all\'ufficio di aggiungerne.'));
+    return;
+  }
+
+  const f = {
+    mezzo_id: mezziAttivi[0].id, data: todayISO(),
+    oraIn: '08:00', oraFi: '18:00', tipo: 'trasferta',
+    operatori: [state.operatore.id], destCliente: null, destNota: '', note: '',
+  };
+
+  root.append(elx('div', { class:'step-title' }, 'Prenota un mezzo'));
+
+  // Mezzo
+  const selMezzo = elx('select', { class:'mz-input', onchange: e => { f.mezzo_id = e.target.value; renderAvail(); } },
+    ...mezziAttivi.map(m => elx('option', { value:m.id }, m.nome + (m.targa ? ' · ' + m.targa : ''))));
+  selMezzo.value = f.mezzo_id;
+  root.append(elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Mezzo'), selMezzo));
+
+  // Data
+  const inData = elx('input', { type:'date', class:'mz-input', value:f.data,
+    onchange: e => { f.data = e.target.value; renderAvail(); } });
+  root.append(elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Data'), inData));
+
+  // Ore
+  const inIn = elx('input', { type:'time', class:'mz-input', value:f.oraIn,
+    onchange: e => { f.oraIn = e.target.value; renderAvail(); } });
+  const inFi = elx('input', { type:'time', class:'mz-input', value:f.oraFi,
+    onchange: e => { f.oraFi = e.target.value; renderAvail(); } });
+  root.append(elx('div', { class:'mz-row' },
+    elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Dalle'), inIn),
+    elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Alle'), inFi)));
+
+  // Disponibilità del mezzo nel giorno scelto
+  const availBox = elx('div', { class:'mz-avail' });
+  root.append(availBox);
+  function renderAvail() {
+    availBox.innerHTML = '';
+    const giorno = prenotazioniMezzoGiorno(f.mezzo_id, f.data);
+    if (giorno.length === 0) {
+      availBox.append(elx('div', { class:'ok' }, '✅ Libero tutto il giorno'));
+      return;
+    }
+    availBox.append(elx('div', {}, 'Già prenotato:'));
+    giorno.forEach(p => {
+      const nomi = (state.prenOp || []).filter(r => r.prenotazione_id === p.id)
+        .map(r => state.utentiById[r.utente_id]?.nome).filter(Boolean).join(', ');
+      const oo = (p.ora_inizio && p.ora_fine) ? p.ora_inizio + '–' + p.ora_fine : 'tutto il giorno';
+      availBox.append(elx('div', { class:'mz-busy-row' }, '• ' + oo + (nomi ? ' · ' + nomi : '')));
+    });
+    if (checkSovrapposizioni(f.mezzo_id, f.data, f.data, null, f.oraIn, f.oraFi).length)
+      availBox.append(elx('div', { class:'busy', style:'margin-top:6px;font-weight:700;' }, '⚠ La tua fascia si sovrappone'));
+  }
+  renderAvail();
+
+  // Tipo
+  const selTipo = elx('select', { class:'mz-input', onchange: e => { f.tipo = e.target.value; renderDest(); } },
+    ...TIPI_MEZZI.map(t => elx('option', { value:t.id }, t.label)));
+  selTipo.value = f.tipo;
+  root.append(elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Tipo'), selTipo));
+
+  // Operatori (io bloccato + aggiungi colleghi)
+  const opWrap = elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Chi userà il mezzo'));
+  const chips = elx('div');
+  const opSearch = elx('input', { type:'text', class:'mz-input', placeholder:'Aggiungi collega…', autocomplete:'off' });
+  const opDrop = elx('div', { class:'mz-droplist', style:'display:none;' });
+  const renderChips = () => {
+    chips.innerHTML = '';
+    f.operatori.forEach(uid => {
+      const u = state.utentiById[uid]; const isMe = uid === state.operatore.id;
+      chips.append(elx('span', { class:'mz-chip' },
+        elx('span', {}, (u?.nome || '?') + (isMe ? ' (io)' : '')),
+        isMe ? null : elx('button', { class:'mz-chip-x', type:'button',
+          onclick: () => { f.operatori = f.operatori.filter(x => x !== uid); renderChips(); } }, '✕')));
+    });
+  };
+  const renderOpDrop = () => {
+    const q = (opSearch.value || '').toLowerCase().trim();
+    const cand = state.utenti.filter(u => !f.operatori.includes(u.id)
+      && (!q || (u.nome || '').toLowerCase().includes(q)));
+    opDrop.innerHTML = '';
+    if (cand.length === 0) { opDrop.style.display = 'none'; return; }
+    cand.slice(0, 8).forEach(u => opDrop.append(elx('div', { class:'mz-drop-row',
+      onmousedown: (e) => { e.preventDefault(); f.operatori.push(u.id); opSearch.value = ''; opDrop.style.display = 'none'; renderChips(); } },
+      u.nome)));
+    opDrop.style.display = '';
+  };
+  opSearch.oninput = renderOpDrop;
+  opSearch.onfocus = renderOpDrop;
+  opSearch.onblur = () => setTimeout(() => { opDrop.style.display = 'none'; }, 200);
+  opWrap.append(chips, opSearch, opDrop);
+  root.append(opWrap);
+  renderChips();
+
+  // Destinazione (cliente) — obbligatoria solo se tipo "Consegna"
+  const destWrap = elx('div', { class:'mz-field' });
+  root.append(destWrap);
+  function renderDest() {
+    destWrap.innerHTML = '';
+    const req = f.tipo === 'consegna';
+    destWrap.append(elx('label', { class:'mz-label' }, 'Destinazione cliente' + (req ? ' *' : ' (opz.)')));
+    const cliSearch = elx('input', { type:'text', class:'mz-input', placeholder:'Cerca cliente…',
+      autocomplete:'off', value: f.destCliente ? (clienteById(f.destCliente)?.nome || '') : '' });
+    const cliDrop = elx('div', { class:'mz-droplist', style:'display:none;' });
+    const renderCliDrop = () => {
+      const q = (cliSearch.value || '').toLowerCase().trim();
+      const cand = (state.aziende || []).filter(a => a.attivo !== false
+        && (!q || (a.nome || '').toLowerCase().includes(q)))
+        .sort((a, b) => (a.nome || '').localeCompare(b.nome || '')).slice(0, 12);
+      cliDrop.innerHTML = '';
+      if (cand.length === 0) { cliDrop.style.display = 'none'; return; }
+      cand.forEach(a => cliDrop.append(elx('div', { class:'mz-drop-row',
+        onmousedown: (e) => { e.preventDefault(); f.destCliente = a.id; cliSearch.value = a.nome; cliDrop.style.display = 'none'; } },
+        a.nome + (a.citta ? ' · ' + a.citta : ''))));
+      cliDrop.style.display = '';
+    };
+    cliSearch.oninput = () => { f.destCliente = null; renderCliDrop(); };
+    cliSearch.onfocus = renderCliDrop;
+    cliSearch.onblur = () => setTimeout(() => { cliDrop.style.display = 'none'; }, 200);
+    const cliNota = elx('input', { type:'text', class:'mz-input', placeholder:'Cosa (opz.)',
+      style:'margin-top:8px;', value:f.destNota, oninput: e => f.destNota = e.target.value });
+    destWrap.append(cliSearch, cliDrop, cliNota);
+  }
+  renderDest();
+
+  // Note
+  const inNote = elx('textarea', { class:'mz-input', rows:'2', placeholder:'Note (opz.)',
+    oninput: e => f.note = e.target.value });
+  root.append(elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Note'), inNote));
+
+  // Salva
+  const err = elx('div', { class:'login-err' });
+  const btn = elx('button', { class:'login-go' }, 'Prenota');
+  btn.onclick = () => salvaPrenotazione(f, btn, err);
+  root.append(err, btn);
+}
+
+async function salvaPrenotazione(f, btn, err) {
+  if (!f.mezzo_id) { err.textContent = 'Scegli un mezzo'; return; }
+  if (!f.data) { err.textContent = 'Scegli la data'; return; }
+  if (!f.oraIn || !f.oraFi) { err.textContent = 'Imposta ora inizio e fine'; return; }
+  if (f.oraFi <= f.oraIn) { err.textContent = 'L\'ora fine deve essere dopo l\'inizio'; return; }
+  if (f.operatori.length === 0) { err.textContent = 'Seleziona almeno un operatore'; return; }
+  if (f.tipo === 'consegna' && !f.destCliente) { err.textContent = 'Per il tipo Consegna scegli un cliente'; return; }
+
+  // Conflitti (stessa logica del gestionale)
+  if (checkSovrapposizioni(f.mezzo_id, f.data, f.data, null, f.oraIn, f.oraFi).length) {
+    err.textContent = 'Mezzo già occupato in quella fascia'; beep('err'); return;
+  }
+  const confOp = checkSovrapposizioniOperatori(f.operatori, f.data, f.data, null, f.oraIn, f.oraFi);
+  if (confOp.length) {
+    const nomi = [...new Set(confOp.flatMap(c => c.operatori))]
+      .map(id => state.utentiById[id]?.nome).filter(Boolean).join(', ');
+    err.textContent = 'Già impegnato su un altro mezzo: ' + nomi; beep('err'); return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Prenoto…'; err.textContent = '';
+  try {
+    const payload = {
+      mezzo_id: f.mezzo_id, tipo: f.tipo,
+      data_inizio: f.data, data_fine: f.data,
+      ora_inizio: f.oraIn, ora_fine: f.oraFi,
+      note: f.note || null,
+      utente_id: state.operatore.account_id,   // creatore = id account
+    };
+    const { data: pren, error } = await sb.from('prenotazioni').insert(payload).select().single();
+    if (error) {
+      if ((error.message || '').includes('exclusion')) throw new Error('Mezzo già prenotato in quel periodo');
+      throw error;
+    }
+    const opRows = f.operatori.map(uid => ({ prenotazione_id: pren.id, utente_id: uid }));
+    const { data: opIns } = await sb.from('prenotazioni_utenti').insert(opRows).select();
+    let consIns = [];
+    if (f.destCliente) {
+      const { data } = await sb.from('consegne').insert([{
+        prenotazione_id: pren.id, ordine: 0, cliente_id: f.destCliente, descrizione: f.destNota || null,
+      }]).select();
+      consIns = data || [];
+    }
+    state.prenotazioni.push(pren);
+    state.prenOp = state.prenOp.concat(opIns || opRows);
+    state.consegne = state.consegne.concat(consIns);
+    beep('ok');
+    renderMezzi();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Prenota';
+    err.textContent = e.message || String(e); beep('err');
+  }
+}
+
+// ═══════════════ Ferie / assenze ═══════════════
+// Helper portati fedelmente dal gestionale (finestre di apertura, festivi,
+// chiusure, ore per codice tipo). La scrittura è identica a quella admin:
+// una riga per giorno, stato 'valida', niente approvazione.
+const zp = n => String(n).padStart(2, '0');
+const toLocalISO = d => `${d.getFullYear()}-${zp(d.getMonth()+1)}-${zp(d.getDate())}`;
+const parseISODate = s => { const [y,m,d] = String(s).split('-').map(Number); return new Date(y, m-1, d); };
+
+function getImpostazione(chiave, def) {
+  const v = state.impostazioni && state.impostazioni[chiave];
+  return (v === undefined || v === null) ? def : v;
+}
+function parseGGMM(s) {
+  if (!s) return null;
+  const m = String(s).match(/^(\d{1,2})-(\d{1,2})$/);
+  if (!m) return null;
+  const g = +m[1], me = +m[2];
+  if (g < 1 || g > 31 || me < 1 || me > 12) return null;
+  return { giorno: g, mese: me };
+}
+function isoDentroIntervallo(iso, ggmmDa, ggmmA) {
+  const da = parseGGMM(ggmmDa), a = parseGGMM(ggmmA);
+  if (!da || !a) return false;
+  const d = parseISODate(iso);
+  const g = d.getDate(), m = d.getMonth() + 1;
+  const k = (mm, gg) => mm * 100 + gg;
+  const kd = k(m, g), kDa = k(da.mese, da.giorno), kA = k(a.mese, a.giorno);
+  if (kDa <= kA) return kd >= kDa && kd <= kA;
+  return kd >= kDa || kd <= kA;
+}
+function getFinestreAssenze() {
+  return [
+    { nome:'estiva',
+      aperturaDa: getImpostazione('finestra_estiva_apertura_da', '01-03'),
+      aperturaA:  getImpostazione('finestra_estiva_apertura_a',  '31-03'),
+      periodoDa:  getImpostazione('finestra_estiva_periodo_da',  '01-04'),
+      periodoA:   getImpostazione('finestra_estiva_periodo_a',   '30-09') },
+    { nome:'invernale',
+      aperturaDa: getImpostazione('finestra_invernale_apertura_da', '01-09'),
+      aperturaA:  getImpostazione('finestra_invernale_apertura_a',  '30-09'),
+      periodoDa:  getImpostazione('finestra_invernale_periodo_da',  '01-10'),
+      periodoA:   getImpostazione('finestra_invernale_periodo_a',   '31-03') },
+  ];
+}
+function getGruppiEsentiAssenze() {
+  const raw = getImpostazione('assenze_gruppi_esenti', null);
+  if (raw === null || raw === undefined) return ['laboratorio'];
+  try { const arr = typeof raw === 'string' ? JSON.parse(raw) : raw; return Array.isArray(arr) ? arr : []; }
+  catch (_) { return []; }
+}
+// Regola finestre: niente date passate, solo dentro la finestra di apertura
+// del periodo, salvo gruppi esenti. Identica al gestionale.
+function verificaAccessoAssenza(iso, utente) {
+  const esenti = getGruppiEsentiAssenze();
+  if (utente?.gruppo && esenti.includes(utente.gruppo)) return { ok:true, esenzione:utente.gruppo };
+  const oggiIso = todayISO();
+  if (iso < oggiIso) return { ok:false, motivo:'le date passate non sono inseribili' };
+  const finestre = getFinestreAssenze();
+  const finestra = finestre.find(f => isoDentroIntervallo(iso, f.periodoDa, f.periodoA));
+  if (!finestra) return { ok:false, motivo:'questa data non rientra in nessuna finestra di apertura' };
+  if (!isoDentroIntervallo(oggiIso, finestra.aperturaDa, finestra.aperturaA))
+    return { ok:false, motivo:`le assenze del periodo ${finestra.nome} si inseriscono dal ${finestra.aperturaDa} al ${finestra.aperturaA}` };
+  return { ok:true, finestra };
+}
+
+// Giorni non lavorativi: weekend + festivi nazionali + chiusure aziendali.
+const FESTIVI_NAZ_FISSI = [
+  {m:1,d:1},{m:1,d:6},{m:4,d:25},{m:5,d:1},{m:6,d:2},
+  {m:8,d:15},{m:11,d:1},{m:12,d:8},{m:12,d:25},{m:12,d:26},
+];
+function calcolaPasqua(anno) {
+  const a=anno%19, b=Math.floor(anno/100), c=anno%100, d=Math.floor(b/4), e=b%4,
+    f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3), h=(19*a+b-d-g+15)%30,
+    i=Math.floor(c/4), k=c%4, l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
+    mese=Math.floor((h+l-7*m+114)/31), giorno=((h+l-7*m+114)%31)+1;
+  return new Date(anno, mese-1, giorno);
+}
+function festiviNazIsoSet(anno) {
+  const s = new Set();
+  FESTIVI_NAZ_FISSI.forEach(f => s.add(toLocalISO(new Date(anno, f.m-1, f.d))));
+  const pasqua = calcolaPasqua(anno);
+  s.add(toLocalISO(pasqua));
+  const pasquetta = new Date(pasqua); pasquetta.setDate(pasqua.getDate()+1);
+  s.add(toLocalISO(pasquetta));
+  return s;
+}
+function chiusuraIso(iso) {
+  return (state.chiusure || []).some(c => {
+    if (!c.data) return false;
+    return c.ricorrente ? c.data.substring(5) === iso.substring(5) : c.data === iso;
+  });
+}
+function isGiornoNonLavorativo(d) {
+  const dow = d.getDay();
+  if (dow === 0 || dow === 6) return true;
+  const iso = toLocalISO(d);
+  if (festiviNazIsoSet(d.getFullYear()).has(iso)) return true;
+  return chiusuraIso(iso);
+}
+function getAssenza(utenteId, iso) {
+  return (state.assenze || []).find(a => a.utente_id === utenteId && a.data === iso && a.stato === 'valida');
+}
+// Ore in base al codice tipo: F/M = giornata intera (8h), P = permesso a ore.
+function modalitaOre(tipo) {
+  const c = (tipo?.codice || '').toUpperCase();
+  if (c === 'F' || c === 'M') return 'fissa';
+  if (c === 'P') return 'permesso';
+  return 'presets';
+}
+function oreInizialiTipo(tipo) {
+  const mod = modalitaOre(tipo);
+  if (mod === 'fissa') return 8;
+  if (mod === 'permesso') return 0.5;
+  return parseFloat(tipo?.ore_default) || 8;
+}
+
+// ─── Lista "Le mie assenze" ───
+function renderFerie() {
+  ferieVista = 'lista';
+  const root = $('#ferie-root');
+  if (!root) return;
+  if (!state.operatore) { renderAuth(); return; }
+  root.innerHTML = '';
+  root.append(elx('button', { class:'mezzi-cta', onclick: () => renderFerieForm() }, '+ Richiedi assenza'));
+
+  const tipiById = Object.fromEntries((state.tipiAssenza || []).map(t => [t.id, t]));
+  const oggi = todayISO();
+  const mie = (state.assenze || []).filter(a => a.utente_id === state.operatore.id);
+  const future = mie.filter(a => a.data >= oggi).sort((a, b) => a.data.localeCompare(b.data));
+  const passate = mie.filter(a => a.data < oggi).sort((a, b) => b.data.localeCompare(a.data));
+
+  root.append(elx('div', { class:'sec-hd' }, 'Prossime'));
+  if (future.length === 0) root.append(elx('div', { class:'empty' }, 'Nessuna assenza in programma.'));
+  else future.forEach(a => root.append(assenzaCard(a, tipiById, true)));
+
+  if (passate.length) {
+    root.append(elx('div', { class:'sec-hd dim', style:'margin-top:14px;' }, 'Recenti'));
+    passate.slice(0, 12).forEach(a => root.append(assenzaCard(a, tipiById, false)));
+  }
+}
+
+function assenzaCard(a, tipiById, cancellabile) {
+  const t = tipiById[a.tipo_assenza_id];
+  const ore = parseFloat(a.ore);
+  const oreTxt = (ore >= 8) ? 'giornata intera' : (ore + 'h');
+  const card = elx('div', { class:'comm-row' });
+  card.append(
+    elx('div', { class:'cr-line1' },
+      elx('span', { class:'mezzo-dot', style:'background:' + (t?.colore || '#6b6b64') + ';' }),
+      elx('span', {}, t ? (t.codice ? t.codice + ' — ' + t.nome : t.nome) : 'Assenza')),
+    elx('div', { class:'cr-meta' }, '📅 ' + fmtIT(a.data) + ' · ' + oreTxt),
+  );
+  if (a.note) card.append(elx('div', { class:'cr-sub' }, a.note));
+  if (cancellabile) card.append(elx('button', { class:'cr-del',
+    onclick: () => annullaAssenza(a) }, '✕ Annulla'));
+  return card;
+}
+
+async function annullaAssenza(a) {
+  // Come nel gestionale: posso togliere la mia assenza solo se la data è
+  // ancora dentro la finestra consentita (i gruppi esenti sempre).
+  const v = verificaAccessoAssenza(a.data, state.operatore);
+  if (!v.ok) { alert('Non puoi annullare questa assenza: ' + v.motivo + '.'); return; }
+  if (!confirm('Annullare l\'assenza del ' + fmtIT(a.data) + '?')) return;
+  try {
+    const { error } = await sb.from('assenze').delete().eq('id', a.id);
+    if (error) throw error;
+    state.assenze = state.assenze.filter(x => x.id !== a.id);
+    beep('ok'); renderFerie();
+  } catch (e) { beep('err'); alert('Errore: ' + (e.message || e)); }
+}
+
+// ─── Form richiesta assenza ───
+function renderFerieForm() {
+  ferieVista = 'form';
+  const root = $('#ferie-root');
+  root.innerHTML = '';
+  root.append(elx('button', { class:'back-link', onclick: () => renderFerie() }, '‹ Indietro'));
+
+  const tipi = (state.tipiAssenza || []).filter(t => t.attivo).sort((a, b) => (a.ordine||0) - (b.ordine||0));
+  if (tipi.length === 0) {
+    root.append(elx('div', { class:'empty' }, 'Nessun tipo di assenza configurato. Chiedi all\'ufficio.'));
+    return;
+  }
+
+  const f = { tipo: tipi[0].id, dataIn: todayISO(), dataFi: todayISO(), ore: oreInizialiTipo(tipi[0]), note: '' };
+  root.append(elx('div', { class:'step-title' }, 'Richiedi assenza'));
+
+  // Tipo (chips colorate)
+  root.append(elx('label', { class:'mz-label' }, 'Tipo'));
+  const chipWrap = elx('div', { class:'fr-chips' });
+  const renderTipoChips = () => {
+    chipWrap.innerHTML = '';
+    tipi.forEach(t => {
+      const sel = f.tipo === t.id, col = t.colore || '#888';
+      chipWrap.append(elx('button', {
+        type:'button', class:'fr-chip' + (sel ? ' sel' : ''),
+        style: sel ? `background:${col};border-color:${col};color:#0f0f0e;` : `border-color:${col};color:${col};`,
+        onclick: () => { f.tipo = t.id; f.ore = oreInizialiTipo(t); renderTipoChips(); renderOre(); },
+      }, t.codice ? t.codice + ' — ' + t.nome : t.nome));
+    });
+  };
+  root.append(chipWrap);
+  renderTipoChips();
+
+  // Periodo (dal/al)
+  const inIn = elx('input', { type:'date', class:'mz-input', value:f.dataIn,
+    onchange: e => { f.dataIn = e.target.value; if (f.dataFi < f.dataIn) { f.dataFi = f.dataIn; inFi.value = f.dataFi; } renderHint(); } });
+  const inFi = elx('input', { type:'date', class:'mz-input', value:f.dataFi,
+    onchange: e => { f.dataFi = e.target.value; renderHint(); } });
+  root.append(elx('div', { class:'mz-row' },
+    elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Dal'), inIn),
+    elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Al'), inFi)));
+
+  // Ore (dipende dal codice del tipo)
+  const oreWrap = elx('div', { class:'mz-field' });
+  root.append(oreWrap);
+  function renderOre() {
+    oreWrap.innerHTML = '';
+    const tipo = tipi.find(t => t.id === f.tipo);
+    const mod = modalitaOre(tipo);
+    oreWrap.append(elx('label', { class:'mz-label' }, 'Ore'));
+    if (mod === 'fissa') {
+      f.ore = 8;
+      oreWrap.append(elx('div', { class:'mz-avail' }, elx('div', {}, '8h — giornata intera')));
+      return;
+    }
+    const clamp = v => Math.max(0, Math.min(8, Math.round((v || 0) * 2) / 2));
+    const val = elx('input', { type:'number', class:'mz-input', step:'0.5', min:'0', max:'8',
+      value:String(f.ore), style:'text-align:center;max-width:90px;' });
+    const dec = elx('button', { type:'button', class:'fr-step', onclick: () => { f.ore = clamp(f.ore - 0.5); val.value = f.ore; } }, '−');
+    const inc = elx('button', { type:'button', class:'fr-step', onclick: () => { f.ore = clamp(f.ore + 0.5); val.value = f.ore; } }, '+');
+    val.onchange = () => { f.ore = clamp(parseFloat(val.value)); val.value = f.ore; };
+    oreWrap.append(elx('div', { class:'fr-stepper' }, dec, val, inc));
+  }
+  renderOre();
+
+  // Note
+  const inNote = elx('textarea', { class:'mz-input', rows:'2', placeholder:'Note (opz.)',
+    oninput: e => f.note = e.target.value });
+  root.append(elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Note'), inNote));
+
+  // Finestra: feedback immediato sulla data iniziale
+  const hintBox = elx('div', { class:'mz-avail' });
+  root.append(hintBox);
+  function renderHint() {
+    hintBox.innerHTML = '';
+    const v = verificaAccessoAssenza(f.dataIn, state.operatore);
+    if (v.ok) hintBox.append(elx('div', { class:'ok' }, '✅ Inseribile' + (v.esenzione ? ' (gruppo esente)' : '')));
+    else hintBox.append(elx('div', { class:'busy' }, '⚠ ' + v.motivo));
+  }
+  renderHint();
+
+  const err = elx('div', { class:'login-err' });
+  const btn = elx('button', { class:'login-go' }, 'Invia richiesta');
+  btn.onclick = () => salvaAssenza(f, btn, err);
+  root.append(err, btn);
+}
+
+async function salvaAssenza(f, btn, err) {
+  if (!f.tipo) { err.textContent = 'Scegli il tipo'; return; }
+  if (!f.dataIn || !f.dataFi) { err.textContent = 'Scegli le date'; return; }
+  if (f.dataFi < f.dataIn) { err.textContent = 'La data finale dev\'essere ≥ a quella iniziale'; return; }
+  const tipo = state.tipiAssenza.find(t => t.id === f.tipo);
+  const mod = modalitaOre(tipo);
+  const ore = mod === 'fissa' ? 8 : (parseFloat(f.ore) || 0);
+  if (mod !== 'fissa' && ore <= 0) { err.textContent = 'Imposta le ore'; return; }
+
+  // Espandi il periodo sui soli giorni lavorativi
+  let giorni = [];
+  const d = parseISODate(f.dataIn), fine = parseISODate(f.dataFi);
+  while (d <= fine) { if (!isGiornoNonLavorativo(d)) giorni.push(toLocalISO(d)); d.setDate(d.getDate() + 1); }
+
+  // Salta i giorni già con un'assenza e quelli fuori finestra
+  let giaPresenti = 0, fuoriFinestra = 0, motivoFuori = '';
+  giorni = giorni.filter(g => { if (getAssenza(state.operatore.id, g)) { giaPresenti++; return false; } return true; });
+  giorni = giorni.filter(g => { const v = verificaAccessoAssenza(g, state.operatore); if (!v.ok) { fuoriFinestra++; motivoFuori = v.motivo; return false; } return true; });
+
+  if (giorni.length === 0) {
+    const parti = [];
+    if (giaPresenti) parti.push(giaPresenti + ' già presenti');
+    if (fuoriFinestra) parti.push(fuoriFinestra + ' fuori finestra');
+    err.textContent = 'Nessun giorno da inserire' + (parti.length ? ' (' + parti.join(', ') + ')' : '') + (motivoFuori ? '. ' + motivoFuori : '');
+    beep('err'); return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Invio…'; err.textContent = '';
+  try {
+    const rows = giorni.map(g => ({
+      utente_id: state.operatore.id, tipo_assenza_id: f.tipo, data: g,
+      ore, stato: 'valida', note: (f.note || '').trim() || null,
+      creato_da: state.operatore.account_id,
+    }));
+    const { data, error } = await sb.from('assenze').insert(rows).select();
+    if (error) {
+      if (error.code === '23505') throw new Error('Alcuni giorni hanno già un\'assenza');
+      throw error;
+    }
+    (data || rows).forEach(r => { if (!r.id || !state.assenze.find(x => x.id === r.id)) state.assenze.push(r); });
+    beep('ok');
+    renderFerie();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Invia richiesta';
+    err.textContent = e.message || String(e); beep('err');
+  }
 }
 
 // ═══════════════ 2. Home ═══════════════
 function goHome() {
   const u = state.operatore;
-  if (!u) { goLogin(); return; }
+  if (!u) { renderAuth(); return; }
   // Se ho una sessione aperta vado dritto lì
   const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
   if (sess) { goAttiva(); return; }
