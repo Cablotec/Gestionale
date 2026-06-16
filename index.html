@@ -11675,6 +11675,22 @@ async function kioskRiapriManuale(opId) {
   kioskRenderOpList();
 }
 
+// Auto-iscrizione addetto (kiosk): chi timbra su una fase ne diventa addetto.
+// Stessa logica di mobile: salta se è già "tutta la commessa" (riga fase_id null)
+// o se la riga per QUESTA fase esiste già; altrimenti inserisce (fase_id null se la
+// commessa non ha fasi). Best-effort: un errore non blocca la timbratura.
+async function kioskAssicuraAddetto(uid, opId, faseId) {
+  try {
+    const righe = addettoRigheUtenteOp(uid, opId);
+    if (righe.some(r => !r.fase_id)) return;
+    if (righe.some(r => (r.fase_id || null) === (faseId || null))) return;
+    const row = { operazione_id: opId, utente_id: uid, fase_id: faseId || null };
+    const { data, error } = await sb.from('operazioni_addetti').insert(row).select().single();
+    if (error) return;
+    if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
+  } catch (e) { /* best-effort */ }
+}
+
 // Ricominciare a lavorare su una fase che avevo marcato finita la "riapre".
 // faseId valorizzato → riapre solo quella riga; null → riapre tutte le righe
 // completate dell'utente sulla commessa (es. ↩ Riapri dalla lista).
@@ -12113,6 +12129,8 @@ async function kioskAvviaSessione(tipoId, faseId) {
     }
     // Aggiorna cache locale
     if (!state.sessioni.find(s => s.id === data.id)) state.sessioni.unshift(data);
+    // Auto-iscrizione: chi timbra su una fase ne diventa addetto (se non lo era già).
+    await kioskAssicuraAddetto(u.id, o.id, payload.fase_id || null);
     // Se l'operatore aveva marcato finita la fase che sta riavviando,
     // ricominciare a lavorarci la riapre (solo quella).
     await kioskRiapriFaseSeCompletata(u.id, o.id, payload.fase_id || null);

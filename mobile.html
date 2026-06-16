@@ -64,6 +64,11 @@ button{font-family:inherit;}
 /* ── Home: liste commesse ── */
 .search{width:100%;background:var(--sur);border:1px solid var(--brd);border-radius:10px;color:var(--txt);font-family:'DM Mono',monospace;font-size:14px;padding:13px 14px;margin-bottom:12px;outline:none;}
 .search:focus{border-color:var(--acc);}
+.login-go{width:100%;background:var(--acc);color:var(--bg);border:none;border-radius:10px;padding:14px;font-weight:700;font-size:15px;cursor:pointer;margin-top:4px;}
+.login-go:disabled{opacity:.6;}
+.login-err{color:#ff6b5e;font-size:13px;text-align:center;min-height:18px;margin:8px 0;}
+.login-hi{font-size:15px;font-weight:700;text-align:center;margin:6px 0 12px;}
+.login-msg{color:var(--acc);font-size:13px;text-align:center;padding:6px 0 12px;}
 .scroll{flex:1;overflow-y:auto;padding-bottom:10px;}
 .sec-hd{font-family:'DM Mono',monospace;font-size:10px;color:var(--acc);letter-spacing:.1em;text-transform:uppercase;margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--acc);}
 .sec-hd.dim{color:var(--mut);border-color:var(--brd);}
@@ -122,7 +127,7 @@ button{font-family:inherit;}
 <div class="hdr">
   <div class="hdr-title">📱 Cablotec <span>Mobile</span></div>
   <div class="hdr-right">
-    <button class="hdr-op" id="hdr-op" style="display:none" onclick="goOperatore()">—</button>
+    <button class="hdr-op" id="hdr-op" style="display:none" onclick="logout()">—</button>
     <button class="hdr-btn" title="Aggiorna" onclick="ricarica()">⟳</button>
   </div>
 </div>
@@ -138,9 +143,9 @@ button{font-family:inherit;}
   <div class="boot" id="boot-box"><div class="spin"></div><div>Connessione…</div></div>
 </div>
 
-<!-- 1. Operatore -->
+<!-- 1. Login -->
 <div class="step" id="step-op">
-  <div class="step-title">Chi sei?</div>
+  <div class="step-title" id="op-title">Accedi</div>
   <div class="op-grid" id="op-grid"></div>
 </div>
 
@@ -266,18 +271,26 @@ async function boot() {
   const box = $('#boot-box');
   try {
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const { data: sess } = await sb.auth.getSession();
-    if (!sess?.session) {
-      const { error } = await sb.auth.signInWithPassword({ email: APP_EMAIL, password: APP_PASSWORD });
-      if (error) throw new Error('Login fallito: ' + error.message);
+    const { data: sd } = await sb.auth.getSession();
+    const sessione = sd?.session || null;
+    const emailSess = (sessione?.user?.email || '').toLowerCase();
+
+    // Sessione di un account operatore reale già salvata sul telefono → entra diretto.
+    // (L'account tecnico condiviso 'kiosk@…' non è un login valido qui.)
+    if (sessione && emailSess && emailSess !== APP_EMAIL.toLowerCase()) {
+      await loadData();
+      state.operatore = state.utenti.find(u => u.account_id === sessione.user.id) || null;
+      if (state.operatore) { aggiornaHeader(); goHome(); return; }
+      // Account loggato ma non collegato a un operatore attivo.
+      await sb.auth.signOut().catch(() => {});
+      goLogin('Questo account non è collegato a un operatore. Contatta l\'ufficio.');
+      return;
     }
-    await loadData();
-    // Telefono personale: l'operatore si sceglie una volta sola e resta
-    // memorizzato sul dispositivo (cambiabile dal chip in alto).
-    const lastId = localStorage.getItem('oper_op');
-    state.operatore = state.utenti.find(u => u.id === lastId) || null;
+
+    // Nessuna sessione utile (o vecchia sessione dell'account condiviso): pulisco e mostro il login.
+    if (sessione) await sb.auth.signOut().catch(() => {});
     aggiornaHeader();
-    if (state.operatore) goHome(); else goOperatore();
+    goLogin();
   } catch (e) {
     box.innerHTML = '';
     box.append(elx('div', { class:'big' }, '✕ Errore di avvio'),
@@ -288,7 +301,7 @@ async function boot() {
 
 async function loadData() {
   const [ut, op, az, ar, tl, fs, ad, se, ax] = await Promise.all([
-    sb.from('utenti').select('id,nome,attivo,email').order('nome'),
+    sb.from('utenti').select('id,nome,attivo,email,account_id').order('nome'),
     sb.from('operazioni').select('*').not('stato', 'in', '("spedita","completata")'),
     sb.from('aziende').select('id,nome'),
     sb.from('articoli').select('id,codice,descrizione'),
@@ -316,7 +329,6 @@ async function ricarica() {
   // Re-render della schermata corrente
   if ($('#step-home').classList.contains('on')) renderHome();
   else if ($('#step-att').classList.contains('on')) goAttiva();
-  else if ($('#step-op').classList.contains('on')) goOperatore();
 }
 // Quando l'app torna in primo piano, riallinea i dati (sessioni potrebbero
 // essere cambiate dal kiosk di reparto o dal gestionale).
@@ -407,29 +419,76 @@ function infoCommessa(o) {
   );
 }
 
-// ═══════════════ 1. Operatore ═══════════════
-function goOperatore() {
+// ═══════════════ 1. Login (email + password) ═══════════════
+// Login standard col PROPRIO account Supabase. La sessione resta salvata sul
+// telefono (login una volta sola). Dopo l'accesso mappo l'account all'operatore
+// via utenti.account_id, così la timbratura è personale senza scelta utente.
+function goLogin(msg) {
   show('step-op');
+  const title = $('#op-title'); if (title) title.textContent = 'Accedi';
   const grid = $('#op-grid');
+  grid.style.display = 'block';   // form a colonna singola, non griglia
   grid.innerHTML = '';
-  state.utenti.forEach(u => {
-    grid.append(elx('button', {
-      class: 'op-tile',
-      onclick: () => {
-        state.operatore = u;
-        localStorage.setItem('oper_op', u.id);
-        aggiornaHeader();
-        goHome();
-      },
-    }, u.nome));
-  });
-  if (state.utenti.length === 0) grid.append(elx('div', { class:'empty' }, 'Nessun operatore attivo trovato.'));
+
+  const inEmail = elx('input', { type:'email', class:'search', placeholder:'Email',
+    autocomplete:'username', autocapitalize:'none', spellcheck:'false' });
+  const inPwd = elx('input', { type:'password', class:'search', placeholder:'Password',
+    autocomplete:'current-password' });
+  const err = elx('div', { class:'login-err' });
+  const btn = elx('button', { class:'login-go' }, 'Entra');
+
+  // Comodità: ricorda l'ultima email usata su questo telefono (non è sicurezza).
+  try { inEmail.value = localStorage.getItem('oper_email') || ''; } catch (_) {}
+
+  const doLogin = async () => {
+    const email = (inEmail.value || '').trim().toLowerCase();
+    const pwd = (inPwd.value || '').trim();
+    if (!email || !pwd) { err.textContent = 'Inserisci email e password'; return; }
+    btn.disabled = true; btn.textContent = 'Accesso…'; err.textContent = '';
+    try {
+      const { data, error } = await sb.auth.signInWithPassword({ email, password: pwd });
+      if (error) throw error;
+      await loadData();
+      state.operatore = state.utenti.find(u => u.account_id === data.user.id) || null;
+      if (!state.operatore) {
+        await sb.auth.signOut().catch(() => {});
+        throw new Error('Questo account non è collegato a un operatore. Contatta l\'ufficio.');
+      }
+      try { localStorage.setItem('oper_email', email); } catch (_) {}
+      beep('ok');
+      aggiornaHeader();
+      goHome();
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Entra';
+      const m = e.message || String(e);
+      err.textContent = /invalid login|credenziali|invalid/i.test(m) ? 'Email o password errate' : m;
+      beep('err');
+    }
+  };
+
+  inEmail.addEventListener('keydown', (e) => { if (e.key === 'Enter') inPwd.focus(); });
+  inPwd.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  btn.onclick = doLogin;
+
+  if (msg) grid.append(elx('div', { class:'login-msg' }, msg));
+  grid.append(inEmail, inPwd, err, btn);
+  setTimeout(() => { try { (inEmail.value ? inPwd : inEmail).focus(); } catch (_) {} }, 50);
+}
+
+// Logout: esce dall'account e torna alla schermata di accesso.
+async function logout() {
+  const nome = state.operatore?.nome || '';
+  if (!confirm('Vuoi uscire' + (nome ? ', ' + nome : '') + '?')) return;
+  try { await sb.auth.signOut(); } catch (_) {}
+  state.operatore = null; state.opSel = null;
+  aggiornaHeader();
+  goLogin();
 }
 
 // ═══════════════ 2. Home ═══════════════
 function goHome() {
   const u = state.operatore;
-  if (!u) { goOperatore(); return; }
+  if (!u) { goLogin(); return; }
   // Se ho una sessione aperta vado dritto lì
   const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
   if (sess) { goAttiva(); return; }
@@ -555,6 +614,23 @@ function goFase(o) {
   });
 }
 
+// Auto-iscrizione addetto: chi timbra su una fase ne diventa addetto.
+// - se è già "tutta la commessa" (riga con fase_id null) → coperto, non aggiungo;
+// - se ha già la riga per QUESTA fase → non aggiungo (no doppioni);
+// - altrimenti inserisco { operazione_id, utente_id, fase_id } (fase_id null se la
+//   commessa non ha fasi). Best-effort: un errore qui non deve bloccare la timbratura.
+async function assicuraAddetto(uid, opId, faseId) {
+  try {
+    const righe = righeAddetto(uid, opId);
+    if (righe.some(r => !r.fase_id)) return;                                // già su tutta la commessa
+    if (righe.some(r => (r.fase_id || null) === (faseId || null))) return;  // già su questa fase
+    const row = { operazione_id: opId, utente_id: uid, fase_id: faseId || null };
+    const { data, error } = await sb.from('operazioni_addetti').insert(row).select().single();
+    if (error) return;
+    if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
+  } catch (_) {}
+}
+
 async function avvia(tipoId, faseId) {
   const u = state.operatore, o = state.opSel;
   if (!u || !o || !tipoId) return;
@@ -570,6 +646,8 @@ async function avvia(tipoId, faseId) {
     const { data, error } = await sb.from('sessioni_lavoro').insert(payload).select().single();
     if (error) throw error;
     state.sessioni.unshift(data);
+    // Auto-iscrizione: se timbro su una fase di cui non sono addetto, mi ci aggiungo.
+    await assicuraAddetto(u.id, o.id, faseId || null);
     // Se avevo marcato finita LA fase che sto riavviando, riaprirla
     const r = righeAddetto(u.id, o.id).find(x => faseId ? x.fase_id === faseId : x.completata_il);
     if (r?.completata_il) await riapriFaseSilenziosa(u.id, o.id, r);
