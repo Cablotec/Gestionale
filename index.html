@@ -8023,7 +8023,7 @@ function openOperazioneModal(o) {
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Numero OP'),
         el('input', { type:'text', name:'numero_op',
-          value: o.numero_op || '',
+          value: o.numero_op || (new Date().getFullYear() + '/OP/'),
           placeholder:'es. 2026/OP/00001 (opzionale)',
           pattern:'\\d{4}/OP/\\d{5}',
           title:'Formato richiesto: AAAA/OP/NNNNN (opzionale)',
@@ -11642,6 +11642,8 @@ function kioskRenderTerminaScelta(sess, riga) {
 async function kioskFineFase(sess, riga) {
   const ora = new Date().toISOString();
   try {
+    // 1) Marca la fase completata: è l'intento deliberato, vale a prescindere
+    //    dalla durata della sessione.
     let q = sb.from('operazioni_addetti').update({ completata_il: ora });
     if (riga.id) q = q.eq('id', riga.id);
     else {
@@ -11656,21 +11658,21 @@ async function kioskFineFase(sess, riga) {
            && (x.fase_id || null) === (riga.fase_id || null)))
         ? { ...x, completata_il: ora } : x);
 
-    const { data: sessChiusa, error: errSess } = await sb.from('sessioni_lavoro')
-      .update({ fine: ora }).eq('id', sess.id).select().single();
-    if (errSess) { kioskBeep('err'); kioskShowError('Errore: ' + errSess.message); return; }
-    state.sessioni = state.sessioni.map(s => s.id === sess.id ? sessChiusa : s);
+    // 2) Chiudi la sessione, o SCARTALA se < 60s (stessa regola di "Sospendo"):
+    //    la fase resta completata, ma il tempo irrisorio non viene registrato.
+    const res = await kioskChiudiOScarta(sess);
 
     if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
     kioskBeep('ok');
-    const durataS = Math.floor((new Date(sessChiusa.fine) - new Date(sessChiusa.inizio)) / 1000);
-    const h = Math.floor(durataS / 3600), m = Math.floor((durataS % 3600) / 60);
-    const durStr = h > 0 ? h + 'h ' + m + 'm' : m + ' min';
-    kioskShowDone({
-      title: 'Fase completata ✓',
-      detail: etichettaFaseAddetto(riga) + '\nDurata: ' + durStr,
-      ok: true,
-    });
+    let detail;
+    if (res.scartata) {
+      detail = etichettaFaseAddetto(riga) + '\nTimbratura troppo breve (' + res.elapsed + 's): non registrata.';
+    } else {
+      const durataS = Math.floor((new Date(res.data.fine) - new Date(res.data.inizio)) / 1000);
+      const h = Math.floor(durataS / 3600), m = Math.floor((durataS % 3600) / 60);
+      detail = etichettaFaseAddetto(riga) + '\nDurata: ' + (h > 0 ? h + 'h ' + m + 'm' : m + ' min');
+    }
+    kioskShowDone({ title: 'Fase completata ✓', detail, ok: true });
   } catch (e) {
     kioskBeep('err'); kioskShowError('Errore di rete: ' + (e.message || e));
   }
@@ -12420,10 +12422,11 @@ const SOGLIA_SCARTO_SEC = 60;   // timbrature più brevi = accidentali, si scart
 // state.sessioni. Ritorna { scartata, elapsed, data? }. Lancia in caso d'errore.
 async function kioskChiudiOScarta(sess) {
   const elapsed = Math.floor((Date.now() - new Date(sess.inizio).getTime()) / 1000);
-  // Lo scarto vale SOLO per le timbrature su commessa (quelle che entrano nei
-  // consuntivi). Le attività extra (operazione_id null) non sporcano nulla:
-  // vanno sempre chiuse/registrate, anche se brevi, così puoi fermarle subito.
-  if (sess.operazione_id && elapsed < SOGLIA_SCARTO_SEC) {
+  // Scarto le micro-timbrature accidentali (start/stop di pochi secondi), sia su
+  // commessa sia sulle attività extra: sotto la soglia la riga viene eliminata
+  // invece che chiusa. (Su commessa "Ho finito la mia fase" la registra comunque,
+  // perché passa da kioskFineFase e non da qui.)
+  if (elapsed < SOGLIA_SCARTO_SEC) {
     const { error } = await sb.from('sessioni_lavoro').delete().eq('id', sess.id);
     if (error) throw error;
     state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
