@@ -8124,7 +8124,7 @@ function openOperazioneModal(o) {
     const orePrev = opCalcOre(o);
     const oreReali = opCalcOreReali(o);
     const perc = orePrev > 0 ? Math.round((oreReali / orePrev) * 100) : 0;
-    const overBudget = orePrev > 0 && oreReali > orePrev;
+    const overBudget = orePrev > 0 && oreReali > orePrev + 0.05;
 
     pCons.append(
       el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
@@ -12191,23 +12191,15 @@ async function kioskSelectAttivita(a) {
   const u = kioskState.utenteSelezionato;
   if (!u || !a) return;
 
-  // Eventuale sessione aperta dell'utente: la chiudo prima di aprire la nuova.
-  // Stesso pattern dello switch tra commesse (kioskStopSessione, modalità 'switch').
+  // Eventuale sessione aperta dell'utente: la chiudo prima di aprire la nuova
+  // (o la scarto se accidentale, < soglia). Stesso pattern dello switch.
   const sessAperta = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
   if (sessAperta) {
     try {
-      const { data: chiusa, error: errClose } = await sb.from('sessioni_lavoro').update({
-        fine: new Date().toISOString(),
-      }).eq('id', sessAperta.id).select().single();
-      if (errClose) {
-        kioskBeep('err');
-        kioskShowError('Errore chiudendo la sessione precedente: ' + errClose.message);
-        return;
-      }
-      state.sessioni = state.sessioni.map(s => s.id === chiusa.id ? chiusa : s);
+      await kioskChiudiOScarta(sessAperta);
     } catch (e) {
       kioskBeep('err');
-      kioskShowError('Errore di rete: ' + (e.message||e));
+      kioskShowError('Errore chiudendo la sessione precedente: ' + (e.message || e));
       return;
     }
   }
@@ -12400,32 +12392,43 @@ function kioskFormatDurataLive(inizioDate) {
   return s+'s';
 }
 
+const SOGLIA_SCARTO_SEC = 60;   // timbrature più brevi = accidentali, si scartano
+
+// Chiude una sessione; se è durata meno della soglia la SCARTA (timbratura
+// accidentale start/stop), così non sporca consuntivi e medie. Aggiorna
+// state.sessioni. Ritorna { scartata, elapsed, data? }. Lancia in caso d'errore.
+async function kioskChiudiOScarta(sess) {
+  const elapsed = Math.floor((Date.now() - new Date(sess.inizio).getTime()) / 1000);
+  if (elapsed < SOGLIA_SCARTO_SEC) {
+    const { error } = await sb.from('sessioni_lavoro').delete().eq('id', sess.id);
+    if (error) throw error;
+    state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
+    return { scartata: true, elapsed };
+  }
+  const { data, error } = await sb.from('sessioni_lavoro')
+    .update({ fine: new Date().toISOString() }).eq('id', sess.id).select().single();
+  if (error) throw error;
+  state.sessioni = state.sessioni.map(s => s.id === sess.id ? data : s);
+  return { scartata: false, elapsed, data };
+}
+
 async function kioskStopSessione(sess, modalita) {
   // modalita: 'pause' = chiudi e torna a id, 'switch' = chiudi e vai a lista operazioni
   try {
-    const { data, error } = await sb.from('sessioni_lavoro').update({
-      fine: new Date().toISOString(),
-    }).eq('id', sess.id).select().single();
-    if (error) {
-      kioskBeep('err');
-      kioskShowError('Errore: ' + error.message);
-      return;
-    }
-    state.sessioni = state.sessioni.map(s => s.id === sess.id ? data : s);
+    const res = await kioskChiudiOScarta(sess);
     kioskBeep('ok');
     if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
 
     if (modalita === 'pause') {
-      // Sospensione: mostra conferma e torna a id
-      const durataS = Math.floor((new Date(data.fine) - new Date(data.inizio)) / 1000);
-      const h = Math.floor(durataS / 3600);
-      const m = Math.floor((durataS % 3600) / 60);
-      const durStr = h > 0 ? h+'h '+m+'m' : m+' min';
-      kioskShowDone({
-        title: 'Sessione sospesa',
-        detail: 'Durata: ' + durStr,
-        ok: true,
-      });
+      if (res.scartata) {
+        kioskShowDone({ title: 'Timbratura annullata', detail: 'Troppo breve (' + res.elapsed + 's): non registrata.', ok: true });
+      } else {
+        const durataS = Math.floor((new Date(res.data.fine) - new Date(res.data.inizio)) / 1000);
+        const h = Math.floor(durataS / 3600);
+        const m = Math.floor((durataS % 3600) / 60);
+        const durStr = h > 0 ? h+'h '+m+'m' : m+' min';
+        kioskShowDone({ title: 'Sessione sospesa', detail: 'Durata: ' + durStr, ok: true });
+      }
     } else {
       // Switch: vai a lista operazioni per scegliere nuova
       kCom.opSelezionata = null;
@@ -12435,7 +12438,7 @@ async function kioskStopSessione(sess, modalita) {
     }
   } catch (e) {
     kioskBeep('err');
-    kioskShowError('Errore di rete: ' + (e.message||e));
+    kioskShowError('Errore: ' + (e.message||e));
   }
 }
 

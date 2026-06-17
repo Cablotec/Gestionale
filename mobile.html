@@ -105,6 +105,28 @@ button{font-family:inherit;}
 .fr-chip{background:transparent;border:2px solid var(--brd);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:700;cursor:pointer;}
 .fr-stepper{display:flex;align-items:center;gap:8px;}
 .fr-step{width:42px;height:42px;font-size:20px;font-weight:700;background:var(--sur2);border:2px solid var(--brd);color:var(--txt);border-radius:8px;cursor:pointer;}
+.mz-addtappa{background:var(--sur2);border:1px dashed var(--brd);color:var(--acc);border-radius:8px;padding:9px;width:100%;font-weight:700;cursor:pointer;margin-top:4px;}
+.mz-tappa{border:1px solid var(--brd);border-radius:10px;padding:10px;margin-bottom:8px;background:var(--sur);}
+.mz-tappa-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
+.mz-incorso{background:rgba(212,255,78,.07);border:1px solid var(--acc);border-radius:10px;padding:12px;margin-bottom:14px;}
+.mz-incorso-hd{font-weight:800;margin-bottom:8px;}
+.mz-tappa-line{font-size:14px;padding:3px 0;}
+/* ── Calendario ferie ── */
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin:4px 0 10px;}
+.cal-title{font-weight:800;font-size:16px;}
+.cal-nav{width:42px;height:36px;background:var(--sur2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;font-size:18px;cursor:pointer;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+.cal-dow{text-align:center;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);padding-bottom:2px;}
+.cal-cell{position:relative;aspect-ratio:1;border:1px solid var(--brd);border-radius:8px;background:var(--sur);padding:4px;cursor:pointer;overflow:hidden;}
+.cal-cell.empty{border:none;background:transparent;cursor:default;}
+.cal-cell.has{border-color:var(--mut);}
+.cal-cell.mia{border-color:var(--acc);background:rgba(212,255,78,.10);}
+.cal-cell.sel{outline:2px solid var(--acc);outline-offset:-1px;}
+.cal-cell.oggi .cal-num{color:var(--acc);font-weight:800;}
+.cal-num{font-size:13px;font-weight:700;line-height:1;}
+.cal-mine{position:absolute;left:5px;bottom:5px;width:8px;height:8px;border-radius:50%;}
+.cal-count{position:absolute;right:4px;bottom:3px;font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);}
+.comm-row.mia-row{border-color:var(--acc);}
 .scroll{flex:1;overflow-y:auto;padding-bottom:10px;}
 .sec-hd{font-family:'DM Mono',monospace;font-size:10px;color:var(--acc);letter-spacing:.1em;text-transform:uppercase;margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--acc);}
 .sec-hd.dim{color:var(--mut);border-color:var(--brd);}
@@ -132,6 +154,7 @@ button{font-family:inherit;}
 .fase-name{font-size:16px;font-weight:700;flex:1;}
 .fase-meta{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
 .fase-mia-tag{position:absolute;top:-9px;right:10px;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:var(--bg);background:var(--acc);border-radius:6px;padding:2px 8px;}
+.fase-sep{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;margin:14px 0 4px;}
 .back-link{background:none;border:none;color:var(--mut);font-size:14px;font-weight:700;cursor:pointer;padding:10px;margin-top:4px;}
 
 /* ── Sessione attiva ── */
@@ -167,7 +190,7 @@ button{font-family:inherit;}
 <div id="app-screen">
 
 <div class="hdr">
-  <div class="hdr-title">📱 Cablotec <span>Mobile</span></div>
+  <div class="hdr-title">Cablotec <span>Mobile</span></div>
   <div class="hdr-right">
     <button class="hdr-op" id="hdr-op" style="display:none" onclick="logout()">—</button>
     <button class="hdr-btn" title="Aggiorna" onclick="ricarica()">⟳</button>
@@ -223,6 +246,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const APP_EMAIL    = 'kiosk@cablotec.local';
 const APP_PASSWORD = 'kiosk-cablotec-2026';
 const SEDE_TIMBRO  = 'mobile';   // marca le sessioni avviate dal telefono
+const SOGLIA_SCARTO_SEC = 60;    // timbrature più brevi di così = accidentali, si scartano
 
 // ═══════════════ Manifest PWA ═══════════════
 (function(){
@@ -255,6 +279,7 @@ const $ = s => document.querySelector(s);
 let sb = null;
 let mezziVista = 'lista';   // 'lista' | 'form' — vista corrente della sezione Mezzi
 let ferieVista = 'lista';   // 'lista' | 'form' — vista corrente della sezione Ferie
+let ferieCal = null;        // { y, m, sel } — mese mostrato nel calendario ferie
 const state = {
   utenti: [], utentiById: {}, operazioni: [], aziende: [], articoli: [],
   tipiLav: [], opFasi: [], opAddetti: [], sessioni: [], attivita: [],
@@ -541,7 +566,7 @@ function renderAuth(msg) {
 
   const box = elx('div', { class:'auth-box' });
   box.append(
-    elx('div', { class:'auth-logo' }, '📱 Cablotec ', elx('span', {}, 'Mobile')),
+    elx('div', { class:'auth-logo' }, 'Cablotec ', elx('span', {}, 'Mobile')),
     elx('div', { class:'auth-sub' }, 'Accedi col tuo account'),
   );
 
@@ -678,6 +703,13 @@ function renderMezzi() {
   const oggi = todayISO();
   const mieIds = new Set((state.prenOp || [])
     .filter(r => r.utente_id === state.operatore.id).map(r => r.prenotazione_id));
+
+  // Consegna in corso adesso (mia, tipo consegna, oggi nel periodo) → tappe in cima
+  const consegnaInCorso = (state.prenotazioni || []).find(p => p.tipo === 'consegna'
+    && (mieIds.has(p.id) || p.utente_id === accId)
+    && p.data_inizio <= oggi && (p.data_fine || p.data_inizio) >= oggi);
+  if (consegnaInCorso) root.append(tappeInCorsoCard(consegnaInCorso));
+
   const mie = (state.prenotazioni || [])
     .filter(p => (p.data_fine || p.data_inizio) >= oggi)
     .filter(p => mieIds.has(p.id) || p.utente_id === accId)
@@ -689,6 +721,26 @@ function renderMezzi() {
     return;
   }
   mie.forEach(p => root.append(prenotazioneCard(p)));
+}
+
+// Card "consegna in corso" con l'elenco delle tappe (clienti in ordine).
+function tappeInCorsoCard(p) {
+  const m = mezzoById(p.mezzo_id);
+  const tappe = (state.consegne || []).filter(c => c.prenotazione_id === p.id)
+    .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+  const card = elx('div', { class:'mz-incorso' });
+  card.append(elx('div', { class:'mz-incorso-hd' }, '🚚 Consegna in corso' + (m ? ' · ' + m.nome : '')));
+  if (tappe.length === 0) {
+    card.append(elx('div', { class:'cr-sub' }, 'Nessuna tappa registrata.'));
+  } else {
+    tappe.forEach((c, i) => {
+      const cli = c.cliente_id ? clienteById(c.cliente_id) : null;
+      const nome = cli ? cli.nome : (c.descrizione || 'Tappa');
+      const extra = (cli && c.descrizione ? ' · ' + c.descrizione : '') + (cli?.citta ? ' (' + cli.citta + ')' : '');
+      card.append(elx('div', { class:'mz-tappa-line' }, (i + 1) + '. ' + nome + extra));
+    });
+  }
+  return card;
 }
 
 function prenotazioneCard(p) {
@@ -747,9 +799,9 @@ function renderPrenotaForm() {
   }
 
   const f = {
-    mezzo_id: mezziAttivi[0].id, data: todayISO(),
+    mezzo_id: mezziAttivi[0].id, dataIn: todayISO(), dataFi: todayISO(),
     oraIn: '08:00', oraFi: '18:00', tipo: 'trasferta',
-    operatori: [state.operatore.id], destCliente: null, destNota: '', note: '',
+    operatori: [state.operatore.id], tappe: [], note: '',
   };
 
   root.append(elx('div', { class:'step-title' }, 'Prenota un mezzo'));
@@ -760,10 +812,14 @@ function renderPrenotaForm() {
   selMezzo.value = f.mezzo_id;
   root.append(elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Mezzo'), selMezzo));
 
-  // Data
-  const inData = elx('input', { type:'date', class:'mz-input', value:f.data,
-    onchange: e => { f.data = e.target.value; renderAvail(); } });
-  root.append(elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Data'), inData));
+  // Periodo (dal/al) — supporta più giorni
+  const inDa = elx('input', { type:'date', class:'mz-input', value:f.dataIn,
+    onchange: e => { f.dataIn = e.target.value; if (f.dataFi < f.dataIn) { f.dataFi = f.dataIn; inA.value = f.dataFi; } renderAvail(); } });
+  const inA = elx('input', { type:'date', class:'mz-input', value:f.dataFi,
+    onchange: e => { f.dataFi = e.target.value; renderAvail(); } });
+  root.append(elx('div', { class:'mz-row' },
+    elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Dal'), inDa),
+    elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Al'), inA)));
 
   // Ore
   const inIn = elx('input', { type:'time', class:'mz-input', value:f.oraIn,
@@ -774,25 +830,24 @@ function renderPrenotaForm() {
     elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Dalle'), inIn),
     elx('div', { class:'mz-field' }, elx('label', { class:'mz-label' }, 'Alle'), inFi)));
 
-  // Disponibilità del mezzo nel giorno scelto
+  // Disponibilità del mezzo nel periodo scelto
   const availBox = elx('div', { class:'mz-avail' });
   root.append(availBox);
   function renderAvail() {
     availBox.innerHTML = '';
-    const giorno = prenotazioniMezzoGiorno(f.mezzo_id, f.data);
-    if (giorno.length === 0) {
-      availBox.append(elx('div', { class:'ok' }, '✅ Libero tutto il giorno'));
+    const conf = checkSovrapposizioni(f.mezzo_id, f.dataIn, f.dataFi, null, f.oraIn, f.oraFi);
+    if (conf.length === 0) {
+      availBox.append(elx('div', { class:'ok' }, '✅ Libero nel periodo scelto'));
       return;
     }
-    availBox.append(elx('div', {}, 'Già prenotato:'));
-    giorno.forEach(p => {
+    availBox.append(elx('div', { class:'busy', style:'font-weight:700;' }, '⛔ Occupato:'));
+    conf.forEach(p => {
       const nomi = (state.prenOp || []).filter(r => r.prenotazione_id === p.id)
         .map(r => state.utentiById[r.utente_id]?.nome).filter(Boolean).join(', ');
-      const oo = (p.ora_inizio && p.ora_fine) ? p.ora_inizio + '–' + p.ora_fine : 'tutto il giorno';
-      availBox.append(elx('div', { class:'mz-busy-row' }, '• ' + oo + (nomi ? ' · ' + nomi : '')));
+      const per = p.data_inizio === p.data_fine ? fmtIT(p.data_inizio) : fmtIT(p.data_inizio) + '→' + fmtIT(p.data_fine);
+      const oo = (p.ora_inizio && p.ora_fine) ? ' ' + p.ora_inizio + '–' + p.ora_fine : '';
+      availBox.append(elx('div', { class:'mz-busy-row' }, '• ' + per + oo + (nomi ? ' · ' + nomi : '')));
     });
-    if (checkSovrapposizioni(f.mezzo_id, f.data, f.data, null, f.oraIn, f.oraFi).length)
-      availBox.append(elx('div', { class:'busy', style:'margin-top:6px;font-weight:700;' }, '⚠ La tua fascia si sovrappone'));
   }
   renderAvail();
 
@@ -835,15 +890,18 @@ function renderPrenotaForm() {
   root.append(opWrap);
   renderChips();
 
-  // Destinazione (cliente) — obbligatoria solo se tipo "Consegna"
+  // Destinazioni — SOLO per tipo "Consegna", obbligatorie, elenco tappe (come desktop)
   const destWrap = elx('div', { class:'mz-field' });
   root.append(destWrap);
-  function renderDest() {
-    destWrap.innerHTML = '';
-    const req = f.tipo === 'consegna';
-    destWrap.append(elx('label', { class:'mz-label' }, 'Destinazione cliente' + (req ? ' *' : ' (opz.)')));
+
+  function tappaRow(tappa, i) {
+    const wrap = elx('div', { class:'mz-tappa' });
+    wrap.append(elx('div', { class:'mz-tappa-head' },
+      elx('span', {}, 'Tappa ' + (i + 1)),
+      f.tappe.length > 1 ? elx('button', { type:'button', class:'mz-chip-x',
+        onclick: () => { f.tappe.splice(i, 1); renderDest(); } }, '✕ Rimuovi') : null));
     const cliSearch = elx('input', { type:'text', class:'mz-input', placeholder:'Cerca cliente…',
-      autocomplete:'off', value: f.destCliente ? (clienteById(f.destCliente)?.nome || '') : '' });
+      autocomplete:'off', value: tappa.cliente_id ? (clienteById(tappa.cliente_id)?.nome || '') : '' });
     const cliDrop = elx('div', { class:'mz-droplist', style:'display:none;' });
     const renderCliDrop = () => {
       const q = (cliSearch.value || '').toLowerCase().trim();
@@ -853,16 +911,26 @@ function renderPrenotaForm() {
       cliDrop.innerHTML = '';
       if (cand.length === 0) { cliDrop.style.display = 'none'; return; }
       cand.forEach(a => cliDrop.append(elx('div', { class:'mz-drop-row',
-        onmousedown: (e) => { e.preventDefault(); f.destCliente = a.id; cliSearch.value = a.nome; cliDrop.style.display = 'none'; } },
+        onmousedown: (e) => { e.preventDefault(); tappa.cliente_id = a.id; cliSearch.value = a.nome; cliDrop.style.display = 'none'; } },
         a.nome + (a.citta ? ' · ' + a.citta : ''))));
       cliDrop.style.display = '';
     };
-    cliSearch.oninput = () => { f.destCliente = null; renderCliDrop(); };
+    cliSearch.oninput = () => { tappa.cliente_id = null; renderCliDrop(); };
     cliSearch.onfocus = renderCliDrop;
     cliSearch.onblur = () => setTimeout(() => { cliDrop.style.display = 'none'; }, 200);
-    const cliNota = elx('input', { type:'text', class:'mz-input', placeholder:'Cosa (opz.)',
-      style:'margin-top:8px;', value:f.destNota, oninput: e => f.destNota = e.target.value });
-    destWrap.append(cliSearch, cliDrop, cliNota);
+    const nota = elx('input', { type:'text', class:'mz-input', placeholder:'Cosa (opz.)',
+      style:'margin-top:6px;', value: tappa.descrizione || '', oninput: e => tappa.descrizione = e.target.value });
+    wrap.append(cliSearch, cliDrop, nota);
+    return wrap;
+  }
+  function renderDest() {
+    destWrap.innerHTML = '';
+    if (f.tipo !== 'consegna') { f.tappe = []; return; }
+    if (f.tappe.length === 0) f.tappe.push({ cliente_id: null, descrizione: '' });
+    destWrap.append(elx('label', { class:'mz-label' }, 'Tappe (destinazioni) *'));
+    f.tappe.forEach((t, i) => destWrap.append(tappaRow(t, i)));
+    destWrap.append(elx('button', { type:'button', class:'mz-addtappa',
+      onclick: () => { f.tappe.push({ cliente_id: null, descrizione: '' }); renderDest(); } }, '+ Aggiungi tappa'));
   }
   renderDest();
 
@@ -880,17 +948,19 @@ function renderPrenotaForm() {
 
 async function salvaPrenotazione(f, btn, err) {
   if (!f.mezzo_id) { err.textContent = 'Scegli un mezzo'; return; }
-  if (!f.data) { err.textContent = 'Scegli la data'; return; }
+  if (!f.dataIn || !f.dataFi) { err.textContent = 'Scegli le date'; return; }
+  if (f.dataFi < f.dataIn) { err.textContent = 'La data finale dev\'essere ≥ a quella iniziale'; return; }
   if (!f.oraIn || !f.oraFi) { err.textContent = 'Imposta ora inizio e fine'; return; }
-  if (f.oraFi <= f.oraIn) { err.textContent = 'L\'ora fine deve essere dopo l\'inizio'; return; }
+  if (f.dataIn === f.dataFi && f.oraFi <= f.oraIn) { err.textContent = 'Nello stesso giorno l\'ora fine dev\'essere dopo l\'inizio'; return; }
   if (f.operatori.length === 0) { err.textContent = 'Seleziona almeno un operatore'; return; }
-  if (f.tipo === 'consegna' && !f.destCliente) { err.textContent = 'Per il tipo Consegna scegli un cliente'; return; }
+  const tappeValide = f.tipo === 'consegna' ? f.tappe.filter(t => t.cliente_id) : [];
+  if (f.tipo === 'consegna' && tappeValide.length === 0) { err.textContent = 'Per una Consegna aggiungi almeno una tappa con cliente'; return; }
 
-  // Conflitti (stessa logica del gestionale)
-  if (checkSovrapposizioni(f.mezzo_id, f.data, f.data, null, f.oraIn, f.oraFi).length) {
-    err.textContent = 'Mezzo già occupato in quella fascia'; beep('err'); return;
+  // Conflitti su tutto il periodo (stessa logica del gestionale)
+  if (checkSovrapposizioni(f.mezzo_id, f.dataIn, f.dataFi, null, f.oraIn, f.oraFi).length) {
+    err.textContent = 'Mezzo già occupato in quel periodo'; beep('err'); return;
   }
-  const confOp = checkSovrapposizioniOperatori(f.operatori, f.data, f.data, null, f.oraIn, f.oraFi);
+  const confOp = checkSovrapposizioniOperatori(f.operatori, f.dataIn, f.dataFi, null, f.oraIn, f.oraFi);
   if (confOp.length) {
     const nomi = [...new Set(confOp.flatMap(c => c.operatori))]
       .map(id => state.utentiById[id]?.nome).filter(Boolean).join(', ');
@@ -901,7 +971,7 @@ async function salvaPrenotazione(f, btn, err) {
   try {
     const payload = {
       mezzo_id: f.mezzo_id, tipo: f.tipo,
-      data_inizio: f.data, data_fine: f.data,
+      data_inizio: f.dataIn, data_fine: f.dataFi,
       ora_inizio: f.oraIn, ora_fine: f.oraFi,
       note: f.note || null,
       utente_id: state.operatore.account_id,   // creatore = id account
@@ -914,11 +984,13 @@ async function salvaPrenotazione(f, btn, err) {
     const opRows = f.operatori.map(uid => ({ prenotazione_id: pren.id, utente_id: uid }));
     const { data: opIns } = await sb.from('prenotazioni_utenti').insert(opRows).select();
     let consIns = [];
-    if (f.destCliente) {
-      const { data } = await sb.from('consegne').insert([{
-        prenotazione_id: pren.id, ordine: 0, cliente_id: f.destCliente, descrizione: f.destNota || null,
-      }]).select();
-      consIns = data || [];
+    if (tappeValide.length) {
+      const consRows = tappeValide.map((t, i) => ({
+        prenotazione_id: pren.id, ordine: i,
+        cliente_id: t.cliente_id, descrizione: (t.descrizione || '').trim() || null,
+      }));
+      const { data } = await sb.from('consegne').insert(consRows).select();
+      consIns = data || consRows;
     }
     state.prenotazioni.push(pren);
     state.prenOp = state.prenOp.concat(opIns || opRows);
@@ -1047,46 +1119,85 @@ function oreInizialiTipo(tipo) {
   return parseFloat(tipo?.ore_default) || 8;
 }
 
-// ─── Lista "Le mie assenze" ───
+// ─── Calendario assenze (tutti, le mie evidenziate) ───
 function renderFerie() {
   ferieVista = 'lista';
   const root = $('#ferie-root');
   if (!root) return;
   if (!state.operatore) { renderAuth(); return; }
+  if (!ferieCal) { const d = new Date(); ferieCal = { y: d.getFullYear(), m: d.getMonth(), sel: todayISO() }; }
   root.innerHTML = '';
   root.append(elx('button', { class:'mezzi-cta', onclick: () => renderFerieForm() }, '+ Richiedi assenza'));
 
   const tipiById = Object.fromEntries((state.tipiAssenza || []).map(t => [t.id, t]));
-  const oggi = todayISO();
-  const mie = (state.assenze || []).filter(a => a.utente_id === state.operatore.id);
-  const future = mie.filter(a => a.data >= oggi).sort((a, b) => a.data.localeCompare(b.data));
-  const passate = mie.filter(a => a.data < oggi).sort((a, b) => b.data.localeCompare(a.data));
+  const mioId = state.operatore.id;
+  const oggiIso = todayISO();
 
-  root.append(elx('div', { class:'sec-hd' }, 'Prossime'));
-  if (future.length === 0) root.append(elx('div', { class:'empty' }, 'Nessuna assenza in programma.'));
-  else future.forEach(a => root.append(assenzaCard(a, tipiById, true)));
+  // Intestazione mese con navigazione
+  const titolo = new Date(ferieCal.y, ferieCal.m, 1).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+  root.append(elx('div', { class:'cal-head' },
+    elx('button', { class:'cal-nav', onclick: () => shiftMese(-1) }, '‹'),
+    elx('div', { class:'cal-title' }, titolo.charAt(0).toUpperCase() + titolo.slice(1)),
+    elx('button', { class:'cal-nav', onclick: () => shiftMese(1) }, '›')));
 
-  if (passate.length) {
-    root.append(elx('div', { class:'sec-hd dim', style:'margin-top:14px;' }, 'Recenti'));
-    passate.slice(0, 12).forEach(a => root.append(assenzaCard(a, tipiById, false)));
+  // Griglia (lun→dom)
+  const grid = elx('div', { class:'cal-grid' });
+  ['L', 'M', 'M', 'G', 'V', 'S', 'D'].forEach(d => grid.append(elx('div', { class:'cal-dow' }, d)));
+  const primo = new Date(ferieCal.y, ferieCal.m, 1);
+  const offset = (primo.getDay() + 6) % 7;   // lun = 0
+  const giorniMese = new Date(ferieCal.y, ferieCal.m + 1, 0).getDate();
+  for (let i = 0; i < offset; i++) grid.append(elx('div', { class:'cal-cell empty' }));
+
+  for (let g = 1; g <= giorniMese; g++) {
+    const iso = `${ferieCal.y}-${zp(ferieCal.m + 1)}-${zp(g)}`;
+    const ass = (state.assenze || []).filter(a => a.data === iso);
+    const mia = ass.find(a => a.utente_id === mioId);
+    const cls = 'cal-cell' + (mia ? ' mia' : (ass.length ? ' has' : '')) +
+      (iso === oggiIso ? ' oggi' : '') + (iso === ferieCal.sel ? ' sel' : '');
+    const cell = elx('div', { class: cls, onclick: () => { ferieCal.sel = iso; renderFerie(); } });
+    cell.append(elx('div', { class:'cal-num' }, String(g)));
+    if (mia) {
+      const t = tipiById[mia.tipo_assenza_id];
+      cell.append(elx('div', { class:'cal-mine', style:'background:' + (t?.colore || 'var(--acc)') + ';' }));
+    }
+    if (ass.length) cell.append(elx('div', { class:'cal-count' }, String(ass.length)));
+    grid.append(cell);
+  }
+  root.append(grid);
+
+  // Dettaglio del giorno selezionato
+  if (ferieCal.sel) {
+    const ass = (state.assenze || []).filter(a => a.data === ferieCal.sel)
+      .sort((a, b) => (state.utentiById[a.utente_id]?.nome || '').localeCompare(state.utentiById[b.utente_id]?.nome || ''));
+    root.append(elx('div', { class:'sec-hd', style:'margin-top:14px;' }, fmtIT(ferieCal.sel) + ' · ' + ass.length + ' assenti'));
+    if (ass.length === 0) {
+      root.append(elx('div', { class:'empty' }, 'Nessuno assente in questa data.'));
+    } else {
+      ass.forEach(a => {
+        const t = tipiById[a.tipo_assenza_id];
+        const u = state.utentiById[a.utente_id];
+        const ore = parseFloat(a.ore);
+        const oreTxt = ore >= 8 ? 'giornata' : (ore + 'h');
+        const isMia = a.utente_id === mioId;
+        const row = elx('div', { class: 'comm-row' + (isMia ? ' mia-row' : '') });
+        row.append(
+          elx('div', { class:'cr-line1' },
+            elx('span', { class:'mezzo-dot', style:'background:' + (t?.colore || '#6b6b64') + ';' }),
+            elx('span', {}, (u?.nome || 'Operatore') + (isMia ? ' (io)' : ''))),
+          elx('div', { class:'cr-meta' }, (t ? (t.codice ? t.codice + ' — ' + t.nome : t.nome) : 'Assenza') + ' · ' + oreTxt));
+        if (a.note) row.append(elx('div', { class:'cr-sub' }, a.note));
+        if (isMia) row.append(elx('button', { class:'cr-del', onclick: () => annullaAssenza(a) }, '✕ Annulla'));
+        root.append(row);
+      });
+    }
   }
 }
 
-function assenzaCard(a, tipiById, cancellabile) {
-  const t = tipiById[a.tipo_assenza_id];
-  const ore = parseFloat(a.ore);
-  const oreTxt = (ore >= 8) ? 'giornata intera' : (ore + 'h');
-  const card = elx('div', { class:'comm-row' });
-  card.append(
-    elx('div', { class:'cr-line1' },
-      elx('span', { class:'mezzo-dot', style:'background:' + (t?.colore || '#6b6b64') + ';' }),
-      elx('span', {}, t ? (t.codice ? t.codice + ' — ' + t.nome : t.nome) : 'Assenza')),
-    elx('div', { class:'cr-meta' }, '📅 ' + fmtIT(a.data) + ' · ' + oreTxt),
-  );
-  if (a.note) card.append(elx('div', { class:'cr-sub' }, a.note));
-  if (cancellabile) card.append(elx('button', { class:'cr-del',
-    onclick: () => annullaAssenza(a) }, '✕ Annulla'));
-  return card;
+function shiftMese(delta) {
+  let m = ferieCal.m + delta, y = ferieCal.y;
+  if (m < 0) { m = 11; y--; } else if (m > 11) { m = 0; y++; }
+  ferieCal.y = y; ferieCal.m = m;
+  renderFerie();
 }
 
 async function annullaAssenza(a) {
@@ -1347,10 +1458,24 @@ function goFase(o) {
       list.append(elx('button', { class:'fase-btn' + (mia ? ' mia' : ''), onclick: () => avvia(f.tipo_lavorazione_id, f.id) },
         elx('div', { class:'fase-color', style:'background:' + col + ';' }),
         elx('div', { class:'fase-name' }, tipo?.nome || 'Fase'),
-        elx('div', { class:'fase-meta' }, Number(f.minuti_unitari) > 0 ? f.minuti_unitari + ' min/pz' : ''),
         mia ? elx('div', { class:'fase-mia-tag' }, '★ LA TUA FASE') : null,
       ));
     });
+
+    // Oltre alle fasi, permetti di scegliere un altro tipo di lavorazione qualsiasi
+    // (non previsto come fase): avvia senza fase.
+    const tipiFase = new Set(fasi.map(f => f.tipo_lavorazione_id));
+    const altri = state.tipiLav.filter(t => t.attivo !== false && !tipiFase.has(t.id))
+      .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+    if (altri.length) {
+      list.append(elx('div', { class:'fase-sep' }, 'Altro tipo di lavorazione'));
+      altri.forEach(t => {
+        list.append(elx('button', { class:'fase-btn', onclick: () => avvia(t.id, null) },
+          elx('div', { class:'fase-color', style:'background:' + (t.colore || '#6b6b64') + ';' }),
+          elx('div', { class:'fase-name' }, t.nome),
+        ));
+      });
+    }
     return;
   }
 
@@ -1387,6 +1512,9 @@ async function assicuraAddetto(uid, opId, faseId) {
 async function avvia(tipoId, faseId) {
   const u = state.operatore, o = state.opSel;
   if (!u || !o || !tipoId) return;
+  // Conferma esplicita per evitare avvii accidentali con un tocco involontario.
+  const nomeTipo = state.tipiLav.find(t => t.id === tipoId)?.nome || 'questa lavorazione';
+  if (!confirm('Iniziare a timbrare "' + nomeTipo + '" su ' + (o.numero_ordine || 'questa commessa') + '?')) return;
   const payload = {
     operazione_id: o.id,
     utente_id: u.id,
@@ -1514,6 +1642,22 @@ function durataFineStr(sess) {
 }
 
 async function stopSessione(sess) {
+  // Micro-timbrature accidentali (start/stop di pochi secondi) → scarto la riga,
+  // così non sporcano consuntivi e medie. Solo sullo stop manuale.
+  const elapsedSec = Math.floor((Date.now() - new Date(sess.inizio).getTime()) / 1000);
+  if (elapsedSec < SOGLIA_SCARTO_SEC) {
+    try {
+      const { error } = await sb.from('sessioni_lavoro').delete().eq('id', sess.id);
+      if (error) throw error;
+      state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
+      beep('ok');
+      showDone(true, 'Timbratura annullata', 'Troppo breve (' + elapsedSec + 's): non registrata.', goHome);
+    } catch (e) {
+      beep('err');
+      showDone(false, 'Errore', String(e.message || e), goAttiva);
+    }
+    return;
+  }
   try {
     const { data, error } = await sb.from('sessioni_lavoro')
       .update({ fine: new Date().toISOString() }).eq('id', sess.id).select().single();
