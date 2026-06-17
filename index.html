@@ -5972,6 +5972,17 @@ function opCalcOreReali(op) {
   });
   return totSec / 3600;
 }
+
+// Tolleranza di sforo (in ore), criterio UNICO per tutto il sistema.
+// È il MAGGIORE tra un minimo assoluto (assorbe il rumore delle timbrature:
+// secondi, micro-scarti — costante a prescindere dalla dimensione) e una
+// percentuale del budget (dà respiro proporzionale alle commesse grandi).
+// Un consuntivo è "sforo" solo se supera il budget di più di questo.
+const TOLL_MIN_ORE = 0.05;   // ~3 minuti
+const TOLL_PERC    = 0.02;   // 2% del budget
+function tolleranzaOre(base) {
+  return Math.max(TOLL_MIN_ORE, (Number(base) || 0) * TOLL_PERC);
+}
 // ── Ore di una SINGOLA fase ────────────────────────────────────────────
 // Preventivo: quantità × minuti unitari della fase.
 function faseCalcOre(op, fase) {
@@ -8124,7 +8135,7 @@ function openOperazioneModal(o) {
     const orePrev = opCalcOre(o);
     const oreReali = opCalcOreReali(o);
     const perc = orePrev > 0 ? Math.round((oreReali / orePrev) * 100) : 0;
-    const overBudget = orePrev > 0 && oreReali > orePrev + 0.05;
+    const overBudget = orePrev > 0 && oreReali > orePrev + tolleranzaOre(orePrev);
 
     pCons.append(
       el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
@@ -8145,7 +8156,7 @@ function openOperazioneModal(o) {
         const fCons = faseCalcOreReali(o, f);
         sommaConsFasi += fCons;
         const fPerc = fPrev > 0 ? Math.round(fCons / fPrev * 100) : 0;
-        const sfora = fPrev > 0 && fCons > fPrev + 0.05;
+        const sfora = fPrev > 0 && fCons > fPrev + tolleranzaOre(fPrev);
         box.append(el('div', { style:'display:flex;align-items:center;gap:10px;padding:3px 0;' },
           el('span', { style:'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + (tipo?.colore || '#6b6b64') + ';' }),
           el('span', { style:'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' },
@@ -8850,7 +8861,7 @@ function openOperazioneModal(o) {
       ? (Number(o.minuti_unitari) * Number(o.quantita)) / 60 : 0;
     const base = pagatoOre > 0 ? pagatoOre : prev;
     const percOre = base > 0 ? Math.min(100, Math.round(cons / base * 100)) : 0;
-    const overOre = base > 0 && cons > base;
+    const overOre = base > 0 && cons > base + tolleranzaOre(base);
     const tackPrev = (pagatoOre > 0 && prev > 0)
       ? Math.min(100, Math.round(prev / pagatoOre * 100)) : null;
     const barInner = [
@@ -9436,7 +9447,7 @@ function renderStorico(root) {
     const pagatoOre = (Number(op.minuti_unitari) > 0 && Number(op.quantita) > 0)
       ? (Number(op.minuti_unitari) * Number(op.quantita)) / 60 : 0;
     if (pagatoOre <= 0) return false;
-    return opCalcOreReali(op) > pagatoOre + 0.01;
+    return opCalcOreReali(op) > pagatoOre + tolleranzaOre(pagatoOre);
   };
   if (filtroSfora) list = list.filter(s => haSforato(opById[s.operazione_id]));
 
@@ -9640,7 +9651,7 @@ function renderStorico(root) {
           ? (Number(op.minuti_unitari) * Number(op.quantita)) / 60 : 0;
         if (!op || pagatoOre <= 0) return el('td', { class:'tr mono', style:'color:var(--mut);' }, '—');
         const cons = opCalcOreReali(op);
-        const sfora = cons > pagatoOre + 0.01;
+        const sfora = cons > pagatoOre + tolleranzaOre(pagatoOre);
         return el('td', { class:'tr mono', style: sfora ? 'color:var(--red);font-weight:700;' : 'color:var(--mut);' },
           cons.toFixed(1) + '/' + pagatoOre.toFixed(1) + (sfora ? ' ⚠' : ''));
       })(),
@@ -11679,12 +11690,22 @@ async function kioskRiapriManuale(opId) {
 // Stessa logica di mobile: salta se è già "tutta la commessa" (riga fase_id null)
 // o se la riga per QUESTA fase esiste già; altrimenti inserisce (fase_id null se la
 // commessa non ha fasi). Best-effort: un errore non blocca la timbratura.
-async function kioskAssicuraAddetto(uid, opId, faseId) {
+async function kioskAssicuraAddetto(uid, opId, faseId, tipoId) {
   try {
     const righe = addettoRigheUtenteOp(uid, opId);
+    const fasiOp = (state.opFasi || []).filter(f => f.operazione_id === opId);
+    // Risolvi la fase: se non è arrivata, deducila dal tipo timbrato (se univoca).
+    let fid = faseId || null;
+    if (!fid && tipoId && fasiOp.length) {
+      const cand = fasiOp.filter(f => f.tipo_lavorazione_id === tipoId);
+      if (cand.length === 1) fid = cand[0].id;
+    }
     if (righe.some(r => !r.fase_id)) return;
-    if (righe.some(r => (r.fase_id || null) === (faseId || null))) return;
-    const row = { operazione_id: opId, utente_id: uid, fase_id: faseId || null };
+    if (righe.some(r => (r.fase_id || null) === (fid || null))) return;
+    // MAI creare una riga "tutta la commessa" (fase_id null) se la commessa HA
+    // fasi: accenderebbe TUTTE le fasi e romperebbe il match per fase.
+    if (!fid && fasiOp.length) return;
+    const row = { operazione_id: opId, utente_id: uid, fase_id: fid };
     const { data, error } = await sb.from('operazioni_addetti').insert(row).select().single();
     if (error) return;
     if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
@@ -11947,7 +11968,7 @@ function kioskOpCard(o, opts = {}) {
     orePrev = ((o.quantita || 0) * (o.minuti_unitari || 0)) / 60;
     if (orePrev > 0) {
       perc = oreCons / orePrev;
-      if (perc > 1.0)       stato = 'prog-sfora';
+      if (oreCons > orePrev + tolleranzaOre(orePrev)) stato = 'prog-sfora';
       else if (perc >= 0.9) stato = 'prog-vicino';
       else                  stato = 'prog-ok';
     } else {
@@ -11961,7 +11982,7 @@ function kioskOpCard(o, opts = {}) {
     const percRound = Math.round(perc * 100);
     const chipCls = stato === 'prog-sfora' ? 'sfora' : stato === 'prog-vicino' ? 'vicino' : '';
     const tip = oreCons.toFixed(1) + 'h su ' + orePrev.toFixed(1) + 'h preventivate'
-      + (perc > 1.0 ? ' (sforamento +' + (oreCons - orePrev).toFixed(1) + 'h)' : '');
+      + (oreCons > orePrev + tolleranzaOre(orePrev) ? ' (sforamento +' + (oreCons - orePrev).toFixed(1) + 'h)' : '');
     progEl = el('span', { class:'kop-prog-chip ' + chipCls, title: tip }, percRound + '%');
     progBar = el('div', { class:'kop-rowbar', title: tip },
       el('div', { class:'kop-progress-fill ' + chipCls, style:'width:' + Math.min(100, perc * 100) + '%;' }));
@@ -12130,7 +12151,7 @@ async function kioskAvviaSessione(tipoId, faseId) {
     // Aggiorna cache locale
     if (!state.sessioni.find(s => s.id === data.id)) state.sessioni.unshift(data);
     // Auto-iscrizione: chi timbra su una fase ne diventa addetto (se non lo era già).
-    await kioskAssicuraAddetto(u.id, o.id, payload.fase_id || null);
+    await kioskAssicuraAddetto(u.id, o.id, payload.fase_id || null, tipoId);
     // Se l'operatore aveva marcato finita la fase che sta riavviando,
     // ricominciare a lavorarci la riapre (solo quella).
     await kioskRiapriFaseSeCompletata(u.id, o.id, payload.fase_id || null);
@@ -12399,7 +12420,10 @@ const SOGLIA_SCARTO_SEC = 60;   // timbrature più brevi = accidentali, si scart
 // state.sessioni. Ritorna { scartata, elapsed, data? }. Lancia in caso d'errore.
 async function kioskChiudiOScarta(sess) {
   const elapsed = Math.floor((Date.now() - new Date(sess.inizio).getTime()) / 1000);
-  if (elapsed < SOGLIA_SCARTO_SEC) {
+  // Lo scarto vale SOLO per le timbrature su commessa (quelle che entrano nei
+  // consuntivi). Le attività extra (operazione_id null) non sporcano nulla:
+  // vanno sempre chiuse/registrate, anche se brevi, così puoi fermarle subito.
+  if (sess.operazione_id && elapsed < SOGLIA_SCARTO_SEC) {
     const { error } = await sb.from('sessioni_lavoro').delete().eq('id', sess.id);
     if (error) throw error;
     state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
@@ -13697,7 +13721,7 @@ function renderGanttCommesse(root) {
       const prev = isFase ? faseCalcOre(c.op, c.fase) : opCalcOre(c.op);
       const cons = isFase ? faseCalcOreReali(c.op, c.fase) : opCalcOreReali(c.op);
       const perc = prev > 0 ? cons / prev : 0;
-      const sfora = prev > 0 && cons > prev + 0.05;
+      const sfora = prev > 0 && cons > prev + tolleranzaOre(prev);
       const attiva = isFase
         ? state.sessioni.some(s => !s.fine && s.operazione_id === c.op.id && faseSessioneMatch(s, c.fase))
         : opConSessioneAperta.has(c.op.id);

@@ -1497,12 +1497,23 @@ function goFase(o) {
 // - se ha già la riga per QUESTA fase → non aggiungo (no doppioni);
 // - altrimenti inserisco { operazione_id, utente_id, fase_id } (fase_id null se la
 //   commessa non ha fasi). Best-effort: un errore qui non deve bloccare la timbratura.
-async function assicuraAddetto(uid, opId, faseId) {
+async function assicuraAddetto(uid, opId, faseId, tipoId) {
   try {
     const righe = righeAddetto(uid, opId);
-    if (righe.some(r => !r.fase_id)) return;                                // già su tutta la commessa
-    if (righe.some(r => (r.fase_id || null) === (faseId || null))) return;  // già su questa fase
-    const row = { operazione_id: opId, utente_id: uid, fase_id: faseId || null };
+    const fasiOp = state.opFasi.filter(f => f.operazione_id === opId);
+    // Risolvi la fase: se non è arrivata, deducila dal tipo timbrato (se univoca).
+    let fid = faseId || null;
+    if (!fid && tipoId && fasiOp.length) {
+      const cand = fasiOp.filter(f => f.tipo_lavorazione_id === tipoId);
+      if (cand.length === 1) fid = cand[0].id;
+    }
+    if (righe.some(r => !r.fase_id)) return;                              // già su tutta la commessa
+    if (righe.some(r => (r.fase_id || null) === (fid || null))) return;   // già su questa fase
+    // MAI creare una riga "tutta la commessa" (fase_id null) se la commessa HA
+    // fasi: accenderebbe TUTTE le fasi nelle assegnazioni e romperebbe il match
+    // per fase (terminazione). Senza una fase precisa non iscrivo a nulla.
+    if (!fid && fasiOp.length) return;
+    const row = { operazione_id: opId, utente_id: uid, fase_id: fid };
     const { data, error } = await sb.from('operazioni_addetti').insert(row).select().single();
     if (error) return;
     if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
@@ -1528,7 +1539,7 @@ async function avvia(tipoId, faseId) {
     if (error) throw error;
     state.sessioni.unshift(data);
     // Auto-iscrizione: se timbro su una fase di cui non sono addetto, mi ci aggiungo.
-    await assicuraAddetto(u.id, o.id, faseId || null);
+    await assicuraAddetto(u.id, o.id, faseId || null, tipoId);
     // Se avevo marcato finita LA fase che sto riavviando, riaprirla
     const r = righeAddetto(u.id, o.id).find(x => faseId ? x.fase_id === faseId : x.completata_il);
     if (r?.completata_il) await riapriFaseSilenziosa(u.id, o.id, r);
