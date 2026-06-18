@@ -11669,7 +11669,10 @@ async function kioskFineFase(sess) {
   }
   try {
     // 1) Completa la fase (aggiorna la riga, o la crea SOLO se è una fase precisa;
-    //    mai una riga "tutta la commessa" nulla).
+    //    mai una riga "tutta la commessa" nulla). Traccio se la marcatura ha
+    //    davvero toccato una riga: con la RLS, una UPDATE non permessa torna
+    //    successo ma 0 righe → va reso visibile, non silenzioso.
+    let markOk = false;
     if (riga) {
       let q = sb.from('operazioni_addetti').update({ completata_il: ora });
       if (riga.id) q = q.eq('id', riga.id);
@@ -11677,32 +11680,39 @@ async function kioskFineFase(sess) {
         q = q.eq('operazione_id', sess.operazione_id).eq('utente_id', uid);
         q = riga.fase_id ? q.eq('fase_id', riga.fase_id) : q.is('fase_id', null);
       }
-      const { error } = await q;
+      const { data: upd, error } = await q.select();
       if (error) { kioskBeep('err'); kioskShowError('Errore: ' + error.message); return; }
-      state.opAddetti = state.opAddetti.map(x =>
-        (riga.id ? x.id === riga.id
-          : (x.operazione_id === sess.operazione_id && x.utente_id === uid
-             && (x.fase_id || null) === (riga.fase_id || null)))
-          ? { ...x, completata_il: ora } : x);
+      markOk = Array.isArray(upd) && upd.length > 0;
+      if (markOk) {
+        state.opAddetti = state.opAddetti.map(x =>
+          (riga.id ? x.id === riga.id
+            : (x.operazione_id === sess.operazione_id && x.utente_id === uid
+               && (x.fase_id || null) === (riga.fase_id || null)))
+            ? { ...x, completata_il: ora } : x);
+      }
     } else if (fid) {
       const { data, error } = await sb.from('operazioni_addetti')
         .insert({ operazione_id: sess.operazione_id, utente_id: uid, fase_id: fid, completata_il: ora })
         .select().single();
       if (error) { kioskBeep('err'); kioskShowError('Errore: ' + error.message); return; }
+      markOk = !!data;
       if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
     }
-    // (se non c'è né riga né fase precisa, non marco nulla: chiudo e basta)
 
     // 2) Chiudi la sessione (sempre registrata, qualunque durata).
     const res = await kioskChiudiOScarta(sess);
     if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
-    kioskBeep('ok');
+    kioskBeep(markOk ? 'ok' : 'err');
     const durataS = Math.floor((new Date(res.data.fine) - new Date(res.data.inizio)) / 1000);
     const h = Math.floor(durataS / 3600), m = Math.floor((durataS % 3600) / 60);
-    const f = (state.opFasi || []).find(ff => ff.id === fid);
-    const t = f && state.tipiLav.find(tt => tt.id === f.tipo_lavorazione_id);
-    const detail = (t?.nome || 'Lavorazione') + '\nDurata: ' + (h > 0 ? h + 'h ' + m + 'm' : m + ' min');
-    kioskShowDone({ title: 'Fase completata ✓', detail, ok: true });
+    const dur = (h > 0 ? h + 'h ' + m + 'm' : m + ' min');
+    if (markOk) {
+      const f = (state.opFasi || []).find(ff => ff.id === fid);
+      const t = f && state.tipiLav.find(tt => tt.id === f.tipo_lavorazione_id);
+      kioskShowDone({ title: 'Fase completata ✓', detail: (t?.nome || 'Lavorazione') + '\nDurata: ' + dur, ok: true });
+    } else {
+      kioskShowDone({ title: 'Sessione chiusa', detail: 'Durata: ' + dur + '\n⚠ Fase NON marcata come finita: permessi DB (UPDATE) mancanti su questo account.', ok: false });
+    }
   } catch (e) {
     kioskBeep('err'); kioskShowError('Errore di rete: ' + (e.message || e));
   }
