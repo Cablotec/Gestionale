@@ -449,6 +449,12 @@ input.search:focus{border-color:var(--acc);}
 .kop-prog-chip.vicino{color:var(--yel);}
 .kop-prog-chip.sfora{color:var(--red);}
 .kop-rowbar{position:relative;height:6px;background:var(--sur2);border-radius:4px;overflow:hidden;margin-top:2px;}
+/* Striscia fasi PER-OPERATORE: cosa ha già chiuso (✓) e cosa gli resta (⏳) */
+.kop-fasi-strip{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px;}
+.kop-fasi-label{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);letter-spacing:.06em;text-transform:uppercase;}
+.kop-fase-chip{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;border:1px solid var(--brd);white-space:nowrap;}
+.kop-fase-chip.resta{color:var(--yel);border-color:var(--yel);background:rgba(255,204,78,.10);}
+.kop-fase-chip.fatta{color:var(--grn);border-color:var(--grn);background:rgba(78,255,163,.10);}
 /* Attività extra: griglia più semplice (card più piccole, nessuna meta complicata) */
 .kiosk-attivita-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;
   max-width:1100px;margin:0 auto;}
@@ -523,6 +529,10 @@ input.search:focus{border-color:var(--acc);}
 .ktipo-meta{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);}
 .kiosk-tipo-btn.mia-fase{border-width:3px;background:rgba(78,255,163,.08);box-shadow:0 0 0 2px var(--grn) inset;}
 .ktipo-mia-badge{font-family:'DM Mono',monospace;font-size:11px;color:var(--grn);font-weight:700;letter-spacing:.06em;}
+/* Fase già completata dall'operatore: smorzata, spunta verde, niente bordo "tua" */
+.kiosk-tipo-btn.fase-fatta{opacity:.62;border-style:dashed;border-color:var(--grn);background:rgba(78,255,163,.04);}
+.kiosk-tipo-btn.fase-fatta:hover,.kiosk-tipo-btn.fase-fatta:active{opacity:.85;}
+.ktipo-fatta-badge{font-family:'DM Mono',monospace;font-size:11px;color:var(--grn);font-weight:700;letter-spacing:.06em;}
 .kiosk-tipo-hint{text-align:center;color:var(--mut);font-size:14px;margin:4px 0 -8px;}
 
 /* Sessione attiva */
@@ -10747,7 +10757,7 @@ async function kioskLoadAll() {
   // + attività extra per il terzo flusso "Attività extra"
   // + assenze del giorno e tipi_assenza per mostrare ferie/permessi nelle card
   const oggi = toLocalISO(new Date());
-  const [mezzi, util, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti, assenze, tipiAss, attExtra, prenFuture, prenOp] = await Promise.all([
+  const [mezzi, util, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti, opFasi, assenze, tipiAss, attExtra, prenFuture, prenOp] = await Promise.all([
     sb.from('mezzi').select('*').eq('attivo', true).order('nome'),
     sb.from('utenti').select('*').eq('attivo', true).order('nome'),
     sb.from('aziende').select('*').eq('attivo', true).order('nome'),
@@ -10756,6 +10766,10 @@ async function kioskLoadAll() {
     sb.from('operazioni').select('*').neq('stato', 'spedita').neq('stato', 'completata').order('scadenza'),
     sb.from('sessioni_lavoro').select('*').is('fine', null),
     sb.from('operazioni_addetti').select('*'),
+    // Fasi delle commesse: SERVONO al kiosk per timbrare la fase giusta e per
+    // evitare che l'auto-iscrizione crei una riga "tutta la commessa" (fase_id
+    // null) credendo per errore che la commessa non abbia fasi.
+    sb.from('operazioni_fasi').select('*'),
     sb.from('assenze').select('*').eq('data', oggi).eq('stato', 'valida'),
     sb.from('tipi_assenza').select('*'),
     sb.from('attivita_extra').select('*').eq('attivo', true).order('ordine'),
@@ -10773,6 +10787,7 @@ async function kioskLoadAll() {
   state.operazioni = operazioni.data || [];
   state.sessioni = sessioni.data || [];
   state.opAddetti = opAddetti.data || [];
+  state.opFasi = opFasi.data || [];
   state.assenze = assenze.data || [];
   state.tipiAssenza = tipiAss.data || [];
   state.attivitaExtra = attExtra.data || [];
@@ -11585,6 +11600,29 @@ function etichettaFaseAddetto(riga) {
   return tipo?.nome || 'la tua fase';
 }
 
+// Stato per-operatore delle fasi su una commessa: cosa ha chiuso, cosa resta.
+// Ritorna { righe:[{fase_id, nome, colore, fatta, ordine}], fatte, totali, restano:[nomi] }.
+// Considera solo le fasi su cui l'utente è addetto (ha una riga). Vuoto se nessuna.
+function kioskFasiUtente(uid, opId) {
+  const righe = addettoRigheUtenteOp(uid, opId).map(r => {
+    const f = r.fase_id ? (state.opFasi || []).find(ff => ff.id === r.fase_id) : null;
+    const t = f ? (state.tipiLav || []).find(tt => tt.id === f.tipo_lavorazione_id) : null;
+    return {
+      fase_id: r.fase_id || null,
+      ordine: f ? (f.ordine || 0) : 0,
+      nome: t?.nome || (r.fase_id ? 'Fase' : 'Tutta la commessa'),
+      colore: t?.colore || '#6b6b64',
+      fatta: !!r.completata_il,
+    };
+  }).sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+  return {
+    righe,
+    fatte: righe.filter(x => x.fatta).length,
+    totali: righe.length,
+    restano: righe.filter(x => !x.fatta).map(x => x.nome),
+  };
+}
+
 // Ordinamento commesse al kiosk: prima la priorità impostata dall'admin
 // (numero più basso = più in alto; senza priorità in coda), poi per scadenza.
 function cmpCommessaKiosk(a, b) {
@@ -11710,7 +11748,13 @@ async function kioskFineFase(sess) {
     if (markOk) {
       const f = (state.opFasi || []).find(ff => ff.id === fid);
       const t = f && state.tipiLav.find(tt => tt.id === f.tipo_lavorazione_id);
-      kioskShowDone({ title: 'Fase completata ✓', detail: (t?.nome || 'Lavorazione') + '\nDurata: ' + dur, ok: true });
+      // Stato aggiornato (state.opAddetti è già stato sincronizzato sopra):
+      // ricordo all'operatore cosa gli resta su questa commessa, o che ha finito.
+      const st = kioskFasiUtente(uid, sess.operazione_id);
+      let extra = '';
+      if (st.totali > 0 && st.restano.length > 0) extra = '\nTi resta: ' + st.restano.join(', ');
+      else if (st.totali > 0) extra = '\n✓ Hai chiuso tutte le tue fasi su questa commessa';
+      kioskShowDone({ title: 'Fase completata ✓', detail: (t?.nome || 'Lavorazione') + '\nDurata: ' + dur + extra, ok: true });
     } else {
       kioskShowDone({ title: 'Sessione chiusa', detail: 'Durata: ' + dur + '\n⚠ Fase NON marcata come finita: permessi DB (UPDATE) mancanti su questo account.', ok: false });
     }
@@ -12039,6 +12083,25 @@ function kioskOpCard(o, opts = {}) {
   // Nota (extra, solo dove presente)
   const noteRow = o.note ? el('div', { class:'kop-note-row', title: o.note }, '✎ ' + o.note) : null;
 
+  // Striscia fasi PER-OPERATORE: a colpo d'occhio cosa ha già chiuso e cosa gli
+  // resta su questa commessa. Risponde a "è finita per la mia parte?" sulla card.
+  let fasiStrip = null;
+  {
+    const uidCard = kioskState.utenteSelezionato?.id;
+    if (uidCard) {
+      const st = kioskFasiUtente(uidCard, o.id);
+      if (st.totali > 0) {
+        const chips = st.righe.map(r => el('span', {
+          class: 'kop-fase-chip ' + (r.fatta ? 'fatta' : 'resta'),
+          title: r.nome + (r.fatta ? ' — completata da te' : ' — ancora da fare'),
+        }, (r.fatta ? '✓ ' : '⏳ ') + r.nome));
+        fasiStrip = el('div', { class:'kop-fasi-strip' },
+          el('span', { class:'kop-fasi-label' }, 'Le tue fasi:'),
+          ...chips);
+      }
+    }
+  }
+
   // Stato preparazione materiale (richiesto dalla produzione): pallino + etichetta.
   const prepKey = o.stato_preparazione || 'vuoto';
   const prepInline = el('div', { class:'kop-prep-inline' },
@@ -12056,7 +12119,7 @@ function kioskOpCard(o, opts = {}) {
     : progEl;
   const footer = el('div', { class:'kop-row-foot' }, prepInline, footRight);
   const rowClass = 'kiosk-op-row' + (stato !== 'intonsa' ? ' stato-' + stato : '');
-  const children = [ kioskInfoBlock(o), noteRow, footer, progBar ];
+  const children = [ kioskInfoBlock(o), noteRow, fasiStrip, footer, progBar ];
 
   // Modalità sola lettura: riga non cliccabile.
   if (opts.readonly) {
@@ -12098,34 +12161,47 @@ function kioskRenderTipo() {
   const fasi = opFasiOf(o);
   if (fasi.length > 0) {
     const u = kioskState.utenteSelezionato;
-    // L'operatore può avere PIÙ fasi assegnate (es. cablaggio + collaudo):
-    // le evidenzio tutte e le porto in cima, nell'ordine della commessa.
-    const mieFasiIds = new Set(addettoRigheUtenteOp(u?.id, o.id)
+    // L'operatore può avere PIÙ fasi assegnate (es. cablaggio + collaudo),
+    // chiuse in momenti diversi. Le ordino così: prima le MIE ancora DA FARE,
+    // poi le altre non mie, infine le MIE già completate (in coda, smorzate).
+    const mieRighe = addettoRigheUtenteOp(u?.id, o.id);
+    const mieFasiIds = new Set(mieRighe.map(r => r.fase_id).filter(Boolean));
+    const fatteFasiIds = new Set(mieRighe.filter(r => r.completata_il)
       .map(r => r.fase_id).filter(Boolean));
+    const rank = (f) => {
+      const mia = mieFasiIds.has(f.id), fatta = fatteFasiIds.has(f.id);
+      if (mia && !fatta) return 0;   // mie da fare → in cima
+      if (mia && fatta)  return 2;   // mie già chiuse → in fondo
+      return 1;                       // non mie → in mezzo
+    };
     const ordinate = fasi.slice().sort((a, b) => {
-      const am = mieFasiIds.has(a.id), bm = mieFasiIds.has(b.id);
-      if (am && !bm) return -1;
-      if (bm && !am) return 1;
+      const ra = rank(a), rb = rank(b);
+      if (ra !== rb) return ra - rb;
       return (a.ordine || 0) - (b.ordine || 0);
     });
 
+    const daFare = mieFasiIds.size - fatteFasiIds.size;
     root.append(el('div', { class:'kiosk-tipo-hint' },
-      'Scegli la fase su cui timbri' + (mieFasiIds.size ? ' (le tue sono evidenziate)' : '') + ':'));
+      'Scegli la fase su cui timbri'
+      + (daFare > 0 ? ' (★ le tue ancora da fare in cima)'
+                    : mieFasiIds.size ? ' (le tue fasi le hai già chiuse tutte)' : '') + ':'));
 
     const grid = el('div', { class:'kiosk-tipo-grid' });
     ordinate.forEach(f => {
       const tipo = state.tipiLav.find(t => t.id === f.tipo_lavorazione_id);
       const col = tipo?.colore || '#6b6b64';
       const mia = mieFasiIds.has(f.id);
+      const fatta = fatteFasiIds.has(f.id);
       grid.append(el('button', {
-        class:'kiosk-tipo-btn' + (mia ? ' mia-fase' : ''),
+        class:'kiosk-tipo-btn' + (mia && !fatta ? ' mia-fase' : '') + (fatta ? ' fase-fatta' : ''),
         style:'border-color:'+col+';',
         onclick: () => kioskSelectFase(f),
       },
         el('div', { class:'ktipo-color-bar', style:'background:'+col+';' }),
         el('div', { class:'ktipo-name' }, tipo?.nome || 'Fase'),
         el('div', { class:'ktipo-meta' }, (Number(f.minuti_unitari) > 0 ? f.minuti_unitari + ' min/pz' : '—')),
-        mia ? el('div', { class:'ktipo-mia-badge' }, '★ La tua fase') : null,
+        fatta ? el('div', { class:'ktipo-fatta-badge' }, '✓ Completata da te')
+              : (mia ? el('div', { class:'ktipo-mia-badge' }, '★ La tua fase') : null),
       ));
     });
     root.append(grid);
@@ -12201,6 +12277,22 @@ async function kioskAvviaSessione(tipoId, faseId) {
   // (urgenza), così sessione e iscrizione finiscono su quella fase precisa.
   let fid = faseId || null;
   if (!fid) fid = await kioskRisolviOCreaFase(o.id, tipoId);
+
+  // Se l'operatore sta per ritimbrare una SUA fase già marcata finita, chiedo
+  // conferma: evita riaperture silenziose per un tocco sbagliato sul kiosk
+  // condiviso. Se annulla, non avvio nulla e non riapro la fase.
+  if (fid) {
+    const rigaFatta = addettoRigheUtenteOp(u.id, o.id)
+      .find(r => (r.fase_id || null) === fid && r.completata_il);
+    if (rigaFatta) {
+      const fObj = (state.opFasi || []).find(ff => ff.id === fid);
+      const tObj = fObj && state.tipiLav.find(tt => tt.id === fObj.tipo_lavorazione_id);
+      const nf = tObj?.nome || 'questa fase';
+      const ok = confirm('Hai già marcato finita la fase "' + nf + '" su questa commessa.\n\n'
+        + 'Vuoi riaprirla e ricominciare a timbrarci?');
+      if (!ok) { kioskGoToTipo(); return; }
+    }
+  }
 
   const payload = {
     operazione_id: o.id,
