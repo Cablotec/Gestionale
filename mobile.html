@@ -1526,6 +1526,11 @@ async function avvia(tipoId, faseId) {
   // Conferma esplicita per evitare avvii accidentali con un tocco involontario.
   const nomeTipo = state.tipiLav.find(t => t.id === tipoId)?.nome || 'questa lavorazione';
   if (!confirm('Iniziare a timbrare "' + nomeTipo + '" su ' + (o.numero_ordine || 'questa commessa') + '?')) return;
+  // Risolvo la fase. Se timbro un TIPO fuori piano su una commessa con fasi, la
+  // fase viene creata al volo (urgenza): così sia la sessione sia l'iscrizione
+  // finiscono su quella fase precisa, non su "tutta la commessa".
+  let fid = faseId || null;
+  if (!fid) fid = await risolviOCreaFase(o.id, tipoId);
   const payload = {
     operazione_id: o.id,
     utente_id: u.id,
@@ -1533,15 +1538,15 @@ async function avvia(tipoId, faseId) {
     sede: SEDE_TIMBRO,
     inizio: new Date().toISOString(),
   };
-  if (faseId) payload.fase_id = faseId;
+  if (fid) payload.fase_id = fid;
   try {
     const { data, error } = await sb.from('sessioni_lavoro').insert(payload).select().single();
     if (error) throw error;
     state.sessioni.unshift(data);
     // Auto-iscrizione: se timbro su una fase di cui non sono addetto, mi ci aggiungo.
-    await assicuraAddetto(u.id, o.id, faseId || null, tipoId);
+    await assicuraAddetto(u.id, o.id, fid, tipoId);
     // Se avevo marcato finita LA fase che sto riavviando, riaprirla
-    const r = righeAddetto(u.id, o.id).find(x => faseId ? x.fase_id === faseId : x.completata_il);
+    const r = righeAddetto(u.id, o.id).find(x => fid ? x.fase_id === fid : x.completata_il);
     if (r?.completata_il) await riapriFaseSilenziosa(u.id, o.id, r);
     beep('ok');
     goAttiva();
@@ -1549,6 +1554,26 @@ async function avvia(tipoId, faseId) {
     beep('err');
     showDone(false, 'Errore avvio', String(e.message || e), () => goFase(o));
   }
+}
+
+// Risolve la fase per un tipo timbrato:
+//  - commessa SENZA fasi → null (timbratura "libera", come prima);
+//  - tipo già presente come fase → quella fase;
+//  - tipo FUORI PIANO su commessa con fasi → CREA la fase al volo e la ritorna.
+async function risolviOCreaFase(opId, tipoId) {
+  const fasiOp = state.opFasi.filter(f => f.operazione_id === opId);
+  if (!fasiOp.length) return null;
+  const esistente = fasiOp.find(f => f.tipo_lavorazione_id === tipoId);
+  if (esistente) return esistente.id;
+  const ordine = fasiOp.reduce((m, f) => Math.max(m, Number(f.ordine) || 0), 0) + 1;
+  try {
+    const { data, error } = await sb.from('operazioni_fasi')
+      .insert({ operazione_id: opId, tipo_lavorazione_id: tipoId, minuti_unitari: 0, ordine })
+      .select().single();
+    if (error || !data) return null;
+    if (!state.opFasi.find(x => x.id === data.id)) state.opFasi.push(data);
+    return data.id;
+  } catch (_) { return null; }
 }
 async function riapriFaseSilenziosa(uid, opId, riga) {
   try {
@@ -1685,6 +1710,7 @@ async function stopSessione(sess) {
 async function fineFase(sess, riga) {
   const ora = new Date().toISOString();
   try {
+    // 1) Marca la fase completata: intento deliberato, vale a prescindere dalla durata.
     let q = sb.from('operazioni_addetti').update({ completata_il: ora });
     if (riga.id) q = q.eq('id', riga.id);
     else {
@@ -1698,12 +1724,24 @@ async function fineFase(sess, riga) {
         : (x.operazione_id === riga.operazione_id && x.utente_id === riga.utente_id
            && (x.fase_id || null) === (riga.fase_id || null)))
         ? { ...x, completata_il: ora } : x);
-    const { data, error: e2 } = await sb.from('sessioni_lavoro')
-      .update({ fine: ora }).eq('id', sess.id).select().single();
-    if (e2) throw e2;
-    state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
-    beep('ok');
-    showDone(true, 'Fase completata ✓', 'Durata: ' + durataFineStr(data), goHome);
+
+    // 2) Chiudi la sessione, o SCARTALA se < 60s (come "Sospendi" e come il kiosk):
+    //    la fase resta completata, il tempo irrisorio non viene registrato.
+    const elapsedSec = Math.floor((Date.now() - new Date(sess.inizio).getTime()) / 1000);
+    if (elapsedSec < SOGLIA_SCARTO_SEC) {
+      const { error: e2 } = await sb.from('sessioni_lavoro').delete().eq('id', sess.id);
+      if (e2) throw e2;
+      state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
+      beep('ok');
+      showDone(true, 'Fase completata ✓', 'Timbratura troppo breve (' + elapsedSec + 's): non registrata.', goHome);
+    } else {
+      const { data, error: e2 } = await sb.from('sessioni_lavoro')
+        .update({ fine: ora }).eq('id', sess.id).select().single();
+      if (e2) throw e2;
+      state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
+      beep('ok');
+      showDone(true, 'Fase completata ✓', 'Durata: ' + durataFineStr(data), goHome);
+    }
   } catch (e) {
     beep('err');
     showDone(false, 'Errore', String(e.message || e), goAttiva);
