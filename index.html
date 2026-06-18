@@ -11667,20 +11667,14 @@ async function kioskFineFase(sess, riga) {
            && (x.fase_id || null) === (riga.fase_id || null)))
         ? { ...x, completata_il: ora } : x);
 
-    // 2) Chiudi la sessione, o SCARTALA se < 60s (stessa regola di "Sospendo"):
-    //    la fase resta completata, ma il tempo irrisorio non viene registrato.
+    // 2) Chiudi la sessione (sempre registrata, qualunque durata).
     const res = await kioskChiudiOScarta(sess);
 
     if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
     kioskBeep('ok');
-    let detail;
-    if (res.scartata) {
-      detail = etichettaFaseAddetto(riga) + '\nTimbratura troppo breve (' + res.elapsed + 's): non registrata.';
-    } else {
-      const durataS = Math.floor((new Date(res.data.fine) - new Date(res.data.inizio)) / 1000);
-      const h = Math.floor(durataS / 3600), m = Math.floor((durataS % 3600) / 60);
-      detail = etichettaFaseAddetto(riga) + '\nDurata: ' + (h > 0 ? h + 'h ' + m + 'm' : m + ' min');
-    }
+    const durataS = Math.floor((new Date(res.data.fine) - new Date(res.data.inizio)) / 1000);
+    const h = Math.floor(durataS / 3600), m = Math.floor((durataS % 3600) / 60);
+    const detail = etichettaFaseAddetto(riga) + '\nDurata: ' + (h > 0 ? h + 'h ' + m + 'm' : m + ' min');
     kioskShowDone({ title: 'Fase completata ✓', detail, ok: true });
   } catch (e) {
     kioskBeep('err'); kioskShowError('Errore di rete: ' + (e.message || e));
@@ -12270,8 +12264,8 @@ async function kioskSelectAttivita(a) {
   const u = kioskState.utenteSelezionato;
   if (!u || !a) return;
 
-  // Eventuale sessione aperta dell'utente: la chiudo prima di aprire la nuova
-  // (o la scarto se accidentale, < soglia). Stesso pattern dello switch.
+  // Eventuale sessione aperta dell'utente: la chiudo prima di aprire la nuova.
+  // Stesso pattern dello switch.
   const sessAperta = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
   if (sessAperta) {
     try {
@@ -12471,23 +12465,11 @@ function kioskFormatDurataLive(inizioDate) {
   return s+'s';
 }
 
-const SOGLIA_SCARTO_SEC = 60;   // timbrature più brevi = accidentali, si scartano
-
-// Chiude una sessione; se è durata meno della soglia la SCARTA (timbratura
-// accidentale start/stop), così non sporca consuntivi e medie. Aggiorna
-// state.sessioni. Ritorna { scartata, elapsed, data? }. Lancia in caso d'errore.
+// Chiude una sessione scrivendo `fine`. Nessuno scarto per durata: ogni
+// timbratura resta registrata, qualunque sia la sua durata. Aggiorna
+// state.sessioni. Ritorna { scartata:false, elapsed, data }. Lancia in caso d'errore.
 async function kioskChiudiOScarta(sess) {
   const elapsed = Math.floor((Date.now() - new Date(sess.inizio).getTime()) / 1000);
-  // Scarto le micro-timbrature accidentali (start/stop di pochi secondi), sia su
-  // commessa sia sulle attività extra: sotto la soglia la riga viene eliminata
-  // invece che chiusa. (Su commessa "Ho finito la mia fase" la registra comunque,
-  // perché passa da kioskFineFase e non da qui.)
-  if (elapsed < SOGLIA_SCARTO_SEC) {
-    const { error } = await sb.from('sessioni_lavoro').delete().eq('id', sess.id);
-    if (error) throw error;
-    state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
-    return { scartata: true, elapsed };
-  }
   const { data, error } = await sb.from('sessioni_lavoro')
     .update({ fine: new Date().toISOString() }).eq('id', sess.id).select().single();
   if (error) throw error;
@@ -12503,15 +12485,11 @@ async function kioskStopSessione(sess, modalita) {
     if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
 
     if (modalita === 'pause') {
-      if (res.scartata) {
-        kioskShowDone({ title: 'Timbratura annullata', detail: 'Troppo breve (' + res.elapsed + 's): non registrata.', ok: true });
-      } else {
-        const durataS = Math.floor((new Date(res.data.fine) - new Date(res.data.inizio)) / 1000);
-        const h = Math.floor(durataS / 3600);
-        const m = Math.floor((durataS % 3600) / 60);
-        const durStr = h > 0 ? h+'h '+m+'m' : m+' min';
-        kioskShowDone({ title: 'Sessione sospesa', detail: 'Durata: ' + durStr, ok: true });
-      }
+      const durataS = Math.floor((new Date(res.data.fine) - new Date(res.data.inizio)) / 1000);
+      const h = Math.floor(durataS / 3600);
+      const m = Math.floor((durataS % 3600) / 60);
+      const durStr = h > 0 ? h+'h '+m+'m' : m+' min';
+      kioskShowDone({ title: 'Sessione sospesa', detail: 'Durata: ' + durStr, ok: true });
     } else {
       // Switch: vai a lista operazioni per scegliere nuova
       kCom.opSelezionata = null;
