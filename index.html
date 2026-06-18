@@ -11751,9 +11751,14 @@ async function kioskFineFase(sess) {
       // Stato aggiornato (state.opAddetti è già stato sincronizzato sopra):
       // ricordo all'operatore cosa gli resta su questa commessa, o che ha finito.
       const st = kioskFasiUtente(uid, sess.operazione_id);
+      const conFasiVere = st.righe.filter(r => r.fase_id);
       let extra = '';
-      if (st.totali > 0 && st.restano.length > 0) extra = '\nTi resta: ' + st.restano.join(', ');
-      else if (st.totali > 0) extra = '\n✓ Hai chiuso tutte le tue fasi su questa commessa';
+      if (conFasiVere.length) {
+        const restano = conFasiVere.filter(r => !r.fatta).map(r => r.nome);
+        extra = restano.length
+          ? '\nTi resta: ' + restano.join(', ')
+          : '\n✓ Hai chiuso tutte le tue fasi su questa commessa';
+      }
       kioskShowDone({ title: 'Fase completata ✓', detail: (t?.nome || 'Lavorazione') + '\nDurata: ' + dur + extra, ok: true });
     } else {
       kioskShowDone({ title: 'Sessione chiusa', detail: 'Durata: ' + dur + '\n⚠ Fase NON marcata come finita: permessi DB (UPDATE) mancanti su questo account.', ok: false });
@@ -12090,7 +12095,9 @@ function kioskOpCard(o, opts = {}) {
     const uidCard = kioskState.utenteSelezionato?.id;
     if (uidCard) {
       const st = kioskFasiUtente(uidCard, o.id);
-      if (st.totali > 0) {
+      // Mostro la striscia solo se l'operatore ha almeno una fase VERA assegnata.
+      // Commesse senza fasi (solo riga "tutta la commessa") restano come prima.
+      if (st.righe.some(r => r.fase_id)) {
         const chips = st.righe.map(r => el('span', {
           class: 'kop-fase-chip ' + (r.fatta ? 'fatta' : 'resta'),
           title: r.nome + (r.fatta ? ' — completata da te' : ' — ancora da fare'),
@@ -12916,7 +12923,9 @@ function buildLiveCard(u, onClick, opts = {}) {
     onclick: onClick || undefined,
   });
 
-  if (assOggi) {
+  // Colore assenza sulla card SOLO se l'operatore non sta lavorando ora: una
+  // sessione aperta significa che è presente, quindi vince lo stile "attivo".
+  if (assOggi && !sess) {
     const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
     card.style.background = `${(tipo?.colore || '#6b6b64')}15`;
     card.style.borderColor = (tipo?.colore || '#6b6b64');
@@ -12934,18 +12943,12 @@ function buildLiveCard(u, onClick, opts = {}) {
     el('div', { class:'live-card-nome' }, u.nome),
     el('div', {
       class:'live-card-stato-badge '+(sess?'attivo':'fermo'),
-      style: assOggi ? `color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};border-color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};` : '',
+      style: (assOggi && !sess) ? `color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};border-color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};` : '',
     }, badgeStato),
   );
   card.append(hd);
 
-  if (assOggi) {
-    const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
-    const ore = parseFloat(assOggi.ore) || 0;
-    card.append(el('div', {
-      style: 'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-top:6px;',
-    }, `${tipo?.nome || 'Assenza'} · ${ore}h${assOggi.note ? ' — '+assOggi.note : ''}`));
-  } else if (sess) {
+  if (sess) {
     const d = descriviSessione(sess);
     const secNow = Math.floor((Date.now() - new Date(sess.inizio).getTime()) / 1000);
     const over = secNow >= LIVE_WARN_SESSIONE_SEC;
@@ -12963,6 +12966,21 @@ function buildLiveCard(u, onClick, opts = {}) {
       el('div', { class:'live-card-warn', style: over ? '' : 'display:none;' },
         '⚠ Sessione aperta da oltre 7 ore — verificare se è in corso o dimenticata aperta'),
     );
+    // Se oggi ha anche un permesso/assenza parziale lo mostro come nota
+    // secondaria: sta lavorando ORA, ma è utile sapere che oggi ha un permesso.
+    if (assOggi) {
+      const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
+      const ore = parseFloat(assOggi.ore) || 0;
+      card.append(el('div', {
+        style: 'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-top:4px;opacity:.85;',
+      }, `◷ ${tipo?.nome || 'Assenza'} ${ore}h oggi${assOggi.note ? ' — '+assOggi.note : ''}`));
+    }
+  } else if (assOggi) {
+    const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
+    const ore = parseFloat(assOggi.ore) || 0;
+    card.append(el('div', {
+      style: 'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-top:6px;',
+    }, `${tipo?.nome || 'Assenza'} · ${ore}h${assOggi.note ? ' — '+assOggi.note : ''}`));
   } else {
     // Mostra ultima sessione chiusa oggi se c'è
     const ultime = state.sessioni
