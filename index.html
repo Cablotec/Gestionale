@@ -11653,32 +11653,45 @@ function kioskRenderTerminaScelta(sess, riga) {
 async function kioskFineFase(sess) {
   const ora = new Date().toISOString();
   const uid = kioskState.utenteSelezionato?.id || sess.utente_id;
-  const fid = sess.fase_id || null;
+  // Risolvo la fase da completare: prima la fase della sessione, poi (se manca)
+  // la fase con lo stesso tipo timbrato, poi l'unica riga incompleta.
+  let fid = sess.fase_id || null;
+  if (!fid && sess.tipo_lavorazione_id) {
+    const cand = (state.opFasi || []).filter(f =>
+      f.operazione_id === sess.operazione_id && f.tipo_lavorazione_id === sess.tipo_lavorazione_id);
+    if (cand.length === 1) fid = cand[0].id;
+  }
+  const righe = addettoRigheUtenteOp(uid, sess.operazione_id);
+  let riga = righe.find(r => (r.fase_id || null) === (fid || null));
+  if (!riga) {
+    const inc = righe.filter(r => !r.completata_il);
+    if (inc.length === 1) { riga = inc[0]; fid = riga.fase_id || null; }
+  }
   try {
-    // 1) Completa la fase della sessione (trova o crea la riga addetto).
-    const riga = addettoRigheUtenteOp(uid, sess.operazione_id)
-      .find(r => (r.fase_id || null) === (fid || null));
+    // 1) Completa la fase (aggiorna la riga, o la crea SOLO se è una fase precisa;
+    //    mai una riga "tutta la commessa" nulla).
     if (riga) {
       let q = sb.from('operazioni_addetti').update({ completata_il: ora });
       if (riga.id) q = q.eq('id', riga.id);
       else {
         q = q.eq('operazione_id', sess.operazione_id).eq('utente_id', uid);
-        q = fid ? q.eq('fase_id', fid) : q.is('fase_id', null);
+        q = riga.fase_id ? q.eq('fase_id', riga.fase_id) : q.is('fase_id', null);
       }
       const { error } = await q;
       if (error) { kioskBeep('err'); kioskShowError('Errore: ' + error.message); return; }
       state.opAddetti = state.opAddetti.map(x =>
         (riga.id ? x.id === riga.id
           : (x.operazione_id === sess.operazione_id && x.utente_id === uid
-             && (x.fase_id || null) === (fid || null)))
+             && (x.fase_id || null) === (riga.fase_id || null)))
           ? { ...x, completata_il: ora } : x);
-    } else {
+    } else if (fid) {
       const { data, error } = await sb.from('operazioni_addetti')
         .insert({ operazione_id: sess.operazione_id, utente_id: uid, fase_id: fid, completata_il: ora })
         .select().single();
       if (error) { kioskBeep('err'); kioskShowError('Errore: ' + error.message); return; }
       if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
     }
+    // (se non c'è né riga né fase precisa, non marco nulla: chiudo e basta)
 
     // 2) Chiudi la sessione (sempre registrata, qualunque durata).
     const res = await kioskChiudiOScarta(sess);
@@ -11688,7 +11701,7 @@ async function kioskFineFase(sess) {
     const h = Math.floor(durataS / 3600), m = Math.floor((durataS % 3600) / 60);
     const f = (state.opFasi || []).find(ff => ff.id === fid);
     const t = f && state.tipiLav.find(tt => tt.id === f.tipo_lavorazione_id);
-    const detail = (t?.nome || 'Fase') + '\nDurata: ' + (h > 0 ? h + 'h ' + m + 'm' : m + ' min');
+    const detail = (t?.nome || 'Lavorazione') + '\nDurata: ' + (h > 0 ? h + 'h ' + m + 'm' : m + ' min');
     kioskShowDone({ title: 'Fase completata ✓', detail, ok: true });
   } catch (e) {
     kioskBeep('err'); kioskShowError('Errore di rete: ' + (e.message || e));
@@ -12425,7 +12438,7 @@ function kioskRenderAttiva() {
   // fase precisa → due tasti: "Ho finito" e "Sospendo". Altrimenti (attività
   // extra o senza fase) → un solo tasto di chiusura.
   const actions = el('div', { class:'kiosk-attiva-actions' });
-  if (sess.operazione_id && sess.fase_id) {
+  if (sess.operazione_id) {
     actions.append(el('button', {
       class:'kiosk-attiva-btn', style:'background:var(--grn);color:#0f0f0e;',
       onclick: () => kioskFineFase(sess),

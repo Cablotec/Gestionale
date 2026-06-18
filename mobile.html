@@ -1652,7 +1652,7 @@ function goAttiva() {
   // "sospendo"; altrimenti (extra o senza fase) solo termina. La scelta NON
   // dipende più da rigaPerSessione (che a volte non agganciava la riga).
   const actions = elx('div', { class:'att-actions' });
-  if (!isExtra && sess.fase_id) {
+  if (!isExtra) {
     actions.append(
       elx('button', { class:'att-btn fine', onclick: () => fineFase(sess) }, '✅ Ho finito la mia fase'),
       elx('button', { class:'att-btn pausa', onclick: () => stopSessione(sess) }, '⏸ Sospendo (continuerò dopo)'),
@@ -1694,32 +1694,45 @@ async function stopSessione(sess) {
 async function fineFase(sess) {
   const ora = new Date().toISOString();
   const uid = state.operatore?.id || sess.utente_id;
-  const fid = sess.fase_id || null;
+  // Risolvo la fase da completare: fase della sessione, poi (se manca) la fase
+  // con lo stesso tipo timbrato, poi l'unica riga incompleta.
+  let fid = sess.fase_id || null;
+  if (!fid && sess.tipo_lavorazione_id) {
+    const cand = state.opFasi.filter(f =>
+      f.operazione_id === sess.operazione_id && f.tipo_lavorazione_id === sess.tipo_lavorazione_id);
+    if (cand.length === 1) fid = cand[0].id;
+  }
+  const righe = righeAddetto(uid, sess.operazione_id);
+  let riga = righe.find(r => (r.fase_id || null) === (fid || null));
+  if (!riga) {
+    const inc = righe.filter(r => !r.completata_il);
+    if (inc.length === 1) { riga = inc[0]; fid = riga.fase_id || null; }
+  }
   try {
-    // 1) Completa la fase DELLA SESSIONE (trova o crea la riga addetto).
-    const riga = righeAddetto(uid, sess.operazione_id)
-      .find(r => (r.fase_id || null) === (fid || null));
+    // 1) Completa la fase (aggiorna la riga, o la crea SOLO se è una fase precisa;
+    //    mai una riga "tutta la commessa" nulla).
     if (riga) {
       let q = sb.from('operazioni_addetti').update({ completata_il: ora });
       if (riga.id) q = q.eq('id', riga.id);
       else {
         q = q.eq('operazione_id', sess.operazione_id).eq('utente_id', uid);
-        q = fid ? q.eq('fase_id', fid) : q.is('fase_id', null);
+        q = riga.fase_id ? q.eq('fase_id', riga.fase_id) : q.is('fase_id', null);
       }
       const { error: e1 } = await q;
       if (e1) throw e1;
       state.opAddetti = state.opAddetti.map(x =>
         (riga.id ? x.id === riga.id
           : (x.operazione_id === sess.operazione_id && x.utente_id === uid
-             && (x.fase_id || null) === (fid || null)))
+             && (x.fase_id || null) === (riga.fase_id || null)))
           ? { ...x, completata_il: ora } : x);
-    } else {
+    } else if (fid) {
       const { data, error } = await sb.from('operazioni_addetti')
         .insert({ operazione_id: sess.operazione_id, utente_id: uid, fase_id: fid, completata_il: ora })
         .select().single();
       if (error) throw error;
       if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
     }
+    // (niente fase precisa → non marco nulla, chiudo e basta)
 
     // 2) Chiudi la sessione (sempre registrata, qualunque durata).
     const { data, error: e2 } = await sb.from('sessioni_lavoro')
