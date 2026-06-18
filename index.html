@@ -11464,7 +11464,8 @@ function kioskShowDone({ title, detail, ok, dopo }) {
     el('div', { class:'kiosk-done-detail', style:'white-space:pre-line' }, detail || ''),
   ));
   clearTimeout(kioskState.doneTimer);
-  kioskState.doneTimer = setTimeout(dopo || kioskGoToId, KIOSK_DONE_MS);
+  // Conferma OK: sparisce in fretta. Errore/avviso: resta a lungo, così è leggibile.
+  kioskState.doneTimer = setTimeout(dopo || kioskGoToId, ok ? KIOSK_DONE_MS : 15000);
 }
 
 // ─── Inattività ───
