@@ -11647,34 +11647,48 @@ function kioskRenderTerminaScelta(sess, riga) {
     el('button', { class:'kiosk-op-toggle-altre', onclick: () => kioskGoToAttiva() }, '← Annulla')));
 }
 
-// Marca finita LA fase dell'utente (solo quella riga) + chiude la sessione.
-async function kioskFineFase(sess, riga) {
+// Marca finita la fase DELLA SESSIONE per l'operatore + chiude la sessione.
+// Robusto: non dipende dall'aggancio rigaPerSessione. Trova la riga addetto per
+// la fase della sessione; se manca, la crea già completata.
+async function kioskFineFase(sess) {
   const ora = new Date().toISOString();
+  const uid = kioskState.utenteSelezionato?.id || sess.utente_id;
+  const fid = sess.fase_id || null;
   try {
-    // 1) Marca la fase completata: è l'intento deliberato, vale a prescindere
-    //    dalla durata della sessione.
-    let q = sb.from('operazioni_addetti').update({ completata_il: ora });
-    if (riga.id) q = q.eq('id', riga.id);
-    else {
-      q = q.eq('operazione_id', riga.operazione_id).eq('utente_id', riga.utente_id);
-      q = riga.fase_id ? q.eq('fase_id', riga.fase_id) : q.is('fase_id', null);
+    // 1) Completa la fase della sessione (trova o crea la riga addetto).
+    const riga = addettoRigheUtenteOp(uid, sess.operazione_id)
+      .find(r => (r.fase_id || null) === (fid || null));
+    if (riga) {
+      let q = sb.from('operazioni_addetti').update({ completata_il: ora });
+      if (riga.id) q = q.eq('id', riga.id);
+      else {
+        q = q.eq('operazione_id', sess.operazione_id).eq('utente_id', uid);
+        q = fid ? q.eq('fase_id', fid) : q.is('fase_id', null);
+      }
+      const { error } = await q;
+      if (error) { kioskBeep('err'); kioskShowError('Errore: ' + error.message); return; }
+      state.opAddetti = state.opAddetti.map(x =>
+        (riga.id ? x.id === riga.id
+          : (x.operazione_id === sess.operazione_id && x.utente_id === uid
+             && (x.fase_id || null) === (fid || null)))
+          ? { ...x, completata_il: ora } : x);
+    } else {
+      const { data, error } = await sb.from('operazioni_addetti')
+        .insert({ operazione_id: sess.operazione_id, utente_id: uid, fase_id: fid, completata_il: ora })
+        .select().single();
+      if (error) { kioskBeep('err'); kioskShowError('Errore: ' + error.message); return; }
+      if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
     }
-    const { error: errAdd } = await q;
-    if (errAdd) { kioskBeep('err'); kioskShowError('Errore: ' + errAdd.message); return; }
-    state.opAddetti = state.opAddetti.map(x =>
-      (riga.id ? x.id === riga.id
-        : (x.operazione_id === riga.operazione_id && x.utente_id === riga.utente_id
-           && (x.fase_id || null) === (riga.fase_id || null)))
-        ? { ...x, completata_il: ora } : x);
 
     // 2) Chiudi la sessione (sempre registrata, qualunque durata).
     const res = await kioskChiudiOScarta(sess);
-
     if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
     kioskBeep('ok');
     const durataS = Math.floor((new Date(res.data.fine) - new Date(res.data.inizio)) / 1000);
     const h = Math.floor(durataS / 3600), m = Math.floor((durataS % 3600) / 60);
-    const detail = etichettaFaseAddetto(riga) + '\nDurata: ' + (h > 0 ? h + 'h ' + m + 'm' : m + ' min');
+    const f = (state.opFasi || []).find(ff => ff.id === fid);
+    const t = f && state.tipiLav.find(tt => tt.id === f.tipo_lavorazione_id);
+    const detail = (t?.nome || 'Fase') + '\nDurata: ' + (h > 0 ? h + 'h ' + m + 'm' : m + ' min');
     kioskShowDone({ title: 'Fase completata ✓', detail, ok: true });
   } catch (e) {
     kioskBeep('err'); kioskShowError('Errore di rete: ' + (e.message || e));
@@ -12406,12 +12420,26 @@ function kioskRenderAttiva() {
   }
   root.append(card);
 
-  // Bottone azione (uno solo: termina la sessione)
+  // Azioni DIRETTE: niente più tasto "Termina" intermedio (che a volte non
+  // mostrava la scelta, a seconda dei permessi/dati). Se la sessione è su una
+  // fase precisa → due tasti: "Ho finito" e "Sospendo". Altrimenti (attività
+  // extra o senza fase) → un solo tasto di chiusura.
   const actions = el('div', { class:'kiosk-attiva-actions' });
-  actions.append(
-    el('button', { class:'kiosk-attiva-btn pause', onclick: () => kioskTerminaLavoro(sess) },
-      '⏹ Termina lavoro'),
-  );
+  if (sess.operazione_id && sess.fase_id) {
+    actions.append(el('button', {
+      class:'kiosk-attiva-btn', style:'background:var(--grn);color:#0f0f0e;',
+      onclick: () => kioskFineFase(sess),
+    }, '✅ Ho finito la mia fase'));
+    actions.append(el('button', {
+      class:'kiosk-attiva-btn pause',
+      onclick: () => kioskStopSessione(sess, 'pause'),
+    }, '⏸ Sospendo, continuo dopo'));
+  } else {
+    actions.append(el('button', {
+      class:'kiosk-attiva-btn pause',
+      onclick: () => kioskStopSessione(sess, 'pause'),
+    }, '⏹ Termina'));
+  }
   root.append(actions);
 
   // ─── Coda: prossime commesse assegnate a questo operatore ───
