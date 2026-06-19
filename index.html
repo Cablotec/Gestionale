@@ -154,6 +154,23 @@ input.search:focus{border-color:var(--acc);}
 .storico-sess[title]:hover{background:var(--sur2);border-radius:4px;}
 .storico-ass{display:flex;align-items:center;gap:8px;padding:6px 11px;font-family:'DM Mono',monospace;font-size:11px;background:var(--sur2);}
 .storico-ass .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+/* Componente riusabile: timeline/drill-down di righe sorgente con header
+   aggregato cliccabile. Generico — non sa cosa sono le righe. */
+.etl{margin-top:4px;}
+.etl-head{display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;padding:2px 0;cursor:pointer;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);text-align:left;}
+.etl-head:hover{color:var(--txt);}
+.etl-caret{font-size:9px;width:10px;flex-shrink:0;}
+.etl-sommario{text-decoration:underline dotted;text-underline-offset:2px;}
+.etl-debole{color:var(--yel);font-weight:700;}
+.etl-head.debole .etl-sommario{color:var(--yel);}
+.etl-det{margin:4px 0 2px 16px;border-left:1px solid var(--brd);padding-left:8px;}
+.etl-vuoto{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
+.etl-riga{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:3px 0;border-top:1px dashed var(--brd);}
+.etl-riga:first-child{border-top:none;}
+.etl-riga-main{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.etl-titolo{font-family:'DM Mono',monospace;font-size:11px;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.etl-meta{font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);}
+.etl-valore{font-family:'DM Mono',monospace;font-size:11px;color:var(--txt);font-weight:700;flex-shrink:0;}
 .mhd{padding:14px 17px 11px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
 .mhd h2{font-size:14px;font-weight:700;}
 .mclose{background:none;border:none;color:var(--mut);font-size:16px;cursor:pointer;padding:2px 8px;border-radius:3px;}
@@ -4503,22 +4520,36 @@ function openArticoloModal(a) {
         placeholder:'min/pz', style:'max-width:90px;' });
       inMin.disabled = readonly;
       inMin.oninput = () => { f.minuti_unitari = Number(inMin.value) || 0; aggiornaConfronto(); };
-      // Suggerimento dallo storico per (articolo, tipo) — Tappa 7
-      const sugg = el('div', { class:'sub', style:'font-family:DM Mono,monospace;font-size:11px;flex-basis:100%;margin:0 0 2px 28px;min-height:14px;' });
+      // Metrica (sola lettura) + drill-down sulle spedite che la compongono.
+      // Il template fasi qui sopra resta l'INTENZIONE: la media la affianca,
+      // mai la sovrascrive. Vedi la divergenza piano-vs-realtà.
+      const sugg = el('div', { class:'sub', style:'font-family:DM Mono,monospace;font-size:11px;flex-basis:100%;margin:2px 0 2px 28px;' });
+      const fmtD = (iso) => { if (!iso) return ''; const p = String(iso).slice(0,10).split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0].slice(2) : String(iso); };
       function refreshSugg() {
         sugg.innerHTML = '';
-        const st = storicoMinutiPz(a.id, f.tipo_lavorazione_id);
-        if (!st) return;
-        const val = Math.round(st.minPz * 10) / 10;
-        sugg.append(el('span', { style:'color:var(--mut);' },
-          'storico ~' + String(val).replace('.', ',') + ' min/pz'));
+        const d = datiStoricoFase(a.id, f.tipo_lavorazione_id);
+        if (!d) return;
+        const val = Math.round(d.minPz * 10) / 10;
+        const top = el('div', { style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;' },
+          el('span', { style:'color:var(--mut);' },
+            'media spediti ~' + String(val).replace('.', ',') + ' min/pz · '
+            + d.nCommesse + (d.nCommesse === 1 ? ' commessa' : ' commesse')));
         if (!readonly) {
-          sugg.append(el('button', {
-            type:'button', class:'btnsm', style:'margin-left:8px;padding:1px 8px;',
-            title: 'Media su ' + st.nSessioni + ' sessioni · ' + st.nCommesse + ' commesse di questo articolo',
+          top.append(el('button', {
+            type:'button', class:'btnsm', style:'padding:1px 8px;',
             onclick: () => { f.minuti_unitari = val; inMin.value = String(val); aggiornaConfronto(); },
           }, 'usa'));
         }
+        sugg.append(top);
+        sugg.append(entityTimeline({
+          sommario: 'da quali spedite esce questo numero',
+          debole: d.debole,
+          righe: d.righe.map(r => ({
+            titolo: r.label,
+            meta: (r.data ? fmtD(r.data) + ' · ' : '') + r.pezzi + ' pz · ' + r.nSess + ' sess',
+            valore: String(Math.round(r.minPz * 10) / 10).replace('.', ',') + ' min/pz',
+          })),
+        }));
       }
       sel.onchange = () => { f.tipo_lavorazione_id = sel.value || null; refreshSugg(); aggiornaConfronto(); };
       const row = el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0;' },
@@ -5953,6 +5984,78 @@ function storicoMinutiPz(articoloId, tipoLavId) {
   return { minPz: (totSec / 60) / pezzi, nSessioni, nCommesse };
 }
 
+// ── SCHEMA RIUSABILE: dato-storia di entità + render timeline ───────────────
+// Pensati per traslocare in core.js tali e quali: leggono solo `state`, niente
+// dipendenze dal contesto chiamante.
+
+// DATO sorgente dietro la media storica di una fase. Replica ESATTA della
+// logica di storicoMinutiPz (media pesata = secondi totali / pezzi totali sulle
+// sole spedite) ma restituisce anche il dettaglio per-commessa, così il
+// drill-down quadra col numero mostrato. È questa la funzione-dato che domani
+// riusano cliente/fornitore/operatore.
+function datiStoricoFase(articoloId, tipoLavId) {
+  if (!articoloId || !tipoLavId) return null;
+  const opIds = new Set((state.operazioni || [])
+    .filter(o => o.articolo_id === articoloId).map(o => o.id));
+  if (opIds.size === 0) return null;
+  const secPerOp = {}, nSessPerOp = {};
+  (state.sessioni || []).forEach(s => {
+    if (!s.fine || s.tipo_lavorazione_id !== tipoLavId || !opIds.has(s.operazione_id)) return;
+    secPerOp[s.operazione_id] = (secPerOp[s.operazione_id] || 0) + (Number(s.durata_secondi) || 0);
+    nSessPerOp[s.operazione_id] = (nSessPerOp[s.operazione_id] || 0) + 1;
+  });
+  let totSec = 0, pezzi = 0, nSessioni = 0;
+  const righe = [];
+  Object.keys(secPerOp).forEach(id => {
+    const op = (state.operazioni || []).find(o => o.id === id);
+    if (!op || op.stato !== 'spedita') return;
+    const prod = quantitaConsegnata(id);
+    const pz = prod > 0 ? prod : Number(op.quantita || 0);
+    if (pz <= 0) return;
+    const sec = secPerOp[id];
+    totSec += sec; pezzi += pz; nSessioni += nSessPerOp[id];
+    righe.push({
+      opId: id,
+      label: op.numero_ordine || op.numero_op || op.riferimento_cliente || ('#' + String(id).slice(0, 6)),
+      data: op.consegnato_il || op.scadenza || null,
+      pezzi: pz, sec, minPz: (sec / 60) / pz, nSess: nSessPerOp[id],
+    });
+  });
+  if (totSec <= 0 || pezzi <= 0) return null;
+  righe.sort((x, y) => String(y.data || '').localeCompare(String(x.data || '')));
+  return { righe, minPz: (totSec / 60) / pezzi, nSessioni, nCommesse: righe.length, pezzi, debole: righe.length <= 1 };
+}
+
+// COMPONENTE riusabile: header aggregato cliccabile che espande/comprime un
+// elenco di righe sorgente. Generico: riceve testo già pronto, non sa cosa
+// rappresentano le righe. opts: { sommario, righe:[{titolo,meta,valore}],
+//   debole?, apertaDiDefault?, vuoto? }
+function entityTimeline(opts = {}) {
+  const righe = opts.righe || [];
+  let aperta = !!opts.apertaDiDefault;
+  const det = el('div', { class:'etl-det', style: aperta ? '' : 'display:none;' });
+  const caret = el('span', { class:'etl-caret' }, aperta ? '▾' : '▸');
+  const head = el('button', {
+    type:'button', class:'etl-head' + (opts.debole ? ' debole' : ''),
+    onclick: () => { aperta = !aperta; det.style.display = aperta ? '' : 'none'; caret.textContent = aperta ? '▾' : '▸'; },
+  },
+    caret,
+    el('span', { class:'etl-sommario' }, opts.sommario || ''),
+    opts.debole ? el('span', { class:'etl-debole' }, '⚠ debole') : null,
+  );
+  if (righe.length === 0) {
+    det.append(el('div', { class:'etl-vuoto' }, opts.vuoto || 'Nessun dato.'));
+  } else {
+    righe.forEach(r => det.append(el('div', { class:'etl-riga' },
+      el('div', { class:'etl-riga-main' },
+        el('span', { class:'etl-titolo' }, r.titolo || ''),
+        r.meta ? el('span', { class:'etl-meta' }, r.meta) : null),
+      (r.valore != null) ? el('span', { class:'etl-valore' }, r.valore) : null,
+    )));
+  }
+  return el('div', { class:'etl' }, head, det);
+}
+
 // Ore di lavoro RESIDUO: pezzi ancora da produrre × minuti_unitari.
 // Usata dove serve "quanto lavoro c'è davanti" (carico, calcolo inizio):
 // se ho già prodotto parte dell'ordine (lotti in `consegne_commessa`),
@@ -6632,32 +6735,27 @@ async function persistPriorita(coppie) {
 //   2. altrimenti dalle medie storiche min/pz per tipo di lavorazione
 //      (sessioni chiuse su commesse dello stesso articolo).
 // Niente viene scritto senza conferma: anteprima con spunte per commessa.
+// Proposta fasi PER COMMESSA: SOLO dalle medie storiche degli spediti
+// (storicoMinutiPz filtra già a stato 'spedita'). Niente template: non si
+// inventano fasi su articoli senza consuntivi reali. Marca "debole" se una
+// fase si basa su una sola commessa spedita.
 function proponiFasiPerCommessa(o) {
-  const art = state.articoli.find(a => a.id === o.articolo_id);
-  if (!art) return null;
-  // 1) Template articolo
-  if (Array.isArray(art.fasi) && art.fasi.length) {
-    const fasi = art.fasi.slice()
-      .sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
-      .filter(f => f.tipo_lavorazione_id)
-      .map((f, i) => ({ tipo_lavorazione_id: f.tipo_lavorazione_id,
-        minuti_unitari: Number(f.minuti_unitari) || 0, ordine: i + 1 }));
-    if (fasi.length) return { fasi, fonte: 'articolo' };
-  }
-  // 2) Medie storiche per tipo
+  if (!o || !o.articolo_id) return null;
   const fasi = [];
+  let debole = false;
   (state.tipiLav || [])
     .filter(t => t.attivo !== false)
     .sort((a, b) => (a.ordine || 0) - (b.ordine || 0))
     .forEach(t => {
       const st = storicoMinutiPz(o.articolo_id, t.id);
       if (st && st.minPz > 0) {
+        if (st.nCommesse <= 1) debole = true;
         fasi.push({ tipo_lavorazione_id: t.id,
           minuti_unitari: Math.round(st.minPz * 10) / 10,
-          ordine: fasi.length + 1, _nSess: st.nSessioni });
+          ordine: fasi.length + 1, _nSess: st.nSessioni, _nCommesse: st.nCommesse });
       }
     });
-  if (fasi.length) return { fasi, fonte: 'storico' };
+  if (fasi.length) return { fasi, fonte: 'storico', debole };
   return null;
 }
 
@@ -6673,6 +6771,27 @@ function oreStoricheUtenti(articoloId, tipoLavId) {
     ore[s.utente_id] = (ore[s.utente_id] || 0) + (Number(s.durata_secondi) || 0);
   });
   return ore;
+}
+
+// Genera e PERSISTE le fasi di una commessa dalla media degli spediti — solo
+// dati, niente template, niente assegnazione operatori (gli operatori si
+// iscrivono al kiosk). Best-effort: ritorna { creato, debole } oppure null se
+// non c'è storico spedito o le fasi esistono già.
+async function autoGeneraFasiDaMedia(op) {
+  if (!op || !op.articolo_id) return null;
+  if ((state.opFasi || []).some(f => f.operazione_id === op.id)) return null;
+  const p = proponiFasiPerCommessa(op);
+  if (!p || !p.fasi.length) return null;
+  const rows = p.fasi.map(f => ({
+    operazione_id: op.id,
+    tipo_lavorazione_id: f.tipo_lavorazione_id,
+    minuti_unitari: f.minuti_unitari,
+    ordine: f.ordine,
+  }));
+  const { data, error } = await sb.from('operazioni_fasi').insert(rows).select();
+  if (error || !data) return null;
+  data.forEach(r => { if (!state.opFasi.find(x => x.id === r.id)) state.opFasi.push(r); });
+  return { creato: data.length, debole: !!p.debole };
 }
 
 function openGeneraFasiModal() {
@@ -6730,7 +6849,7 @@ function openGeneraFasiModal() {
 
   body.append(el('div', { class:'sub', style:'margin-bottom:12px;' },
     senzaFasi.length + ' commesse aperte senza fasi. '
-    + proposte.length + ' con proposta (template articolo o storico), '
+    + proposte.length + ' con proposta (media degli spediti), '
     + senzaDati.length + ' senza dati sufficienti. '
     + 'Dove c\'è storico viene proposto anche l\'operatore abituale (→ nome). '
     + 'Niente viene scritto finché non confermi.'));
@@ -6765,9 +6884,12 @@ function openGeneraFasiModal() {
           descrFasi(p)
           + '  →  tot ' + String(p.somma).replace('.', ',') + "'/pz"
           + (pagato > 0 ? ' su ' + String(pagato).replace('.', ',') + "' pagati" : '')
-          + '  ·  fonte: ' + (p.fonte === 'articolo' ? 'template articolo' : 'medie storiche')),
+          + '  ·  fonte: medie storiche (spediti)'
+          + (p.debole ? '  ·  ⚠ 1 sola commessa' : '')),
         sfora ? el('div', { style:'font-size:11px;color:var(--yel);margin-top:2px;' },
           '⚠ la somma delle fasi supera il tempo pagato') : null,
+        p.debole ? el('div', { style:'font-size:11px;color:var(--mut);margin-top:2px;' },
+          '⚠ media debole: basata su una sola commessa spedita') : null,
       ),
     ));
   });
@@ -6775,7 +6897,7 @@ function openGeneraFasiModal() {
 
   if (senzaDati.length) {
     body.append(el('div', { class:'sub', style:'margin-top:12px;color:var(--mut);' },
-      'Senza dati (né template articolo né storico): '
+      'Senza dati (nessuno storico spedito): '
       + senzaDati.map(o => {
           const a = state.articoli.find(x => x.id === o.articolo_id);
           return a?.codice || o.numero_ordine || '?';
@@ -7022,7 +7144,7 @@ function renderPianificazione(root) {
     toolbar.append(el('button', { class:'btnp', onclick:()=>openOperazioneModal() }, '+ Nuova Operazione'));
     toolbar.append(el('button', { class:'btng', onclick:()=>openPrioritaModal() }, '⠿ Ordina priorità'));
     toolbar.append(el('button', { class:'btng', onclick:()=>openGeneraFasiModal(),
-      title:'Crea le fasi sulle commesse aperte che non ne hanno, da template articolo o medie storiche' }, '⚙ Genera fasi'));
+      title:'Rivedi le commesse aperte senza fasi e generale dalle medie storiche degli spediti' }, '⚙ Genera fasi'));
     const fileImp = el('input', {
       type:'file', accept:'.xlsx,.xls', style:'display:none;',
       onchange: (e) => { if (e.target.files[0]) operazioniImportExcel(e.target.files[0]); e.target.value=''; },
@@ -9146,6 +9268,20 @@ function openOperazioneModal(o) {
         }
         const faseIdByK = syncFasi.keyToId || {};
         const resolveFase = (k) => (k && faseIdByK[k]) ? faseIdByK[k] : null;
+
+        // Generazione automatica fasi dalla media degli spediti: SOLO commessa
+        // nuova e SOLO se non ne hai inserite a mano. Niente template, niente
+        // operatori assegnati di nascosto. Best-effort: non blocca il salvataggio.
+        if (isNew && fasiPayloadComm.length === 0) {
+          try {
+            const gen = await autoGeneraFasiDaMedia(data);
+            if (gen && gen.creato > 0) {
+              toast(gen.debole
+                ? '⚠ Fasi generate da media spediti (debole: 1 sola commessa)'
+                : 'Fasi generate automaticamente da media spediti');
+            }
+          } catch (e) { /* best-effort: l'automatismo non deve mai bloccare il salvataggio */ }
+        }
 
         // 2) Addetti: una riga per coppia (utente, fase). Nessuna fase
         //    selezionata = una riga con fase_id null (tutta la commessa).
