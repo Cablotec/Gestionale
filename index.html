@@ -5907,13 +5907,30 @@ function opFasiOf(op) {
   return (state.opFasi || []).filter(f => f.operazione_id === op.id)
     .slice().sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
 }
+// Fasi "complete": presenti e TUTTE con minuti > 0. Una fase a 0 è un
+// placeholder senza dato → le fasi non sono ancora pianificabili.
+function opFasiComplete(op) {
+  const f = opFasiOf(op);
+  return f.length > 0 && f.every(x => (Number(x.minuti_unitari) || 0) > 0);
+}
+// Fasi da usare per la PIANIFICAZIONE: le fasi se complete, altrimenti [] → la
+// commessa ricade sul calcolo aggregato (minuti_unitari, il budget). Così "una
+// fase coi minuti, le altre a 0" non sotto-schedula: usa il budget pieno.
+function opFasiPianif(op) {
+  return opFasiComplete(op) ? opFasiOf(op) : [];
+}
 // Minuti/pezzo "effettivi" per la pianificazione: somma delle fasi se presenti,
 // altrimenti il minuti_unitari (tempo pagato). Il pagato resta solo budget.
 function opMinutiEffettivi(op) {
-  const fasi = opFasiOf(op);
+  const fasi = opFasiPianif(op);
   if (fasi.length) return fasi.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
   return Number((op && op.minuti_unitari) || 0);
 }
+// Modalità fasi: PER ORA tutte SEQUENZIALI (parallelo disattivato su richiesta).
+// Unico interruttore: vale per nuove, auto-generate ed esistenti, senza
+// migrazioni di dati. Per riattivare il parallelo in futuro:
+//   return !!op.fasi_sequenziali;
+function opSequenziale(op) { return true; }
 // Assegnatari di una fase: i suoi addetti/fornitori (per fase_id). Se la fase
 // non ne ha di propri, ripiega sugli assegnatari "a tutta la commessa" (fase_id nullo).
 function faseAssegnatari(op, faseId) {
@@ -6129,14 +6146,14 @@ function opCalcInizio(op, addettiOverride, fornitoriOverride) {
   // Solo se la commessa ha fasi e NON stiamo usando override (gli override
   // servono all'anteprima di una commessa non ancora salvata, dove
   // l'assegnazione per fase non è ancora su DB: lì resta il calcolo aggregato).
-  const fasi = opFasiOf(op);
+  const fasi = opFasiPianif(op);
   if (fasi.length && !addettiOverride && !fornitoriOverride) {
     const pezzi = op.inizio_manuale
       ? Number(op.quantita || 0)
       : Math.max(0, Number(op.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0));
     if (pezzi <= 0) return op.scadenza;
 
-    if (op.fasi_sequenziali) {
+    if (opSequenziale(op)) {
       // Catena a ritroso: l'ultima fase finisce alla scadenza, il suo inizio
       // diventa la "scadenza" della fase precedente, e così via.
       let cursore = op.scadenza;
@@ -6200,14 +6217,14 @@ function opInizio(op) {
 function opFineLavoro(op, inizioIso) {
   if (!op || !inizioIso) return (op && op.scadenza) || inizioIso;
 
-  const fasi = opFasiOf(op);
+  const fasi = opFasiPianif(op);
   if (fasi.length) {
     const pezzi = op.inizio_manuale
       ? Number(op.quantita || 0)
       : Math.max(0, Number(op.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0));
     if (pezzi <= 0) return inizioIso;
 
-    if (op.fasi_sequenziali) {
+    if (opSequenziale(op)) {
       // Catena in avanti: ogni fase parte dove finisce la precedente.
       let cursore = inizioIso;
       fasi.forEach(f => {
@@ -6250,13 +6267,13 @@ function opFineLavoro(op, inizioIso) {
 // = catena a ritroso dalla scadenza; parallelo = ogni fase a ritroso per sé.
 // Serve al Gantt per posizionare la barra di ciascun addetto sulla SUA fase.
 function opFasiWindows(op) {
-  const fasi = opFasiOf(op);
+  const fasi = opFasiPianif(op);
   if (!fasi.length || !op.scadenza) return {};
   const pezzi = op.inizio_manuale
     ? Number(op.quantita || 0)
     : Math.max(0, Number(op.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0));
   const out = {};
-  if (op.fasi_sequenziali) {
+  if (opSequenziale(op)) {
     let cursore = op.scadenza;
     for (let i = fasi.length - 1; i >= 0; i--) {
       const f = fasi[i];
@@ -8830,7 +8847,9 @@ function openOperazioneModal(o) {
     // Fasi LIVE (dal form, non ancora salvate). Se presenti, l'anteprima usa la
     // SOMMA fasi come volume e calcola l'inizio PER FASE, coerente col motore.
     const fasiVere = fasiComm.filter(f => f.tipo_lavorazione_id);
-    const conFasi = fasiVere.length > 0;
+    // Coerente col motore: l'anteprima usa le fasi solo se COMPLETE (tutte > 0),
+    // altrimenti ricade sull'aggregato (minuti_unitari).
+    const conFasi = fasiVere.length > 0 && fasiVere.every(f => (Number(f.minuti_unitari) || 0) > 0);
     let ore, inizioCalc;
     if (conFasi) {
       const minutiEff = fasiVere.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
@@ -8848,7 +8867,8 @@ function openOperazioneModal(o) {
       };
       if (!tmp.scadenza) {
         inizioCalc = null;
-      } else if (seqChk.checked && fasiVere.length >= 2) {
+      } else {
+        // Sempre sequenziale (parallelo disattivato): catena a ritroso.
         let cursore = tmp.scadenza;
         for (let i = fasiVere.length - 1; i >= 0; i--) {
           const f = fasiVere[i];
@@ -8857,15 +8877,6 @@ function openOperazioneModal(o) {
           cursore = inizioPerFase(cursore, oreF, add, forn);
         }
         inizioCalc = cursore;
-      } else {
-        let minIni = tmp.scadenza;
-        fasiVere.forEach(f => {
-          const oreF = (tmp.quantita * (Number(f.minuti_unitari) || 0)) / 60;
-          const { add, forn } = assegnLive(f._k);
-          const ini = inizioPerFase(tmp.scadenza, oreF, add, forn);
-          if (ini < minIni) minIni = ini;
-        });
-        inizioCalc = minIni;
       }
     } else {
       ore = opCalcOre(tmp);
@@ -8908,7 +8919,7 @@ function openOperazioneModal(o) {
       el('div', { style:'margin-top:4px;font-size:10px;color:var(--mut);' },
         conFasi
           ? ('Inizio calcolato per fase — ognuna sulla capacità dei suoi assegnatari — '
-             + (seqChk.checked && fasiVere.length >= 2 ? 'in sequenza' : 'in parallelo')
+             + 'in sequenza'
              + ', a ritroso dalla scadenza. Le ore sono la somma delle fasi (il tempo pagato resta solo budget).')
           : (conAddetti
             ? 'Inizio calcolato a ritroso dalla scadenza in base alla capacità reale degli addetti assegnati (8h a testa, meno le loro ferie), escludendo weekend, festivi e chiusure aziendali.'
