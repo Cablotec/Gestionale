@@ -1439,11 +1439,6 @@ function getImpostazione(chiave, defaultVal) {
   const v = state.impostazioni && state.impostazioni[chiave];
   return (v === undefined || v === null) ? defaultVal : v;
 }
-function getImpostazioneInt(chiave, defaultVal) {
-  const v = getImpostazione(chiave, defaultVal);
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : defaultVal;
-}
 
 // ── Persistenza filtro clienti (Pianificazione) ──────────────
 // Salva/carica l'insieme di clienti ESCLUSI in localStorage.
@@ -2111,10 +2106,6 @@ function quantitaConsegnata(opId) {
     .reduce((sum, c) => sum + Number(c.quantita || 0), 0);
 }
 
-function quantitaResidua(op) {
-  if (!op) return 0;
-  return Number(op.quantita || 0) - quantitaConsegnata(op.id);
-}
 
 // Campi che una commessa DEVE avere compilati per essere pianificabile.
 // Ritorna l'elenco (leggibile) dei campi mancanti; vuoto = tutto a posto.
@@ -2238,7 +2229,6 @@ async function syncOperazioneFornitori(opId, nuovi) {
       allocazione: 1.0,
       numero_ordine: n.numero_ordine || null,
       fase_id: n.fase_id || null,
-      lead_giorni: (n.lead_giorni != null && n.lead_giorni !== '') ? Number(n.lead_giorni) : null,
     }));
     const { data, error } = await sb.from('operazioni_fornitori').insert(rows).select();
     if (error) return { error };
@@ -2247,15 +2237,14 @@ async function syncOperazioneFornitori(opId, nuovi) {
     });
   }
 
-  // UPDATE: coppia invariata ma numero_ordine o lead_giorni cambiati
+  // UPDATE: coppia invariata ma numero_ordine cambiato
   for (const n of nuovi) {
     const vecchia = vecchieByKey[chiave(n)];
     if (!vecchia) continue; // già gestito da insert
     const nuovoNum = n.numero_ordine || null;
-    const nuovoLead = (n.lead_giorni != null && n.lead_giorni !== '') ? Number(n.lead_giorni) : null;
-    if ((vecchia.numero_ordine || null) === nuovoNum && (vecchia.lead_giorni ?? null) === nuovoLead) continue;
+    if ((vecchia.numero_ordine || null) === nuovoNum) continue;
     const { data, error } = await sb.from('operazioni_fornitori')
-      .update({ numero_ordine: nuovoNum, lead_giorni: nuovoLead })
+      .update({ numero_ordine: nuovoNum })
       .eq('id', vecchia.id).select().single();
     if (error) return { error };
     state.opFornitori = state.opFornitori.map(x => x.id === vecchia.id ? data : x);
@@ -5304,19 +5293,6 @@ function articoliExportExcel() {
 }
 
 
-// ═══════════════════════════════════════════════════════════
-// PLACEHOLDER generico per tab non ancora implementate
-// ═══════════════════════════════════════════════════════════
-function renderPlaceholder(root, titolo, descrizione, stepLabel) {
-  root.innerHTML = '';
-  root.append(el('div', { class:'toolbar' }, el('h2', {}, titolo)));
-  root.append(el('div', { class:'placeholder-card' },
-    el('div', { class:'placeholder-icon' }, '🛠'),
-    el('div', { class:'placeholder-title' }, titolo + ' in arrivo'),
-    el('div', { class:'placeholder-sub' }, descrizione),
-    el('div', { class:'placeholder-meta' }, stepLabel + ' del piano di sviluppo'),
-  ));
-}
 
 // ═══════════════════════════════════════════════════════════
 // TIPI LAVORAZIONE — anagrafica piccola, lista chiusa
@@ -5915,15 +5891,11 @@ function opFasiOf(op) {
   return (state.opFasi || []).filter(f => f.operazione_id === op.id)
     .slice().sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
 }
-// Fasi "complete" e pianificabili: presenti, e ogni fase ha ciò che le serve —
-// una fase INTERNA i minuti > 0, una fase ESTERNA (terzista) il lead time > 0.
-// Se manca, le fasi sono incomplete → si ricade sul calcolo aggregato (budget).
+// Fasi "complete" e pianificabili: presenti e ognuna coi minuti/pz > 0
+// (interna o terzista che sia). Se manca, si ricade sull'aggregato (budget).
 function opFasiComplete(op) {
   const f = opFasiOf(op);
-  if (f.length === 0) return false;
-  return f.every(x => faseEsterna(op, x)
-    ? faseLeadGiorni(op, x) > 0
-    : (Number(x.minuti_unitari) || 0) > 0);
+  return f.length > 0 && f.every(x => (Number(x.minuti_unitari) || 0) > 0);
 }
 // Fasi da usare per la PIANIFICAZIONE: le fasi se complete, altrimenti [] → la
 // commessa ricade sul calcolo aggregato (minuti_unitari, il budget). Così "una
@@ -5995,46 +5967,21 @@ function finePerFase(inizioIso, oreFase, addetti, fornitori) {
   return giorni <= 0 ? inizioIso : avantiGiorniLavorativi(inizioIso, giorni);
 }
 
-// ── Fasi date a TERZISTI: lead time, non ore di capacità ──────────────
-// Una fase è "esterna" se ha un fornitore assegnato A QUELLA fase (specifica).
-// NON uso il fallback "tutta la commessa": un fornitore commessa-intera non
-// rende esterne le singole fasi (eviterebbe di moltiplicare il lead per fase).
-function faseEsterna(op, fase) {
-  return (state.opFornitori || []).some(r => r.operazione_id === op.id && r.fase_id === fase.id);
-}
-// Lead time (giorni lav.) della fase: override sulla riga ordine di quella fase,
-// altrimenti default in anagrafica fornitore. Più fornitori → il più lungo.
-function faseLeadGiorni(op, fase) {
-  const righe = (state.opFornitori || []).filter(r => r.operazione_id === op.id && r.fase_id === fase.id);
-  let lead = 0;
-  righe.forEach(r => {
-    const az = (state.aziende || []).find(a => a.id === r.azienda_id);
-    const g = (r.lead_giorni != null) ? Number(r.lead_giorni)
-            : (az && az.lead_giorni != null) ? Number(az.lead_giorni) : 0;
-    if (g > lead) lead = g;
-  });
-  return lead;
-}
-// Inizio di UNA fase a ritroso da `fine`: esterna = lead time; interna = ore
-// sulla capacità degli assegnatari.
+// ── Inizio/fine di UNA fase: durata = minuti/pz × pezzi sulla capacità degli
+// assegnatari. Vale anche per il terzista: il fornitore non carica i TUOI
+// operatori (capacità separata), ma la durata scala coi pezzi. Senza minuti la
+// fase non sposta nulla.
 function faseInizio(op, fase, fineIso, pezzi) {
-  if (faseEsterna(op, fase)) {
-    const lead = faseLeadGiorni(op, fase);
-    return lead > 0 ? indietroGiorniLavorativi(fineIso, lead) : fineIso;
-  }
-  const ore = (pezzi * (Number(fase.minuti_unitari) || 0)) / 60;
+  const minuti = Number(fase.minuti_unitari) || 0;
+  if (minuti <= 0) return fineIso;
   const { addetti, fornitori } = faseAssegnatari(op, fase.id);
-  return inizioPerFase(fineIso, ore, addetti, fornitori);
+  return inizioPerFase(fineIso, (pezzi * minuti) / 60, addetti, fornitori);
 }
-// Fine di UNA fase in avanti da `inizio`: speculare a faseInizio.
 function faseFine(op, fase, inizioIso, pezzi) {
-  if (faseEsterna(op, fase)) {
-    const lead = faseLeadGiorni(op, fase);
-    return lead > 0 ? avantiGiorniLavorativi(inizioIso, lead) : inizioIso;
-  }
-  const ore = (pezzi * (Number(fase.minuti_unitari) || 0)) / 60;
+  const minuti = Number(fase.minuti_unitari) || 0;
+  if (minuti <= 0) return inizioIso;
   const { addetti, fornitori } = faseAssegnatari(op, fase.id);
-  return finePerFase(inizioIso, ore, addetti, fornitori);
+  return finePerFase(inizioIso, (pezzi * minuti) / 60, addetti, fornitori);
 }
 
 function opCalcOre(op) {
@@ -6212,10 +6159,6 @@ function faseCalcOreReali(op, fase) {
   });
   return totSec / 3600;
 }
-function opCalcGiorni(op) {
-  const ore = opCalcOre(op);
-  return Math.ceil(ore / 8); // 8 ore al giorno, arrotondato per eccesso
-}
 function opCalcInizio(op, addettiOverride, fornitoriOverride) {
   if (!op.scadenza) return null;
 
@@ -6350,7 +6293,7 @@ function opFasiWindows(op) {
     for (let i = fasi.length - 1; i >= 0; i--) {
       const f = fasi[i];
       const inizio = faseInizio(op, f, cursore, pezzi);
-      out[f.id] = { inizio, fine: cursore, ordine: f.ordine, tipo_lavorazione_id: f.tipo_lavorazione_id, esterna: faseEsterna(op, f) };
+      out[f.id] = { inizio, fine: cursore, ordine: f.ordine, tipo_lavorazione_id: f.tipo_lavorazione_id };
       cursore = inizio;
     }
   } else {
@@ -7510,99 +7453,7 @@ function renderPianificazione(root) {
     'Click su una riga per aprire la scheda completa dell\'operazione.'));
 }
 
-// Cella inline editabile (text/number/date)
-function opInlineCell(op, field, displayValue, type) {
-  const cell = el('span', { class:'op-cell-inline' }, String(displayValue));
-  cell.onclick = (e) => {
-    e.stopPropagation();
-    if (cell.classList.contains('editing')) return;
-    cell.classList.add('editing');
-    cell.innerHTML = '';
-    const inp = el('input', { type, value: op[field] || '' });
-    cell.appendChild(inp);
-    inp.focus();
-    if (type !== 'date') inp.select();
 
-    const commit = async () => {
-      let val = inp.value;
-      if (type === 'number') {
-        const n = parseInt(val);
-        val = isNaN(n) ? 0 : n;
-      }
-      if (type === 'date' && !val) val = null;
-      if (type === 'text' && (val||'').trim() === '') val = null;
-      // Se non è cambiato, exit silenzioso
-      if (val === op[field] || (val === null && !op[field])) {
-        cell.classList.remove('editing');
-        cell.innerHTML = String(displayValue);
-        return;
-      }
-      cell.innerHTML = '...';
-      const { data, error } = await sb.from('operazioni')
-        .update({ [field]: val }).eq('id', op.id).select().single();
-      cell.classList.remove('editing');
-      if (error) {
-        toast(error.message, 'err');
-        cell.innerHTML = String(displayValue);
-        return;
-      }
-      state.operazioni = state.operazioni.map(x => x.id === op.id ? data : x);
-      renderTab('pianificazione');
-    };
-    inp.onblur = commit;
-    inp.onkeydown = (ev) => {
-      if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); }
-      else if (ev.key === 'Escape') {
-        cell.classList.remove('editing');
-        cell.innerHTML = String(displayValue);
-      }
-    };
-  };
-  return cell;
-}
-
-// Cella inline editabile (select)
-function opInlineSelect(op, field, displayNode, options) {
-  const cell = el('span', { class:'op-cell-inline' });
-  if (typeof displayNode === 'string') cell.textContent = displayNode;
-  else cell.appendChild(displayNode);
-  cell.onclick = (e) => {
-    e.stopPropagation();
-    if (cell.classList.contains('editing')) return;
-    cell.classList.add('editing');
-    cell.innerHTML = '';
-    const sel = el('select', {});
-    options.forEach(o => sel.appendChild(el('option', { value:o.value }, o.label)));
-    sel.value = op[field] || '';
-    cell.appendChild(sel);
-    sel.focus();
-
-    const commit = async () => {
-      let val = sel.value || null;
-      if (val === op[field]) {
-        cell.classList.remove('editing');
-        if (typeof displayNode === 'string') cell.textContent = displayNode;
-        else { cell.innerHTML=''; cell.appendChild(displayNode); }
-        return;
-      }
-      cell.innerHTML = '...';
-      const { data, error } = await sb.from('operazioni')
-        .update({ [field]: val }).eq('id', op.id).select().single();
-      cell.classList.remove('editing');
-      if (error) {
-        toast(error.message, 'err');
-        renderTab('pianificazione');
-        return;
-      }
-      state.operazioni = state.operazioni.map(x => x.id === op.id ? data : x);
-      renderTab('pianificazione');
-    };
-    sel.onchange = commit;
-    sel.onblur = commit;
-    sel.onkeydown = (ev) => { if (ev.key === 'Escape') { cell.classList.remove('editing'); renderTab('pianificazione'); } };
-  };
-  return cell;
-}
 
 // Modale completa per creazione e modifica
 // ─── Campo autocomplete con creazione al volo ───
@@ -7827,20 +7678,6 @@ function openOperazioneModal(o) {
   }
   const tipoNomeFase = (id) => (tipiAttiviComm.find(t => t.id === id) || {}).nome || 'fase';
   const fasiAssegnabili = () => fasiComm.filter(f => f.tipo_lavorazione_id);
-  // <select> di scelta fase per un assegnatario (addetto o fornitore).
-  function buildFaseSelect(currentKey, onChange) {
-    const sel = el('select', { style:'max-width:160px;font-size:11px;padding:2px 4px;' },
-      el('option', { value:'' }, 'Tutta la commessa'));
-    fasiComm.forEach((f, i) => {
-      if (!f.tipo_lavorazione_id) return;
-      sel.append(el('option', { value: f._k }, `#${i + 1} ${tipoNomeFase(f.tipo_lavorazione_id)}`));
-    });
-    const valido = currentKey && fasiComm.some(f => f._k === currentKey && f.tipo_lavorazione_id);
-    sel.value = valido ? currentKey : '';
-    sel.disabled = !canEdit;
-    sel.onchange = () => onChange(sel.value || '');
-    return sel;
-  }
   // Chip multi-fase per un ADDETTO: ogni fase è un interruttore on/off.
   // Nessuna fase accesa = assegnato a tutta la commessa. Un operatore può
   // quindi coprire più fasi (es. cablaggio + collaudo) sulla stessa commessa.
@@ -8014,7 +7851,6 @@ function openOperazioneModal(o) {
           azienda_id: r.azienda_id,
           numero_ordine: r.numero_ordine || '',
           allocazione: r.allocazione || 1.0,
-          lead_giorni: (r.lead_giorni != null ? r.lead_giorni : ''),
           fase_keys: [],
         };
       }
@@ -8084,16 +7920,6 @@ function openOperazioneModal(o) {
       if (fasiAssegnabili().length >= 1) {
         row.append(buildFornitoreFaseChips(sel));
       }
-      // Lead time: giorni lavorativi di reso del lotto (un reso per fornitore).
-      const inputLead = el('input', {
-        type:'number', min:'0', step:'1',
-        placeholder:'gg', title:'Giorni lavorativi di reso del terzista (lead time)',
-        value: (sel.lead_giorni != null ? sel.lead_giorni : ''),
-        style:'width:54px;font-size:11px;padding:2px 4px;',
-        oninput: (e) => { sel.lead_giorni = e.target.value; if (aggiornaPreviewInizio) aggiornaPreviewInizio(); },
-      });
-      if (!canEdit) inputLead.disabled = true;
-      row.append(el('span', { style:'font-size:11px;color:var(--mut);display:inline-flex;align-items:center;gap:4px;' }, inputLead, 'gg'));
       // Bottone elimina
       if (canEdit) {
         row.append(el('button', {
@@ -8135,7 +7961,6 @@ function openOperazioneModal(o) {
               azienda_id: a.id,
               numero_ordine: '',
               allocazione: 1.0,
-              lead_giorni: (a.lead_giorni != null ? a.lead_giorni : ''),
               fase_keys: [],
             });
           }
@@ -8171,7 +7996,7 @@ function openOperazioneModal(o) {
 
   // ── Fasi della commessa: editor (dati e helper sono definiti più in alto) ──
   // Lista fasi (tipo + minuti), confronto col tempo pagato, toggle sequenziale.
-  // L'assegnazione per fase vive nelle tendine di addetti/fornitori (buildFaseSelect).
+  // L'assegnazione per fase vive nelle chip di addetti e fornitori.
   const fasiWrapComm = el('div', { class:'fasi-list' });
   const notaConfrontoComm = el('div', { class:'sub', style:'margin-top:8px;font-family:monospace;' });
   const seqChk = el('input', { type:'checkbox' });
@@ -9457,7 +9282,7 @@ function openOperazioneModal(o) {
         //    Nessuna fase selezionata = una riga con fase_id null (tutta la commessa).
         const fornitoriPayload = [];
         fornitoriSel.forEach(s => {
-          const base = { azienda_id: s.azienda_id, numero_ordine: s.numero_ordine, allocazione: s.allocazione, lead_giorni: s.lead_giorni };
+          const base = { azienda_id: s.azienda_id, numero_ordine: s.numero_ordine, allocazione: s.allocazione };
           const keys = (s.fase_keys || []).map(k => resolveFase(k)).filter(Boolean);
           if (keys.length === 0) fornitoriPayload.push({ ...base, fase_id: null });
           else keys.forEach(fid => fornitoriPayload.push({ ...base, fase_id: fid }));
@@ -9516,13 +9341,6 @@ async function deleteOperazione(o) {
 // STORICO — operazioni spedite, KPI puntualità
 // ═══════════════════════════════════════════════════════════
 
-// Calcola giorni di ritardo tra scadenza e consegna (negativo = anticipo, 0 = in tempo, positivo = ritardo)
-function calcRitardoGiorni(o) {
-  if (!o.scadenza || !o.consegnato_il) return null;
-  const scad = parseISODate(o.scadenza);
-  const cons = parseISODate(o.consegnato_il);
-  return Math.round((cons - scad) / 86400000);
-}
 
 // Vista admin/consultazione dei prelievi registrati dall'app magazzino.
 let _prelSeq = 0; // guardia anti-doppione: solo l'ultima invocazione disegna
@@ -11831,10 +11649,6 @@ function kioskGoToCommesse() {
 // con la sua fase in fase_id. "Fase finita" = completata_il valorizzato su quella
 // riga. La commessa sparisce dai suoi suggerimenti quando la marca finita.
 
-// Riga addetto di un utente su una commessa (al più una).
-function addettoRigaUtenteOp(uid, opId) {
-  return (state.opAddetti || []).find(r => r.utente_id === uid && r.operazione_id === opId) || null;
-}
 // Tutte le righe dell'utente su questa commessa (può averne più d'una: una per fase).
 function addettoRigheUtenteOp(uid, opId) {
   return (state.opAddetti || []).filter(r => r.utente_id === uid && r.operazione_id === opId);
@@ -11922,53 +11736,7 @@ function cmpCommessaKiosk(a, b) {
   return a.scadenza < b.scadenza ? -1 : (a.scadenza > b.scadenza ? 1 : 0);
 }
 
-// Premuto "Termina lavoro": se è una commessa con una fase ancora da finire,
-// chiedo se ha finito o sospende; altrimenti (attività extra, non assegnato,
-// o già finita) chiudo direttamente come prima.
-function kioskTerminaLavoro(sess) {
-  if (!sess || !sess.operazione_id) { kioskStopSessione(sess, 'pause'); return; }
-  const u = kioskState.utenteSelezionato;
-  const riga = rigaPerSessione(u?.id, sess);
-  if (!riga || riga.completata_il) { kioskStopSessione(sess, 'pause'); return; }
-  kioskRenderTerminaScelta(sess, riga);
-}
 
-// Schermata di scelta dentro la vista "lavoro attivo".
-function kioskRenderTerminaScelta(sess, riga) {
-  const root = $('#kiosk-attiva-content');
-  if (!root) return;
-  if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
-  root.innerHTML = '';
-  const nomeFase = etichettaFaseAddetto(riga);
-  const nomeUtente = (state.utenti.find(x => x.id === riga.utente_id)
-    || kioskState.utenteSelezionato || {}).nome || '';
-
-  // Il nome è in evidenza APPOSTA: su un kiosk condiviso questa scelta agisce
-  // sull'utente selezionato sullo schermo, non su chi fisicamente preme.
-  root.append(el('div', {
-    style:'font-family:Syne,sans-serif;font-size:22px;font-weight:700;text-align:center;margin-bottom:8px;'
-  }, 'Hai finito la tua fase' + (nomeUtente ? ', ' + nomeUtente : '') + '?'));
-  root.append(el('div', {
-    style:'text-align:center;color:var(--mut);font-size:14px;line-height:1.5;margin-bottom:24px;'
-  }, 'Fase: ' + nomeFase + (nomeUtente ? ' · Operatore: ' + nomeUtente : '')
-     + '. Se la marchi finita, questa commessa non ti verrà più suggerita '
-     + '(puoi sempre riaprirla da “✓ Completate da te”). '
-     + 'Se NON sei ' + (nomeUtente || 'questo operatore') + ', premi Annulla.'));
-
-  const actions = el('div', { class:'kiosk-attiva-actions' });
-  actions.append(el('button', {
-    class:'kiosk-attiva-btn', style:'background:var(--grn);color:#0f0f0e;',
-    onclick: () => kioskFineFase(sess, riga),
-  }, '✅ Ho finito la mia fase'));
-  actions.append(el('button', {
-    class:'kiosk-attiva-btn pause',
-    onclick: () => kioskStopSessione(sess, 'pause'),
-  }, '⏸ Sospendo, continuo dopo'));
-  root.append(actions);
-
-  root.append(el('div', { style:'text-align:center;margin-top:18px;' },
-    el('button', { class:'kiosk-op-toggle-altre', onclick: () => kioskGoToAttiva() }, '← Annulla')));
-}
 
 // Marca finita la fase DELLA SESSIONE per l'operatore + chiude la sessione.
 // Robusto: non dipende dall'aggancio rigaPerSessione. Trova la riga addetto per
@@ -13144,25 +12912,7 @@ function calcolaCaricoFornitoreRange(aziendaId, isoStart, isoEnd) {
   return { oreCarico, oreCapacita, perc, livello, coefficiente: coef };
 }
 
-// Etichetta breve di una commessa (per la barra)
-function etichettaCommessa(op) {
-  if (!op) return '';
-  const art = state.articoli && state.articoli.find(a => a.id === op.articolo_id);
-  return (art && art.codice) || ('OP' + op.id);
-}
 
-// Descrizione completa di una commessa (per il tooltip)
-function descrizioneCommessa(op) {
-  if (!op) return 'Commessa';
-  const cli = state.aziende && state.aziende.find(c => c.id === op.cliente_id);
-  const art = state.articoli && state.articoli.find(a => a.id === op.articolo_id);
-  const parti = [];
-  if (op.numero_ordine) parti.push('Ordine ' + op.numero_ordine);
-  let riga = parti.join(' · ') || 'Commessa';
-  if (cli) riga += '\nCliente: ' + cli.nome;
-  if (art) riga += '\nArticolo: ' + (art.codice || art.descrizione || '');
-  return riga;
-}
 
 // ═══════════════════════════════════════════════════════════
 // GANTT — schede separate: Live e Commesse
@@ -14594,11 +14344,6 @@ function ganttRangeLabel(range, zoom) {
   return '';
 }
 
-function sessIntersectsRange(sess, rangeStart, rangeEnd) {
-  const ini = new Date(sess.inizio);
-  const fin = sess.fine ? new Date(sess.fine) : new Date();
-  return ini < rangeEnd && fin > rangeStart;
-}
 
 // ─── Modal modifica/elimina sessione (admin) ───
 // onDone (opzionale): callback eseguito DOPO un salvataggio/eliminazione andati
@@ -15516,26 +15261,6 @@ async function eliminaAssenza(a) {
 // CHIUSURE AZIENDALI da riga matrice (toggle veloce)
 // ═══════════════════════════════════════════════════════════
 
-async function toggleChiusuraAziendale(iso, esistente) {
-  if (esistente) {
-    if (!confirm(`Rimuovere la chiusura aziendale del ${fmtIT(iso)}?`)) return;
-    const { error } = await sb.from('chiusure_aziendali').delete().eq('id', esistente.id);
-    if (error) return toast(error.message, 'err');
-    state.chiusure = state.chiusure.filter(c => c.id !== esistente.id);
-    toast('Chiusura rimossa');
-    renderTab('cal_assenze');
-  } else {
-    const desc = prompt(`Descrizione chiusura del ${fmtIT(iso)} (es. "Ponte" o "Festività patronale"):`, 'Chiusura');
-    if (desc === null) return;
-    const { data, error } = await sb.from('chiusure_aziendali').insert({
-      data: iso, descrizione: (desc || 'Chiusura').trim(), ricorrente: false,
-    }).select().single();
-    if (error) return toast(error.message, 'err');
-    state.chiusure.push(data);
-    toast('Chiusura aggiunta');
-    renderTab('cal_assenze');
-  }
-}
 
 // ═══════════════════════════════════════════════════════════
 // RIEPILOGO ANNUALE
