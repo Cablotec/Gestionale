@@ -656,6 +656,8 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .gantt-cmbar.attiva:hover{box-shadow:0 0 0 2px var(--grn),0 0 0 3px var(--txt);}
 .gantt-cmbar.mzconflict{box-shadow:0 0 0 2px var(--red);z-index:2;}
 .gantt-cmbar.mzconflict:hover{box-shadow:0 0 0 2px var(--red),0 0 0 3px var(--txt);}
+.gantt-cmbar.evidenzia{box-shadow:0 0 0 2px var(--yel),0 0 0 5px rgba(255,204,78,.35);z-index:6;animation:gevid 1.1s ease-in-out 3;}
+@keyframes gevid{0%,100%{box-shadow:0 0 0 2px var(--yel),0 0 0 5px rgba(255,204,78,.35);}50%{box-shadow:0 0 0 2px var(--yel),0 0 0 10px rgba(255,204,78,.10);}}
 /* riempimento = ore consuntivate sul preventivo */
 .gantt-cmbar-fill{position:absolute;left:0;top:0;bottom:0;background:var(--blu);opacity:.85;z-index:0;}
 .gantt-cmbar-fill.sfora{background:var(--red);opacity:.9;}
@@ -2218,12 +2220,17 @@ async function syncOperazioneAddetti(opId, nuovi) {
 // `nuovi` è array di oggetti { azienda_id, numero_ordine }.
 // Gestisce insert, update (quando numero_ordine cambia), e delete.
 async function syncOperazioneFornitori(opId, nuovi) {
+  // Un fornitore può comparire su PIÙ fasi (es. meccanica + cablaggio): il diff
+  // è per coppia (azienda_id, fase_id) — stesso pattern degli addetti. Le coppie
+  // invariate restano, le nuove inserite, le sparite eliminate; numero_ordine si
+  // aggiorna se cambia.
+  const chiave = (r) => r.azienda_id + '|' + (r.fase_id || '');
   const vecchieRighe = (state.opFornitori || []).filter(r => r.operazione_id === opId);
-  const vecchieById = Object.fromEntries(vecchieRighe.map(r => [r.azienda_id, r]));
-  const nuoviIds = new Set(nuovi.map(n => n.azienda_id));
+  const vecchieByKey = Object.fromEntries(vecchieRighe.map(r => [chiave(r), r]));
+  const nuoveKeys = new Set(nuovi.map(chiave));
 
-  // INSERT: presenti in nuovi ma non in vecchieById
-  const daAggiungere = nuovi.filter(n => !vecchieById[n.azienda_id]);
+  // INSERT: coppie nuove
+  const daAggiungere = nuovi.filter(n => !vecchieByKey[chiave(n)]);
   if (daAggiungere.length) {
     const rows = daAggiungere.map(n => ({
       operazione_id: opId,
@@ -2231,6 +2238,7 @@ async function syncOperazioneFornitori(opId, nuovi) {
       allocazione: 1.0,
       numero_ordine: n.numero_ordine || null,
       fase_id: n.fase_id || null,
+      lead_giorni: (n.lead_giorni != null && n.lead_giorni !== '') ? Number(n.lead_giorni) : null,
     }));
     const { data, error } = await sb.from('operazioni_fornitori').insert(rows).select();
     if (error) return { error };
@@ -2239,22 +2247,22 @@ async function syncOperazioneFornitori(opId, nuovi) {
     });
   }
 
-  // UPDATE: presenti in entrambi con numero_ordine o fase_id diversi
+  // UPDATE: coppia invariata ma numero_ordine o lead_giorni cambiati
   for (const n of nuovi) {
-    const vecchia = vecchieById[n.azienda_id];
+    const vecchia = vecchieByKey[chiave(n)];
     if (!vecchia) continue; // già gestito da insert
     const nuovoNum = n.numero_ordine || null;
-    const nuovaFase = n.fase_id || null;
-    if ((vecchia.numero_ordine || null) === nuovoNum && (vecchia.fase_id || null) === nuovaFase) continue;
+    const nuovoLead = (n.lead_giorni != null && n.lead_giorni !== '') ? Number(n.lead_giorni) : null;
+    if ((vecchia.numero_ordine || null) === nuovoNum && (vecchia.lead_giorni ?? null) === nuovoLead) continue;
     const { data, error } = await sb.from('operazioni_fornitori')
-      .update({ numero_ordine: nuovoNum, fase_id: nuovaFase })
+      .update({ numero_ordine: nuovoNum, lead_giorni: nuovoLead })
       .eq('id', vecchia.id).select().single();
     if (error) return { error };
     state.opFornitori = state.opFornitori.map(x => x.id === vecchia.id ? data : x);
   }
 
-  // DELETE: presenti in vecchieById ma non in nuoviIds
-  const daRimuovere = vecchieRighe.filter(r => !nuoviIds.has(r.azienda_id));
+  // DELETE: coppie rimosse
+  const daRimuovere = vecchieRighe.filter(r => !nuoveKeys.has(chiave(r)));
   for (const r of daRimuovere) {
     const { error } = await sb.from('operazioni_fornitori').delete().eq('id', r.id);
     if (error) return { error };
@@ -5907,17 +5915,44 @@ function opFasiOf(op) {
   return (state.opFasi || []).filter(f => f.operazione_id === op.id)
     .slice().sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
 }
-// Fasi "complete": presenti e TUTTE con minuti > 0. Una fase a 0 è un
-// placeholder senza dato → le fasi non sono ancora pianificabili.
+// Fasi "complete" e pianificabili: presenti, e ogni fase ha ciò che le serve —
+// una fase INTERNA i minuti > 0, una fase ESTERNA (terzista) il lead time > 0.
+// Se manca, le fasi sono incomplete → si ricade sul calcolo aggregato (budget).
 function opFasiComplete(op) {
   const f = opFasiOf(op);
-  return f.length > 0 && f.every(x => (Number(x.minuti_unitari) || 0) > 0);
+  if (f.length === 0) return false;
+  return f.every(x => faseEsterna(op, x)
+    ? faseLeadGiorni(op, x) > 0
+    : (Number(x.minuti_unitari) || 0) > 0);
 }
 // Fasi da usare per la PIANIFICAZIONE: le fasi se complete, altrimenti [] → la
 // commessa ricade sul calcolo aggregato (minuti_unitari, il budget). Così "una
 // fase coi minuti, le altre a 0" non sotto-schedula: usa il budget pieno.
 function opFasiPianif(op) {
   return opFasiComplete(op) ? opFasiOf(op) : [];
+}
+// Ore "pagate" attribuibili alla parte INTERNA del lavoro (fasi NON date a
+// terzisti). Il pagato (minuti_unitari) è dell'intero job e non è spezzato per
+// fase, quindi lo ripartisco sulla quota di lavoro pianificato che resta in
+// casa. Così nello Storico il confronto cons/pag è interno-contro-interno e
+// sparisce il falso "10 contro 100" di chi esternalizza una fase.
+function pagatoOreInterne(op) {
+  const q = Number(op && op.quantita || 0);
+  const pagWhole = (Number(op && op.minuti_unitari || 0)) * q / 60;
+  if (pagWhole <= 0) return 0;
+  const fasi = opFasiOf(op);
+  const fuori = new Set((state.opFornitori || [])
+    .filter(r => r.operazione_id === op.id && r.fase_id).map(r => r.fase_id));
+  if (fasi.length === 0) {
+    // Senza fasi: se la commessa intera è a un terzista, niente interno.
+    const tuttaFuori = (state.opFornitori || []).some(r => r.operazione_id === op.id && !r.fase_id);
+    return tuttaFuori ? 0 : pagWhole;
+  }
+  const totMin = fasi.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
+  if (totMin <= 0) return pagWhole; // fasi senza minuti: non so ripartire, tengo l'intero
+  const intMin = fasi.filter(f => !fuori.has(f.id))
+    .reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
+  return pagWhole * (intMin / totMin);
 }
 // Minuti/pezzo "effettivi" per la pianificazione: somma delle fasi se presenti,
 // altrimenti il minuti_unitari (tempo pagato). Il pagato resta solo budget.
@@ -5958,6 +5993,48 @@ function finePerFase(inizioIso, oreFase, addetti, fornitori) {
   if (addetti.length > 0 || fornitori.length > 0) return avantiOreCapacita(inizioIso, oreFase, addetti, fornitori);
   const giorni = Math.ceil(oreFase / 8);
   return giorni <= 0 ? inizioIso : avantiGiorniLavorativi(inizioIso, giorni);
+}
+
+// ── Fasi date a TERZISTI: lead time, non ore di capacità ──────────────
+// Una fase è "esterna" se ha un fornitore assegnato A QUELLA fase (specifica).
+// NON uso il fallback "tutta la commessa": un fornitore commessa-intera non
+// rende esterne le singole fasi (eviterebbe di moltiplicare il lead per fase).
+function faseEsterna(op, fase) {
+  return (state.opFornitori || []).some(r => r.operazione_id === op.id && r.fase_id === fase.id);
+}
+// Lead time (giorni lav.) della fase: override sulla riga ordine di quella fase,
+// altrimenti default in anagrafica fornitore. Più fornitori → il più lungo.
+function faseLeadGiorni(op, fase) {
+  const righe = (state.opFornitori || []).filter(r => r.operazione_id === op.id && r.fase_id === fase.id);
+  let lead = 0;
+  righe.forEach(r => {
+    const az = (state.aziende || []).find(a => a.id === r.azienda_id);
+    const g = (r.lead_giorni != null) ? Number(r.lead_giorni)
+            : (az && az.lead_giorni != null) ? Number(az.lead_giorni) : 0;
+    if (g > lead) lead = g;
+  });
+  return lead;
+}
+// Inizio di UNA fase a ritroso da `fine`: esterna = lead time; interna = ore
+// sulla capacità degli assegnatari.
+function faseInizio(op, fase, fineIso, pezzi) {
+  if (faseEsterna(op, fase)) {
+    const lead = faseLeadGiorni(op, fase);
+    return lead > 0 ? indietroGiorniLavorativi(fineIso, lead) : fineIso;
+  }
+  const ore = (pezzi * (Number(fase.minuti_unitari) || 0)) / 60;
+  const { addetti, fornitori } = faseAssegnatari(op, fase.id);
+  return inizioPerFase(fineIso, ore, addetti, fornitori);
+}
+// Fine di UNA fase in avanti da `inizio`: speculare a faseInizio.
+function faseFine(op, fase, inizioIso, pezzi) {
+  if (faseEsterna(op, fase)) {
+    const lead = faseLeadGiorni(op, fase);
+    return lead > 0 ? avantiGiorniLavorativi(inizioIso, lead) : inizioIso;
+  }
+  const ore = (pezzi * (Number(fase.minuti_unitari) || 0)) / 60;
+  const { addetti, fornitori } = faseAssegnatari(op, fase.id);
+  return finePerFase(inizioIso, ore, addetti, fornitori);
 }
 
 function opCalcOre(op) {
@@ -6158,10 +6235,7 @@ function opCalcInizio(op, addettiOverride, fornitoriOverride) {
       // diventa la "scadenza" della fase precedente, e così via.
       let cursore = op.scadenza;
       for (let i = fasi.length - 1; i >= 0; i--) {
-        const f = fasi[i];
-        const ore = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
-        const { addetti, fornitori } = faseAssegnatari(op, f.id);
-        cursore = inizioPerFase(cursore, ore, addetti, fornitori);
+        cursore = faseInizio(op, fasi[i], cursore, pezzi);
       }
       return cursore;
     }
@@ -6228,9 +6302,7 @@ function opFineLavoro(op, inizioIso) {
       // Catena in avanti: ogni fase parte dove finisce la precedente.
       let cursore = inizioIso;
       fasi.forEach(f => {
-        const ore = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
-        const { addetti, fornitori } = faseAssegnatari(op, f.id);
-        cursore = finePerFase(cursore, ore, addetti, fornitori);
+        cursore = faseFine(op, f, cursore, pezzi);
       });
       return cursore;
     }
@@ -6277,10 +6349,8 @@ function opFasiWindows(op) {
     let cursore = op.scadenza;
     for (let i = fasi.length - 1; i >= 0; i--) {
       const f = fasi[i];
-      const ore = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
-      const { addetti, fornitori } = faseAssegnatari(op, f.id);
-      const inizio = inizioPerFase(cursore, ore, addetti, fornitori);
-      out[f.id] = { inizio, fine: cursore, ordine: f.ordine, tipo_lavorazione_id: f.tipo_lavorazione_id };
+      const inizio = faseInizio(op, f, cursore, pezzi);
+      out[f.id] = { inizio, fine: cursore, ordine: f.ordine, tipo_lavorazione_id: f.tipo_lavorazione_id, esterna: faseEsterna(op, f) };
       cursore = inizio;
     }
   } else {
@@ -7896,20 +7966,63 @@ function openOperazioneModal(o) {
   addSearchInput.oninput = renderAddDropList;
   renderAddSelected();
 
+  // Chip multi-fase per un FORNITORE: stesso meccanismo degli addetti, ma
+  // opera su sel.fase_keys (array). Nessuna chip accesa = tutta la commessa
+  // (per i terzisti è uno stato legittimo: fanno tutto il lavoro esterno).
+  function buildFornitoreFaseChips(sel) {
+    if (!Array.isArray(sel.fase_keys)) sel.fase_keys = [];
+    const wrap = el('span', { style:'display:inline-flex;gap:3px;flex-wrap:wrap;align-items:center;' });
+    const ridisegna = () => {
+      wrap.innerHTML = '';
+      const assegnabili = fasiComm.filter(f => f.tipo_lavorazione_id);
+      assegnabili.forEach((f, i) => {
+        const on = sel.fase_keys.includes(f._k);
+        wrap.append(el('button', {
+          type:'button',
+          style:'font-size:10px;padding:2px 7px;border-radius:10px;cursor:pointer;font-family:DM Mono,monospace;'
+            + (on ? 'background:var(--acc);color:var(--bg);border:1px solid var(--acc);font-weight:700;'
+                  : 'background:transparent;color:var(--mut);border:1px solid var(--brd);'),
+          title: (on ? 'Togli da' : 'Assegna a') + ' #' + (i+1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id),
+          onclick: () => {
+            if (!canEdit) return;
+            sel.fase_keys = on ? sel.fase_keys.filter(k => k !== f._k) : [...sel.fase_keys, f._k];
+            ridisegna();
+          },
+        }, '#' + (i + 1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id)));
+      });
+      if (sel.fase_keys.length === 0) {
+        wrap.append(el('span', { style:'font-size:10px;color:var(--mut);font-family:DM Mono,monospace;' }, '· tutta la commessa'));
+      }
+    };
+    ridisegna();
+    return wrap;
+  }
   // ── Fornitori esterni (aziende con is_fornitore=true) ─────────────
   // Stato locale: array di azienda_id allocati a questa commessa.
   // Stato locale fornitori esterni: lista di oggetti {azienda_id, numero_ordine, allocazione}.
   // Cambio rispetto al vecchio modello: prima era un semplice array di id.
   // Ora trasporto anche numero_ordine (formato AAAA/OF/NNNNN o AAAA/OL/NNNNN, opzionale)
   // perché ogni fornitore può avere il proprio ordine di fornitura.
-  let fornitoriSel = isNew ? [] : (state.opFornitori || [])
-    .filter(r => r.operazione_id === o.id)
-    .map(r => ({
-      azienda_id: r.azienda_id,
-      numero_ordine: r.numero_ordine || '',
-      allocazione: r.allocazione || 1.0,
-      fase_k: r.fase_id || '',
-    }));
+  // Un fornitore può stare su PIÙ fasi: raggruppo le righe per azienda e
+  // raccolgo le sue fasi in fase_keys (array). Nessuna fase = tutta la commessa.
+  let fornitoriSel = [];
+  if (!isNew) {
+    const byAz = {};
+    (state.opFornitori || []).filter(r => r.operazione_id === o.id).forEach(r => {
+      if (!byAz[r.azienda_id]) {
+        byAz[r.azienda_id] = {
+          azienda_id: r.azienda_id,
+          numero_ordine: r.numero_ordine || '',
+          allocazione: r.allocazione || 1.0,
+          lead_giorni: (r.lead_giorni != null ? r.lead_giorni : ''),
+          fase_keys: [],
+        };
+      }
+      if (r.fase_id) byAz[r.azienda_id].fase_keys.push(r.fase_id);
+      if (!byAz[r.azienda_id].numero_ordine && r.numero_ordine) byAz[r.azienda_id].numero_ordine = r.numero_ordine;
+    });
+    fornitoriSel = Object.values(byAz);
+  }
   const aziendeFornitrici = state.aziende.filter(a => a.is_fornitore && a.attivo);
   const forSelectedWrap = el('div', { class:'util-selected', style:'display:flex;flex-direction:column;gap:8px;' });
   const forSearchInput = el('input', {
@@ -7967,10 +8080,20 @@ function openOperazioneModal(o) {
       });
       if (!canEdit) inputNO.disabled = true;
       row.append(inputNO);
-      // Tendina fase (compare solo se la commessa ha fasi assegnabili)
+      // Chip multi-fase (compaiono solo se la commessa ha fasi assegnabili)
       if (fasiAssegnabili().length >= 1) {
-        row.append(buildFaseSelect(sel.fase_k || '', (k) => { sel.fase_k = k; }));
+        row.append(buildFornitoreFaseChips(sel));
       }
+      // Lead time: giorni lavorativi di reso del lotto (un reso per fornitore).
+      const inputLead = el('input', {
+        type:'number', min:'0', step:'1',
+        placeholder:'gg', title:'Giorni lavorativi di reso del terzista (lead time)',
+        value: (sel.lead_giorni != null ? sel.lead_giorni : ''),
+        style:'width:54px;font-size:11px;padding:2px 4px;',
+        oninput: (e) => { sel.lead_giorni = e.target.value; if (aggiornaPreviewInizio) aggiornaPreviewInizio(); },
+      });
+      if (!canEdit) inputLead.disabled = true;
+      row.append(el('span', { style:'font-size:11px;color:var(--mut);display:inline-flex;align-items:center;gap:4px;' }, inputLead, 'gg'));
       // Bottone elimina
       if (canEdit) {
         row.append(el('button', {
@@ -8012,7 +8135,8 @@ function openOperazioneModal(o) {
               azienda_id: a.id,
               numero_ordine: '',
               allocazione: 1.0,
-              fase_k: '',
+              lead_giorni: (a.lead_giorni != null ? a.lead_giorni : ''),
+              fase_keys: [],
             });
           }
           renderForSelected(); renderForDropList();
@@ -8089,7 +8213,9 @@ function openOperazioneModal(o) {
       addettoFase[uid] = (puliti.length === 0 && validi.size > 0)
         ? [...validi] : puliti;
     });
-    (fornitoriSel || []).forEach(s => { if (s.fase_k && !validi.has(s.fase_k)) s.fase_k = ''; });
+    (fornitoriSel || []).forEach(s => {
+      s.fase_keys = (s.fase_keys || []).filter(k => validi.has(k));
+    });
   }
   // Quando cambiano le fasi: ridisegno editor, confronto e le tendine "fase" di
   // addetti/fornitori (le opzioni dipendono dalle fasi correnti).
@@ -8854,14 +8980,14 @@ function openOperazioneModal(o) {
     if (conFasi) {
       const minutiEff = fasiVere.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
       ore = (tmp.quantita * minutiEff) / 60;
-      // Assegnatari per fase dai dati live (addettoFase: uid→_k; fornitoriSel.fase_k),
+      // Assegnatari per fase dai dati live (addettoFase: uid→_k; fornitoriSel.fase_keys),
       // con ripiego sugli assegnati "a tutta la commessa" (senza fase).
       const assegnLive = (faseK) => {
         let add = addettiSel.filter(uid => (addettoFase[uid] || '') === faseK);
-        let forn = fornitoriSel.filter(s => (s.fase_k || '') === faseK).map(s => ({ azienda_id: s.azienda_id, allocazione: s.allocazione }));
+        let forn = fornitoriSel.filter(s => (s.fase_keys || []).includes(faseK)).map(s => ({ azienda_id: s.azienda_id, allocazione: s.allocazione }));
         if (!add.length && !forn.length) {
           add = addettiSel.filter(uid => !addettoFase[uid]);
-          forn = fornitoriSel.filter(s => !s.fase_k).map(s => ({ azienda_id: s.azienda_id, allocazione: s.allocazione }));
+          forn = fornitoriSel.filter(s => !(s.fase_keys || []).length).map(s => ({ azienda_id: s.azienda_id, allocazione: s.allocazione }));
         }
         return { add, forn };
       };
@@ -9327,8 +9453,15 @@ function openOperazioneModal(o) {
           sel.numero_ordine = (n && !soloPrefisso) ? n : '';
         }
 
-        // 3) Fornitori: ognuno con il suo fase_id risolto
-        const fornitoriPayload = fornitoriSel.map(s => ({ ...s, fase_id: resolveFase(s.fase_k) }));
+        // 3) Fornitori: un fornitore su più fasi → una riga per (azienda, fase).
+        //    Nessuna fase selezionata = una riga con fase_id null (tutta la commessa).
+        const fornitoriPayload = [];
+        fornitoriSel.forEach(s => {
+          const base = { azienda_id: s.azienda_id, numero_ordine: s.numero_ordine, allocazione: s.allocazione, lead_giorni: s.lead_giorni };
+          const keys = (s.fase_keys || []).map(k => resolveFase(k)).filter(Boolean);
+          if (keys.length === 0) fornitoriPayload.push({ ...base, fase_id: null });
+          else keys.forEach(fid => fornitoriPayload.push({ ...base, fase_id: fid }));
+        });
         const syncFor = await syncOperazioneFornitori(data.id, fornitoriPayload);
         if (syncFor.error) {
           stopWatchdog();
@@ -9804,13 +9937,17 @@ function renderStorico(root) {
       }, s.note || '—'),
       el('td', { class:'mono' }, op?.scadenza ? fmtIT(op.scadenza) : '—'),
       (() => {
-        const pagatoOre = (op && Number(op.minuti_unitari) > 0 && Number(op.quantita) > 0)
-          ? (Number(op.minuti_unitari) * Number(op.quantita)) / 60 : 0;
+        const pagatoOre = op ? pagatoOreInterne(op) : 0;
         if (!op || pagatoOre <= 0) return el('td', { class:'tr mono', style:'color:var(--mut);' }, '—');
         const cons = opCalcOreReali(op);
         const sfora = cons > pagatoOre + tolleranzaOre(pagatoOre);
-        return el('td', { class:'tr mono', style: sfora ? 'color:var(--red);font-weight:700;' : 'color:var(--mut);' },
-          cons.toFixed(1) + '/' + pagatoOre.toFixed(1) + (sfora ? ' ⚠' : ''));
+        // Segnalo quando il pagato è ridotto perché una o più fasi sono esterne.
+        const haEsterne = (state.opFornitori || []).some(r => r.operazione_id === op.id);
+        return el('td', {
+          class:'tr mono',
+          style: sfora ? 'color:var(--red);font-weight:700;' : 'color:var(--mut);',
+          title: haEsterne ? 'Pagato sulla sola parte interna (fasi a terzisti escluse)' : '',
+        }, cons.toFixed(1) + '/' + pagatoOre.toFixed(1) + (sfora ? ' ⚠' : '') + (haEsterne ? ' ·int' : ''));
       })(),
       el('td', { class:'tc' }, esitoBadge),
       el('td', { class:'tc' },
@@ -13849,6 +13986,60 @@ function renderGanttCommesse(root) {
     ));
   });
   navToolbar.append(chipBar);
+
+  // ── Ricerca commessa: salta la timeline sulle sue date ed evidenzia le barre ──
+  const searchWrap = el('div', { style:'position:relative;margin-left:auto;' });
+  const searchInput = el('input', {
+    type:'text', placeholder:'Cerca commessa…', value: state.ganttSearchQ || '',
+    style:'font-size:12px;padding:5px 9px;width:210px;',
+  });
+  const results = el('div', {
+    style:'position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--sur);border:1px solid var(--brd);'
+      + 'border-radius:6px;margin-top:3px;max-height:260px;overflow:auto;display:none;box-shadow:0 8px 24px var(--shadow);',
+  });
+  const matchOp = (o, q) => {
+    const cli = state.aziende.find(x => x.id === o.cliente_id);
+    const art = state.articoli.find(a => a.id === o.articolo_id);
+    return [o.numero_ordine, o.riferimento_cliente, o.numero_op, cli && cli.nome, art && art.codice]
+      .map(v => (v || '').toLowerCase()).join(' ').includes(q);
+  };
+  const vaiACommessa = (o) => {
+    state.ganttCursor = parseISODate(opInizio(o) || o.scadenza);
+    state.ganttHighlightOp = o.id;
+    state.ganttScrollTo = o.id;
+    state.ganttSearchQ = '';
+    renderTab('gantt_commesse');
+  };
+  const aggiornaRicerca = () => {
+    const q = searchInput.value.trim().toLowerCase();
+    state.ganttSearchQ = searchInput.value;
+    results.innerHTML = '';
+    if (q.length < 2) { results.style.display = 'none'; return; }
+    const hits = state.operazioni.filter(o => matchOp(o, q)).slice(0, 12);
+    if (hits.length === 0) {
+      results.append(el('div', { style:'padding:8px 10px;font-size:12px;color:var(--mut);' }, 'Nessuna commessa'));
+      results.style.display = 'block'; return;
+    }
+    hits.forEach(o => {
+      const cli = state.aziende.find(x => x.id === o.cliente_id);
+      const art = state.articoli.find(a => a.id === o.articolo_id);
+      results.append(el('div', {
+        style:'padding:7px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--brd);',
+        onmouseenter:(e)=>{ e.currentTarget.style.background='var(--sur2)'; },
+        onmouseleave:(e)=>{ e.currentTarget.style.background=''; },
+        onmousedown:(e)=>{ e.preventDefault(); vaiACommessa(o); },
+      },
+        el('span', { style:'font-family:DM Mono,monospace;color:var(--txt);' }, o.numero_ordine || o.numero_op || '—'),
+        el('span', { style:'color:var(--mut);' }, '  ' + (cli ? cli.nome : '') + (art && art.codice ? ' · ' + art.codice : '')),
+      ));
+    });
+    results.style.display = 'block';
+  };
+  searchInput.oninput = aggiornaRicerca;
+  searchInput.onfocus = aggiornaRicerca;
+  searchInput.onblur = () => setTimeout(() => { results.style.display = 'none'; }, 150);
+  searchWrap.append(searchInput, results);
+  navToolbar.append(searchWrap);
   root.append(navToolbar);
 
   const operatori = state.utenti
@@ -14076,7 +14267,8 @@ function renderGanttCommesse(root) {
       const cli = state.aziende.find(x => x.id === c.op.cliente_id);
 
       const bar = el('div', {
-        class: 'gantt-cmbar' + (sfora ? ' sfora' : '') + (attiva ? ' attiva' : ''),
+        class: 'gantt-cmbar' + (sfora ? ' sfora' : '') + (attiva ? ' attiva' : '') + (c.op.id === state.ganttHighlightOp ? ' evidenzia' : ''),
+        'data-op-id': c.op.id,
         style: `left:${left}px;width:${width}px;top:${idx*(BAR_H+GAP)}px;`
           + (c.faseTipo && c.faseTipo.colore && !sfora ? `background:${c.faseTipo.colore};` : ''),
         title:
@@ -14245,7 +14437,8 @@ function renderGanttCommesse(root) {
         const prev = opCalcOre(c.op);
 
         const bar = el('div', {
-          class: 'gantt-cmbar',
+          class: 'gantt-cmbar' + (c.op.id === state.ganttHighlightOp ? ' evidenzia' : ''),
+          'data-op-id': c.op.id,
           style: `left:${left}px;width:${width}px;top:${idx*(BAR_H+GAP)}px;`
             + 'border-color:rgba(212,140,40,.6);',
           title:
@@ -14301,6 +14494,16 @@ function renderGanttCommesse(root) {
     el('span', { style:'display:inline-block;width:22px;height:13px;border-radius:3px;background:repeating-linear-gradient(135deg,rgba(150,150,150,.5) 0,rgba(150,150,150,.5) 4px,transparent 4px,transparent 8px);' }),
     'Assenza / ferie'));
   root.append(leg);
+
+  // Dopo il render: porta in vista la barra cercata (una volta sola).
+  if (state.ganttScrollTo) {
+    const target = state.ganttScrollTo;
+    state.ganttScrollTo = null;
+    setTimeout(() => {
+      const bar = root.querySelector('.gantt-cmbar.evidenzia[data-op-id="' + target + '"]');
+      if (bar && bar.scrollIntoView) bar.scrollIntoView({ behavior:'smooth', block:'center', inline:'center' });
+    }, 60);
+  }
 }
 
 // ─── Calcola range visualizzato in base a cursor + zoom ───
