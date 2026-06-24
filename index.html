@@ -5931,7 +5931,12 @@ function pagatoOreInterne(op) {
 function opMinutiEffettivi(op) {
   const fasi = opFasiPianif(op);
   if (fasi.length) return fasi.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
-  return Number((op && op.minuti_unitari) || 0);
+  const budget = Number((op && op.minuti_unitari) || 0);
+  if (budget > 0) return budget;
+  // Fasi incomplete E budget commessa a 0: meglio una stima parziale (somma dei
+  // minuti delle fasi già compilate) che zero, altrimenti la commessa "non
+  // pesa" su nessuno nel calcolo del carico.
+  return opFasiOf(op).reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
 }
 // Modalità fasi: PER ORA tutte SEQUENZIALI (parallelo disattivato su richiesta).
 // Unico interruttore: vale per nuove, auto-generate ed esistenti, senza
@@ -6159,7 +6164,7 @@ function faseCalcOreReali(op, fase) {
   });
   return totSec / 3600;
 }
-function opCalcInizio(op, addettiOverride, fornitoriOverride) {
+function opCalcInizio(op, addettiOverride, fornitoriOverride, pezziOverride) {
   if (!op.scadenza) return null;
 
   // ── Calcolo PER FASE ──────────────────────────────────────────────
@@ -6168,9 +6173,10 @@ function opCalcInizio(op, addettiOverride, fornitoriOverride) {
   // l'assegnazione per fase non è ancora su DB: lì resta il calcolo aggregato).
   const fasi = opFasiPianif(op);
   if (fasi.length && !addettiOverride && !fornitoriOverride) {
-    const pezzi = op.inizio_manuale
-      ? Number(op.quantita || 0)
-      : Math.max(0, Number(op.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0));
+    const pezzi = (pezziOverride != null) ? pezziOverride
+      : (op.inizio_manuale
+        ? Number(op.quantita || 0)
+        : Math.max(0, Number(op.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0)));
     if (pezzi <= 0) return op.scadenza;
 
     if (opSequenziale(op)) {
@@ -6196,7 +6202,8 @@ function opCalcInizio(op, addettiOverride, fornitoriOverride) {
   // ── Calcolo AGGREGATO (nessuna fase, oppure anteprima con override) ──
   // Se l'admin ha bloccato manualmente l'inizio, calcoliamo sulle ore TOTALI;
   // altrimenti sulle ore RESIDUE (tiene conto del lavoro già prodotto).
-  const ore = op.inizio_manuale ? opCalcOre(op) : opCalcOreResidue(op);
+  const ore = (pezziOverride != null) ? (pezziOverride * opMinutiEffettivi(op)) / 60
+    : (op.inizio_manuale ? opCalcOre(op) : opCalcOreResidue(op));
   if (ore <= 0) return op.scadenza;
 
   let addetti = addettiOverride;
@@ -6281,12 +6288,13 @@ function opFineLavoro(op, inizioIso) {
 // ordine, tipo_lavorazione_id} }. Usa la stessa logica del motore: sequenziale
 // = catena a ritroso dalla scadenza; parallelo = ogni fase a ritroso per sé.
 // Serve al Gantt per posizionare la barra di ciascun addetto sulla SUA fase.
-function opFasiWindows(op) {
+function opFasiWindows(op, pezziOverride) {
   const fasi = opFasiPianif(op);
   if (!fasi.length || !op.scadenza) return {};
-  const pezzi = op.inizio_manuale
-    ? Number(op.quantita || 0)
-    : Math.max(0, Number(op.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0));
+  const pezzi = (pezziOverride != null) ? pezziOverride
+    : (op.inizio_manuale
+      ? Number(op.quantita || 0)
+      : Math.max(0, Number(op.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0)));
   const out = {};
   if (opSequenziale(op)) {
     let cursore = op.scadenza;
@@ -12751,7 +12759,10 @@ function pesiEntitaCommessa(opId) {
     pesiAdd.set(uid, 1.0);
     totale += 1.0;
   });
+  const azViste = new Set();
   fornitoriRows.forEach(r => {
+    if (azViste.has(r.azienda_id)) return; // un fornitore pesa 1 volta, anche se su più fasi
+    azViste.add(r.azienda_id);
     const az = state.aziende.find(a => a.id === r.azienda_id);
     if (!az) return;
     const coef = Number(az.coefficiente != null ? az.coefficiente : 1.0);
@@ -12792,21 +12803,27 @@ function calcolaCaricoUtenteRange(uid, isoStart, isoEnd) {
   // la sua quota (perché i fornitori coprono parte del lavoro).
   let oreCarico = 0;
   state.operazioni
-    .filter(o => o.stato === 'aperta' && o.scadenza)
+    // OCCUPAZIONE PIANIFICATA: tutte le commesse con scadenza la cui finestra
+    // cade nel periodo, a prescindere dallo stato. Conta le ore PREVISTE intere
+    // (quantità piena), non il residuo: così completare un lavoro non svuota il
+    // periodo in cui è stato fatto. La selezione la fa la sovrapposizione
+    // finestra-periodo più sotto.
+    .filter(o => o.scadenza)
     .forEach(o => {
-      const fasi = opFasiOf(o);
+      // Ramo per-fase SOLO se le fasi sono complete (pianificabili): se anche
+      // una fase è a minuti 0, opFasiWindows tornerebbe vuoto → useremmo
+      // l'aggregato (qui fasi = [] → si va sull'else col budget).
+      const fasi = opFasiPianif(o);
       const mieRighe = (state.opAddetti || []).filter(r => r.operazione_id === o.id && r.utente_id === uid);
       if (!mieRighe.length) return;
-      const pezzi = o.inizio_manuale
-        ? Number(o.quantita || 0)
-        : Math.max(0, Number(o.quantita || 0) - ((typeof quantitaConsegnata === 'function') ? quantitaConsegnata(o.id) : 0));
+      const pezzi = Number(o.quantita || 0); // pieni, non residui (occupazione pianificata)
       // Fasi specifiche dell'utente (fase_id valido e ancora esistente)
       const mieFasi = fasi.length ? mieRighe.map(r => r.fase_id).filter(fid => fid && fasi.some(f => f.id === fid)) : [];
 
       if (fasi.length && mieFasi.length) {
         // ── Carico PER FASE: solo le ore delle fasi dell'utente, sulla loro finestra ──
         if (pezzi <= 0) return;
-        const windows = opFasiWindows(o);
+        const windows = opFasiWindows(o, pezzi);
         const visti = new Set();
         mieFasi.forEach(fid => {
           if (visti.has(fid)) return;
@@ -12832,13 +12849,13 @@ function calcolaCaricoUtenteRange(uid, isoStart, isoEnd) {
           });
         });
       } else {
-        // ── Aggregato (nessuna fase, o assegnato a livello commessa): come prima ──
+        // ── Aggregato (nessuna fase, o assegnato a livello commessa) ──
         const pesi = pesiEntitaCommessa(o.id);
         const pesoUtente = pesi.addetti.get(uid);
         if (!pesoUtente || pesi.totale <= 0) return;
-        const oreTot = opCalcOreResidue(o);
+        const oreTot = opCalcOre(o); // ore PREVISTE intere (non residue)
         if (oreTot <= 0) return;
-        const inizio = opInizio(o);
+        const inizio = o.inizio_manuale || opCalcInizio(o, null, null, pezzi); // finestra pianificata
         if (!inizio) return;
         if (o.scadenza < isoStart || inizio > isoEnd) return;
         const orePerAddetto = oreTot * (pesoUtente / pesi.totale);
@@ -12880,17 +12897,18 @@ function calcolaCaricoFornitoreRange(aziendaId, isoStart, isoEnd) {
   }
   const oreCapacita = giorniLav * 8 * coef;
 
-  // Carico: somma ore residue ripartite per peso (uguale a calcolaCaricoUtenteRange)
+  // Carico: occupazione PIANIFICATA — ore previste intere ripartite per peso,
+  // tutte le commesse la cui finestra cade nel periodo (qualsiasi stato).
   let oreCarico = 0;
   state.operazioni
-    .filter(o => o.stato === 'aperta' && o.scadenza)
+    .filter(o => o.scadenza)
     .forEach(o => {
       const pesi = pesiEntitaCommessa(o.id);
       const pesoFornitore = pesi.fornitori.get(aziendaId);
       if (!pesoFornitore || pesi.totale <= 0) return;
-      const oreTot = opCalcOreResidue(o);
+      const oreTot = opCalcOre(o); // ore PREVISTE intere (non residue)
       if (oreTot <= 0) return;
-      const inizio = opInizio(o);
+      const inizio = o.inizio_manuale || opCalcInizio(o, null, null, Number(o.quantita || 0)); // finestra pianificata
       if (!inizio) return;
       if (o.scadenza < isoStart || inizio > isoEnd) return;
       const orePerFornitore = oreTot * (pesoFornitore / pesi.totale);
