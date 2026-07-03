@@ -10,6 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="core/db.js?v=2026-07-04"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
@@ -240,11 +241,8 @@ button{font-family:inherit;}
 </div><!-- /#app-screen -->
 
 <script>
-// ═══════════════ CONFIG (stesso backend del gestionale) ═══════════════
-const SUPABASE_URL      = "https://cuiakdyatsuhioyubpne.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1aWFrZHlhdHN1aGlveXVicG5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjQ0NDYsImV4cCI6MjA5MzA0MDQ0Nn0.kaC1n1ABHxxcUAOIcxQlUxQva25KBKWOTJbPSo9C-l8";
-const APP_EMAIL    = 'kiosk@cablotec.local';
-const APP_PASSWORD = 'kiosk-cablotec-2026';
+// ═══════════════ CONFIG ═══════════════
+// URL/key Supabase e account tecnico vivono in core/db.js (condiviso).
 const SEDE_TIMBRO  = 'mobile';   // marca le sessioni avviate dal telefono
 
 // ═══════════════ Manifest PWA ═══════════════
@@ -275,7 +273,7 @@ const SEDE_TIMBRO  = 'mobile';   // marca le sessioni avviate dal telefono
 
 // ═══════════════ Stato ═══════════════
 const $ = s => document.querySelector(s);
-let sb = null;
+// `sb` è dichiarato e gestito in core/db.js
 let mezziVista = 'lista';   // 'lista' | 'form' — vista corrente della sezione Mezzi
 let ferieVista = 'lista';   // 'lista' | 'form' — vista corrente della sezione Ferie
 let ferieCal = null;        // { y, m, sel } — mese mostrato nel calendario ferie
@@ -331,7 +329,7 @@ const TIPI_MEZZI = [
 async function boot() {
   showAuthBoot();
   try {
-    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    creaClientSupabase('sb-cablotec-mobile');
     const { data: sd } = await sb.auth.getSession();
     const sessione = sd?.session || null;
     const emailSess = (sessione?.user?.email || '').toLowerCase();

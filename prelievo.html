@@ -10,6 +10,7 @@
 <title>Prelievo Magazzino — Cablotec</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="core/db.js?v=2026-07-04"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
 <style>
@@ -165,11 +166,8 @@ button{font-family:inherit;}
 </div>
 
 <script>
-// ═══════════════ CONFIG (stesso backend del gestionale) ═══════════════
-const SUPABASE_URL      = "https://cuiakdyatsuhioyubpne.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1aWFrZHlhdHN1aGlveXVicG5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjQ0NDYsImV4cCI6MjA5MzA0MDQ0Nn0.kaC1n1ABHxxcUAOIcxQlUxQva25KBKWOTJbPSo9C-l8";
-const APP_EMAIL    = 'kiosk@cablotec.local';
-const APP_PASSWORD = 'kiosk-cablotec-2026';
+// ═══════════════ CONFIG ═══════════════
+// URL/key Supabase e account tecnico (APP_EMAIL/APP_PASSWORD) vivono in core/db.js.
 const KIOSK_EMAIL  = APP_EMAIL; // per escludere l'account tecnico dalla lista operatori
 
 // ═══════════════ Manifest PWA (iniettato dinamicamente) ═══════════════
@@ -201,7 +199,7 @@ const KIOSK_EMAIL  = APP_EMAIL; // per escludere l'account tecnico dalla lista o
 
 // ═══════════════ Stato ═══════════════
 const $ = s => document.querySelector(s);
-let sb = null;
+// `sb` è dichiarato e gestito in core/db.js
 const state = {
   utenti: [], operazioni: [], aziende: [], articoli: [],
   operatore: null, commessa: null,
@@ -234,7 +232,7 @@ function show(id) {
 async function boot() {
   const box = $('#boot-box');
   try {
-    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    creaClientSupabase('sb-cablotec-prelievo');
     const { data: sess } = await sb.auth.getSession();
     if (!sess?.session) {
       const { error } = await sb.auth.signInWithPassword({ email: APP_EMAIL, password: APP_PASSWORD });
