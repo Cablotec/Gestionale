@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#161614">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Prelievo Magazzino — Cablotec</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="core/db.js?v=2026-07-04"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
+:root{
+  --bg:#161614; --sur:#1f1f1c; --sur2:#262622; --brd:#3a3a34;
+  --txt:#eaeae4; --mut:#8a8a80; --acc:#d4ff4e;
+  --grn:#5ad45a; --red:#ff5a5a; --yel:#ffd45a; --blu:#5aa5ff;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;}
+body{
+  background:var(--bg); color:var(--txt);
+  font-family:'Syne',sans-serif; font-size:15px;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  display:flex; flex-direction:column;
+}
+button{font-family:inherit;}
+
+/* ── Header ── */
+.hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px 12px;border-bottom:2px solid var(--acc);}
+.hdr-title{font-size:18px;font-weight:800;letter-spacing:-.01em;}
+.hdr-title span{color:var(--acc);}
+.hdr-right{display:flex;align-items:center;gap:8px;}
+.hdr-op{font-family:'DM Mono',monospace;font-size:12px;color:var(--bg);background:var(--acc);border:none;border-radius:20px;padding:7px 14px;font-weight:700;cursor:pointer;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.hdr-btn{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;width:38px;height:34px;font-size:16px;cursor:pointer;}
+
+/* ── Layout step ── */
+.step{flex:1;display:none;flex-direction:column;overflow:hidden;padding:14px 14px 18px;}
+.step.on{display:flex;}
+.step-title{font-size:16px;font-weight:700;margin-bottom:12px;text-align:center;}
+.step-sub{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);text-align:center;margin:-8px 0 12px;}
+
+/* ── Stato boot / errori ── */
+.boot{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--mut);text-align:center;padding:24px;}
+.boot .big{font-size:18px;color:var(--txt);font-weight:700;}
+.spin{width:34px;height:34px;border:3px solid var(--brd);border-top-color:var(--acc);border-radius:50%;animation:sp 1s linear infinite;}
+@keyframes sp{to{transform:rotate(360deg)}}
+.boot button{background:var(--acc);color:var(--bg);border:none;border-radius:8px;padding:12px 24px;font-weight:700;font-size:15px;cursor:pointer;}
+
+/* ── Griglia operatori ── */
+.op-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;overflow-y:auto;align-content:start;flex:1;padding-bottom:8px;}
+.op-tile{background:var(--sur);border:2px solid var(--brd);border-radius:10px;padding:18px 10px;text-align:center;font-size:15px;font-weight:700;color:var(--txt);cursor:pointer;min-height:64px;display:flex;align-items:center;justify-content:center;}
+.op-tile:active{border-color:var(--acc);background:rgba(212,255,78,.06);}
+
+/* ── Ricerca + lista commesse ── */
+.search{width:100%;background:var(--sur);border:1px solid var(--brd);border-radius:10px;color:var(--txt);font-family:'DM Mono',monospace;font-size:14px;padding:13px 14px;margin-bottom:12px;outline:none;}
+.search:focus{border-color:var(--acc);}
+.comm-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-bottom:8px;}
+.comm-row{background:var(--sur);border:1px solid var(--brd);border-radius:10px;padding:12px 14px;text-align:left;cursor:pointer;color:var(--txt);width:100%;}
+.comm-row:active{border-color:var(--acc);background:rgba(212,255,78,.06);}
+.cr-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+.cr-cod{font-family:'DM Mono',monospace;font-size:16px;font-weight:700;}
+.cr-cli{font-size:12px;color:var(--mut);}
+.cr-sub{font-size:12px;color:var(--mut);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.empty{color:var(--mut);text-align:center;padding:26px 12px;font-size:13px;}
+
+/* ── Scanner ── */
+.scan-comm{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);text-align:center;margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.scan-wrap{position:relative;border-radius:14px;overflow:hidden;background:#000;}
+.scan-wrap video{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;}
+.scan-frame{position:absolute;inset:16%;border:3px solid var(--acc);border-radius:14px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.25);}
+.scan-pause{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);}
+.scan-pause.on{display:flex;}
+.scan-pause button{background:var(--acc);color:var(--bg);border:none;border-radius:12px;padding:16px 22px;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);}
+.scan-status{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);text-align:center;min-height:17px;margin:10px 4px;}
+.scan-status.ok{color:var(--grn);}
+.scan-status.err{color:var(--red);}
+.manual{display:flex;gap:8px;margin-bottom:12px;}
+.manual input{flex:1;background:var(--sur);border:1px solid var(--brd);border-radius:8px;color:var(--txt);font-family:'DM Mono',monospace;font-size:14px;padding:11px 12px;outline:none;}
+.manual input:focus{border-color:var(--acc);}
+.manual button{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:0 16px;font-weight:700;cursor:pointer;}
+
+.rows{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-bottom:8px;}
+.row{display:flex;align-items:center;gap:10px;background:var(--sur);border:1px solid var(--brd);border-radius:10px;padding:10px 12px;}
+.row-main{flex:1;min-width:0;}
+.row-cod{font-family:'DM Mono',monospace;font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.row-desc{font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.row-desc.warn{color:var(--yel);}
+.qty{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.qty button{width:38px;height:38px;border-radius:8px;border:1px solid var(--brd);background:var(--sur2);color:var(--txt);font-size:20px;line-height:1;cursor:pointer;}
+.qty .val{font-family:'DM Mono',monospace;font-size:16px;font-weight:700;min-width:30px;text-align:center;}
+.row-del{background:none;border:none;color:var(--red);font-size:17px;cursor:pointer;flex-shrink:0;padding:4px;}
+
+.savebar{display:flex;gap:10px;margin-top:10px;}
+.savebar .back{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);border-radius:10px;padding:15px 18px;font-size:15px;font-weight:700;cursor:pointer;}
+.savebar .save{flex:1;background:var(--grn);border:none;color:#0f0f0e;border-radius:10px;padding:15px;font-size:16px;font-weight:800;cursor:pointer;}
+.savebar .save:disabled{opacity:.35;}
+
+/* ── Conferma ── */
+.done{flex:1;display:flex;align-items:center;justify-content:center;padding:20px;}
+.done-card{background:var(--sur);border:3px solid var(--grn);border-radius:14px;padding:30px 26px;text-align:center;max-width:340px;width:100%;}
+.done-card.err{border-color:var(--red);}
+.done-icon{font-size:46px;color:var(--grn);margin-bottom:12px;}
+.done-card.err .done-icon{color:var(--red);}
+.done-msg{font-size:20px;font-weight:800;margin-bottom:8px;}
+.done-detail{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);white-space:pre-line;}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-title">📦 Prelievo <span>Magazzino</span></div>
+  <div class="hdr-right">
+    <button class="hdr-op" id="hdr-op" style="display:none" onclick="goOperatore()">—</button>
+    <button class="hdr-btn" title="Ricarica dati" onclick="ricarica()">⟳</button>
+  </div>
+</div>
+
+<!-- Boot / errore -->
+<div class="step on" id="step-boot">
+  <div class="boot" id="boot-box"><div class="spin"></div><div>Connessione…</div></div>
+</div>
+
+<!-- 1. Operatore -->
+<div class="step" id="step-op">
+  <div class="step-title">Chi sei?</div>
+  <div class="op-grid" id="op-grid"></div>
+</div>
+
+<!-- 2. Commessa -->
+<div class="step" id="step-comm">
+  <div class="step-title">Per quale commessa?</div>
+  <input type="text" class="search" id="comm-search" placeholder="🔍 Cerca: codice, ordine, cliente…">
+  <div class="comm-list" id="comm-list"></div>
+</div>
+
+<!-- 3. Scanner -->
+<div class="step" id="step-scan">
+  <div class="scan-comm" id="scan-comm">—</div>
+  <div class="scan-wrap">
+    <video id="video" playsinline muted></video>
+    <div class="scan-frame"></div>
+    <div class="scan-pause" id="scan-pause">
+      <button onclick="riprendiScan()">📷 Scansiona il prossimo</button>
+    </div>
+  </div>
+  <div class="scan-status" id="scan-status">Inquadra il QR dell'articolo…</div>
+  <div class="manual">
+    <input type="text" id="manual-code" placeholder="…oppure digita il codice articolo">
+    <button onclick="manualAdd()">Aggiungi</button>
+  </div>
+  <div class="rows" id="rows"></div>
+  <div class="savebar">
+    <button class="back" onclick="goCommessa()">‹</button>
+    <button class="save" id="btn-save" onclick="salva()" disabled>✓ Salva prelievo</button>
+  </div>
+</div>
+
+<!-- 4. Conferma -->
+<div class="step" id="step-done">
+  <div class="done"><div class="done-card" id="done-card"></div></div>
+</div>
+
+<script>
+// ═══════════════ CONFIG ═══════════════
+// URL/key Supabase e account tecnico (APP_EMAIL/APP_PASSWORD) vivono in core/db.js.
+const KIOSK_EMAIL  = APP_EMAIL; // per escludere l'account tecnico dalla lista operatori
+
+// ═══════════════ Manifest PWA (iniettato dinamicamente) ═══════════════
+(function(){
+  const icon = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">' +
+    '<rect width="512" height="512" rx="96" fill="#161614"/>' +
+    '<rect x="96" y="176" width="320" height="240" rx="24" fill="#d4ff4e"/>' +
+    '<rect x="96" y="176" width="320" height="72" rx="24" fill="#a8cc3e"/>' +
+    '<rect x="216" y="248" width="80" height="40" rx="10" fill="#161614"/>' +
+    '<path d="M160 176l40-80h112l40 80" stroke="#d4ff4e" stroke-width="28" fill="none" stroke-linejoin="round"/>' +
+    '</svg>');
+  const manifest = {
+    name: 'Prelievo Magazzino Cablotec',
+    short_name: 'Prelievo',
+    start_url: location.href.split('#')[0],
+    scope: location.href.replace(/[^/]*$/, ''),
+    display: 'standalone',
+    background_color: '#161614',
+    theme_color: '#161614',
+    icons: [{ src: icon, sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+  };
+  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = URL.createObjectURL(blob);
+  document.head.appendChild(link);
+})();
+
+// ═══════════════ Stato ═══════════════
+const $ = s => document.querySelector(s);
+// `sb` è dichiarato e gestito in core/db.js
+const state = {
+  utenti: [], operazioni: [], aziende: [], articoli: [],
+  operatore: null, commessa: null,
+  righe: [],            // [{ articolo, codice, quantita }]
+  search: '',
+  stream: null, rafId: null, detector: null,
+  lastCode: null, lastTime: 0,
+  paused: false,      // dopo ogni lettura lo scanner si ferma finché non si riprende
+};
+
+function pausaScan() {
+  state.paused = true;
+  const v = $('#video'); if (v && !v.paused) v.pause();   // congela il fotogramma letto
+  $('#scan-pause')?.classList.add('on');
+}
+function riprendiScan() {
+  state.paused = false;
+  state.lastCode = null;                                   // ripartenza pulita
+  $('#scan-pause')?.classList.remove('on');
+  const v = $('#video'); if (v && v.srcObject) v.play().catch(() => {});
+}
+
+function show(id) {
+  stopCamera();
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('on'));
+  $('#' + id).classList.add('on');
+}
+
+// ═══════════════ Boot ═══════════════
+async function boot() {
+  const box = $('#boot-box');
+  try {
+    creaClientSupabase('sb-cablotec-prelievo');
+    const { data: sess } = await sb.auth.getSession();
+    if (!sess?.session) {
+      const { error } = await sb.auth.signInWithPassword({ email: APP_EMAIL, password: APP_PASSWORD });
+      if (error) throw new Error('Login fallito: ' + error.message);
+    }
+    await loadData();
+    // Telefono condiviso: si chiede sempre chi sei a ogni apertura.
+    state.operatore = null;
+    aggiornaHeader();
+    goOperatore();
+  } catch (e) {
+    box.innerHTML = '';
+    box.append(elx('div', { class:'big' }, '✕ Errore di avvio'),
+               elx('div', {}, String(e.message || e)),
+               elx('button', { onclick: () => location.reload() }, 'Riprova'));
+  }
+}
+
+async function loadData() {
+  const [ut, op, az, ar] = await Promise.all([
+    sb.from('utenti').select('id,nome,attivo,email').order('nome'),
+    sb.from('operazioni').select('*').not('stato', 'in', '("spedita","completata")'),
+    sb.from('aziende').select('id,nome'),
+    sb.from('articoli').select('id,codice,descrizione'),
+  ]);
+  for (const r of [ut, op, az, ar]) if (r.error) throw r.error;
+  state.utenti = (ut.data || []).filter(u => u.attivo !== false &&
+    (u.email || '').toLowerCase() !== KIOSK_EMAIL.toLowerCase());
+  state.operazioni = (op.data || []).sort(cmpCommessa);
+  state.aziende = az.data || [];
+  state.articoli = ar.data || [];
+}
+
+async function ricarica() {
+  try { await loadData(); renderCommesse(); toastStatus('Dati aggiornati'); }
+  catch (e) { toastStatus('Errore aggiornamento: ' + (e.message || e), true); }
+}
+
+// priorità (numero basso prima), poi scadenza, poi numero ordine
+function cmpCommessa(a, b) {
+  const pa = a.priorita ?? Infinity, pb = b.priorita ?? Infinity;
+  if (pa !== pb) return pa - pb;
+  const sa = a.scadenza || '9999-12-31', sbb = b.scadenza || '9999-12-31';
+  if (sa !== sbb) return sa < sbb ? -1 : 1;
+  return (a.numero_ordine || '').localeCompare(b.numero_ordine || '');
+}
+
+// helper DOM minimale
+function elx(tag, attrs = {}, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') n.className = v;
+    else if (k.startsWith('on')) n[k] = v;
+    else n.setAttribute(k, v);
+  }
+  for (const c of children) if (c != null) n.append(c.nodeType ? c : document.createTextNode(c));
+  return n;
+}
+
+function aggiornaHeader() {
+  const b = $('#hdr-op');
+  if (state.operatore) { b.style.display = ''; b.textContent = state.operatore.nome; }
+  else b.style.display = 'none';
+}
+
+// ═══════════════ 1. Operatore ═══════════════
+function goOperatore() {
+  show('step-op');
+  const grid = $('#op-grid');
+  grid.innerHTML = '';
+  state.utenti.forEach(u => {
+    grid.append(elx('button', {
+      class: 'op-tile',
+      onclick: () => { state.operatore = u; aggiornaHeader(); goCommessa(); },
+    }, u.nome));
+  });
+  if (state.utenti.length === 0) grid.append(elx('div', { class:'empty' }, 'Nessun operatore attivo trovato.'));
+}
+
+// ═══════════════ 2. Commessa ═══════════════
+function goCommessa() {
+  state.commessa = null;
+  state.righe = [];
+  show('step-comm');
+  const inp = $('#comm-search');
+  inp.value = state.search;
+  inp.oninput = () => { state.search = inp.value; renderCommesse(); };
+  renderCommesse();
+}
+
+function renderCommesse() {
+  const list = $('#comm-list');
+  if (!list) return;
+  list.innerHTML = '';
+  const q = (state.search || '').toLowerCase();
+  const filt = state.operazioni.filter(o => {
+    if (!q) return true;
+    const cli = state.aziende.find(c => c.id === o.cliente_id);
+    const art = state.articoli.find(a => a.id === o.articolo_id);
+    return (o.numero_ordine || '').toLowerCase().includes(q)
+        || (o.numero_op || '').toLowerCase().includes(q)
+        || (o.rif_cliente || '').toLowerCase().includes(q)
+        || (cli?.nome || '').toLowerCase().includes(q)
+        || (art?.codice || '').toLowerCase().includes(q)
+        || (art?.descrizione || '').toLowerCase().includes(q);
+  });
+  if (filt.length === 0) { list.append(elx('div', { class:'empty' }, 'Nessuna commessa trovata.')); return; }
+  filt.forEach(o => {
+    const cli = state.aziende.find(c => c.id === o.cliente_id);
+    const art = state.articoli.find(a => a.id === o.articolo_id);
+    list.append(elx('button', { class:'comm-row', onclick: () => goScan(o) },
+      elx('div', { class:'cr-top' },
+        elx('span', { class:'cr-cod' }, art?.codice || o.numero_ordine || '—'),
+        elx('span', { class:'cr-cli' }, cli?.nome || ''),
+      ),
+      elx('div', { class:'cr-sub' },
+        'Ord. ' + (o.numero_ordine || '—')
+        + (o.numero_op ? ' · OP ' + o.numero_op : '')
+        + (art?.descrizione ? ' · ' + art.descrizione : '')),
+    ));
+  });
+}
+
+// ═══════════════ 3. Scanner ═══════════════
+function goScan(o) {
+  state.commessa = o;
+  state.righe = [];
+  show('step-scan');
+  const cli = state.aziende.find(c => c.id === o.cliente_id);
+  const art = state.articoli.find(a => a.id === o.articolo_id);
+  $('#scan-comm').textContent =
+    (art?.codice || '') + (cli ? ' · ' + cli.nome : '') + ' · Ord. ' + (o.numero_ordine || '—');
+  $('#scan-status').className = 'scan-status';
+  $('#scan-status').textContent = "Inquadra il QR dell'articolo…";
+  $('#manual-code').value = '';
+  state.paused = false;
+  $('#scan-pause')?.classList.remove('on');
+  renderRows();
+  startCamera();
+}
+
+function renderRows() {
+  const list = $('#rows');
+  list.innerHTML = '';
+  if (state.righe.length === 0)
+    list.append(elx('div', { class:'empty' }, 'Nessun articolo. Scansiona un QR o aggiungi a mano.'));
+  state.righe.forEach((r, i) => {
+    list.append(elx('div', { class:'row' },
+      elx('div', { class:'row-main' },
+        elx('div', { class:'row-cod' }, r.articolo?.codice || r.codice || '—'),
+        elx('div', { class:'row-desc' + (r.articolo ? '' : ' warn') },
+          r.articolo ? (r.articolo.descrizione || '') : '⚠ non in anagrafica'),
+      ),
+      elx('div', { class:'qty' },
+        elx('button', { onclick: () => setQta(i, r.quantita - 1) }, '−'),
+        elx('span', { class:'val' }, String(r.quantita)),
+        elx('button', { onclick: () => setQta(i, r.quantita + 1) }, '+'),
+      ),
+      elx('button', { class:'row-del', onclick: () => { state.righe.splice(i, 1); renderRows(); } }, '✕'),
+    ));
+  });
+  $('#btn-save').disabled = state.righe.length === 0;
+}
+
+function setQta(i, q) {
+  if (q <= 0) state.righe.splice(i, 1);
+  else state.righe[i].quantita = q;
+  renderRows();
+}
+
+function manualAdd() {
+  const inp = $('#manual-code');
+  const code = inp.value.trim();
+  if (code) { onDetect(code, true); inp.value = ''; }
+  inp.focus();
+}
+document.addEventListener('DOMContentLoaded', () => {
+  $('#manual-code').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); manualAdd(); }
+  });
+});
+
+function onDetect(code, manuale) {
+  const now = Date.now();
+  const norm = (code || '').trim();
+  if (!norm) return;
+  if (!manuale && state.paused) return;                    // in pausa: ignora
+  if (!manuale && norm === state.lastCode && (now - state.lastTime) < 1500) return;
+  state.lastCode = norm; state.lastTime = now;
+
+  const art = state.articoli.find(a => (a.codice || '').trim().toLowerCase() === norm.toLowerCase());
+  const ex = state.righe.find(r =>
+    (art && r.articolo && r.articolo.id === art.id) || (!art && !r.articolo && r.codice === norm));
+  if (ex) ex.quantita += 1;
+  else state.righe.push({ articolo: art || null, codice: norm, quantita: 1 });
+  renderRows();
+
+  const st = $('#scan-status');
+  if (art) { st.className = 'scan-status ok'; st.textContent = '✓ ' + art.codice + (art.descrizione ? ' — ' + art.descrizione : ''); }
+  else { st.className = 'scan-status err'; st.textContent = '⚠ "' + norm + '" non in anagrafica (aggiunto comunque)'; }
+  beep(art ? 'ok' : 'err');
+  if (navigator.vibrate) navigator.vibrate(art ? 40 : [60, 60, 60]);
+  if (!manuale) pausaScan();   // si riprende solo toccando "Scansiona il prossimo"
+}
+
+async function startCamera() {
+  const video = $('#video');
+  const st = $('#scan-status');
+  if (!navigator.mediaDevices?.getUserMedia) {
+    st.className = 'scan-status err';
+    st.textContent = 'Fotocamera non disponibile. Usa l\'aggiunta manuale.';
+    return;
+  }
+  try {
+    state.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = state.stream;
+    await video.play();
+  } catch (e) {
+    st.className = 'scan-status err';
+    st.textContent = 'Fotocamera non accessibile (' + (e.name || e) + '). Serve HTTPS + permesso fotocamera.';
+    return;
+  }
+  if ('BarcodeDetector' in window) {
+    try { state.detector = new window.BarcodeDetector({ formats: ['qr_code'] }); } catch (_) { state.detector = null; }
+  }
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const loop = async () => {
+    if (!state.stream) return;
+    if (!state.paused && video.readyState >= 2 && video.videoWidth) {
+      try {
+        if (state.detector) {
+          const codes = await state.detector.detect(video);
+          if (codes?.length) onDetect(codes[0].rawValue, false);
+        } else if (typeof jsQR === 'function') {
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const res = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+          if (res?.data) onDetect(res.data, false);
+        }
+      } catch (_) { /* frame saltato */ }
+    }
+    state.rafId = requestAnimationFrame(loop);
+  };
+  state.rafId = requestAnimationFrame(loop);
+}
+
+function stopCamera() {
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  if (state.stream) { state.stream.getTracks().forEach(t => t.stop()); state.stream = null; }
+  state.detector = null;
+  const v = $('#video'); if (v) v.srcObject = null;
+}
+
+// ═══════════════ 4. Salvataggio ═══════════════
+async function salva() {
+  const o = state.commessa, u = state.operatore;
+  if (!o || !u || state.righe.length === 0) return;
+  $('#btn-save').disabled = true;
+  const rows = state.righe.map(r => ({
+    operazione_id: o.id,
+    articolo_id: r.articolo?.id || null,
+    codice_scansionato: r.codice || r.articolo?.codice || null,
+    utente_id: u.id,
+    quantita: r.quantita,
+  }));
+  try {
+    const { error } = await sb.from('prelievi_magazzino').insert(rows);
+    if (error) throw error;
+    const n = rows.length, tot = state.righe.reduce((s, r) => s + r.quantita, 0);
+    state.righe = [];
+    beep('ok');
+    showDone(true, 'Prelievo registrato ✓',
+      n + ' articol' + (n === 1 ? 'o' : 'i') + ' · ' + tot + ' pz totali\n' + u.nome);
+  } catch (e) {
+    beep('err');
+    $('#btn-save').disabled = false;
+    showDone(false, 'Errore salvataggio', String(e.message || e));
+  }
+}
+
+let doneTimer = null;
+function showDone(ok, title, detail) {
+  show('step-done');
+  const card = $('#done-card');
+  card.className = 'done-card' + (ok ? '' : ' err');
+  card.innerHTML = '';
+  card.append(
+    elx('div', { class:'done-icon' }, ok ? '✓' : '✕'),
+    elx('div', { class:'done-msg' }, title),
+    elx('div', { class:'done-detail' }, detail || ''),
+  );
+  clearTimeout(doneTimer);
+  doneTimer = setTimeout(() => { ok ? goCommessa() : goScan(state.commessa); }, ok ? 2200 : 3500);
+}
+
+function toastStatus(msg, isErr) {
+  const st = $('#scan-status');
+  if (st && $('#step-scan').classList.contains('on')) {
+    st.className = 'scan-status' + (isErr ? ' err' : ' ok');
+    st.textContent = msg;
+  }
+}
+
+// ═══════════════ Beep ═══════════════
+let audioCtx = null;
+function beep(kind) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.connect(g); g.connect(audioCtx.destination);
+    o.frequency.value = kind === 'ok' ? 880 : 220;
+    g.gain.setValueAtTime(.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001, audioCtx.currentTime + .18);
+    o.start(); o.stop(audioCtx.currentTime + .2);
+  } catch (_) {}
+}
+
+boot();
+</script>
+</body>
+</html>

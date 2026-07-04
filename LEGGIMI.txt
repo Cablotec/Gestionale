@@ -1,0 +1,23 @@
+GESTIONALE CABLOTEC — struttura definitiva (percorsi già sistemati per la radice del repo)
+
+  index.html          guscio gestionale
+  kiosk.html          guscio kiosk (pagina vera, niente più redirect ?kiosk)
+  app.js / app.css    logica e stili (estratti dal vecchio index)
+  core/db.js          connessione Supabase condivisa (già deployato: sovrascrive identico)
+  domain/scheduling.js  motore di pianificazione (già deployato: sovrascrive identico)
+  mobile.html         app operatore  (già deployato: sovrascrive identico)
+  prelievo.html       app magazzino  (già deployato: sovrascrive identico)
+  index-vecchio.html  SCORTA: il monolite di produzione attuale, per rollback lampo
+
+DEPLOY (quando i test su beta/ sono passati):
+  1. Carica tutto il contenuto di questa cartella nella RADICE del repo.
+  2. index.html e kiosk.html sovrascrivono i vecchi. Le postazioni kiosk
+     non vanno toccate: puntano già a kiosk.html.
+  3. Ricarica forzata sui dispositivi al primo giro (Ctrl+Shift+R).
+
+ROLLBACK: copia il contenuto di index-vecchio.html dentro index.html
+  (o Revert del commit su GitHub). La cartella beta/ si può cancellare
+  dopo lo switch.
+
+CACHE: a ogni deploy futuro di app.js/app.css/core/domain, bumpare il
+  ?v=YYYY-MM-DD nei gusci (index.html, kiosk.html, mobile.html, prelievo.html).

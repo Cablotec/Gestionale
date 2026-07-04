@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f0e">
+<title>Kiosk — Cablotec</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="core/db.js?v=2026-07-04"></script>
+<script src="domain/scheduling.js?v=2026-07-04"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="app.css?v=2026-07-04">
+</head>
+<body>
+
+<!-- Config Supabase: vive in core/db.js (condiviso) -->
+
+<div id="auth-screen" style="display:none"></div>
+
+<div id="app-screen" style="display:none">
+  <header class="topbar">
+    <div>
+      <h1>Cabl<span>otec</span></h1>
+      <div class="sub">Sistema Gestionale — v2.0</div>
+    </div>
+    <div class="user-info">
+      <span id="user-name">…</span>
+      <span id="role-pill"></span>
+      <button class="btnsm" id="btn-kiosk" title="Apri schermata kiosk operatori" style="display:none;">⌐ Kiosk</button>
+      <button class="theme-toggle" id="btn-theme" title="Cambia tema">🌙</button>
+      <button class="btnsm" id="btn-logout">Esci</button>
+    </div>
+  </header>
+
+  <nav class="nav" id="tabs-macro">
+    <button class="navtab active" data-area="calendari">Calendari</button>
+    <button class="navtab" data-area="lavoro">Lavoro</button>
+    <button class="navtab" data-area="gestione" id="area-gestione" style="display:none">Gestione</button>
+    <button class="navtab" data-area="impostazioni" id="area-impostazioni" style="display:none">Impostazioni</button>
+  </nav>
+  <nav class="nav nav-sub" id="tabs"></nav>
+
+  <div id="tab-content"></div>
+</div>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- KIOSK MODE — schermata dedicata per mini-PC delle sedi         -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="kiosk-screen" style="display:none">
+  <div class="kiosk-header">
+    <div>
+      <div class="kiosk-title">Cablotec <span>Operatori</span></div>
+    </div>
+    <div class="kiosk-header-right">
+      <div class="kiosk-clock" id="kiosk-clock">--:--:--</div>
+      <a class="kiosk-exit" id="kiosk-exit-btn" href="./" title="Torna al gestionale">← Gestionale</a>
+    </div>
+  </div>
+
+  <!-- Schermata 1: identificazione -->
+  <div id="kiosk-step-id" class="kiosk-step">
+    <div class="kiosk-grid" id="kiosk-utili-grid"></div>
+  </div>
+
+  <!-- Schermata 2: scelta mezzo / rientro -->
+  <div id="kiosk-step-action" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name" id="kiosk-greet-name">Ciao</div>
+      <button class="kiosk-cancel" onclick="kioskGoToId()">Annulla</button>
+    </div>
+    <div id="kiosk-action-content"></div>
+  </div>
+
+  <!-- Schermata 2bis: menu (Mezzi / Commesse) -->
+  <div id="kiosk-step-menu" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name" id="kiosk-menu-name">Ciao</div>
+      <button class="kiosk-cancel" onclick="kioskGoToId()">Annulla</button>
+    </div>
+    <div class="kiosk-menu-grid">
+      <button class="kiosk-menu-btn" onclick="kioskGoToMezzi()">
+        <div class="kmb-icon">🚗</div>
+        <div class="kmb-label">Mezzi</div>
+        <div class="kmb-sub">Check-out e rientro</div>
+      </button>
+      <button class="kiosk-menu-btn" onclick="kioskGoToCommesse()">
+        <div class="kmb-icon">⚙</div>
+        <div class="kmb-label">Commesse</div>
+        <div class="kmb-sub">Avvia / sospendi lavoro</div>
+      </button>
+      <button class="kiosk-menu-btn" onclick="kioskGoToAttivita()">
+        <div class="kmb-icon">⚒</div>
+        <div class="kmb-label">Attività extra</div>
+        <div class="kmb-sub">Pulizia, riunioni, formazione…</div>
+      </button>
+    </div>
+  </div>
+
+  <!-- Schermata attività extra - lista attività -->
+  <div id="kiosk-step-attivita-list" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name">Seleziona attività</div>
+      <button class="kiosk-cancel" onclick="kioskGoToMenu()">Indietro</button>
+    </div>
+    <div id="kiosk-attivita-list-content"></div>
+  </div>
+
+  <!-- Schermata commesse - lista operazioni -->
+  <div id="kiosk-step-op-list" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name" id="kiosk-op-name">Seleziona operazione</div>
+      <button class="kiosk-cancel" onclick="kioskGoToMenu()">Indietro</button>
+    </div>
+    <div id="kiosk-op-list-content"></div>
+  </div>
+
+  <!-- Schermata commesse - selezione tipo lavorazione -->
+  <div id="kiosk-step-tipo" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name">Quale tipo di lavoro?</div>
+      <button class="kiosk-cancel" onclick="kioskGoToOpList()">Indietro</button>
+    </div>
+    <div id="kiosk-tipo-content"></div>
+  </div>
+
+  <!-- Schermata commesse - sessione attiva -->
+  <div id="kiosk-step-attiva" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name" id="kiosk-attiva-name">Stai lavorando su</div>
+      <button class="kiosk-cancel" onclick="kioskGoToId()">Esci</button>
+    </div>
+    <div id="kiosk-attiva-content"></div>
+  </div>
+
+  <!-- Schermata mezzo - conferma uscita con rientro previsto obbligatorio -->
+  <div id="kiosk-step-mezzo-rientro" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name">Fino a quando ti serve?</div>
+      <button class="kiosk-cancel" onclick="kioskGoToAction()">Indietro</button>
+    </div>
+    <div id="kiosk-mezzo-rientro-content"></div>
+  </div>
+
+  <!-- Schermata 3: conferma -->
+  <div id="kiosk-step-done" class="kiosk-step" style="display:none">
+    <div class="kiosk-done" id="kiosk-done-msg"></div>
+  </div>
+</div>
+
+<script>window.CABLOTEC_MODE='kiosk';</script>
+<script src="app.js?v=2026-07-04"></script>
+</body>
+</html>
