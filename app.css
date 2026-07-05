@@ -653,6 +653,9 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .gantt-cmbar-txt{position:relative;z-index:1;font-family:'DM Mono',monospace;font-size:9px;
   font-weight:700;color:#0f0f0e;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .gantt-cmdeadline{position:absolute;width:0;border-left:2px dashed var(--red);z-index:4;pointer-events:auto;}
+/* Livellato: segmento di barra oltre la scadenza (solo vista, +Ng dentro) */
+.gantt-cmbar-over{position:absolute;border-radius:0 5px 5px 0;background:var(--red);opacity:.6;z-index:3;pointer-events:none;
+  display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:#fff;}
 .sess-row-clic{transition:background .1s;}
 .sess-row-clic:hover{background:var(--sur2) !important;}
 

@@ -11641,6 +11641,13 @@ function renderGanttCommesse(root) {
       el('button', { class: zoom === 'settimana' ? 'act' : '', onclick:() => { state.ganttZoom='settimana'; renderTab('gantt_commesse'); } }, 'Settimana'),
       el('button', { class: zoom === 'mese' ? 'act' : '', onclick:() => { state.ganttZoom='mese'; renderTab('gantt_commesse'); } }, 'Mese'),
     ),
+    // Livellamento risorse (v1): SOLO VISTA, ricalcolato a ogni render.
+    el('div', { class:'switch-bar',
+      title:'Livellato: mette in fila il lavoro residuo di ogni operatore in avanti da oggi, senza sovrapposizioni '
+        + '(ordine: priorità manuale, scadenza a pareggio). Rosso = oltre la scadenza. Nessuna data viene salvata.' },
+      el('button', { class: !state.ganttLivella ? 'act' : '', onclick:() => { state.ganttLivella = false; renderTab('gantt_commesse'); } }, 'Scadenze'),
+      el('button', { class: state.ganttLivella ? 'act' : '', onclick:() => { state.ganttLivella = true; renderTab('gantt_commesse'); } }, '⇄ Livellato'),
+    ),
     el('div', { class:'gantt-nav' },
       el('button', { onclick: () => { state.ganttCursor = ganttShift(cursor, zoom, -1); renderTab('gantt_commesse'); }, title:'Indietro' }, '◀'),
       el('button', { onclick: () => { state.ganttCursor = new Date(); renderTab('gantt_commesse'); } }, 'Oggi'),
@@ -11858,6 +11865,9 @@ function renderGanttCommesse(root) {
 
     // Commesse assegnate all'operatore che intersecano il range. Con le fasi:
     // l'operatore occupa la finestra della SUA fase (non l'intera commessa).
+    // In modalità LIVELLATO le finestre vengono dalla fila (livellaOperatore):
+    // chi non ha lavoro residuo esce dalla vista, chi sfora si colora di rosso.
+    const liv = state.ganttLivella ? livellaOperatore(u.id) : null;
     const commesse = [];
     state.operazioni.forEach(o => {
       if (!o.scadenza) return;
@@ -11874,18 +11884,30 @@ function renderGanttCommesse(root) {
         mieFasi.forEach(fid => {
           if (visti.has(fid)) return;
           visti.add(fid);
-          const w = windows[fid];
+          let w = windows[fid];
+          let lw = null;
+          if (liv) {
+            lw = liv[o.id + '|' + fid];
+            if (!lw) return; // niente lavoro residuo → fuori dalla fila
+            w = { ...w, inizio: lw.inizio, fine: lw.fine };
+          }
           if (w.fine < rangeStartIso || w.inizio > rangeEndIso) return;
           const tipo = state.tipiLav.find(t => t.id === w.tipo_lavorazione_id);
           const f = fasi.find(x => x.id === fid) || null;
-          commesse.push({ op:o, inizio:w.inizio, scadenza:o.scadenza, fine:w.fine, faseTipo: tipo || null, fase: f });
+          commesse.push({ op:o, inizio:w.inizio, scadenza:o.scadenza, fine:w.fine, faseTipo: tipo || null, fase: f, liv: lw });
         });
       } else {
         // Nessuna fase, oppure assegnato "a tutta la commessa": intera finestra
-        const inizio = opInizio(o) || o.scadenza;
-        const fine = opFineLavoro(o, inizio);
+        let inizio = opInizio(o) || o.scadenza;
+        let fine = opFineLavoro(o, inizio);
+        let lw = null;
+        if (liv) {
+          lw = liv[o.id];
+          if (!lw) return; // niente lavoro residuo → fuori dalla fila
+          inizio = lw.inizio; fine = lw.fine;
+        }
         if (fine < rangeStartIso || inizio > rangeEndIso) return;
-        commesse.push({ op:o, inizio, scadenza:o.scadenza, fine, faseTipo: null });
+        commesse.push({ op:o, inizio, scadenza:o.scadenza, fine, faseTipo: null, liv: lw });
       }
     });
 
@@ -11972,6 +11994,10 @@ function renderGanttCommesse(root) {
           + (attiva ? '\n● lavorazione in corso' : '')
           + '\nLavoro: ' + fmtIT(c.inizio) + ' → ' + fmtIT(c.fine)
           + '\nScadenza: ' + fmtIT(c.scadenza)
+          + (c.liv ? '\nLivellato: in fila da oggi, fine stimata ' + fmtIT(c.liv.fine)
+              + (c.liv.sfora ? '\n⚠ OLTRE LA SCADENZA di ' + c.liv.giorniSforo
+                  + ' giorn' + (c.liv.giorniSforo === 1 ? 'o' : 'i') + ' lavorativ' + (c.liv.giorniSforo === 1 ? 'o' : 'i') : '')
+            : '')
           + '\n(clic per aprire la commessa)',
         onclick: () => { if (typeof openOperazioneModal === 'function') openOperazioneModal(c.op); },
       });
@@ -11986,6 +12012,24 @@ function renderGanttCommesse(root) {
         (art && art.codice ? art.codice : 'OP')
         + '  ' + Math.round(cons) + '/' + Math.round(prev) + 'h'));
       track.append(bar);
+
+      // Livellato: segmento ROSSO sulla parte di barra oltre la scadenza.
+      // pointer-events:none → il clic e il tooltip restano della barra sotto.
+      if (c.liv && c.liv.sfora) {
+        let iOver = -1;
+        if (c.scadenza < rangeStartIso) iOver = iStart; // scadenza già passata rispetto alla finestra: tutto il visibile è sforo
+        else {
+          const iScad = slotIndexOfIso(c.scadenza);
+          if (iScad >= 0) iOver = iScad + 1;
+        }
+        if (iOver >= 0 && iOver <= iEnd) {
+          const overW = (iEnd - iOver + 1) * slotWidth;
+          track.append(el('div', {
+            class:'gantt-cmbar-over',
+            style:`left:${iOver*slotWidth}px;width:${overW}px;top:${idx*(BAR_H+GAP)}px;height:${BAR_H}px;`,
+          }, overW >= 34 ? '+' + c.liv.giorniSforo + 'g' : ''));
+        }
+      }
 
       // Marcatore scadenza: visibile quando la barra NON finisce sulla
       // scadenza (slack per inizio anticipato, o sforamento per inizio
