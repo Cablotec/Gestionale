@@ -3458,6 +3458,27 @@ function openArticoloModal(a) {
     el('div', { class:'field' }, el('label', {}, 'Minuti unitari per pezzo — tempo pagato'), inMinuti, notaMinuti),
     el('div', { class:'field' },
       el('label', {}, 'Fasi (opzionale)'),
+      // Colpo d'occhio: le fasi EFFETTIVE che useranno le commesse nuove
+      // (media storica viva + valori manuali per i tipi senza storico).
+      // Calcolata al volo, mai scritta: i campi sotto restano il fallback.
+      (() => {
+        if (!a.id) return null;
+        const eff = (typeof fasiEffettiveArticolo === 'function' ? fasiEffettiveArticolo(a.id) : [])
+          .filter(f => (Number(f.minuti_unitari) || 0) > 0);
+        if (!eff.length) return null;
+        const tot = Math.round(eff.reduce((s, f) => s + f.minuti_unitari, 0) * 10) / 10;
+        return el('div', { class:'sub',
+          style:'margin:2px 0 8px;padding:8px 10px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;'
+            + 'font-family:DM Mono,monospace;font-size:11px;color:var(--txt);' },
+          el('div', { style:'color:var(--mut);font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;' },
+            'Effettive per le nuove commesse (media storica viva)'),
+          eff.map(f => {
+            const t = state.tipiLav.find(x => x.id === f.tipo_lavorazione_id);
+            return (t?.nome || '?') + ' ' + String(f.minuti_unitari).replace('.', ',') + "'"
+              + (f.fonte === 'storico' ? '' : ' (manuale)');
+          }).join('  +  ') + '  =  ' + String(tot).replace('.', ',') + "'/pz",
+        );
+      })(),
       fasiWrap,
       btnAddFase,
       notaConfronto,
