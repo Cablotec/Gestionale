@@ -5101,12 +5101,7 @@ async function persistPriorita(coppie) {
   return cambiate.length;
 }
 
-// ── Generazione fasi mancanti (bulk, con anteprima) ─────────────────────
-// Per ogni commessa APERTA senza fasi propone una scomposizione:
-//   1. dal template fasi dell'articolo, se definito in anagrafica;
-//   2. altrimenti dalle medie storiche min/pz per tipo di lavorazione
-//      (sessioni chiuse su commesse dello stesso articolo).
-// Niente viene scritto senza conferma: anteprima con spunte per commessa.
+// ── Proposta fasi da storico ─────────────────────────────────────────────
 // Proposta fasi PER COMMESSA: SOLO dalle medie storiche degli spediti
 // (storicoMinutiPz filtra già a stato 'spedita'). Niente template: non si
 // inventano fasi su articoli senza consuntivi reali. Marca "debole" se una
@@ -5124,25 +5119,11 @@ function proponiFasiPerCommessa(o) {
         if (st.nCommesse <= 1) debole = true;
         fasi.push({ tipo_lavorazione_id: t.id,
           minuti_unitari: Math.round(st.minPz * 10) / 10,
-          ordine: fasi.length + 1, _nSess: st.nSessioni, _nCommesse: st.nCommesse });
+          ordine: fasi.length + 1 });
       }
     });
   if (fasi.length) return { fasi, fonte: 'storico', debole };
   return null;
-}
-
-// Ore storiche per utente su una coppia (articolo, tipo di lavorazione):
-// secondi di sessioni CHIUSE di quel tipo sulle commesse di quell'articolo.
-// Usato per proporre l'"operatore abituale" di una fase.
-function oreStoricheUtenti(articoloId, tipoLavId) {
-  const opIds = new Set((state.operazioni || [])
-    .filter(o => o.articolo_id === articoloId).map(o => o.id));
-  const ore = {};
-  (state.sessioni || []).forEach(s => {
-    if (!s.fine || s.tipo_lavorazione_id !== tipoLavId || !opIds.has(s.operazione_id) || !s.utente_id) return;
-    ore[s.utente_id] = (ore[s.utente_id] || 0) + (Number(s.durata_secondi) || 0);
-  });
-  return ore;
 }
 
 // Genera e PERSISTE le fasi di una commessa dalla media degli spediti — solo
@@ -5164,184 +5145,6 @@ async function autoGeneraFasiDaMedia(op) {
   if (error || !data) return null;
   data.forEach(r => { if (!state.opFasi.find(x => x.id === r.id)) state.opFasi.push(r); });
   return { creato: data.length, debole: !!p.debole };
-}
-
-function openGeneraFasiModal() {
-  const senzaFasi = state.operazioni
-    .filter(o => o.stato !== 'spedita' && o.stato !== 'completata')
-    .filter(o => !(state.opFasi || []).some(f => f.operazione_id === o.id))
-    .sort((a, b) => (a.scadenza || '9999').localeCompare(b.scadenza || '9999'));
-
-  const modal = el('div', { class:'modal', style:'max-width:760px;' });
-  modal.append(el('div', { class:'mhd' },
-    el('h2', {}, '⚙ Genera fasi mancanti'),
-    el('button', { class:'mclose', onclick: closeModal }, '✕'),
-  ));
-  const body = el('div', { class:'mbody' });
-
-  if (senzaFasi.length === 0) {
-    body.append(el('div', { class:'sub' }, 'Tutte le commesse aperte hanno già le fasi. Niente da fare. ✓'));
-    modal.append(body, el('div', { class:'mfoot' },
-      el('button', { class:'btng', onclick: closeModal }, 'Chiudi')));
-    openModal(modal);
-    return;
-  }
-
-  // Costruisco le proposte
-  const proposte = [];   // { o, fasi, fonte, somma, checked }
-  const senzaDati = [];
-  senzaFasi.forEach(o => {
-    const p = proponiFasiPerCommessa(o);
-    if (p) {
-      const somma = p.fasi.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
-      proposte.push({ o, ...p, somma: Math.round(somma * 10) / 10, checked: true });
-    } else {
-      senzaDati.push(o);
-    }
-  });
-
-  // Operatore abituale per ciascuna fase: chi ha più ore storiche su quella
-  // coppia articolo+tipo. La stessa persona può coprire PIÙ fasi della
-  // stessa commessa (es. cablaggio + collaudo).
-  const utenteOk = (uid) => {
-    const u = state.utenti.find(x => x.id === uid);
-    return u && u.attivo !== false && !isKioskRecord(u);
-  };
-  proposte.forEach(p => {
-    p.fasi.forEach(f => {
-      const migliori = Object.entries(oreStoricheUtenti(p.o.articolo_id, f.tipo_lavorazione_id))
-        .filter(([uid]) => utenteOk(uid))
-        .sort((a, b) => b[1] - a[1]);
-      if (migliori.length) {
-        f._utente_id = migliori[0][0];
-        f._utenteNome = state.utenti.find(u => u.id === migliori[0][0])?.nome || '?';
-      }
-    });
-  });
-
-  body.append(el('div', { class:'sub', style:'margin-bottom:12px;' },
-    senzaFasi.length + ' commesse aperte senza fasi. '
-    + proposte.length + ' con proposta (media degli spediti), '
-    + senzaDati.length + ' senza dati sufficienti. '
-    + 'Dove c\'è storico viene proposto anche l\'operatore abituale (→ nome). '
-    + 'Niente viene scritto finché non confermi.'));
-
-  const tipoNome = (id) => state.tipiLav.find(t => t.id === id)?.nome || '?';
-  const descrFasi = (p) => p.fasi
-    .map(f => tipoNome(f.tipo_lavorazione_id) + ' ' + String(f.minuti_unitari).replace('.', ',') + "'"
-      + (f._utenteNome ? ' → ' + f._utenteNome : ''))
-    .join('  +  ');
-
-  const lista = el('div', { style:'display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto;' });
-  const contaSel = el('span', {}, String(proposte.length));
-  const aggiornaConta = () => { contaSel.textContent = String(proposte.filter(p => p.checked).length); };
-
-  proposte.forEach(p => {
-    const art = state.articoli.find(a => a.id === p.o.articolo_id);
-    const cli = state.aziende.find(c => c.id === p.o.cliente_id);
-    const pagato = Number(p.o.minuti_unitari) || 0;
-    const sfora = pagato > 0 && p.somma > pagato + 0.05;
-    const chk = el('input', { type:'checkbox' });
-    chk.checked = true;
-    chk.onchange = () => { p.checked = chk.checked; aggiornaConta(); };
-    lista.append(el('label', {
-      style:'display:flex;align-items:flex-start;gap:10px;background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:9px 12px;cursor:pointer;',
-    },
-      chk,
-      el('div', { style:'flex:1;min-width:0;' },
-        el('div', { style:'font-family:DM Mono,monospace;font-size:12px;font-weight:700;' },
-          (art?.codice || p.o.numero_ordine || '—') + (cli ? '  ·  ' + cli.nome : '')
-          + (p.o.numero_op ? '  ·  OP ' + p.o.numero_op : '')),
-        el('div', { style:'font-size:11px;color:var(--mut);margin-top:3px;' },
-          descrFasi(p)
-          + '  →  tot ' + String(p.somma).replace('.', ',') + "'/pz"
-          + (pagato > 0 ? ' su ' + String(pagato).replace('.', ',') + "' pagati" : '')
-          + '  ·  fonte: medie storiche (spediti)'
-          + (p.debole ? '  ·  ⚠ 1 sola commessa' : '')),
-        sfora ? el('div', { style:'font-size:11px;color:var(--yel);margin-top:2px;' },
-          '⚠ la somma delle fasi supera il tempo pagato') : null,
-        p.debole ? el('div', { style:'font-size:11px;color:var(--mut);margin-top:2px;' },
-          '⚠ media debole: basata su una sola commessa spedita') : null,
-      ),
-    ));
-  });
-  body.append(lista);
-
-  if (senzaDati.length) {
-    body.append(el('div', { class:'sub', style:'margin-top:12px;color:var(--mut);' },
-      'Senza dati (nessuno storico spedito): '
-      + senzaDati.map(o => {
-          const a = state.articoli.find(x => x.id === o.articolo_id);
-          return a?.codice || o.numero_ordine || '?';
-        }).join(', ')));
-  }
-
-  modal.append(body);
-
-  const foot = el('div', { class:'mfoot' });
-  foot.append(el('button', { class:'btng', onclick: closeModal }, 'Annulla'));
-  const btnGo = el('button', { class:'btnp' });
-  btnGo.append(document.createTextNode('Crea fasi ('), contaSel, document.createTextNode(' commesse)'));
-  btnGo.onclick = async () => {
-    const scelte = proposte.filter(p => p.checked);
-    if (scelte.length === 0) return toast('Nessuna commessa selezionata', 'err');
-    btnGo.disabled = true; btnGo.textContent = 'Creazione…';
-    let okN = 0, errN = 0, assN = 0;
-    for (const p of scelte) {
-      const rows = p.fasi.map(f => ({
-        operazione_id: p.o.id,
-        tipo_lavorazione_id: f.tipo_lavorazione_id,
-        minuti_unitari: f.minuti_unitari,
-        ordine: f.ordine,
-      }));
-      const { data, error } = await sb.from('operazioni_fasi').insert(rows).select();
-      if (error) { errN++; continue; }
-      const nuoveFasi = data || [];
-      nuoveFasi.forEach(r => {
-        if (!state.opFasi.find(x => x.id === r.id)) state.opFasi.push(r);
-      });
-      okN++;
-
-      // Assegnazioni proposte (operatore abituale → fase). Se la persona ha
-      // una riga "tutta la commessa" (fase_id null) la raffino alla fase;
-      // altrimenti aggiungo una riga: con il nuovo modello può averne più
-      // d'una (una per fase).
-      for (let i = 0; i < p.fasi.length; i++) {
-        const f = p.fasi[i], rec = nuoveFasi[i];
-        if (!f._utente_id || !rec) continue;
-        const rigaNull = (state.opAddetti || []).find(r =>
-          r.operazione_id === p.o.id && r.utente_id === f._utente_id && !r.fase_id);
-        const giaSuFase = (state.opAddetti || []).find(r =>
-          r.operazione_id === p.o.id && r.utente_id === f._utente_id && r.fase_id === rec.id);
-        if (giaSuFase) continue;
-        if (rigaNull) {
-          let q = sb.from('operazioni_addetti').update({ fase_id: rec.id });
-          q = rigaNull.id ? q.eq('id', rigaNull.id)
-            : q.eq('operazione_id', p.o.id).eq('utente_id', f._utente_id).is('fase_id', null);
-          const { error: e2 } = await q;
-          if (!e2) {
-            state.opAddetti = state.opAddetti.map(r =>
-              (rigaNull.id ? r.id === rigaNull.id
-                : (r.operazione_id === p.o.id && r.utente_id === f._utente_id && !r.fase_id))
-                ? { ...r, fase_id: rec.id } : r);
-            assN++;
-          }
-        } else {
-          const { data: ins, error: e2 } = await sb.from('operazioni_addetti')
-            .insert({ operazione_id: p.o.id, utente_id: f._utente_id, fase_id: rec.id }).select();
-          if (!e2) { (ins || []).forEach(r => state.opAddetti.push(r)); assN++; }
-        }
-      }
-    }
-    closeModal();
-    const dettAss = assN > 0 ? ` (${assN} operatori assegnati)` : '';
-    if (errN) toast(`Fasi create su ${okN} commesse${dettAss}, ${errN} errori`, 'err');
-    else toast(`Fasi create su ${okN} commesse${dettAss}`, 'ok');
-    renderTab(state.currentTab || 'pianificazione');
-  };
-  foot.append(btnGo);
-  modal.append(foot);
-  openModal(modal);
 }
 
 // Modale "Ordina priorità" (gestionale): riordino di tutte le commesse aperte.
@@ -5515,8 +5318,6 @@ function renderPianificazione(root) {
   if (isAdmin) {
     toolbar.append(el('button', { class:'btnp', onclick:()=>openOperazioneModal() }, '+ Nuova Operazione'));
     toolbar.append(el('button', { class:'btng', onclick:()=>openPrioritaModal() }, '⠿ Ordina priorità'));
-    toolbar.append(el('button', { class:'btng', onclick:()=>openGeneraFasiModal(),
-      title:'Rivedi le commesse aperte senza fasi e generale dalle medie storiche degli spediti' }, '⚙ Genera fasi'));
     const fileImp = el('input', {
       type:'file', accept:'.xlsx,.xls', style:'display:none;',
       onchange: (e) => { if (e.target.files[0]) operazioniImportExcel(e.target.files[0]); e.target.value=''; },
