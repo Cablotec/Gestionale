@@ -11987,6 +11987,27 @@ function renderGanttCommesse(root) {
         + '  ' + Math.round(cons) + '/' + Math.round(prev) + 'h'));
       track.append(bar);
 
+      // Interruzioni: la barra NON tira dritto sui giorni in cui non si
+      // lavora (weekend, festivi/chiusure, assenza a giornata intera
+      // dell'operatore). Il motore già non conta quei giorni (capacitaGiorno
+      // = 0): qui lo si rende visibile. Maschere sopra la barra, clic e
+      // tooltip passano alla barra sotto.
+      for (let i = iStart; i <= iEnd; i++) {
+        const slot = slots[i];
+        if (!slot) continue;
+        const nonLav = !slot.weekend && nonLavMap[slot.dateISO];
+        const assTutta = assByDate[slot.dateISO]
+          && (parseFloat(assByDate[slot.dateISO].ore) || 0) >= 8;
+        if (!slot.weekend && !nonLav && !assTutta) continue;
+        track.append(el('div', {
+          class:'gantt-cmgap'
+            + (slot.weekend ? ' weekend' : '')
+            + (nonLav ? ' nonlav' : '')
+            + (assTutta ? ' assenza' : ''),
+          style:`left:${i*slotWidth}px;width:${slotWidth}px;top:${idx*(BAR_H+GAP)}px;height:${BAR_H}px;`,
+        }));
+      }
+
       // Marcatore scadenza: visibile quando la barra NON finisce sulla
       // scadenza (slack per inizio anticipato, o sforamento per inizio
       // tardivo). Con calcolo automatico fine == scadenza → niente marcatore.

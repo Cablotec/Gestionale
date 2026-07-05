@@ -653,6 +653,13 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .gantt-cmbar-txt{position:relative;z-index:1;font-family:'DM Mono',monospace;font-size:9px;
   font-weight:700;color:#0f0f0e;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .gantt-cmdeadline{position:absolute;width:0;border-left:2px dashed var(--red);z-index:4;pointer-events:auto;}
+/* Interruzione barra su giorni non lavorati (weekend/festivi/assenze intere):
+   maschera color sfondo + la stessa tinta della colonna sotto. */
+.gantt-cmgap{position:absolute;z-index:2;pointer-events:none;background-color:var(--sur);
+  border-right:1px solid var(--brd);box-sizing:border-box;}
+.gantt-cmgap.weekend{background-image:linear-gradient(rgba(255,78,107,.05),rgba(255,78,107,.05));}
+.gantt-cmgap.nonlav{background-image:linear-gradient(rgba(255,140,40,.07),rgba(255,140,40,.07));}
+.gantt-cmgap.assenza{background-image:linear-gradient(rgba(150,150,150,.12),rgba(150,150,150,.12));}
 .sess-row-clic{transition:background .1s;}
 .sess-row-clic:hover{background:var(--sur2) !important;}
 
