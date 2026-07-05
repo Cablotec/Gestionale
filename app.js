@@ -3406,7 +3406,7 @@ function openArticoloModal(a) {
         const val = Math.round(d.minPz * 10) / 10;
         const top = el('div', { style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;' },
           el('span', { style:'color:var(--mut);' },
-            'media spediti ~' + String(val).replace('.', ',') + ' min/pz · '
+            'media storica ~' + String(val).replace('.', ',') + ' min/pz · '
             + d.nCommesse + (d.nCommesse === 1 ? ' commessa' : ' commesse')));
         if (!readonly) {
           top.append(el('button', {
@@ -3416,7 +3416,7 @@ function openArticoloModal(a) {
         }
         sugg.append(top);
         sugg.append(entityTimeline({
-          sommario: 'da quali spedite esce questo numero',
+          sommario: 'da quali commesse esce questo numero (spedite e completate)',
           debole: d.debole,
           righe: d.righe.map(r => ({
             titolo: r.label,
@@ -5102,7 +5102,7 @@ async function persistPriorita(coppie) {
 }
 
 // ── Proposta fasi da storico ─────────────────────────────────────────────
-// Proposta fasi PER COMMESSA: SOLO dalle medie storiche degli spediti
+// Proposta fasi PER COMMESSA: SOLO dalle medie storiche (spedite+completate)
 // (storicoMinutiPz filtra già a stato 'spedita'). Niente template: non si
 // inventano fasi su articoli senza consuntivi reali. Marca "debole" se una
 // fase si basa su una sola commessa spedita.
@@ -5126,7 +5126,7 @@ function proponiFasiPerCommessa(o) {
   return null;
 }
 
-// Genera e PERSISTE le fasi di una commessa dalla media degli spediti — solo
+// Genera e PERSISTE le fasi di una commessa dalla media storica — solo
 // dati, niente template, niente assegnazione operatori (gli operatori si
 // iscrivono al kiosk). Best-effort: ritorna { creato, debole } oppure null se
 // non c'è storico spedito o le fasi esistono già.
@@ -7374,7 +7374,7 @@ function openOperazioneModal(o) {
         const faseIdByK = syncFasi.keyToId || {};
         const resolveFase = (k) => (k && faseIdByK[k]) ? faseIdByK[k] : null;
 
-        // Generazione automatica fasi dalla media degli spediti: SOLO commessa
+        // Generazione automatica fasi dalla media storica: SOLO commessa
         // nuova e SOLO se non ne hai inserite a mano. Niente template, niente
         // operatori assegnati di nascosto. Best-effort: non blocca il salvataggio.
         if (isNew && fasiPayloadComm.length === 0) {
@@ -7382,8 +7382,8 @@ function openOperazioneModal(o) {
             const gen = await autoGeneraFasiDaMedia(data);
             if (gen && gen.creato > 0) {
               toast(gen.debole
-                ? '⚠ Fasi generate da media spediti (debole: 1 sola commessa)'
-                : 'Fasi generate automaticamente da media spediti');
+                ? '⚠ Fasi generate da media storica (debole: 1 sola commessa)'
+                : 'Fasi generate automaticamente da media storica');
             }
           } catch (e) { /* best-effort: l'automatismo non deve mai bloccare il salvataggio */ }
         }

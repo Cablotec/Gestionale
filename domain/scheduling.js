@@ -259,13 +259,14 @@ function storicoMinutiPz(articoloId, tipoLavId) {
     secPerOp[s.operazione_id] = (secPerOp[s.operazione_id] || 0) + (Number(s.durata_secondi) || 0);
     nSessPerOp[s.operazione_id] = (nSessPerOp[s.operazione_id] || 0) + 1;
   });
-  // Una commessa entra nello storico SOLO se è 'spedita': dato definitivo,
-  // pezzi e ore consolidati e non più in movimento. Così le medie usate per
-  // generare le fasi non cambiano più man mano che le commesse procedono.
+  // Una commessa entra nello storico se è 'spedita' O 'completata': le ORE
+  // si consolidano alla chiusura del lavoro (completata), la spedizione è
+  // logistica e non cambia più i timbri. Le commesse ancora in lavorazione
+  // restano fuori (dati parziali).
   let totSec = 0, pezzi = 0, nSessioni = 0, nCommesse = 0;
   Object.keys(secPerOp).forEach(id => {
     const op = (state.operazioni || []).find(o => o.id === id);
-    if (!op || op.stato !== 'spedita') return;
+    if (!op || (op.stato !== 'spedita' && op.stato !== 'completata')) return;
     const prod = quantitaConsegnata(id);
     const pz = prod > 0 ? prod : Number(op.quantita || 0);
     if (pz <= 0) return;
@@ -284,7 +285,7 @@ function storicoMinutiPz(articoloId, tipoLavId) {
 
 // DATO sorgente dietro la media storica di una fase. Replica ESATTA della
 // logica di storicoMinutiPz (media pesata = secondi totali / pezzi totali sulle
-// sole spedite) ma restituisce anche il dettaglio per-commessa, così il
+// sole spedite+completate) ma restituisce anche il dettaglio per-commessa, così il
 // drill-down quadra col numero mostrato. È questa la funzione-dato che domani
 // riusano cliente/fornitore/operatore.
 function datiStoricoFase(articoloId, tipoLavId) {
@@ -302,7 +303,7 @@ function datiStoricoFase(articoloId, tipoLavId) {
   const righe = [];
   Object.keys(secPerOp).forEach(id => {
     const op = (state.operazioni || []).find(o => o.id === id);
-    if (!op || op.stato !== 'spedita') return;
+    if (!op || (op.stato !== 'spedita' && op.stato !== 'completata')) return;
     const prod = quantitaConsegnata(id);
     const pz = prod > 0 ? prod : Number(op.quantita || 0);
     if (pz <= 0) return;
