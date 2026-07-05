@@ -6243,8 +6243,9 @@ function openOperazioneModal(o) {
           const sug = el('span', { class:'sub',
             style:'flex-basis:100%;margin-left:28px;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);' },
             (eff.fonte === 'storico'
-              ? 'da storico ~' + String(val).replace('.', ',') + "'/pz (" + eff.nCommesse + ' comm.)'
-              : "in anagrafica: " + String(val).replace('.', ',') + "'/pz"));
+              ? 'da storico ~' + String(val).replace('.', ',') + ' min/pz · ' + eff.nCommesse
+                + (eff.nCommesse === 1 ? ' commessa' : ' commesse')
+              : 'in anagrafica: ' + String(val).replace('.', ',') + ' min/pz'));
           if (canEdit) {
             sug.append(el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
               onclick: () => { f.minuti_unitari = val; inMin.value = String(val); aggiornaConfrontoComm(); sug.remove(); },
@@ -6442,9 +6443,9 @@ function openOperazioneModal(o) {
           el('span', { style:'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' },
             '#' + (i + 1) + ' ' + (tipo?.nome || 'Fase')),
           el('span', { style:'color:' + (sfora ? 'var(--red)' : 'var(--mut)') + ';flex-shrink:0;' },
-            Math.round(fCons * 60) + "' / " + Math.round(fPrev * 60) + "'"
+            Math.round(fCons * 60) + ' / ' + Math.round(fPrev * 60) + ' min'
             + (fPrev > 0 ? ' (' + fPerc + '%)' : '')
-            + (sfora ? " ⚠ +" + Math.round((fCons - fPrev) * 60) + "'" : ' ✓')),
+            + (sfora ? ' ⚠ +' + Math.round((fCons - fPrev) * 60) + ' min' : ' ✓')),
         ));
       });
       // Ore non attribuibili a nessuna fase (tipi diversi, sessioni anomale)
@@ -6453,7 +6454,7 @@ function openOperazioneModal(o) {
         box.append(el('div', { style:'display:flex;align-items:center;gap:10px;padding:3px 0;color:var(--yel);' },
           el('span', { style:'width:10px;height:10px;flex-shrink:0;text-align:center;' }, '?'),
           el('span', { style:'flex:1;' }, 'Fuori fase (tipo non riconducibile)'),
-          el('span', { style:'flex-shrink:0;' }, Math.round(fuori * 60) + "'"),
+          el('span', { style:'flex-shrink:0;' }, Math.round(fuori * 60) + ' min'),
         ));
       }
       pCons.append(box);
