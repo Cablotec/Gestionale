@@ -6199,6 +6199,15 @@ function openOperazioneModal(o) {
     if (fasiComm.length === 0) {
       fasiWrapComm.append(el('div', { class:'sub' }, 'Nessuna fase: la commessa usa il solo tempo pagato.'));
     }
+    // Articolo corrente: serve per suggerire i minuti del template alle fasi
+    // rimaste a 0 (tipico delle commesse vecchie, salvate prima del template).
+    const artCorr = (() => {
+      if (!isNew && o.articolo_id) return state.articoli.find(a => a.id === o.articolo_id) || null;
+      try {
+        const v = acArticolo.getValue();
+        return (v.mode === 'existing' && v.id) ? (state.articoli.find(a => a.id === v.id) || null) : null;
+      } catch (e) { return null; }
+    })();
     fasiComm.forEach((f, i) => {
       const sel = el('select', { style:'flex:1;min-width:0;' },
         el('option', { value:'' }, '— tipo lavorazione —'),
@@ -6210,13 +6219,32 @@ function openOperazioneModal(o) {
         placeholder:'min/pz', style:'max-width:90px;' });
       inMin.disabled = !canEdit;
       inMin.oninput = () => { f.minuti_unitari = Number(inMin.value) || 0; aggiornaConfrontoComm(); };
-      const row = el('div', { style:'display:flex;gap:8px;align-items:center;margin:6px 0;' },
+      const row = el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0;' },
         el('span', { class:'sub', style:'width:20px;flex-shrink:0;' }, '#' + (i + 1)),
         sel, inMin,
         el('span', { class:'sub', style:'flex-shrink:0;font-size:10px;' }, 'min/pz'));
       if (canEdit) {
         row.append(el('button', { type:'button', class:'btnsm', style:'flex-shrink:0;',
           onclick: () => { fasiComm.splice(i, 1); onFasiChanged(); } }, '✕'));
+      }
+      // Fase senza minuti + template articolo compilato per quel tipo →
+      // proponi il valore ATTUALE dell'anagrafica, con "usa" per applicarlo.
+      if ((Number(f.minuti_unitari) || 0) <= 0 && f.tipo_lavorazione_id
+          && artCorr && Array.isArray(artCorr.fasi)) {
+        const tf = artCorr.fasi.find(x => x.tipo_lavorazione_id === f.tipo_lavorazione_id
+          && (Number(x.minuti_unitari) || 0) > 0);
+        if (tf) {
+          const val = Number(tf.minuti_unitari);
+          const sug = el('span', { class:'sub',
+            style:'flex-basis:100%;margin-left:28px;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);' },
+            "in anagrafica: " + String(val).replace('.', ',') + "'/pz");
+          if (canEdit) {
+            sug.append(el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
+              onclick: () => { f.minuti_unitari = val; inMin.value = String(val); aggiornaConfrontoComm(); sug.remove(); },
+            }, 'usa'));
+          }
+          row.append(sug);
+        }
       }
       fasiWrapComm.append(row);
     });
@@ -6392,6 +6420,8 @@ function openOperazioneModal(o) {
     if (fasiOp.length > 0) {
       const box = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;' });
       box.append(el('div', { style:'color:var(--mut);font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;' }, 'Riepilogo per fase'));
+      // Totali di fase in MINUTI (i minuti/pezzo delle fasi sono in minuti:
+      // stessa unità, confronto immediato senza conversioni a mente).
       let sommaConsFasi = 0;
       fasiOp.forEach((f, i) => {
         const tipo = state.tipiLav.find(t => t.id === f.tipo_lavorazione_id);
@@ -6405,9 +6435,9 @@ function openOperazioneModal(o) {
           el('span', { style:'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' },
             '#' + (i + 1) + ' ' + (tipo?.nome || 'Fase')),
           el('span', { style:'color:' + (sfora ? 'var(--red)' : 'var(--mut)') + ';flex-shrink:0;' },
-            fCons.toFixed(1) + ' / ' + fPrev.toFixed(1) + 'h'
+            Math.round(fCons * 60) + "' / " + Math.round(fPrev * 60) + "'"
             + (fPrev > 0 ? ' (' + fPerc + '%)' : '')
-            + (sfora ? ' ⚠ +' + (fCons - fPrev).toFixed(1) + 'h' : ' ✓')),
+            + (sfora ? " ⚠ +" + Math.round((fCons - fPrev) * 60) + "'" : ' ✓')),
         ));
       });
       // Ore non attribuibili a nessuna fase (tipi diversi, sessioni anomale)
@@ -6416,7 +6446,7 @@ function openOperazioneModal(o) {
         box.append(el('div', { style:'display:flex;align-items:center;gap:10px;padding:3px 0;color:var(--yel);' },
           el('span', { style:'width:10px;height:10px;flex-shrink:0;text-align:center;' }, '?'),
           el('span', { style:'flex:1;' }, 'Fuori fase (tipo non riconducibile)'),
-          el('span', { style:'flex-shrink:0;' }, fuori.toFixed(1) + 'h'),
+          el('span', { style:'flex-shrink:0;' }, Math.round(fuori * 60) + "'"),
         ));
       }
       pCons.append(box);
