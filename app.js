@@ -3407,7 +3407,8 @@ function openArticoloModal(a) {
         const top = el('div', { style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;' },
           el('span', { style:'color:var(--mut);' },
             'media storica ~' + String(val).replace('.', ',') + ' min/pz · '
-            + d.nCommesse + (d.nCommesse === 1 ? ' commessa' : ' commesse')));
+            + d.nCommesse + (d.nCommesse === 1 ? ' commessa' : ' commesse')
+            + ' · ← le nuove commesse usano questa'));
         if (!readonly) {
           top.append(el('button', {
             type:'button', class:'btnsm', style:'padding:1px 8px;',
@@ -3461,7 +3462,9 @@ function openArticoloModal(a) {
       btnAddFase,
       notaConfronto,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Scomposizione interna del lavoro per mansione (es. meccanica → montaggio). Fanno da template per le nuove commesse e dovrebbero stare entro il tempo pagato.')),
+        'Scomposizione interna del lavoro per mansione. Le nuove commesse usano la MEDIA STORICA '
+        + '(si aggiorna da sola a ogni commessa chiusa); i valori qui sotto valgono solo per i tipi senza storico. '
+        + 'La somma dovrebbe stare entro il tempo pagato.')),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
 
@@ -5101,29 +5104,22 @@ async function persistPriorita(coppie) {
   return cambiate.length;
 }
 
-// ── Proposta fasi da storico ─────────────────────────────────────────────
-// Proposta fasi PER COMMESSA: SOLO dalle medie storiche (spedite+completate)
-// (storicoMinutiPz filtra già a stato 'spedita'). Niente template: non si
-// inventano fasi su articoli senza consuntivi reali. Marca "debole" se una
-// fase si basa su una sola commessa spedita.
+// ── Proposta fasi per una commessa ───────────────────────────────────────
+// Usa le fasi EFFETTIVE dell'articolo (media storica viva dove esiste,
+// template per i tipi senza storico). Scarta le voci a 0 minuti: non si
+// pianifica il nulla. Marca "debole" se una media si basa su una sola
+// commessa chiusa.
 function proponiFasiPerCommessa(o) {
   if (!o || !o.articolo_id) return null;
-  const fasi = [];
-  let debole = false;
-  (state.tipiLav || [])
-    .filter(t => t.attivo !== false)
-    .sort((a, b) => (a.ordine || 0) - (b.ordine || 0))
-    .forEach(t => {
-      const st = storicoMinutiPz(o.articolo_id, t.id);
-      if (st && st.minPz > 0) {
-        if (st.nCommesse <= 1) debole = true;
-        fasi.push({ tipo_lavorazione_id: t.id,
-          minuti_unitari: Math.round(st.minPz * 10) / 10,
-          ordine: fasi.length + 1 });
-      }
-    });
-  if (fasi.length) return { fasi, fonte: 'storico', debole };
-  return null;
+  const eff = fasiEffettiveArticolo(o.articolo_id)
+    .filter(f => (Number(f.minuti_unitari) || 0) > 0);
+  if (!eff.length) return null;
+  const debole = eff.some(f => f.fonte === 'storico' && f.nCommesse <= 1);
+  return {
+    fasi: eff.map((f, i) => ({ tipo_lavorazione_id: f.tipo_lavorazione_id,
+      minuti_unitari: f.minuti_unitari, ordine: i + 1 })),
+    fonte: 'effettive', debole,
+  };
 }
 
 // Genera e PERSISTE le fasi di una commessa dalla media storica — solo
@@ -5775,13 +5771,14 @@ function openOperazioneModal(o) {
           }
         }
       }
-      // Pre-compila le fasi dal template dell'articolo (solo commessa nuova e
+      // Pre-compila le fasi EFFETTIVE dell'articolo (solo commessa nuova e
       // solo se non hai già aggiunto fasi a mano: non sovrascrive le tue).
+      // Effettive = media storica dove esiste (viva, si aggiorna da sola a
+      // ogni commessa chiusa), valore del template per i tipi senza storico.
       if (isNew && val.mode === 'existing' && val.id && fasiComm.length === 0) {
-        const artF = state.articoli.find(a => a.id === val.id);
-        if (artF && Array.isArray(artF.fasi) && artF.fasi.length) {
-          fasiComm = artF.fasi.slice().sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
-            .map(f => ({ _k: nextFaseKey(), tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
+        const eff = fasiEffettiveArticolo(val.id);
+        if (eff.length) {
+          fasiComm = eff.map(f => ({ _k: nextFaseKey(), tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
           if (typeof onFasiChanged === 'function') onFasiChanged();
         }
       }
@@ -6227,17 +6224,19 @@ function openOperazioneModal(o) {
         row.append(el('button', { type:'button', class:'btnsm', style:'flex-shrink:0;',
           onclick: () => { fasiComm.splice(i, 1); onFasiChanged(); } }, '✕'));
       }
-      // Fase senza minuti + template articolo compilato per quel tipo →
-      // proponi il valore ATTUALE dell'anagrafica, con "usa" per applicarlo.
-      if ((Number(f.minuti_unitari) || 0) <= 0 && f.tipo_lavorazione_id
-          && artCorr && Array.isArray(artCorr.fasi)) {
-        const tf = artCorr.fasi.find(x => x.tipo_lavorazione_id === f.tipo_lavorazione_id
-          && (Number(x.minuti_unitari) || 0) > 0);
-        if (tf) {
-          const val = Number(tf.minuti_unitari);
+      // Fase senza minuti + valore effettivo disponibile per quel tipo
+      // (media storica o template articolo) → proponilo, con "usa".
+      if ((Number(f.minuti_unitari) || 0) <= 0 && f.tipo_lavorazione_id && artCorr) {
+        const eff = fasiEffettiveArticolo(artCorr.id)
+          .find(x => x.tipo_lavorazione_id === f.tipo_lavorazione_id
+            && (Number(x.minuti_unitari) || 0) > 0);
+        if (eff) {
+          const val = Number(eff.minuti_unitari);
           const sug = el('span', { class:'sub',
             style:'flex-basis:100%;margin-left:28px;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);' },
-            "in anagrafica: " + String(val).replace('.', ',') + "'/pz");
+            (eff.fonte === 'storico'
+              ? 'da storico ~' + String(val).replace('.', ',') + "'/pz (" + eff.nCommesse + ' comm.)'
+              : "in anagrafica: " + String(val).replace('.', ',') + "'/pz"));
           if (canEdit) {
             sug.append(el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
               onclick: () => { f.minuti_unitari = val; inMin.value = String(val); aggiornaConfrontoComm(); sug.remove(); },
@@ -7412,8 +7411,8 @@ function openOperazioneModal(o) {
             const gen = await autoGeneraFasiDaMedia(data);
             if (gen && gen.creato > 0) {
               toast(gen.debole
-                ? '⚠ Fasi generate da media storica (debole: 1 sola commessa)'
-                : 'Fasi generate automaticamente da media storica');
+                ? '⚠ Fasi generate da storico/anagrafica (media debole: 1 sola commessa)'
+                : 'Fasi generate automaticamente da storico/anagrafica');
             }
           } catch (e) { /* best-effort: l'automatismo non deve mai bloccare il salvataggio */ }
         }

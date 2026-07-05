@@ -279,6 +279,47 @@ function storicoMinutiPz(articoloId, tipoLavId) {
   return { minPz: (totSec / 60) / pezzi, nSessioni, nCommesse };
 }
 
+// ── Fasi EFFETTIVE di un articolo (per le commesse nuove) ──────────────
+// La media storica (spedite+completate) è il valore VIVO: si allarga o si
+// restringe da sola a ogni commessa chiusa, niente da ricopiare a mano in
+// anagrafica. Il template resta il valore di partenza per i tipi senza
+// storico. Ordine: quello del template; i tipi solo-storico in coda
+// (ordine dei tipi di lavorazione).
+// Ritorna [{ tipo_lavorazione_id, minuti_unitari, fonte:'storico'|'template', nCommesse }]
+function fasiEffettiveArticolo(articoloId) {
+  const art = (state.articoli || []).find(a => a.id === articoloId);
+  if (!art) return [];
+  const out = [];
+  const visti = new Set();
+  const tmpl = (Array.isArray(art.fasi) ? art.fasi.slice() : [])
+    .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+  tmpl.forEach(f => {
+    if (!f.tipo_lavorazione_id || visti.has(f.tipo_lavorazione_id)) return;
+    visti.add(f.tipo_lavorazione_id);
+    const st = storicoMinutiPz(articoloId, f.tipo_lavorazione_id);
+    if (st && st.minPz > 0) {
+      out.push({ tipo_lavorazione_id: f.tipo_lavorazione_id,
+        minuti_unitari: Math.round(st.minPz * 10) / 10, fonte: 'storico', nCommesse: st.nCommesse });
+    } else {
+      out.push({ tipo_lavorazione_id: f.tipo_lavorazione_id,
+        minuti_unitari: Number(f.minuti_unitari) || 0, fonte: 'template', nCommesse: 0 });
+    }
+  });
+  (state.tipiLav || [])
+    .filter(t => t.attivo !== false)
+    .sort((a, b) => (a.ordine || 0) - (b.ordine || 0))
+    .forEach(t => {
+      if (visti.has(t.id)) return;
+      const st = storicoMinutiPz(articoloId, t.id);
+      if (st && st.minPz > 0) {
+        visti.add(t.id);
+        out.push({ tipo_lavorazione_id: t.id,
+          minuti_unitari: Math.round(st.minPz * 10) / 10, fonte: 'storico', nCommesse: st.nCommesse });
+      }
+    });
+  return out;
+}
+
 // ── SCHEMA RIUSABILE: dato-storia di entità + render timeline ───────────────
 // Pensati per traslocare in core.js tali e quali: leggono solo `state`, niente
 // dipendenze dal contesto chiamante.
