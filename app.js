@@ -3351,9 +3351,18 @@ function openArticoloModal(a) {
   // (minuti_unitari): mostra solo il confronto somma fasi vs pagato. ---
   const tipiAttivi = (state.tipiLav || []).filter(t => t.attivo !== false)
     .sort((x, y) => (x.ordine || 0) - (y.ordine || 0));
-  const fasi = (Array.isArray(a.fasi) ? a.fasi.slice() : [])
-    .sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
-    .map(f => ({ tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
+  // Righe fase: per gli articoli esistenti si parte dalle fasi EFFETTIVE
+  // (media storica viva nei campi, tipi solo-storico aggiunti in automatico);
+  // il salvataggio le persiste nel template, che resta il fallback per i
+  // tipi senza storico. Articolo nuovo: si parte vuoti come sempre.
+  const fasi = (a.id && typeof fasiEffettiveArticolo === 'function'
+    ? fasiEffettiveArticolo(a.id).map(f => ({
+        tipo_lavorazione_id: f.tipo_lavorazione_id || null,
+        minuti_unitari: Number(f.minuti_unitari) || 0,
+        _fonte: f.fonte, _nComm: f.nCommesse }))
+    : (Array.isArray(a.fasi) ? a.fasi.slice() : [])
+        .sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
+        .map(f => ({ tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 })));
   const notaMinuti = el('div', { class:'sub', style:'margin-top:4px;' },
     'Tempo PAGATO per pezzo (lo standard commerciale). Pre-compila le nuove commesse. '
     + 'Le fasi qui sotto sono la scomposizione interna e dovrebbero starci dentro.');
@@ -3407,8 +3416,7 @@ function openArticoloModal(a) {
         const top = el('div', { style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;' },
           el('span', { style:'color:var(--mut);' },
             'media storica ~' + String(val).replace('.', ',') + ' min/pz · '
-            + d.nCommesse + (d.nCommesse === 1 ? ' commessa' : ' commesse')
-            + ' · ← le nuove commesse usano questa'));
+            + d.nCommesse + (d.nCommesse === 1 ? ' commessa' : ' commesse')));
         if (!readonly) {
           top.append(el('button', {
             type:'button', class:'btnsm', style:'padding:1px 8px;',
@@ -3458,33 +3466,12 @@ function openArticoloModal(a) {
     el('div', { class:'field' }, el('label', {}, 'Minuti unitari per pezzo — tempo pagato'), inMinuti, notaMinuti),
     el('div', { class:'field' },
       el('label', {}, 'Fasi (opzionale)'),
-      // Colpo d'occhio: le fasi EFFETTIVE che useranno le commesse nuove
-      // (media storica viva + valori manuali per i tipi senza storico).
-      // Calcolata al volo, mai scritta: i campi sotto restano il fallback.
-      (() => {
-        if (!a.id) return null;
-        const eff = (typeof fasiEffettiveArticolo === 'function' ? fasiEffettiveArticolo(a.id) : [])
-          .filter(f => (Number(f.minuti_unitari) || 0) > 0);
-        if (!eff.length) return null;
-        const tot = Math.round(eff.reduce((s, f) => s + f.minuti_unitari, 0) * 10) / 10;
-        return el('div', { class:'sub',
-          style:'margin:2px 0 8px;padding:8px 10px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;'
-            + 'font-family:DM Mono,monospace;font-size:11px;color:var(--txt);' },
-          el('div', { style:'color:var(--mut);font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;' },
-            'Effettive per le nuove commesse (media storica viva)'),
-          eff.map(f => {
-            const t = state.tipiLav.find(x => x.id === f.tipo_lavorazione_id);
-            return (t?.nome || '?') + ' ' + String(f.minuti_unitari).replace('.', ',') + "'"
-              + (f.fonte === 'storico' ? '' : ' (manuale)');
-          }).join('  +  ') + '  =  ' + String(tot).replace('.', ',') + "'/pz",
-        );
-      })(),
       fasiWrap,
       btnAddFase,
       notaConfronto,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Scomposizione interna del lavoro per mansione. Le nuove commesse usano la MEDIA STORICA '
-        + '(si aggiorna da sola a ogni commessa chiusa); i valori qui sotto valgono solo per i tipi senza storico. '
+        'Compilate in automatico dalla MEDIA STORICA (spedite+completate), viva a ogni apertura: '
+        + 'è quella che usano le commesse nuove. I valori manuali contano solo per i tipi senza storico. '
         + 'La somma dovrebbe stare entro il tempo pagato.')),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
