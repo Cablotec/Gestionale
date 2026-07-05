@@ -618,6 +618,19 @@ document.addEventListener('click', async (e) => {
   if (e.target.id === 'btn-kiosk') location.href = './kiosk.html';
 });
 
+// Versione in uso sotto il logo: letta dal ?v= del proprio tag script,
+// così il bump di cache a ogni deploy aggiorna anche la scritta (una
+// fonte sola, niente numeri da tenere allineati a mano).
+(function mostraVersione() {
+  try {
+    const sc = document.querySelector('script[src*="app.js?v="]');
+    const v = sc ? (sc.getAttribute('src').split('v=')[1] || '') : '';
+    if (!v) return;
+    const sub = document.querySelector('.topbar .sub');
+    if (sub) sub.textContent = 'Sistema Gestionale — v. ' + v;
+  } catch (e) {}
+})();
+
 // NOTA: gli handler 'visibilitychange' e 'online' sono ora gestiti centralmente
 // dentro installaProtezioneSalvataggi() — vedi sezione RESILIENZA CONNESSIONE.
 // Avere un solo handler evita race condition tra ricreazione client e refresh.
