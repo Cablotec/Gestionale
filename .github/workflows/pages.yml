@@ -1,0 +1,35 @@
+# Pubblicazione su GitHub Pages — workflow esplicito (build_type: workflow).
+# Sostituisce la pipeline "legacy" da branch, rimasta incastrata il 5-6 lug 2026
+# (build fermi in 'building' per ore, run non cancellabili). Il sito è statico:
+# nessun build, i file vanno su così come sono.
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Un deploy alla volta; quelli superati si annullano da soli.
+concurrency:
+  group: pages-cablotec
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
