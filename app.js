@@ -6016,6 +6016,10 @@ function openOperazioneModal(o) {
             if (!canEdit) return;
             sel.fase_keys = on ? sel.fase_keys.filter(k => k !== f._k) : [...sel.fase_keys, f._k];
             ridisegna();
+            // Il blocco fasi marca le esterne e il confronto separa
+            // interne/esterne: vanno rinfrescati a ogni spunta.
+            if (typeof renderFasiComm === 'function') renderFasiComm();
+            if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
           },
         }, '#' + (i + 1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id)));
       });
@@ -6198,19 +6202,31 @@ function openOperazioneModal(o) {
     const v = mi ? parseFloat((mi.value || '').toString().replace(',', '.')) : NaN;
     return Number.isFinite(v) ? v : null;
   }
+  // Fornitori assegnati a una fase (per chiave _k): nomi per il badge "esterna".
+  // Legge la selezione LIVE delle chip, così spuntare/togliere aggiorna subito.
+  function faseEsterna(k) {
+    return (fornitoriSel || [])
+      .filter(s => (s.fase_keys || []).includes(k))
+      .map(s => (state.aziende.find(a => a.id === s.azienda_id) || {}).nome || '?');
+  }
   function aggiornaConfrontoComm() {
     if (fasiComm.length === 0) { notaConfrontoComm.textContent = ''; notaConfrontoComm.style.color = ''; return; }
-    const somma = fasiComm.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
+    const somma = +fasiComm.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0).toFixed(2);
+    let esterne = 0;
+    fasiComm.forEach(f => { if (faseEsterna(f._k).length) esterne += Number(f.minuti_unitari) || 0; });
+    esterne = +esterne.toFixed(2);
+    const interne = +(somma - esterne).toFixed(2);
+    const dett = esterne > 0 ? ` (interne ${interne} · esterne ${esterne})` : '';
     const pagato = pagatoComm();
     if (pagato === null) {
       notaConfrontoComm.style.color = 'var(--mut)';
-      notaConfrontoComm.textContent = `Somma fasi: ${somma} min/pz · tempo pagato non impostato`;
+      notaConfrontoComm.textContent = `Somma fasi: ${somma} min/pz${dett} · tempo pagato non impostato`;
     } else if (somma > pagato) {
       notaConfrontoComm.style.color = 'var(--red)';
-      notaConfrontoComm.textContent = `⚠ Somma fasi ${somma} · pagato ${pagato} · sfori di ${+(somma - pagato).toFixed(2)} min/pz`;
+      notaConfrontoComm.textContent = `⚠ Somma fasi ${somma}${dett} · pagato ${pagato} · sfori di ${+(somma - pagato).toFixed(2)} min/pz`;
     } else {
       notaConfrontoComm.style.color = 'var(--grn)';
-      notaConfrontoComm.textContent = `Somma fasi ${somma} · pagato ${pagato} · margine ${+(pagato - somma).toFixed(2)} min/pz`;
+      notaConfrontoComm.textContent = `Somma fasi ${somma}${dett} · pagato ${pagato} · margine ${+(pagato - somma).toFixed(2)} min/pz`;
     }
   }
   // Ripulisce le assegnazioni che puntano a fasi non più valide.
@@ -6260,6 +6276,7 @@ function openOperazioneModal(o) {
         : (f._fonte === 'template'
           ? 'manuale da anagrafica'
           : '⚠ solo su questa commessa (non più in anagrafica)');
+      const est = faseEsterna(f._k);
       fasiWrapComm.append(el('div', { style:'display:flex;gap:10px;align-items:center;margin:6px 0;' },
         el('span', { class:'sub', style:'width:20px;flex-shrink:0;' }, '#' + (i + 1)),
         el('span', { style:'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + (tipo?.colore || '#6b6b64') + ';' }),
@@ -6267,6 +6284,10 @@ function openOperazioneModal(o) {
           tipo?.nome || '—'),
         el('span', { style:'font-family:DM Mono,monospace;font-size:12px;flex-shrink:0;' },
           String(f.minuti_unitari).replace('.', ',') + ' min/pz'),
+        est.length
+          ? el('span', { style:'flex-shrink:0;font-size:10px;font-family:DM Mono,monospace;color:var(--yel);font-weight:700;' },
+              '→ ' + est.join(', ') + ' (esterna)')
+          : null,
         el('span', { class:'sub', style:'flex-shrink:0;font-size:10px;color:var(--mut);' }, fonte),
       ));
     });
@@ -6438,8 +6459,12 @@ function openOperazioneModal(o) {
 
     const orePrev = opCalcOre(o);
     const oreReali = opCalcOreReali(o);
-    const perc = orePrev > 0 ? Math.round((oreReali / orePrev) * 100) : 0;
-    const overBudget = orePrev > 0 && oreReali > orePrev + tolleranzaOre(orePrev);
+    // I timbri sono SOLO interni: il confronto usa le ore previste INTERNE
+    // (le fasi esternalizzate escono dal preventivo, non dal costo).
+    const orePrevInt = opCalcOreInterne(o);
+    const oreEsterne = Math.max(0, orePrev - orePrevInt);
+    const perc = orePrevInt > 0 ? Math.round((oreReali / orePrevInt) * 100) : 0;
+    const overBudget = orePrevInt > 0 && oreReali > orePrevInt + tolleranzaOre(orePrevInt);
 
     pCons.append(
       el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
@@ -6461,16 +6486,24 @@ function openOperazioneModal(o) {
         const fPrev = faseCalcOre(o, f);
         const fCons = faseCalcOreReali(o, f);
         sommaConsFasi += fCons;
+        // Fase affidata a fornitori esterni: niente ✓/⚠ (non timbra nessuno
+        // dei nostri), si mostra solo chi la fa e quanto vale.
+        const estRighe = (state.opFornitori || []).filter(r => r.operazione_id === o.id && r.fase_id === f.id);
+        const estNomi = estRighe.map(r => (state.aziende.find(a => a.id === r.azienda_id) || {}).nome || '?');
         const fPerc = fPrev > 0 ? Math.round(fCons / fPrev * 100) : 0;
-        const sfora = fPrev > 0 && fCons > fPrev + tolleranzaOre(fPrev);
+        const sfora = !estNomi.length && fPrev > 0 && fCons > fPrev + tolleranzaOre(fPrev);
         box.append(el('div', { style:'display:flex;align-items:center;gap:10px;padding:3px 0;' },
           el('span', { style:'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + (tipo?.colore || '#6b6b64') + ';' }),
           el('span', { style:'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' },
             '#' + (i + 1) + ' ' + (tipo?.nome || 'Fase')),
-          el('span', { style:'color:' + (sfora ? 'var(--red)' : 'var(--mut)') + ';flex-shrink:0;' },
-            Math.round(fCons * 60) + ' / ' + Math.round(fPrev * 60) + ' min'
-            + (fPrev > 0 ? ' (' + fPerc + '%)' : '')
-            + (sfora ? ' ⚠ +' + Math.round((fCons - fPrev) * 60) + ' min' : ' ✓')),
+          estNomi.length
+            ? el('span', { style:'color:var(--yel);flex-shrink:0;' },
+                Math.round(fPrev * 60) + ' min → ' + estNomi.join(', ') + ' (esterna)'
+                + (fCons > 0.05 ? ' · ⚠ ' + Math.round(fCons * 60) + ' min timbrati interni' : ''))
+            : el('span', { style:'color:' + (sfora ? 'var(--red)' : 'var(--mut)') + ';flex-shrink:0;' },
+                Math.round(fCons * 60) + ' / ' + Math.round(fPrev * 60) + ' min'
+                + (fPrev > 0 ? ' (' + fPerc + '%)' : '')
+                + (sfora ? ' ⚠ +' + Math.round((fCons - fPrev) * 60) + ' min' : ' ✓')),
         ));
       });
       // Ore non attribuibili a nessuna fase (tipi diversi, sessioni anomale)
@@ -6493,17 +6526,20 @@ function openOperazioneModal(o) {
       pCons.append(el('div', {
         style: 'background:var(--sur2);border:1px solid '+(overBudget?'var(--red)':'var(--brd)')+';border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;',
       },
-        el('div', { style:'display:flex;justify-content:space-between;gap:14px;' },
+        el('div', { style:'display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;' },
           el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Ore previste: '),
-            el('span', { style:'color:var(--txt);font-weight:600;' }, orePrev.toFixed(2) + 'h')),
+            el('span', { style:'color:var(--mut)' }, 'Ore previste (interne): '),
+            el('span', { style:'color:var(--txt);font-weight:600;' }, orePrevInt.toFixed(2) + 'h'),
+            oreEsterne > 0.05
+              ? el('span', { style:'color:var(--mut);font-size:10px;' }, ' + ' + oreEsterne.toFixed(1) + 'h esterne')
+              : null),
           el('div', {},
             el('span', { style:'color:var(--mut)' }, 'Ore consuntivate: '),
             el('span', { style:'color:'+(overBudget?'var(--red)':'var(--grn)')+';font-weight:600;' }, oreReali.toFixed(2) + 'h')),
           el('div', {},
             el('span', { style:'color:var(--mut)' }, 'Avanzamento: '),
             el('span', { style:'color:'+(overBudget?'var(--red)':'var(--txt)')+';font-weight:700;' },
-              orePrev > 0 ? perc + '%' : '—'))
+              orePrevInt > 0 ? perc + '%' : '—'))
         ),
         overBudget
           ? el('div', { style:'margin-top:6px;color:var(--red);font-size:10px;' },
@@ -7153,12 +7189,12 @@ function openOperazioneModal(o) {
     const stDef = OP_STATI[o.stato] || { label: o.stato, color: 'var(--mut)', badge: 'bgry' };
     const oggiISO = toLocalISO(new Date());
     const scadLate = o.scadenza && o.scadenza < oggiISO && o.stato !== 'spedita';
-    const prev = opCalcOre(o), cons = opCalcOreReali(o);
-    // Tempo pagato della commessa (budget): se presente è il 100% della barra,
-    // con una tacca al preventivo interno (somma fasi). Senza pagato, la barra
-    // torna al solo confronto consuntivo/preventivo.
-    const pagatoOre = (Number(o.minuti_unitari) > 0 && Number(o.quantita) > 0)
-      ? (Number(o.minuti_unitari) * Number(o.quantita)) / 60 : 0;
+    // Confronto INTERNO-contro-interno: i timbri sono solo interni, quindi
+    // preventivo e pagato escludono la quota delle fasi esternalizzate
+    // (pagatoOreInterne ripartisce il pagato sulla quota di lavoro in casa).
+    const prev = opCalcOreInterne(o), cons = opCalcOreReali(o);
+    const oreEsterneHd = Math.max(0, opCalcOre(o) - prev);
+    const pagatoOre = pagatoOreInterne(o);
     const base = pagatoOre > 0 ? pagatoOre : prev;
     const percOre = base > 0 ? Math.min(100, Math.round(cons / base * 100)) : 0;
     const overOre = base > 0 && cons > base + tolleranzaOre(base);
@@ -7170,7 +7206,7 @@ function openOperazioneModal(o) {
     if (tackPrev !== null) {
       barInner.push(el('div', {
         class:'opsum-oretick', style:'left:' + tackPrev + '%;',
-        title:'Preventivo fasi: ' + prev.toFixed(1) + 'h',
+        title:'Preventivo fasi interne: ' + prev.toFixed(1) + 'h',
       }));
     }
     body.append(el('div', { class:'opsum' },
@@ -7187,14 +7223,16 @@ function openOperazioneModal(o) {
       el('div', { class:'opsum-right' },
         el('div', { class:'opsum-scad' + (scadLate ? ' late' : '') },
           'Scad. ' + fmtIT(o.scadenza || '') + (scadLate ? ' ⚠' : '')),
-        el('div', { class:'opsum-ore', title: pagatoOre > 0
-            ? 'Consuntivo ' + cons.toFixed(1) + 'h · tacca = preventivo fasi ' + prev.toFixed(1) + 'h · 100% = tempo pagato ' + pagatoOre.toFixed(1) + 'h'
-            : 'Ore consuntivate / preventivate' },
+        el('div', { class:'opsum-ore', title: (pagatoOre > 0
+            ? 'Solo parte INTERNA. Consuntivo ' + cons.toFixed(1) + 'h · tacca = preventivo fasi interne ' + prev.toFixed(1) + 'h · 100% = quota interna del pagato ' + pagatoOre.toFixed(1) + 'h'
+            : 'Ore consuntivate / preventivate (solo parte interna)')
+            + (oreEsterneHd > 0.05 ? '\nFasi esterne (fornitori): ' + oreEsterneHd.toFixed(1) + 'h, fuori da questo confronto' : '') },
           el('span', { style:'font-size:9px;letter-spacing:.08em;text-transform:uppercase;' }, 'ore'),
           el('div', { class:'opsum-orebar' }, ...barInner),
-          el('span', {}, pagatoOre > 0
+          el('span', {}, (pagatoOre > 0
             ? cons.toFixed(1) + 'h · fasi ' + prev.toFixed(1) + ' · pag. ' + pagatoOre.toFixed(1)
-            : cons.toFixed(1) + '/' + prev.toFixed(1) + 'h')),
+            : cons.toFixed(1) + '/' + prev.toFixed(1) + 'h')
+            + (oreEsterneHd > 0.05 ? ' · est. ' + oreEsterneHd.toFixed(1) : ''))),
       ),
     ));
   }
