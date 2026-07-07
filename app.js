@@ -10252,8 +10252,40 @@ function kioskRenderOpList() {
   const mieFiltered = filtra(mie);
   const altreFiltered = filtra(altre);
 
+  // ── Sezione "▶ Riprendi": le ultime commesse su cui l'operatore ha
+  // timbrato (sessione chiusa, fase non ancora dichiarata finita). Il lavoro
+  // rimasto in sospeso si ritrova in cima, senza cercarlo. Max 4, ordinate
+  // dalla timbratura più recente. Con la ricerca attiva la sezione sparisce
+  // (si cerca sull'elenco completo). Le schede qui NON sono duplicate sotto.
+  let riprendi = [];
+  if (!q) {
+    const ultimaSess = {};
+    state.sessioni.forEach(s => {
+      if (!s.fine || s.utente_id !== u.id || !s.operazione_id) return;
+      if (!ultimaSess[s.operazione_id] || s.fine > ultimaSess[s.operazione_id]) {
+        ultimaSess[s.operazione_id] = s.fine;
+      }
+    });
+    riprendi = mieFiltered
+      .filter(o => ultimaSess[o.id])
+      .sort((a, b) => (ultimaSess[b.id] || '').localeCompare(ultimaSess[a.id] || ''))
+      .slice(0, 4);
+  }
+  const riprendiIds = new Set(riprendi.map(o => o.id));
+  const mieRestanti = mieFiltered.filter(o => !riprendiIds.has(o.id));
+
+  if (riprendi.length > 0) {
+    const sec = el('div', { class:'kiosk-op-section' });
+    sec.append(el('div', { class:'kiosk-op-section-hd', style:'color:var(--acc);border-color:var(--acc);' },
+      '▶ Riprendi — ultime su cui hai lavorato'));
+    const grid = el('div', { class:'kiosk-op-grid' });
+    riprendi.forEach(o => grid.append(kioskOpCard(o)));
+    sec.append(grid);
+    root.append(sec);
+  }
+
   // Sezione "Le tue operazioni"
-  if (mieFiltered.length > 0) {
+  if (mieRestanti.length > 0) {
     const sec = el('div', { class:'kiosk-op-section' });
     sec.append(el('div', { class:'kiosk-op-section-hd' }, '⭐ Le tue operazioni assegnate'));
     // Admin: trascina le schede per riordinare (drag col mouse). Solo senza
@@ -10262,7 +10294,7 @@ function kioskRenderOpList() {
     if (dndOn) sec.append(el('div', { class:'prio-hint', style:'margin:-2px 0 10px;' },
       '⠿ Trascina le schede per dare priorità (un clic breve avvia il lavoro).'));
     const grid = el('div', { class:'kiosk-op-grid' });
-    mieFiltered.forEach(o => {
+    mieRestanti.forEach(o => {
       const card = kioskOpCard(o);
       card.dataset.opid = o.id;
       grid.append(card);
@@ -10270,7 +10302,7 @@ function kioskRenderOpList() {
     if (dndOn) kioskAttachReorder(grid);
     sec.append(grid);
     root.append(sec);
-  } else if (!q && !kCom.vediAltre) {
+  } else if (!q && !kCom.vediAltre && riprendi.length === 0) {
     root.append(el('div', { class:'kiosk-empty', style:'padding:20px;' },
       'Nessuna operazione assegnata a te. Clicca "Vedi tutte" per scegliere da quelle aperte.'));
   }
@@ -11289,6 +11321,7 @@ function cartellinoExportExcel(fromISO, toISO) {
       'Fine':                  fin ? (z(fin.getHours()) + ':' + z(fin.getMinutes())) : 'in corso',
       'Ore':                   +(sec / 3600).toFixed(2),
       'Note':                  _exportClean(s.note),
+      'Note commessa':         d.isAttivitaExtra ? '' : _exportClean(d.op?.note),
     };
   });
 
@@ -11317,7 +11350,7 @@ function cartellinoExportExcel(fromISO, toISO) {
   wsDet['!cols'] = [
     { wch: 11 }, { wch: 20 }, { wch: 14 }, { wch: 24 }, { wch: 16 },
     { wch: 16 }, { wch: 18 }, { wch: 34 }, { wch: 22 }, { wch: 8 },
-    { wch: 8 }, { wch: 7 }, { wch: 30 },
+    { wch: 8 }, { wch: 7 }, { wch: 30 }, { wch: 34 },
   ];
   const wsRie = XLSX.utils.json_to_sheet(riepilogo);
   wsRie['!cols'] = [ { wch: 20 }, { wch: 11 }, { wch: 8 }, { wch: 8 }, { wch: 11 } ];
@@ -12498,6 +12531,14 @@ function openSessioneModal(s, onDone) {
   );
 
   body.append(form);
+  // Note della COMMESSA (sola lettura), in fondo: contesto per chi rivede la
+  // sessione senza dover aprire la commessa.
+  if (!d.isAttivitaExtra && (d.op?.note || '').trim()) {
+    body.append(el('div', { class:'field', style:'margin-top:10px;' },
+      el('label', {}, 'Note commessa'),
+      el('div', { class:'sub', style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;'
+        + 'padding:8px 10px;white-space:pre-wrap;color:var(--txt);' }, d.op.note.trim())));
+  }
   modal.append(body);
 
   const foot = el('div', { class:'mfoot' });
