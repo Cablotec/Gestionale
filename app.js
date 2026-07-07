@@ -10258,8 +10258,8 @@ function kioskRenderOpList() {
   // dalla timbratura più recente. Con la ricerca attiva la sezione sparisce
   // (si cerca sull'elenco completo). Le schede qui NON sono duplicate sotto.
   let riprendi = [];
+  const ultimaSess = {};
   if (!q) {
-    const ultimaSess = {};
     state.sessioni.forEach(s => {
       if (!s.fine || s.utente_id !== u.id || !s.operazione_id) return;
       if (!ultimaSess[s.operazione_id] || s.fine > ultimaSess[s.operazione_id]) {
@@ -10275,11 +10275,30 @@ function kioskRenderOpList() {
   const mieRestanti = mieFiltered.filter(o => !riprendiIds.has(o.id));
 
   if (riprendi.length > 0) {
+    // "Ieri/oggi HH:MM" — l'operatore capisce al volo quando ha lasciato.
+    const fmtUltima = (iso) => {
+      const dt = new Date(iso);
+      const dIso = toLocalISO(dt);
+      const oggi = toLocalISO(new Date());
+      const ieriD = new Date(); ieriD.setDate(ieriD.getDate() - 1);
+      const hm = z(dt.getHours()) + ':' + z(dt.getMinutes());
+      if (dIso === oggi) return 'oggi ' + hm;
+      if (dIso === toLocalISO(ieriD)) return 'ieri ' + hm;
+      return fmtIT(dIso) + ' ' + hm;
+    };
     const sec = el('div', { class:'kiosk-op-section' });
     sec.append(el('div', { class:'kiosk-op-section-hd', style:'color:var(--acc);border-color:var(--acc);' },
       '▶ Riprendi — ultime su cui hai lavorato'));
     const grid = el('div', { class:'kiosk-op-grid' });
-    riprendi.forEach(o => grid.append(kioskOpCard(o)));
+    riprendi.forEach(o => {
+      const card = kioskOpCard(o);
+      card.style.borderColor = 'var(--acc)';
+      card.style.boxShadow = '0 0 0 1px var(--acc)';
+      card.append(el('div', {
+        style:'margin-top:8px;font-family:DM Mono,monospace;font-size:12px;color:var(--acc);font-weight:700;',
+      }, '⏸ ultima timbratura: ' + fmtUltima(ultimaSess[o.id])));
+      grid.append(card);
+    });
     sec.append(grid);
     root.append(sec);
   }
@@ -12532,12 +12551,15 @@ function openSessioneModal(s, onDone) {
 
   body.append(form);
   // Note della COMMESSA (sola lettura), in fondo: contesto per chi rivede la
-  // sessione senza dover aprire la commessa.
-  if (!d.isAttivitaExtra && (d.op?.note || '').trim()) {
+  // sessione senza dover aprire la commessa. SEMPRE visibile (— se vuota),
+  // così si sa che il posto è quello e non ci si chiede se manca qualcosa.
+  if (!d.isAttivitaExtra) {
+    const noteComm = (d.op?.note || '').trim();
     body.append(el('div', { class:'field', style:'margin-top:10px;' },
       el('label', {}, 'Note commessa'),
       el('div', { class:'sub', style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;'
-        + 'padding:8px 10px;white-space:pre-wrap;color:var(--txt);' }, d.op.note.trim())));
+        + 'padding:8px 10px;white-space:pre-wrap;'
+        + (noteComm ? 'color:var(--txt);' : 'color:var(--mut);') }, noteComm || '—')));
   }
   modal.append(body);
 
