@@ -621,15 +621,42 @@ document.addEventListener('click', async (e) => {
 // Versione in uso sotto il logo: letta dal ?v= del proprio tag script,
 // così il bump di cache a ogni deploy aggiorna anche la scritta (una
 // fonte sola, niente numeri da tenere allineati a mano).
-(function mostraVersione() {
+const APP_VERSIONE = (() => {
   try {
     const sc = document.querySelector('script[src*="app.js?v="]');
-    const v = sc ? (sc.getAttribute('src').split('v=')[1] || '') : '';
-    if (!v) return;
-    const sub = document.querySelector('.topbar .sub');
-    if (sub) sub.textContent = 'Sistema Gestionale — v. ' + v;
-  } catch (e) {}
+    return sc ? (sc.getAttribute('src').split('v=')[1] || '') : '';
+  } catch (e) { return ''; }
 })();
+(function mostraVersione() {
+  if (!APP_VERSIONE) return;
+  const sub = document.querySelector('.topbar .sub');
+  if (sub) sub.textContent = 'Sistema Gestionale — v. ' + APP_VERSIONE;
+  // Anche sul kiosk (sotto il titolo): le postazioni restano accese per
+  // giorni, senza questa scritta non si sa mai cosa stanno eseguendo.
+  const kt = document.querySelector('.kiosk-title');
+  if (kt) kt.append(el('div', {
+    style:'font-size:10px;color:var(--mut);font-family:DM Mono,monospace;letter-spacing:.05em;margin-top:2px;',
+  }, 'v. ' + APP_VERSIONE));
+})();
+
+// ── Auto-aggiornamento kiosk ──
+// Ogni 5 minuti controlla se il server pubblica una versione nuova (il ?v=
+// nel guscio HTML). Se sì e la postazione è ferma sulla schermata di
+// identificazione (nessuno sta lavorando), ricarica da sola: mai più
+// postazioni rimaste indietro di giorni.
+if (IS_KIOSK && APP_VERSIONE) {
+  setInterval(async () => {
+    try {
+      const res = await fetch(location.pathname + '?nc=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) return;
+      const html = await res.text();
+      const m = html.match(/app\.js\?v=([0-9A-Za-z.\-]+)/);
+      if (!m || m[1] === APP_VERSIONE) return;
+      const stepId = document.getElementById('kiosk-step-id');
+      if (stepId && stepId.style.display !== 'none') location.reload();
+    } catch (e) { /* offline o rete lenta: si riprova al giro dopo */ }
+  }, 5 * 60 * 1000);
+}
 
 // NOTA: gli handler 'visibilitychange' e 'online' sono ora gestiti centralmente
 // dentro installaProtezioneSalvataggi() — vedi sezione RESILIENZA CONNESSIONE.
