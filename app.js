@@ -9137,7 +9137,11 @@ async function kioskLoadAll() {
     sb.from('articoli').select('*').eq('attivo', true).order('codice'),
     sb.from('tipi_lavorazione').select('*').eq('attivo', true).order('ordine'),
     sb.from('operazioni').select('*').neq('stato', 'spedita').neq('stato', 'completata').order('scadenza'),
-    sb.from('sessioni_lavoro').select('*').is('fine', null),
+    // Sessioni: le APERTE (tutte, anche di giorni passati) + le CHIUSE
+    // recenti (ultimi 15 giorni), che servono alla sezione "▶ Riprendi"
+    // dell'elenco commesse. Il resto del kiosk filtra sempre !s.fine da sé.
+    sb.from('sessioni_lavoro').select('*')
+      .or('fine.is.null,inizio.gte.' + toLocalISO(new Date(Date.now() - 15 * 86400000))),
     sb.from('operazioni_addetti').select('*'),
     // Fasi delle commesse: SERVONO al kiosk per timbrare la fase giusta e per
     // evitare che l'auto-iscrizione crei una riga "tutta la commessa" (fase_id
@@ -9177,7 +9181,7 @@ async function kioskLoadAll() {
     tipiLav: state.tipiLav.length,
     operazioni: state.operazioni.length,
     opAddetti: state.opAddetti.length,
-    sessioni_aperte: state.sessioni.length,
+    sessioni_aperte: state.sessioni.filter(s => !s.fine).length,
     assenze_oggi: state.assenze.length,
   });
   // Log errori se ci sono
