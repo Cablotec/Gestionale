@@ -177,18 +177,21 @@ function pagatoOreInterne(op) {
 // Ore PREVISTE della sola parte INTERNA: esclude le fasi affidate a fornitori
 // esterni (fase_id in operazioni_fornitori). I timbri sono solo interni:
 // ogni confronto consuntivo-vs-preventivo deve usare QUESTA, non il totale.
-// Senza fasi: tutto interno, salvo commessa intera a terzista (riga fornitore
-// con fase_id null) → 0.
+// STESSA BASE di opCalcOre: fasi pianificabili (complete). Con fasi assenti o
+// incomplete (una a 0 min → si pianifica sul budget) il totale è il budget e
+// resta tutto interno, salvo commessa intera a terzista (fase_id null) → 0.
+// Altrimenti la differenza budget-vs-somma fasi verrebbe spacciata per
+// "esterna" anche senza fornitori.
 function opCalcOreInterne(op) {
   if (!op) return 0;
   const q = Number(op.quantita || 0);
-  const fasi = opFasiOf(op);
-  const fuori = new Set((state.opFornitori || [])
-    .filter(r => r.operazione_id === op.id && r.fase_id).map(r => r.fase_id));
+  const fasi = opFasiPianif(op);
   if (fasi.length === 0) {
     const tuttaFuori = (state.opFornitori || []).some(r => r.operazione_id === op.id && !r.fase_id);
     return tuttaFuori ? 0 : opCalcOre(op);
   }
+  const fuori = new Set((state.opFornitori || [])
+    .filter(r => r.operazione_id === op.id && r.fase_id).map(r => r.fase_id));
   const minInt = fasi.filter(f => !fuori.has(f.id))
     .reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
   return (q * minInt) / 60;
