@@ -269,6 +269,11 @@ function opCalcOre(op) {
 // commesse di quell'articolo, diviso i pezzi prodotti di quelle commesse.
 // Il match è per tipo_lavorazione_id (stabile su tutto lo storico, anche
 // pre-fasi). Ritorna { minPz, nSessioni, nCommesse } o null se non c'è storico.
+
+// Finestra della media: contano solo le ultime N commesse chiuse per
+// (articolo, tipo). 5 = assorbe una commessa storta senza restare ancorata
+// al passato; ritoccare qui se serve più reattività (3) o stabilità (10).
+const MEDIA_ULTIME_COMMESSE = 5;
 function storicoMinutiPz(articoloId, tipoLavId) {
   if (!articoloId || !tipoLavId) return null;
   const opIds = new Set((state.operazioni || [])
@@ -285,20 +290,25 @@ function storicoMinutiPz(articoloId, tipoLavId) {
   // si consolidano alla chiusura del lavoro (completata), la spedizione è
   // logistica e non cambia più i timbri. Le commesse ancora in lavorazione
   // restano fuori (dati parziali).
-  let totSec = 0, pezzi = 0, nSessioni = 0, nCommesse = 0;
+  // FINESTRA: contano solo le ULTIME N chiuse (le più recenti per data di
+  // consegna/scadenza). Quando una lavorazione migliora, i tempi vecchi
+  // escono dalla media da soli — niente da cancellare.
+  const candidate = [];
   Object.keys(secPerOp).forEach(id => {
     const op = (state.operazioni || []).find(o => o.id === id);
     if (!op || (op.stato !== 'spedita' && op.stato !== 'completata')) return;
     const prod = quantitaConsegnata(id);
     const pz = prod > 0 ? prod : Number(op.quantita || 0);
     if (pz <= 0) return;
-    totSec += secPerOp[id];
-    pezzi += pz;
-    nSessioni += nSessPerOp[id];
-    nCommesse += 1;
+    candidate.push({ sec: secPerOp[id], pz, nSess: nSessPerOp[id],
+      data: op.consegnato_il || op.scadenza || '' });
   });
+  candidate.sort((a, b) => String(b.data).localeCompare(String(a.data)));
+  const finestra = candidate.slice(0, MEDIA_ULTIME_COMMESSE);
+  let totSec = 0, pezzi = 0, nSessioni = 0;
+  finestra.forEach(c => { totSec += c.sec; pezzi += c.pz; nSessioni += c.nSess; });
   if (totSec <= 0 || pezzi <= 0) return null;
-  return { minPz: (totSec / 60) / pezzi, nSessioni, nCommesse };
+  return { minPz: (totSec / 60) / pezzi, nSessioni, nCommesse: finestra.length };
 }
 
 // ── Fasi EFFETTIVE di un articolo (per le commesse nuove) ──────────────
@@ -362,8 +372,7 @@ function datiStoricoFase(articoloId, tipoLavId) {
     secPerOp[s.operazione_id] = (secPerOp[s.operazione_id] || 0) + (Number(s.durata_secondi) || 0);
     nSessPerOp[s.operazione_id] = (nSessPerOp[s.operazione_id] || 0) + 1;
   });
-  let totSec = 0, pezzi = 0, nSessioni = 0;
-  const righe = [];
+  let righe = [];
   Object.keys(secPerOp).forEach(id => {
     const op = (state.operazioni || []).find(o => o.id === id);
     if (!op || (op.stato !== 'spedita' && op.stato !== 'completata')) return;
@@ -371,7 +380,6 @@ function datiStoricoFase(articoloId, tipoLavId) {
     const pz = prod > 0 ? prod : Number(op.quantita || 0);
     if (pz <= 0) return;
     const sec = secPerOp[id];
-    totSec += sec; pezzi += pz; nSessioni += nSessPerOp[id];
     righe.push({
       opId: id,
       label: op.numero_ordine || op.numero_op || op.riferimento_cliente || ('#' + String(id).slice(0, 6)),
@@ -379,8 +387,13 @@ function datiStoricoFase(articoloId, tipoLavId) {
       pezzi: pz, sec, minPz: (sec / 60) / pz, nSess: nSessPerOp[id],
     });
   });
-  if (totSec <= 0 || pezzi <= 0) return null;
+  // Stessa FINESTRA di storicoMinutiPz: solo le ultime N chiuse. Il
+  // drill-down mostra esattamente le commesse che compongono il numero.
   righe.sort((x, y) => String(y.data || '').localeCompare(String(x.data || '')));
+  righe = righe.slice(0, MEDIA_ULTIME_COMMESSE);
+  let totSec = 0, pezzi = 0, nSessioni = 0;
+  righe.forEach(r => { totSec += r.sec; pezzi += r.pezzi; nSessioni += r.nSess; });
+  if (totSec <= 0 || pezzi <= 0) return null;
   return { righe, minPz: (totSec / 60) / pezzi, nSessioni, nCommesse: righe.length, pezzi, debole: righe.length <= 1 };
 }
 

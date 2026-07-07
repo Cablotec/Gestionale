@@ -3478,7 +3478,8 @@ function openArticoloModal(a, opts) {
         }
         sugg.append(top);
         sugg.append(entityTimeline({
-          sommario: 'da quali commesse esce questo numero (spedite e completate)',
+          sommario: 'da quali commesse esce questo numero (ultime '
+            + MEDIA_ULTIME_COMMESSE + ' chiuse)',
           debole: d.debole,
           righe: d.righe.map(r => ({
             titolo: r.label,
