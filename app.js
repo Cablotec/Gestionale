@@ -670,21 +670,27 @@ async function loadAllData() {
     sb.from('prenotazioni').select('*').order('data_inizio'),
     sb.from('consegne').select('*').order('ordine'),
     sb.from('prenotazioni_utenti').select('*'),
-    sb.from('aziende').select('*').order('nome'),
-    sb.from('articoli').select('*').order('codice'),
+    // Tabelle che CRESCONO senza limite: caricate paginate (fetchTutte),
+    // altrimenti oltre le 1000 righe le più vecchie spariscono in silenzio
+    // (successo con sessioni_lavoro il 7 lug 2026: 1003 righe, 3 perse).
+    // L'ordine primario resta quello di visualizzazione; 'id' fa da spareggio
+    // per rendere la paginazione stabile (niente righe perse/duplicate ai
+    // confini di pagina quando i valori si ripetono).
+    fetchTutte(() => sb.from('aziende').select('*').order('nome').order('id')),
+    fetchTutte(() => sb.from('articoli').select('*').order('codice').order('id')),
     sb.from('tipi_lavorazione').select('*').order('ordine'),
     sb.from('chiusure_aziendali').select('*').order('data'),
-    sb.from('operazioni').select('*').order('scadenza'),
-    sb.from('sessioni_lavoro').select('*').order('inizio', { ascending:false }),
+    fetchTutte(() => sb.from('operazioni').select('*').order('scadenza').order('id')),
+    fetchTutte(() => sb.from('sessioni_lavoro').select('*').order('inizio', { ascending:false }).order('id')),
     sb.from('tipi_assenza').select('*').order('ordine'),
     sb.from('attivita_extra').select('*').order('ordine'),
-    sb.from('assenze').select('*').order('data', { ascending:false }),
-    sb.from('operazioni_addetti').select('*'),
+    fetchTutte(() => sb.from('assenze').select('*').order('data', { ascending:false }).order('id')),
+    fetchTutte(() => sb.from('operazioni_addetti').select('*').order('operazione_id').order('utente_id').order('fase_id')),
     sb.from('impostazioni').select('*'),
-    sb.from('consegne_commessa').select('*').order('data', { ascending:false }),
-    sb.from('operazioni_fornitori').select('*'),
-    sb.from('operazioni_fasi').select('*'),
-    sb.from('spedizioni').select('*').order('data', { ascending:false }),
+    fetchTutte(() => sb.from('consegne_commessa').select('*').order('data', { ascending:false }).order('id')),
+    fetchTutte(() => sb.from('operazioni_fornitori').select('*').order('operazione_id').order('azienda_id').order('fase_id')),
+    fetchTutte(() => sb.from('operazioni_fasi').select('*').order('id')),
+    fetchTutte(() => sb.from('spedizioni').select('*').order('data', { ascending:false }).order('id')),
   ]);
   if (profili.error) throw profili.error;
   if (mezzi.error) throw mezzi.error;
@@ -9136,17 +9142,18 @@ async function kioskLoadAll() {
     sb.from('aziende').select('*').eq('attivo', true).order('nome'),
     sb.from('articoli').select('*').eq('attivo', true).order('codice'),
     sb.from('tipi_lavorazione').select('*').eq('attivo', true).order('ordine'),
-    sb.from('operazioni').select('*').neq('stato', 'spedita').neq('stato', 'completata').order('scadenza'),
+    fetchTutte(() => sb.from('operazioni').select('*').neq('stato', 'spedita').neq('stato', 'completata').order('scadenza').order('id')),
     // Sessioni: le APERTE (tutte, anche di giorni passati) + le CHIUSE
     // recenti (ultimi 15 giorni), che servono alla sezione "▶ Riprendi"
     // dell'elenco commesse. Il resto del kiosk filtra sempre !s.fine da sé.
-    sb.from('sessioni_lavoro').select('*')
-      .or('fine.is.null,inizio.gte.' + toLocalISO(new Date(Date.now() - 15 * 86400000))),
-    sb.from('operazioni_addetti').select('*'),
+    fetchTutte(() => sb.from('sessioni_lavoro').select('*')
+      .or('fine.is.null,inizio.gte.' + toLocalISO(new Date(Date.now() - 15 * 86400000)))
+      .order('inizio', { ascending:false }).order('id')),
+    fetchTutte(() => sb.from('operazioni_addetti').select('*').order('operazione_id').order('utente_id').order('fase_id')),
     // Fasi delle commesse: SERVONO al kiosk per timbrare la fase giusta e per
     // evitare che l'auto-iscrizione crei una riga "tutta la commessa" (fase_id
     // null) credendo per errore che la commessa non abbia fasi.
-    sb.from('operazioni_fasi').select('*'),
+    fetchTutte(() => sb.from('operazioni_fasi').select('*').order('id')),
     sb.from('assenze').select('*').eq('data', oggi).eq('stato', 'valida'),
     sb.from('tipi_assenza').select('*'),
     sb.from('attivita_extra').select('*').eq('attivo', true).order('ordine'),

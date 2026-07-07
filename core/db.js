@@ -188,6 +188,24 @@ async function eseguiConRetry(fn, opts) {
   }};
 }
 
+// ─── Caricamento COMPLETO oltre il tetto di 1000 righe ───
+// PostgREST restituisce max 1000 righe per richiesta: una select su una
+// tabella cresciuta oltre PERDE SILENZIOSAMENTE le righe più vecchie.
+// Questa helper pagina finché le pagine arrivano piene.
+// costruisciQuery: funzione che RITORNA la query base (from/select/order/filtri),
+// rifatta a ogni pagina. Ritorna { data, error } come una query normale.
+async function fetchTutte(costruisciQuery) {
+  const PAGINA = 1000;
+  const out = [];
+  for (let da = 0; ; da += PAGINA) {
+    const { data, error } = await costruisciQuery().range(da, da + PAGINA - 1);
+    if (error) return { data: null, error };
+    out.push(...(data || []));
+    if (!data || data.length < PAGINA) break;
+  }
+  return { data: out, error: null };
+}
+
 // ─── Refresh preventivo: rinnova la sessione se scade entro 5 minuti ───
 async function assicuraSessioneValida() {
   try {
