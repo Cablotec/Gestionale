@@ -12522,6 +12522,9 @@ function openSessioneModal(s, onDone) {
       el('div', {}, el('span', { style:'color:var(--mut)' }, 'Numero ordine: '), (d.op?.numero_ordine || '—')),
       el('div', {}, el('span', { style:'color:var(--mut)' }, 'Numero OP: '), (d.op?.numero_op || '—')),
       el('div', {}, el('span', { style:'color:var(--mut)' }, 'Tipo lavorazione: '), d.tipoLav?.nome || '—'),
+      el('div', { style:'white-space:pre-wrap;' },
+        el('span', { style:'color:var(--mut)' }, 'Note commessa: '),
+        (d.op?.note || '').trim() || '—'),
     );
   }
   body.append(infoBox);
@@ -12550,17 +12553,6 @@ function openSessioneModal(s, onDone) {
   );
 
   body.append(form);
-  // Note della COMMESSA (sola lettura), in fondo: contesto per chi rivede la
-  // sessione senza dover aprire la commessa. SEMPRE visibile (— se vuota),
-  // così si sa che il posto è quello e non ci si chiede se manca qualcosa.
-  if (!d.isAttivitaExtra) {
-    const noteComm = (d.op?.note || '').trim();
-    body.append(el('div', { class:'field', style:'margin-top:10px;' },
-      el('label', {}, 'Note commessa'),
-      el('div', { class:'sub', style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;'
-        + 'padding:8px 10px;white-space:pre-wrap;'
-        + (noteComm ? 'color:var(--txt);' : 'color:var(--mut);') }, noteComm || '—')));
-  }
   modal.append(body);
 
   const foot = el('div', { class:'mfoot' });
