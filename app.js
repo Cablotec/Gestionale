@@ -3323,11 +3323,18 @@ function renderArticoli(root) {
   root.append(tw);
 }
 
-function openArticoloModal(a) {
+function openArticoloModal(a, opts) {
   const isNew = !a;
   const isAdmin = state.profile?.ruolo === 'admin';
   a = a || { codice:'', descrizione:'', categoria:'', note:'', attivo:true, minuti_unitari:null };
   const readonly = !isAdmin;
+  // Chiusura: se chi ha aperto la scheda vuole riprendere il controllo dopo
+  // (es. modal commessa → matita fasi → anagrafica → ritorno alla commessa),
+  // passa opts.dopoChiusura. In quel caso NIENTE salto alla tab articoli.
+  const chiudi = () => {
+    closeModal();
+    if (opts && typeof opts.dopoChiusura === 'function') opts.dopoChiusura();
+  };
   // Valore originale dei minuti, per chiedere conferma se cambia
   const minutiOrig = (a.minuti_unitari != null && a.minuti_unitari !== '')
     ? Number(a.minuti_unitari) : null;
@@ -3335,7 +3342,7 @@ function openArticoloModal(a) {
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, isNew ? 'Nuovo Articolo' : (readonly ? 'Articolo' : 'Modifica Articolo')),
-    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+    el('button', { class:'mclose', onclick:chiudi }, '✕'),
   ));
 
   const body = el('div', { class:'mbody' });
@@ -3493,7 +3500,7 @@ function openArticoloModal(a) {
   modal.append(body);
 
   const foot = el('div', { class:'mfoot' });
-  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  foot.append(el('button', { class:'btng', onclick:chiudi }, 'Chiudi'));
   if (isAdmin) {
     const btnSave = el('button', { class:'btnp' }, 'Salva');
     btnSave.onclick = async () => {
@@ -3551,7 +3558,8 @@ function openArticoloModal(a) {
           state.articoli = state.articoli.map(x => x.id === a.id ? data : x);
         }
         toast(isNew ? 'Articolo creato' : 'Articolo aggiornato');
-        closeModal(); renderTab('articoli');
+        if (opts && typeof opts.dopoChiusura === 'function') { chiudi(); }
+        else { closeModal(); renderTab('articoli'); }
       } catch (e) {
         btnSave.disabled = false;
         btnSave.textContent = 'Salva';
@@ -5792,16 +5800,14 @@ function openOperazioneModal(o) {
           }
         }
       }
-      // Pre-compila le fasi EFFETTIVE dell'articolo (solo commessa nuova e
-      // solo se non hai già aggiunto fasi a mano: non sovrascrive le tue).
-      // Effettive = media storica dove esiste (viva, si aggiorna da sola a
-      // ogni commessa chiusa), valore del template per i tipi senza storico.
-      if (isNew && val.mode === 'existing' && val.id && fasiComm.length === 0) {
+      // Fasi = quelle EFFETTIVE dell'articolo scelto (media storica viva +
+      // manuali per i tipi senza storico). Il blocco è in sola lettura:
+      // a ogni cambio articolo si ricostruisce da capo.
+      if (isNew && val.mode === 'existing' && val.id) {
         const eff = fasiEffettiveArticolo(val.id);
-        if (eff.length) {
-          fasiComm = eff.map(f => ({ _k: nextFaseKey(), tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
-          if (typeof onFasiChanged === 'function') onFasiChanged();
-        }
+        fasiComm = eff.map(f => ({ _k: nextFaseKey(), tipo_lavorazione_id: f.tipo_lavorazione_id || null,
+          minuti_unitari: Number(f.minuti_unitari) || 0, _fonte: f.fonte, _nComm: f.nCommesse }));
+        if (typeof onFasiChanged === 'function') onFasiChanged();
       }
       // Aggiorna indicatore divergenza (se la funzione è già definita)
       if (typeof aggiornaIndicatoreMinuti === 'function') aggiornaIndicatoreMinuti();
@@ -5816,11 +5822,36 @@ function openOperazioneModal(o) {
     .sort((x, y) => (x.ordine || 0) - (y.ordine || 0));
   let faseKeyCounter = 0;
   const nextFaseKey = () => 'n' + (faseKeyCounter++);
-  let fasiComm = isNew
-    ? []
-    : (state.opFasi || []).filter(f => f.operazione_id === o.id)
-        .sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
-        .map(f => ({ _k: f.id, id: f.id, tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 }));
+  // Fasi in sola lettura dall'anagrafica. Per le commesse esistenti si parte
+  // dalla fotografia su DB (i timbri e le assegnazioni si agganciano lì) e la
+  // si riallinea alle fasi EFFETTIVE correnti dell'articolo: minuti aggiornati,
+  // tipi nuovi aggiunti. Le fasi fotografate non più in anagrafica RESTANO
+  // (potrebbero avere timbri): il sync non cancella mai. Persiste al Salva.
+  let fasiComm = [];
+  if (!isNew) {
+    fasiComm = (state.opFasi || []).filter(f => f.operazione_id === o.id)
+      .sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
+      .map(f => ({ _k: f.id, id: f.id, tipo_lavorazione_id: f.tipo_lavorazione_id || null,
+        minuti_unitari: Number(f.minuti_unitari) || 0, _foto: true }));
+    const effIni = (o.articolo_id && typeof fasiEffettiveArticolo === 'function')
+      ? fasiEffettiveArticolo(o.articolo_id) : [];
+    effIni.forEach(e => {
+      const r = fasiComm.find(x => x.tipo_lavorazione_id === e.tipo_lavorazione_id);
+      if (r) {
+        r.minuti_unitari = Number(e.minuti_unitari) || 0;
+        r._fonte = e.fonte; r._nComm = e.nCommesse; r._foto = false;
+      } else {
+        fasiComm.push({ _k: nextFaseKey(), tipo_lavorazione_id: e.tipo_lavorazione_id,
+          minuti_unitari: Number(e.minuti_unitari) || 0, _fonte: e.fonte, _nComm: e.nCommesse });
+      }
+    });
+    // L'ordine segue l'anagrafica (la catena di pianificazione è sequenziale);
+    // le fasi solo-di-questa-commessa restano in coda nel loro ordine.
+    const ordineEff = new Map(effIni.map((e, i) => [e.tipo_lavorazione_id, i]));
+    fasiComm.sort((x, y) =>
+      (ordineEff.has(x.tipo_lavorazione_id) ? ordineEff.get(x.tipo_lavorazione_id) : 999)
+      - (ordineEff.has(y.tipo_lavorazione_id) ? ordineEff.get(y.tipo_lavorazione_id) : 999));
+  }
   let fasiSeq = !!o.fasi_sequenziali;
   // Assegnazione addetto → fase: utente_id → _k della fase ('' = tutta la commessa)
   const addettoFase = {};   // uid → ARRAY di chiavi fase
@@ -6155,24 +6186,19 @@ function openOperazioneModal(o) {
   );
   selPrep.value = o.stato_preparazione || 'vuoto';
 
-  // ── Fasi della commessa: editor (dati e helper sono definiti più in alto) ──
-  // Lista fasi (tipo + minuti), confronto col tempo pagato, toggle sequenziale.
+  // ── Fasi della commessa: SOLA LETTURA dall'anagrafica articolo ──
+  // (media storica viva + valori manuali per i tipi senza storico).
+  // Si modificano con la matita, che apre la scheda anagrafica. Il toggle
+  // sequenza/parallelo è stato tolto: il motore pianifica sempre in sequenza.
   // L'assegnazione per fase vive nelle chip di addetti e fornitori.
   const fasiWrapComm = el('div', { class:'fasi-list' });
   const notaConfrontoComm = el('div', { class:'sub', style:'margin-top:8px;font-family:monospace;' });
-  const seqChk = el('input', { type:'checkbox' });
-  seqChk.checked = fasiSeq; seqChk.disabled = !canEdit;
-  seqChk.onchange = () => { fasiSeq = seqChk.checked; };
-  const seqRow = el('label', { style:'display:none;align-items:center;gap:8px;margin-top:8px;cursor:pointer;justify-content:flex-start;' },
-    seqChk, el('span', { style:'font-size:11px;color:var(--mut);text-transform:none;letter-spacing:0;text-align:left;' },
-      'Fasi in sequenza (catena) — altrimenti in parallelo. Solo pianificazione.'));
   function pagatoComm() {
     const mi = form.querySelector('#minuti-input');
     const v = mi ? parseFloat((mi.value || '').toString().replace(',', '.')) : NaN;
     return Number.isFinite(v) ? v : null;
   }
   function aggiornaConfrontoComm() {
-    seqRow.style.display = (fasiAssegnabili().length >= 2) ? 'flex' : 'none';
     if (fasiComm.length === 0) { notaConfrontoComm.textContent = ''; notaConfrontoComm.style.color = ''; return; }
     const somma = fasiComm.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
     const pagato = pagatoComm();
@@ -6215,65 +6241,36 @@ function openOperazioneModal(o) {
   function renderFasiComm() {
     fasiWrapComm.innerHTML = '';
     if (fasiComm.length === 0) {
-      fasiWrapComm.append(el('div', { class:'sub' }, 'Nessuna fase: la commessa usa il solo tempo pagato.'));
+      let msg = 'Nessuna fase in anagrafica: la commessa usa il solo tempo pagato.';
+      if (isNew) {
+        let selId = null;
+        try {
+          const v = acArticolo.getValue();
+          selId = (v.mode === 'existing' && v.id) ? v.id : null;
+        } catch (e) {}
+        if (!selId) msg = 'Le fasi compaiono scegliendo l\'articolo (dalla sua anagrafica).';
+      }
+      fasiWrapComm.append(el('div', { class:'sub' }, msg));
+      return;
     }
-    // Articolo corrente: serve per suggerire i minuti del template alle fasi
-    // rimaste a 0 (tipico delle commesse vecchie, salvate prima del template).
-    const artCorr = (() => {
-      if (!isNew && o.articolo_id) return state.articoli.find(a => a.id === o.articolo_id) || null;
-      try {
-        const v = acArticolo.getValue();
-        return (v.mode === 'existing' && v.id) ? (state.articoli.find(a => a.id === v.id) || null) : null;
-      } catch (e) { return null; }
-    })();
     fasiComm.forEach((f, i) => {
-      const sel = el('select', { style:'flex:1;min-width:0;' },
-        el('option', { value:'' }, '— tipo lavorazione —'),
-        ...tipiAttiviComm.map(t => el('option', { value:t.id }, t.nome)));
-      sel.value = f.tipo_lavorazione_id || '';
-      sel.disabled = !canEdit;
-      sel.onchange = () => { f.tipo_lavorazione_id = sel.value || null; onFasiChanged(); };
-      const inMin = el('input', { type:'number', step:'0.5', min:'0', value:String(f.minuti_unitari || 0),
-        placeholder:'min/pz', style:'max-width:90px;' });
-      inMin.disabled = !canEdit;
-      inMin.oninput = () => { f.minuti_unitari = Number(inMin.value) || 0; aggiornaConfrontoComm(); };
-      const row = el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0;' },
+      const tipo = state.tipiLav.find(t => t.id === f.tipo_lavorazione_id);
+      const fonte = f._fonte === 'storico'
+        ? 'media storica' + (f._nComm ? ' · ' + f._nComm + (f._nComm === 1 ? ' commessa' : ' commesse') : '')
+        : (f._fonte === 'template'
+          ? 'manuale da anagrafica'
+          : '⚠ solo su questa commessa (non più in anagrafica)');
+      fasiWrapComm.append(el('div', { style:'display:flex;gap:10px;align-items:center;margin:6px 0;' },
         el('span', { class:'sub', style:'width:20px;flex-shrink:0;' }, '#' + (i + 1)),
-        sel, inMin,
-        el('span', { class:'sub', style:'flex-shrink:0;font-size:10px;' }, 'min/pz'));
-      if (canEdit) {
-        row.append(el('button', { type:'button', class:'btnsm', style:'flex-shrink:0;',
-          onclick: () => { fasiComm.splice(i, 1); onFasiChanged(); } }, '✕'));
-      }
-      // Fase senza minuti + valore effettivo disponibile per quel tipo
-      // (media storica o template articolo) → proponilo, con "usa".
-      if ((Number(f.minuti_unitari) || 0) <= 0 && f.tipo_lavorazione_id && artCorr) {
-        const eff = fasiEffettiveArticolo(artCorr.id)
-          .find(x => x.tipo_lavorazione_id === f.tipo_lavorazione_id
-            && (Number(x.minuti_unitari) || 0) > 0);
-        if (eff) {
-          const val = Number(eff.minuti_unitari);
-          const sug = el('span', { class:'sub',
-            style:'flex-basis:100%;margin-left:28px;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);' },
-            (eff.fonte === 'storico'
-              ? 'da storico ~' + String(val).replace('.', ',') + ' min/pz · ' + eff.nCommesse
-                + (eff.nCommesse === 1 ? ' commessa' : ' commesse')
-              : 'in anagrafica: ' + String(val).replace('.', ',') + ' min/pz'));
-          if (canEdit) {
-            sug.append(el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
-              onclick: () => { f.minuti_unitari = val; inMin.value = String(val); aggiornaConfrontoComm(); sug.remove(); },
-            }, 'usa'));
-          }
-          row.append(sug);
-        }
-      }
-      fasiWrapComm.append(row);
+        el('span', { style:'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + (tipo?.colore || '#6b6b64') + ';' }),
+        el('span', { style:'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' },
+          tipo?.nome || '—'),
+        el('span', { style:'font-family:DM Mono,monospace;font-size:12px;flex-shrink:0;' },
+          String(f.minuti_unitari).replace('.', ',') + ' min/pz'),
+        el('span', { class:'sub', style:'flex-shrink:0;font-size:10px;color:var(--mut);' }, fonte),
+      ));
     });
   }
-  const btnAddFaseComm = !canEdit ? null : el('button', {
-    type:'button', class:'btnsm', style:'margin-top:8px;',
-    onclick: () => { fasiComm.push({ _k: nextFaseKey(), tipo_lavorazione_id:null, minuti_unitari:0 }); onFasiChanged(); }
-  }, '+ Aggiungi fase');
   renderFasiComm();
 
   // ── Struttura a schede: i pannelli vivono DENTRO il form, così FormData
@@ -6374,11 +6371,26 @@ function openOperazioneModal(o) {
       el('textarea', { name:'note', rows:'2' }, o.note||'')),
   );
 
+  // Matita fasi: apre l'anagrafica dell'articolo; alla chiusura riapre questa
+  // commessa (il blocco si ricostruisce e vede i valori aggiornati).
+  const btnFasiAnagrafica = (() => {
+    if (isNew || !canEdit || !o.articolo_id) return null;
+    const art = state.articoli.find(x => x.id === o.articolo_id);
+    if (!art) return null;
+    return el('div', { style:'margin-top:6px;' },
+      el('button', { type:'button', class:'btnsm',
+        title:'Apre la scheda articolo: le fasi si modificano lì. Valgono per questa commessa (al salvataggio) e per le future.',
+        onclick: () => openArticoloModal(art, {
+          dopoChiusura: () => openOperazioneModal(state.operazioni.find(x => x.id === o.id) || o),
+        }),
+      }, '✎ Modifica in anagrafica'));
+  })();
   pLav.append(
-    el('div', { class:'field' }, el('label', {}, 'Fasi (opzionale)'),
-      fasiWrapComm, btnAddFaseComm, notaConfrontoComm, seqRow,
+    el('div', { class:'field' }, el('label', {}, 'Fasi (da anagrafica articolo)'),
+      fasiWrapComm, notaConfrontoComm, btnFasiAnagrafica,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Scomposizione interna per mansione. Precompilate dall\'articolo; qui puoi sovrascriverne i minuti per questa commessa. La somma dovrebbe stare entro il tempo pagato.')),
+        'Gestite in automatico dall\'anagrafica: media storica dei consuntivi, valori manuali solo per i tipi senza storico. '
+        + 'Si riallineano a questa commessa quando la salvi. La somma dovrebbe stare entro il tempo pagato.')),
     el('div', { class:'field' }, el('label', {}, 'Addetti previsti'),
       addSelectedWrap, addDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
