@@ -6115,11 +6115,13 @@ function openOperazioneModal(o) {
     fornitoriSel.forEach((sel, idx) => {
       const a = state.aziende.find(x => x.id === sel.azienda_id);
       if (!a) return;
+      // flex-wrap: con tante fasi le chips vanno a capo invece di SCHIACCIARE
+      // il nome a larghezza zero (successo con Tecnocab su commesse a 3+ fasi).
       const row = el('div', {
-        style:'display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(212,140,40,.08);border:1px solid rgba(212,140,40,.3);border-radius:4px;',
+        style:'display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 10px;background:rgba(212,140,40,.08);border:1px solid rgba(212,140,40,.3);border-radius:4px;',
       });
-      // Nome fornitore + coefficiente
-      row.append(el('div', { style:'flex:1;min-width:0;color:#f0c070;font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+      // Nome fornitore + coefficiente: mai sotto i 140px, come le righe addetti
+      row.append(el('div', { style:'flex:1 1 auto;min-width:140px;color:#f0c070;font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
         a.nome + (a.coefficiente && a.coefficiente !== 1
           ? ` · coef ${Number(a.coefficiente).toFixed(2)}` : '')));
       // Input numero ordine fornitore.
