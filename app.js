@@ -6460,7 +6460,13 @@ function openOperazioneModal(o) {
   // nuove sulla capacità della squadra, ferie e chiusure comprese.
   const boxRealistica = isNew ? el('div', { class:'sub',
     style:'padding:8px 10px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;'
-      + 'font-family:DM Mono,monospace;font-size:11px;display:none;' }) : null;
+      + 'font-family:DM Mono,monospace;font-size:11px;' }) : null;
+  // Wrapper con etichetta: nascosto TUTTO finché non c'è una stima
+  // (senza dati l'etichetta orfana sembrerebbe un riquadro rotto).
+  const fieldRealistica = boxRealistica
+    ? el('div', { class:'field', style:'display:none;' },
+        el('label', {}, 'Data realistica di consegna'), boxRealistica)
+    : null;
   function aggiornaDataRealistica() {
     // try esteso: alla prima render del modal boxRealistica/fornitoriSel
     // possono essere ancora in TDZ (dichiarati più sotto) — si esce zitti
@@ -6472,10 +6478,10 @@ function openOperazioneModal(o) {
       const fasiOk = fasiComm.filter(f => f.tipo_lavorazione_id && Number(f.minuti_unitari) > 0);
       const stima = (qta > 0 && fasiOk.length && (addettiSel.length || fornitoriSel.length))
         ? stimaFineCommessaNuova(addettiSel, fornitoriSel, fasiOk, qta) : null;
-      if (!stima) { boxRealistica.style.display = 'none'; return; }
+      if (!stima) { fieldRealistica.style.display = 'none'; return; }
       const scadV = (form.querySelector('[name=scadenza]') || {}).value || '';
       const oltre = scadV && stima.fine > scadV;
-      boxRealistica.style.display = '';
+      fieldRealistica.style.display = '';
       boxRealistica.style.borderColor = oltre ? 'var(--red)' : 'var(--brd)';
       boxRealistica.innerHTML = '';
       boxRealistica.append(
@@ -6523,8 +6529,7 @@ function openOperazioneModal(o) {
       forSelectedWrap, forDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Ditte terze che contribuiscono alla lavorazione (con coefficiente di capacità).')),
-    boxRealistica ? el('div', { class:'field' },
-      el('label', {}, 'Data realistica di consegna'), boxRealistica) : null,
+    ...(fieldRealistica ? [fieldRealistica] : []),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
       el('div', { class:'field' }),
