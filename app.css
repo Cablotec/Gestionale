@@ -641,6 +641,9 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
   transition:filter .1s,box-shadow .1s;}
 .gantt-cmbar:hover{filter:brightness(1.15);box-shadow:0 0 0 1.5px var(--txt);z-index:5;}
 .gantt-cmbar.sfora{background:#5c2a35;}
+/* Commessa IN RITARDO (scadenza passata, lavoro residuo): barra ancorata a
+   oggi, rossa piena — deve saltare all'occhio prima di tutto il resto. */
+.gantt-cmbar.inritardo{background:var(--red);border:1px solid var(--red);}
 .gantt-cmbar.attiva{box-shadow:0 0 0 2px var(--grn);}
 .gantt-cmbar.attiva:hover{box-shadow:0 0 0 2px var(--grn),0 0 0 3px var(--txt);}
 .gantt-cmbar.mzconflict{box-shadow:0 0 0 2px var(--red);z-index:2;}

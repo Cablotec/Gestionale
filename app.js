@@ -6161,6 +6161,8 @@ function openOperazioneModal(o) {
           onclick: () => {
             fornitoriSel = fornitoriSel.filter((_, i) => i !== idx);
             renderForSelected(); renderForDropList();
+            if (typeof renderFasiComm === 'function') renderFasiComm();
+            if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
             if (aggiornaPreviewInizio) aggiornaPreviewInizio();
           },
         }, '✕'));
@@ -6197,6 +6199,8 @@ function openOperazioneModal(o) {
             });
           }
           renderForSelected(); renderForDropList();
+          if (typeof renderFasiComm === 'function') renderFasiComm();
+          if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
           if (aggiornaPreviewInizio) aggiornaPreviewInizio();
         },
       },
@@ -6290,6 +6294,20 @@ function openOperazioneModal(o) {
     if (typeof renderAddSelected === 'function') renderAddSelected();
     if (typeof renderForSelected === 'function') renderForSelected();
   }
+  // Fornitori assegnati "a tutta la commessa" (nessuna fase spuntata):
+  // lavorano in QUOTA con gli interni su tutte le fasi — il nome non deve
+  // sparire dal blocco solo perché non c'è una fase specifica.
+  function badgeFornitoriTuttaCommessa() {
+    try {
+      const tutti = (fornitoriSel || [])
+        .filter(s => !(s.fase_keys || []).length)
+        .map(s => (state.aziende.find(a => a.id === s.azienda_id) || {}).nome || '?');
+      if (!tutti.length) return null;
+      return el('div', { class:'sub',
+        style:'margin-top:6px;font-family:DM Mono,monospace;font-size:11px;color:var(--yel);' },
+        '⚙ Fornitore su tutta la commessa: ' + tutti.join(', ') + ' (in quota con gli interni)');
+    } catch (e) { return null; }
+  }
   function renderFasiComm() {
     fasiWrapComm.innerHTML = '';
     if (fasiComm.length === 0) {
@@ -6303,6 +6321,8 @@ function openOperazioneModal(o) {
         if (!selId) msg = 'Le fasi compaiono scegliendo l\'articolo (dalla sua anagrafica).';
       }
       fasiWrapComm.append(el('div', { class:'sub' }, msg));
+      const b0 = badgeFornitoriTuttaCommessa();
+      if (b0) fasiWrapComm.append(b0);
       return;
     }
     fasiComm.forEach((f, i) => {
@@ -6327,6 +6347,8 @@ function openOperazioneModal(o) {
         el('span', { class:'sub', style:'flex-shrink:0;font-size:10px;color:var(--mut);' }, fonte),
       ));
     });
+    const bTot = badgeFornitoriTuttaCommessa();
+    if (bTot) fasiWrapComm.append(bTot);
   }
   renderFasiComm();
 
@@ -12062,6 +12084,21 @@ function renderGanttCommesse(root) {
       const windows = fasi.length ? opFasiWindows(o) : null;
       // Fasi specifiche a cui l'operatore è assegnato (fase_id valido)
       const mieFasi = windows ? mieRighe.map(r => r.fase_id).filter(fid => fid && windows[fid]) : [];
+
+      // IN RITARDO: scadenza passata e lavoro residuo → la finestra a
+      // ritroso vive nel PASSATO e la commessa sparirebbe dalla vista del
+      // futuro. La si ancora a OGGI: una barra rossa unica, da oggi alla
+      // fine stimata del residuo, coi giorni di ritardo dichiarati.
+      if (o.scadenza < oggiISO && o.stato !== 'spedita' && o.stato !== 'completata'
+          && opCalcOreResidue(o) > 0) {
+        const fine = opFineLavoro(o, oggiISO);
+        if (fine < rangeStartIso || oggiISO > rangeEndIso) return;
+        const dopoScad = parseISODate(o.scadenza); dopoScad.setDate(dopoScad.getDate() + 1);
+        const gRit = contaGiorniLavorativi(toLocalISO(dopoScad), oggiISO);
+        commesse.push({ op:o, inizio:oggiISO, scadenza:o.scadenza, fine, faseTipo: null, ritardo: gRit });
+        return;
+      }
+
       if (fasi.length && mieFasi.length) {
         // Una barra per ciascuna fase dell'operatore, sulla sua finestra
         const visti = new Set();
@@ -12134,36 +12171,47 @@ function renderGanttCommesse(root) {
       const left = iStart * slotWidth;
       const width = Math.max(slotWidth, (iEnd - iStart + 1) * slotWidth);
 
-      // Per le barre di FASE: ore della fase (preventivo = qta × min fase,
-      // consuntivo = sessioni attribuibili alla fase). Per le barre intere:
-      // ore di tutta la commessa, come prima.
+      // QUOTA dell'operatore: preventivo = la SUA parte (fase divisa per gli
+      // assegnatari; commessa intera ripartita per pesi), consuntivo = i SUOI
+      // timbri. Così le barre e il carico% raccontano la stessa storia.
       const isFase = !!c.fase;
-      const prev = isFase ? faseCalcOre(c.op, c.fase) : opCalcOre(c.op);
-      const cons = isFase ? faseCalcOreReali(c.op, c.fase) : opCalcOreReali(c.op);
+      const prevTot = isFase ? faseCalcOre(c.op, c.fase) : opCalcOre(c.op);
+      const prev = isFase ? faseQuotaOreAddetto(c.op, c.fase) : opQuotaOreUtente(c.op, u.id);
+      const cons = isFase ? faseCalcOreRealiUtente(c.op, c.fase, u.id) : opCalcOreRealiUtente(c.op, u.id);
       const perc = prev > 0 ? cons / prev : 0;
       const sfora = prev > 0 && cons > prev + tolleranzaOre(prev);
-      const attiva = isFase
-        ? state.sessioni.some(s => !s.fine && s.operazione_id === c.op.id && faseSessioneMatch(s, c.fase))
-        : opConSessioneAperta.has(c.op.id);
+      // "In corso" = una SUA sessione aperta (riga personale, semaforo personale)
+      const attiva = state.sessioni.some(s => !s.fine && s.utente_id === u.id
+        && s.operazione_id === c.op.id && (!isFase || faseSessioneMatch(s, c.fase)));
 
       const art = state.articoli.find(a => a.id === c.op.articolo_id);
       const cli = state.aziende.find(x => x.id === c.op.cliente_id);
+      // Fornitori coinvolti sulla commessa: dichiarati nel tooltip (in quota)
+      const fornNomi = [...new Set((state.opFornitori || [])
+        .filter(r => r.operazione_id === c.op.id)
+        .map(r => (state.aziende.find(a => a.id === r.azienda_id) || {}).nome || '?'))];
 
       const bar = el('div', {
-        class: 'gantt-cmbar' + (sfora ? ' sfora' : '') + (attiva ? ' attiva' : '') + (c.op.id === state.ganttHighlightOp ? ' evidenzia' : ''),
+        class: 'gantt-cmbar' + (sfora ? ' sfora' : '') + (c.ritardo ? ' inritardo' : '')
+          + (attiva ? ' attiva' : '') + (c.op.id === state.ganttHighlightOp ? ' evidenzia' : ''),
         'data-op-id': c.op.id,
         style: `left:${left}px;width:${width}px;top:${idx*(BAR_H+GAP)}px;`
-          + (c.faseTipo && c.faseTipo.colore && !sfora ? `background:${c.faseTipo.colore};` : ''),
+          + (c.faseTipo && c.faseTipo.colore && !sfora && !c.ritardo ? `background:${c.faseTipo.colore};` : ''),
         title:
           'Commessa ' + (c.op.numero_ordine || '')
           + (cli ? '\nCliente: ' + cli.nome : '')
           + (art ? '\nArticolo: ' + (art.codice || '') : '')
           + (c.faseTipo ? '\nFase: ' + c.faseTipo.nome : '')
-          + '\nPreventivo' + (isFase ? ' fase' : '') + ': ' + prev.toFixed(1) + ' h'
-          + '\nConsuntivo' + (isFase ? ' fase' : '') + ': ' + cons.toFixed(1) + ' h'
+          + (c.ritardo ? '\n⚠ IN RITARDO di ' + c.ritardo + ' giorn' + (c.ritardo === 1 ? 'o' : 'i')
+              + ' lavorativ' + (c.ritardo === 1 ? 'o' : 'i') + ' — barra ancorata a oggi' : '')
+          + '\nQuota operatore: ' + prev.toFixed(1) + ' h'
+          + (Math.abs(prevTot - prev) > 0.05
+              ? ' (' + (isFase ? 'fase intera' : 'commessa intera') + ': ' + prevTot.toFixed(1) + ' h)' : '')
+          + '\nSuo consuntivo: ' + cons.toFixed(1) + ' h'
           + (prev > 0 ? '  (' + Math.round(perc*100) + '%)' : '')
-          + (sfora ? '\n⚠ SFORAMENTO: +' + (cons-prev).toFixed(1) + ' h' : '')
-          + (attiva ? '\n● lavorazione in corso' : '')
+          + (sfora ? '\n⚠ SFORAMENTO quota: +' + (cons-prev).toFixed(1) + ' h' : '')
+          + (fornNomi.length ? '\nCon fornitore (in quota): ' + fornNomi.join(', ') : '')
+          + (attiva ? '\n● sta lavorando ora' : '')
           + '\nLavoro: ' + fmtIT(c.inizio) + ' → ' + fmtIT(c.fine)
           + '\nScadenza: ' + fmtIT(c.scadenza)
           + '\n(clic per aprire la commessa)',
@@ -12174,10 +12222,11 @@ function renderGanttCommesse(root) {
         class:'gantt-cmbar-fill' + (sfora ? ' sfora' : ''),
         style:`width:${Math.min(100, perc*100)}%;`,
       });
-      bar.append(fill);
+      if (!c.ritardo) bar.append(fill);
       // etichetta
       bar.append(el('div', { class:'gantt-cmbar-txt' },
-        (art && art.codice ? art.codice : 'OP')
+        (c.ritardo ? '⚠ RIT. ' + c.ritardo + 'g · ' : '')
+        + (art && art.codice ? art.codice : 'OP')
         + '  ' + Math.round(cons) + '/' + Math.round(prev) + 'h'));
       track.append(bar);
 
@@ -12293,6 +12342,16 @@ function renderGanttCommesse(root) {
         if (!o.scadenza) return;
         const for_ids = getOperazioneFornitori(o.id);
         if (!for_ids.includes(a.id)) return;
+        // In ritardo: ancorata a oggi come nelle righe operatore
+        if (o.scadenza < oggiISO && o.stato !== 'spedita' && o.stato !== 'completata'
+            && opCalcOreResidue(o) > 0) {
+          const fineR = opFineLavoro(o, oggiISO);
+          if (fineR < rangeStartIso || oggiISO > rangeEndIso) return;
+          const dopoScad = parseISODate(o.scadenza); dopoScad.setDate(dopoScad.getDate() + 1);
+          commesse.push({ op:o, inizio:oggiISO, scadenza:o.scadenza, fine:fineR,
+            ritardo: contaGiorniLavorativi(toLocalISO(dopoScad), oggiISO) });
+          return;
+        }
         const inizio = opInizio(o) || o.scadenza;
         const fine = opFineLavoro(o, inizio);
         if (fine < rangeStartIso || inizio > rangeEndIso) return;
@@ -12341,14 +12400,16 @@ function renderGanttCommesse(root) {
         const prev = opCalcOre(c.op);
 
         const bar = el('div', {
-          class: 'gantt-cmbar' + (c.op.id === state.ganttHighlightOp ? ' evidenzia' : ''),
+          class: 'gantt-cmbar' + (c.ritardo ? ' inritardo' : '') + (c.op.id === state.ganttHighlightOp ? ' evidenzia' : ''),
           'data-op-id': c.op.id,
           style: `left:${left}px;width:${width}px;top:${idx*(BAR_H+GAP)}px;`
-            + 'border-color:rgba(212,140,40,.6);',
+            + (c.ritardo ? '' : 'border-color:rgba(212,140,40,.6);'),
           title:
             'Commessa ' + (c.op.numero_ordine || '')
             + (cli ? '\nCliente: ' + cli.nome : '')
             + (art ? '\nArticolo: ' + (art.codice || '') : '')
+            + (c.ritardo ? '\n⚠ IN RITARDO di ' + c.ritardo + ' giorn' + (c.ritardo === 1 ? 'o' : 'i')
+                + ' lavorativ' + (c.ritardo === 1 ? 'o' : 'i') + ' — barra ancorata a oggi' : '')
             + '\nPreventivo: ' + prev.toFixed(1) + ' h'
             + '\nLavoro: ' + fmtIT(c.inizio) + ' → ' + fmtIT(c.fine)
             + '\nScadenza: ' + fmtIT(c.scadenza)
@@ -12356,7 +12417,8 @@ function renderGanttCommesse(root) {
           onclick: () => { if (typeof openOperazioneModal === 'function') openOperazioneModal(c.op); },
         });
         bar.append(el('div', { class:'gantt-cmbar-txt' },
-          (art && art.codice ? art.codice : 'OP') + '  ' + Math.round(prev) + 'h'));
+          (c.ritardo ? '⚠ RIT. ' + c.ritardo + 'g · ' : '')
+          + (art && art.codice ? art.codice : 'OP') + '  ' + Math.round(prev) + 'h'));
         track.append(bar);
 
         // Marcatore scadenza (vedi blocco operatori)

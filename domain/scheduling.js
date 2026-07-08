@@ -864,3 +864,50 @@ function calcolaCaricoFornitoreRange(aziendaId, isoStart, isoEnd) {
   return { oreCarico, oreCapacita, perc, livello, coefficiente: coef };
 }
 
+
+// ════════════════════════════════════════════════════════════
+// QUOTE PER-OPERATORE (Gantt): la SUA parte, non l'intera fase
+// ════════════════════════════════════════════════════════════
+// Ore di UN addetto su una fase: ore intere della fase divise per il peso
+// totale degli assegnatari (addetti = 1, fornitori = coefficiente × allocazione).
+// Stessa ripartizione di calcolaCaricoUtenteRange: barre e carico% coerenti.
+function faseQuotaOreAddetto(op, fase) {
+  const pezzi = Number(op && op.quantita || 0);
+  const oreFase = (pezzi * (Number(fase && fase.minuti_unitari) || 0)) / 60;
+  if (oreFase <= 0) return 0;
+  const { addetti, fornitori } = faseAssegnatari(op, fase.id);
+  let tot = addetti.length * 1.0;
+  fornitori.forEach(fr => {
+    const az = state.aziende.find(a => a.id === fr.azienda_id);
+    const coef = az ? Number(az.coefficiente != null ? az.coefficiente : 1.0) : 1.0;
+    tot += coef * Number(fr.allocazione != null ? fr.allocazione : 1.0);
+  });
+  return tot > 0 ? oreFase / tot : oreFase;
+}
+// Quota dell'utente sulle ore INTERE della commessa (modello aggregato,
+// per chi è assegnato "a tutta la commessa").
+function opQuotaOreUtente(op, uid) {
+  const pesi = pesiEntitaCommessa(op.id);
+  const peso = pesi.addetti.get(uid);
+  if (!peso || pesi.totale <= 0) return opCalcOre(op);
+  return opCalcOre(op) * (peso / pesi.totale);
+}
+// Consuntivo dei SOLI timbri dell'utente sulla commessa / sulla fase.
+function opCalcOreRealiUtente(op, uid) {
+  let sec = 0;
+  state.sessioni.forEach(s => {
+    if (s.operazione_id !== op.id || s.utente_id !== uid) return;
+    sec += s.fine ? (s.durata_secondi || 0)
+      : Math.max(0, Math.floor((Date.now() - new Date(s.inizio).getTime()) / 1000));
+  });
+  return sec / 3600;
+}
+function faseCalcOreRealiUtente(op, fase, uid) {
+  let sec = 0;
+  state.sessioni.forEach(s => {
+    if (s.operazione_id !== op.id || s.utente_id !== uid || !faseSessioneMatch(s, fase)) return;
+    sec += s.fine ? (s.durata_secondi || 0)
+      : Math.max(0, Math.floor((Date.now() - new Date(s.inizio).getTime()) / 1000));
+  });
+  return sec / 3600;
+}
