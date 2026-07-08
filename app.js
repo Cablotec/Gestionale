@@ -11947,6 +11947,28 @@ function renderGanttCommesse(root) {
   navToolbar.append(searchWrap);
   root.append(navToolbar);
 
+  // ── Legenda (in alto, aggiornata al modello quota/ritardi) ──
+  const legVoce = (chip, testo) => el('span',
+    { style:'display:inline-flex;align-items:center;gap:5px;white-space:nowrap;' }, chip, testo);
+  const legChip = (style) => el('span',
+    { style:'display:inline-block;width:22px;height:12px;border-radius:3px;flex-shrink:0;' + style });
+  root.append(el('div', {
+    style:'margin:6px 0 10px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;'
+      + 'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);',
+  },
+    el('span', { style:'font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:9px;' }, 'Legenda:'),
+    legVoce(legChip('background:var(--sur2);border:1px solid var(--brd);position:relative;overflow:hidden;'
+      + 'background-image:linear-gradient(to right, var(--blu) 0 55%, transparent 55%);'),
+      'barra = quota operatore · riempimento = suoi timbri'),
+    legVoce(legChip('background:var(--red);'), '⚠ RIT. = in ritardo, ancorata a oggi'),
+    legVoce(legChip('background:#5c2a35;'), 'sforamento quota'),
+    legVoce(legChip('background:var(--sur2);border:2px solid var(--grn);'), 'sta lavorando ora'),
+    legVoce(legChip('background:var(--sur2);border-left:2px dashed var(--red);border-radius:0;width:10px;'), 'scadenza'),
+    legVoce(legChip('background:linear-gradient(to right, var(--blu) 0 35%, var(--sur) 35% 65%, var(--blu) 65%);border:1px solid var(--brd);'),
+      'buco = giorni non lavorati'),
+    legVoce(legChip('background:rgba(212,140,40,.35);border:1px solid rgba(212,140,40,.6);'), 'fornitori esterni (righe in fondo) · ⚙ = fornitore in quota'),
+  ));
+
   const operatori = state.utenti
     .filter(u => u.attivo && !isKioskRecord(u))
     .sort((a,b) => a.nome.localeCompare(b.nome));
@@ -12223,11 +12245,12 @@ function renderGanttCommesse(root) {
         style:`width:${Math.min(100, perc*100)}%;`,
       });
       if (!c.ritardo) bar.append(fill);
-      // etichetta
+      // etichetta (il fornitore è scritto in chiaro, non solo nel tooltip)
       bar.append(el('div', { class:'gantt-cmbar-txt' },
         (c.ritardo ? '⚠ RIT. ' + c.ritardo + 'g · ' : '')
         + (art && art.codice ? art.codice : 'OP')
-        + '  ' + Math.round(cons) + '/' + Math.round(prev) + 'h'));
+        + '  ' + Math.round(cons) + '/' + Math.round(prev) + 'h'
+        + (fornNomi.length ? ' · ⚙ ' + fornNomi.join(', ') : '')));
       track.append(bar);
 
       // Interruzioni: la barra NON tira dritto sui giorni in cui non si
@@ -12445,21 +12468,6 @@ function renderGanttCommesse(root) {
   wrap.append(grid);
   root.append(wrap);
 
-  // Legenda
-  const leg = el('div', { style:'margin-top:14px;display:flex;gap:16px;flex-wrap:wrap;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);align-items:center;' });
-  leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
-    el('span', { style:'display:inline-block;width:22px;height:13px;border-radius:3px;background:var(--blu);' }),
-    'Commessa (riempimento = ore consuntivate)'));
-  leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
-    el('span', { style:'display:inline-block;width:22px;height:13px;border-radius:3px;background:var(--red);' }),
-    'Sforamento (consuntivo oltre il preventivo)'));
-  leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
-    el('span', { style:'display:inline-block;width:22px;height:13px;border-radius:3px;border:2px solid var(--grn);' }),
-    'Lavorazione in corso'));
-  leg.append(el('span', { style:'display:inline-flex;align-items:center;gap:5px;' },
-    el('span', { style:'display:inline-block;width:22px;height:13px;border-radius:3px;background:repeating-linear-gradient(135deg,rgba(150,150,150,.5) 0,rgba(150,150,150,.5) 4px,transparent 4px,transparent 8px);' }),
-    'Assenza / ferie'));
-  root.append(leg);
 
   // Dopo il render: porta in vista la barra cercata (una volta sola).
   if (state.ganttScrollTo) {
