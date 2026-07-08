@@ -1036,8 +1036,11 @@ function quantitaConsegnata(opId) {
 //   il minuti_unitari pagato); senza non si calcola la durata
 // - Scadenza: vuota
 // - Senza fasi → serve almeno un addetto o un fornitore sulla commessa
-// - Con fasi → per OGNI fase: minuti > 0 e almeno un assegnatario
+// - Con fasi → per OGNI fase serve almeno un assegnatario
 //   (per-fase o, in ripiego, "a tutta la commessa")
+// NOTA (7 lug 2026): tolta la voce "fase con minuti a zero" — con le fasi
+// effettive il valore arriva da solo (media/template) e, dove ancora manca,
+// la pianificazione ricade sul budget pagato: non è più un gesto in sospeso.
 function opCampiMancanti(op) {
   if (!op) return [];
   const mancanti = [];
@@ -1050,7 +1053,6 @@ function opCampiMancanti(op) {
     fasi.forEach(f => {
       const tipo = (state.tipiLav || []).find(t => t.id === f.tipo_lavorazione_id);
       const nome = tipo?.nome || 'fase';
-      if (!(Number(f.minuti_unitari) > 0)) mancanti.push('Fase «' + nome + '»: minuti a zero');
       const ass = faseAssegnatari(op, f.id);
       if (ass.addetti.length === 0 && ass.fornitori.length === 0) {
         mancanti.push('Fase «' + nome + '»: nessun addetto/fornitore');
