@@ -5962,6 +5962,7 @@ function openOperazioneModal(o) {
   const renderAddSelected = () => {
     addSelectedWrap.innerHTML = '';
     addSelectedWrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+    if (typeof aggiornaDataRealistica === 'function') aggiornaDataRealistica();
     if (addettiSel.length === 0) {
       addSelectedWrap.append(el('span', { class:'util-empty' }, 'Nessun addetto previsto'));
       return;
@@ -6108,6 +6109,7 @@ function openOperazioneModal(o) {
 
   const renderForSelected = () => {
     forSelectedWrap.innerHTML = '';
+    if (typeof aggiornaDataRealistica === 'function') aggiornaDataRealistica();
     if (fornitoriSel.length === 0) {
       forSelectedWrap.append(el('span', { class:'util-empty' }, 'Nessun fornitore'));
       return;
@@ -6295,6 +6297,7 @@ function openOperazioneModal(o) {
     aggiornaConfrontoComm();
     if (typeof renderAddSelected === 'function') renderAddSelected();
     if (typeof renderForSelected === 'function') renderForSelected();
+    if (typeof aggiornaDataRealistica === 'function') aggiornaDataRealistica();
   }
   // Fornitori assegnati "a tutta la commessa" (nessuna fase spuntata):
   // lavorano in QUOTA con gli interni su tutte le fasi — il nome non deve
@@ -6452,6 +6455,46 @@ function openOperazioneModal(o) {
       el('textarea', { name:'note', rows:'2' }, o.note||'')),
   );
 
+  // ── Data REALISTICA (solo commessa nuova): promessa onesta al cliente ──
+  // In avanti: coda attuale degli addetti scelti (livellaOperatore) + fasi
+  // nuove sulla capacità della squadra, ferie e chiusure comprese.
+  const boxRealistica = isNew ? el('div', { class:'sub',
+    style:'padding:8px 10px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;'
+      + 'font-family:DM Mono,monospace;font-size:11px;display:none;' }) : null;
+  function aggiornaDataRealistica() {
+    // try esteso: alla prima render del modal boxRealistica/fornitoriSel
+    // possono essere ancora in TDZ (dichiarati più sotto) — si esce zitti
+    // e la chiamata buona arriva a fine setup.
+    try {
+      if (!boxRealistica) return;
+      const oggi = toLocalISO(new Date());
+      const qta = parseFloat(((form.querySelector('[name=quantita]') || {}).value || '').toString().replace(',', '.')) || 0;
+      const fasiOk = fasiComm.filter(f => f.tipo_lavorazione_id && Number(f.minuti_unitari) > 0);
+      const stima = (qta > 0 && fasiOk.length && (addettiSel.length || fornitoriSel.length))
+        ? stimaFineCommessaNuova(addettiSel, fornitoriSel, fasiOk, qta) : null;
+      if (!stima) { boxRealistica.style.display = 'none'; return; }
+      const scadV = (form.querySelector('[name=scadenza]') || {}).value || '';
+      const oltre = scadV && stima.fine > scadV;
+      boxRealistica.style.display = '';
+      boxRealistica.style.borderColor = oltre ? 'var(--red)' : 'var(--brd)';
+      boxRealistica.innerHTML = '';
+      boxRealistica.append(
+        el('div', { style:'font-size:13px;font-weight:700;color:' + (oltre ? 'var(--red)' : 'var(--grn)') + ';' },
+          'Fine realistica: ' + fmtIT(stima.fine)
+          + (scadV ? (oltre ? '  ⚠ oltre la richiesta (' + fmtIT(scadV) + ')' : '  ✓ entro la richiesta (' + fmtIT(scadV) + ')') : '')),
+        el('div', { style:'color:var(--mut);margin-top:3px;' },
+          stima.oreTot.toFixed(1).replace('.', ',') + 'h di lavoro · partenza ' + (stima.inizio === oggi ? 'oggi' : fmtIT(stima.inizio))
+          + ' · ' + stima.liberi.map(l => {
+              const un = state.utenti.find(x => x.id === l.uid);
+              return (un ? un.nome.split(' ')[0] : '?')
+                + (l.libero <= oggi ? ': libero' : ': occupato fino al ' + fmtIT(l.libero));
+            }).join(' · ')),
+        el('div', { style:'color:var(--mut);font-size:10px;margin-top:3px;' },
+          'Coda attuale degli addetti scelti + ferie/chiusure. Solo indicativa: nessuna data viene salvata.'),
+      );
+    } catch (e) { /* setup non ancora completo o dati parziali: niente box */ }
+  }
+
   // Matita fasi: apre l'anagrafica dell'articolo; alla chiusura riapre questa
   // commessa (il blocco si ricostruisce e vede i valori aggiornati).
   const btnFasiAnagrafica = (() => {
@@ -6480,6 +6523,8 @@ function openOperazioneModal(o) {
       forSelectedWrap, forDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Ditte terze che contribuiscono alla lavorazione (con coefficiente di capacità).')),
+    boxRealistica ? el('div', { class:'field' },
+      el('label', {}, 'Data realistica di consegna'), boxRealistica) : null,
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
       el('div', { class:'field' }),
@@ -7215,7 +7260,9 @@ function openOperazioneModal(o) {
   ['quantita','minuti_unitari','scadenza','inizio'].forEach(name => {
     const f = form.querySelector(`[name=${name}]`);
     if (f) f.addEventListener('input', refreshPreview);
+    if (f) f.addEventListener('input', aggiornaDataRealistica);
   });
+  aggiornaDataRealistica();
   // Bind aggiuntivo: input minuti aggiorna anche l'indicatore di divergenza
   const minInputEl = form.querySelector('#minuti-input');
   if (minInputEl) minInputEl.addEventListener('input', aggiornaIndicatoreMinuti);
