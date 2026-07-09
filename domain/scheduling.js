@@ -1054,3 +1054,60 @@ function stimaFineCommessaNuova(addettiIds, fornitoriRows, fasiNuove, pezzi, ogg
   const fine = avantiOreCapacita(inizio, oreTot, addettiIds || [], fornitoriRows || []);
   return { inizio, fine, oreTot, liberi };
 }
+
+// ── ANALISI CLIENTI: reale/pagato e ripartizione fasi (commesse CHIUSE) ──
+// Per ogni cliente, sulle commesse spedite/completate con almeno 1h timbrata:
+//  - rapporto ore reali / ore pagate: quanto sfora il prezzo, sistematicamente
+//    (×1,45 = quel cliente costa il 45% più di quanto paga)
+//  - quota % media di ogni tipo di lavorazione, con deviazione standard
+//    (deviazione alta = lavori troppo diversi, la media non predice)
+// Tutto live dai timbri: nessun dato materializzato.
+function analisiClienti() {
+  const perOp = {};
+  (state.operazioni || []).forEach(o => {
+    if (o.stato !== 'spedita' && o.stato !== 'completata') return;
+    perOp[o.id] = { cliente: o.cliente_id, perTipo: {}, tot: 0,
+      pagatoOre: (Number(o.minuti_unitari) || 0) * (Number(o.quantita) || 0) / 60 };
+  });
+  (state.sessioni || []).forEach(s => {
+    const c = perOp[s.operazione_id];
+    if (!c || !s.fine || !s.tipo_lavorazione_id) return;
+    const h = (Number(s.durata_secondi) || 0) / 3600;
+    c.perTipo[s.tipo_lavorazione_id] = (c.perTipo[s.tipo_lavorazione_id] || 0) + h;
+    c.tot += h;
+  });
+  const perCliente = {};
+  Object.values(perOp).forEach(c => {
+    if (c.tot < 1) return; // sotto l'ora timbrata: rumore, fuori
+    if (!perCliente[c.cliente]) {
+      perCliente[c.cliente] = { quote: [], ratio: [], oreReali: 0, orePagate: 0 };
+    }
+    const g = perCliente[c.cliente];
+    const q = {};
+    Object.entries(c.perTipo).forEach(([t, h]) => { q[t] = h / c.tot; });
+    g.quote.push(q);
+    g.oreReali += c.tot;
+    if (c.pagatoOre > 0) { g.ratio.push(c.tot / c.pagatoOre); g.orePagate += c.pagatoOre; }
+  });
+  const media = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+  const out = [];
+  Object.entries(perCliente).forEach(([cid, g]) => {
+    const tuttiTipi = [...new Set(g.quote.flatMap(q => Object.keys(q)))];
+    const tipi = tuttiTipi.map(t => {
+      const vals = g.quote.map(q => q[t] || 0);
+      const m = media(vals);
+      const dev = Math.sqrt(vals.reduce((s, x) => s + (x - m) ** 2, 0) / vals.length);
+      return { tipoId: t, media: m, dev };
+    }).filter(r => r.media >= 0.03).sort((a, b) => b.media - a.media);
+    out.push({
+      clienteId: cid,
+      nCommesse: g.quote.length,
+      ratio: g.ratio.length ? media(g.ratio) : null,
+      oreReali: g.oreReali,
+      orePagate: g.orePagate,
+      tipi,
+    });
+  });
+  out.sort((a, b) => b.nCommesse - a.nCommesse);
+  return out;
+}

@@ -1406,6 +1406,7 @@ const TAB_STRUCTURE = {
     adminOnly: true,
     tabs: [
       { id: 'aziende',        label: 'Aziende',           adminOnly: true },
+      { id: 'analisi_clienti', label: 'Analisi clienti',  adminOnly: true },
       { id: 'articoli',       label: 'Articoli',          adminOnly: true },
       { id: 'tipi_lav',       label: 'Tipi lavorazione',  adminOnly: true },
       { id: 'mezzi',          label: 'Anagrafica mezzi',  adminOnly: true },
@@ -1505,6 +1506,7 @@ function renderTab(name) {
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt_live') renderGanttLiveTab(root);
     else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
+    else if (name === 'analisi_clienti') renderAnalisiClienti(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
     else if (name === 'attivita_extra') renderAttivitaExtra(root);
@@ -11129,6 +11131,61 @@ async function kioskStopSessione(sess, modalita) {
 let ganttLiveTimer = null;
 
 // Scheda "Live": dashboard chi sta lavorando ora
+// ═══ GESTIONE → ANALISI CLIENTI ═══
+// Due domande, cliente per cliente (commesse CHIUSE con almeno 1h timbrata):
+//  1. quanto ci costa DAVVERO rispetto a quanto paga? (reale/pagato)
+//  2. come si spezzetta il suo lavoro tra i tipi? (e quanto è affidabile
+//     la media: ± alto = lavori troppo diversi, la media non predice)
+// Il calcolo vive in domain/scheduling.js (analisiClienti), tutto live.
+function renderAnalisiClienti(root) {
+  const righe = analisiClienti();
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Analisi clienti')));
+  root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
+    'Base dati: commesse spedite/completate con almeno 1h timbrata, calcolo live dai timbri. '
+    + 'Reale/pagato: ×1,00 = il tempo pagato regge; sopra = il cliente costa più di quanto paga (rosso da ×1,05). '
+    + 'Ripartizione: quota media del tipo di lavorazione; il ± dice quanto balla da commessa a commessa.'));
+  if (!righe.length) {
+    root.append(el('div', { class:'empty' }, 'Nessuna commessa chiusa con timbri.'));
+    return;
+  }
+  righe.forEach(r => {
+    const cli = state.aziende.find(a => a.id === r.clienteId);
+    const debole = r.nCommesse < 3;
+    let ratioEl = null;
+    if (r.ratio != null) {
+      const col = r.ratio > 1.05 ? 'var(--red)' : (r.ratio < 0.95 ? 'var(--grn)' : 'var(--txt)');
+      ratioEl = el('span', {
+        style:'font-family:DM Mono,monospace;font-weight:700;font-size:15px;color:' + col + ';',
+        title:'Ore timbrate / ore pagate, media sulle sue commesse chiuse',
+      }, 'reale/pagato ×' + r.ratio.toFixed(2).replace('.', ','));
+    }
+    const card = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:10px;' });
+    card.append(el('div', { style:'display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;' },
+      el('span', { style:'font-weight:700;font-size:14px;' }, cli?.nome || '—'),
+      el('span', { class:'sub' },
+        r.nCommesse + (r.nCommesse === 1 ? ' commessa chiusa' : ' commesse chiuse')
+        + ' · ' + r.oreReali.toFixed(1).replace('.', ',') + 'h timbrate'
+        + (r.orePagate > 0 ? ' su ' + r.orePagate.toFixed(1).replace('.', ',') + 'h pagate' : '')),
+      ratioEl,
+      debole ? el('span', { style:'color:var(--yel);font-size:11px;' }, '⚠ dati deboli (meno di 3 commesse)') : null,
+    ));
+    const wrap = el('div', { style:'margin-top:8px;display:flex;flex-direction:column;gap:4px;' });
+    r.tipi.forEach(t => {
+      const tipo = state.tipiLav.find(x => x.id === t.tipoId);
+      const pM = Math.round(t.media * 100), pD = Math.round(t.dev * 100);
+      wrap.append(el('div', { style:'display:flex;align-items:center;gap:10px;font-family:DM Mono,monospace;font-size:11px;' },
+        el('span', { style:'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + (tipo?.colore || '#6b6b64') + ';' }),
+        el('span', { style:'width:170px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, tipo?.nome || '?'),
+        el('div', { style:'flex:1;max-width:320px;height:10px;background:var(--sur);border:1px solid var(--brd);border-radius:3px;position:relative;overflow:hidden;' },
+          el('div', { style:'position:absolute;left:0;top:0;bottom:0;width:' + Math.min(100, pM) + '%;background:' + (tipo?.colore || 'var(--blu)') + ';opacity:.8;' })),
+        el('span', { style:'flex-shrink:0;color:var(--mut);' }, pM + '% ± ' + pD),
+      ));
+    });
+    card.append(wrap);
+    root.append(card);
+  });
+}
+
 function renderGanttLiveTab(root) {
   if (ganttLiveTimer) { clearInterval(ganttLiveTimer); ganttLiveTimer = null; }
   root.innerHTML = '';
