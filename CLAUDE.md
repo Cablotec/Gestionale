@@ -60,9 +60,9 @@
 ## Accorpamento commesse (9 lug 2026) — gruppo visto come UNA al kiosk
 - L'admin raggruppa commesse dalla **Pianificazione** (bottone `⊞ Raggruppa` → modalità selezione → "Crea gruppo"); badge `⊞N` sulle righe, click sul badge per sciogliere. Persiste su `operazioni.gruppo_id` (UPDATE, serve sessione admin).
 - **Kiosk**: le commesse con stesso `gruppo_id` si fondono in **una card** (banner `⊞ Gruppo di N`); ogni gruppo compare una volta sola (set `gruppiVisti`), niente doppio timbro.
-- **Split alla chiusura del timbro** (`kioskChiudiOScarta`): il tempo si divide in parti UGUALI sulle N commesse lavorabili del gruppo (spedite/completate escluse) — la sessione aperta prende la sua quota, le altre nascono come sessioni nuove sfalsate (insert, nessuna cancellazione: coerente col vincolo RLS). Motore puro in domain: `ripartisciTimbroGruppo` + `commesseGruppoLavorabili` (14 test Node). Tutto il resto (consuntivo/medie/gantt/export) legge sessioni normali, zero modifiche.
+- **Split alla chiusura del timbro** (`kioskChiudiOScarta`): il tempo si divide sulle N commesse lavorabili del gruppo (spedite/completate escluse) **IN PROPORZIONE al peso = quantità × minuti/pz effettivi** (una commessa da 7 pz assorbe più di una da 2; codici identici → ∝ pezzi; pesi uguali/mancanti → ÷uguali). La sessione aperta prende la sua quota, le altre nascono come sessioni nuove sfalsate (insert, nessuna cancellazione: coerente col vincolo RLS). Motore puro in domain: `ripartisciTimbroGruppo(inizio,fine,membri[])` + `commesseGruppoLavorabili` (18 test Node, incluso 5+2+7→500/200/700). Tutto il resto (consuntivo/medie/gantt/export) legge sessioni normali, zero modifiche.
 - **RICHIEDE MIGRAZIONE** (una volta, da pannello Supabase SQL): `alter table operazioni add column gruppo_id uuid;`. Finché la colonna non c'è, nessun effetto (comportamento invariato).
-- **v1, limiti noti**: split solo ÷uguali; la "fine fase" marca finita solo la commessa timbrata, non propaga al gruppo; fase_id=null sulle copie (match per tipo). Da valutare con Nico se servono.
+- **v1, limiti noti**: la "fine fase" marca finita solo la commessa timbrata, non propaga al gruppo; fase_id=null sulle copie (match per tipo). Da valutare con Nico se servono.
 
 ## Diciture unità (Nico ci tiene: UNA dicitura, SEMPRE quella)
 - Tempo per pezzo: **`min/pz`** (mai l'apostrofo `'`).

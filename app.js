@@ -10698,13 +10698,12 @@ function kioskOpCard(o, opts = {}) {
   // timbri qui si divide in parti uguali su tutte quelle elencate.
   let gruppoBanner = null;
   if (o._gruppoMembri && o._gruppoMembri.length > 1) {
-    const codici = o._gruppoMembri.map(m => {
-      const art = state.articoli.find(a => a.id === m.articolo_id);
-      return art?.codice || m.numero_ordine || '—';
-    });
+    // Mostro ordine + pezzi di ciascuna: il tempo si divide in proporzione
+    // ai pezzi (lavoro previsto), non in parti uguali.
+    const voci = o._gruppoMembri.map(m => (m.numero_ordine || '—') + ' (' + (m.quantita ?? '?') + 'pz)');
     gruppoBanner = el('div', { class:'kop-gruppo-banner',
-      title:'Timbrando qui il tempo si divide in parti uguali su queste ' + codici.length + ' commesse' },
-      '⊞ Gruppo di ' + codici.length + ' — il tempo si divide su: ' + codici.join('  ·  '));
+      title:'Timbrando qui il tempo si divide sulle ' + voci.length + ' commesse in proporzione ai pezzi' },
+      '⊞ Gruppo di ' + voci.length + ' — tempo diviso per pezzi su: ' + voci.join('  ·  '));
   }
   const children = [ gruppoBanner, kioskInfoBlock(o), noteRow, fasiStrip, footer, progBar ];
 
@@ -11208,7 +11207,7 @@ async function kioskChiudiOScarta(sess) {
   // del gruppo (spedite/completate escluse). La sessione aperta prende la sua
   // quota; le altre nascono come sessioni nuove (insert), senza cancellazioni.
   const op = (state.operazioni || []).find(o => o.id === sess.operazione_id);
-  const gruppo = op ? commesseGruppoLavorabili(op) : [sess.operazione_id];
+  const gruppo = op ? commesseGruppoLavorabili(op) : [{ operazione_id: sess.operazione_id, peso: 1 }];
 
   if (gruppo.length > 1) {
     const parti = ripartisciTimbroGruppo(inizio, fineNow, gruppo);
