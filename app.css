@@ -429,6 +429,7 @@ input.search:focus{border-color:var(--acc);}
 .kib-desc{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--txt);line-height:1.25;margin-top:3px;}
 .kib-meta{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);letter-spacing:.04em;margin-top:6px;line-height:1.4;}
 .kop-note-row{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kop-gruppo-banner{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:#0f0f0e;background:var(--acc);border-radius:5px;padding:5px 10px;margin-bottom:8px;white-space:normal;line-height:1.3;}
 .kop-prep-row{font-family:'DM Mono',monospace;font-size:13px;color:var(--txt);display:flex;align-items:center;}
 .kop-prep-row .prep-dot{width:12px;height:12px;}
 /* Griglia commesse: fino a 3 colonne, scende a 2 o 1 se non c'è spazio.

@@ -1111,3 +1111,50 @@ function analisiClienti() {
   out.sort((a, b) => b.nCommesse - a.nCommesse);
   return out;
 }
+
+// ── ACCORPAMENTO COMMESSE: spalmatura di un timbro sul gruppo ──────────
+// Le commesse con lo stesso `gruppo_id` sono viste come UNA al kiosk. Alla
+// chiusura del timbro il tempo lavorato si divide in parti UGUALI tra le N
+// commesse del gruppo, creando N sessioni vere (una per commessa) sfalsate
+// nel tempo così non si sovrappongono e sommano ESATTAMENTE al totale.
+// Pura e testabile: date le due date e la lista di operazione_id (la prima
+// è quella su cui il timbro è già aperto), ritorna gli N intervalli.
+//   [{ operazione_id, inizio, fine }]  — [0] ha inizio === inizioIso.
+// durata_secondi la ricalcola il DB (colonna generata = fine - inizio).
+function ripartisciTimbroGruppo(inizioIso, fineIso, opIds) {
+  const t0 = new Date(inizioIso).getTime();
+  const t1 = new Date(fineIso).getTime();
+  const totSec = Math.max(0, Math.round((t1 - t0) / 1000));
+  const N = Math.max(1, opIds.length);
+  const base = Math.floor(totSec / N);
+  const rem = totSec - base * N; // i primi `rem` ricevono 1 secondo in più
+  const out = [];
+  let cursor = t0;
+  opIds.forEach((opId, i) => {
+    const share = base + (i < rem ? 1 : 0);
+    const start = cursor;
+    const end = cursor + share * 1000;
+    out.push({
+      operazione_id: opId,
+      inizio: new Date(start).toISOString(),
+      fine: new Date(end).toISOString(),
+      secondi: share,
+    });
+    cursor = end;
+  });
+  return out;
+}
+// Commesse (id) che formano il gruppo lavorabile di una commessa: tutte quelle
+// con lo stesso gruppo_id ancora aperte (spedite/completate escluse: il lavoro
+// è finito, non ricevono più quota). La commessa data è sempre in testa.
+function commesseGruppoLavorabili(op) {
+  if (!op) return [];
+  if (!op.gruppo_id) return [op.id];
+  const membri = (state.operazioni || [])
+    .filter(o => o.gruppo_id === op.gruppo_id
+      && o.stato !== 'spedita' && o.stato !== 'completata')
+    .map(o => o.id);
+  // La commessa timbrata sempre per prima (mappa alla sessione già aperta)
+  const altri = membri.filter(id => id !== op.id);
+  return [op.id, ...altri];
+}

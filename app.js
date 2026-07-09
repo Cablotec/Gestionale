@@ -5260,6 +5260,30 @@ async function salvaPriorita(coppie) {
   }
 }
 
+// Assegna un gruppo_id a più commesse (le accorpa). gruppoId null = scioglie.
+async function salvaGruppoCommesse(ids, gruppoId) {
+  if (!ids.length) return;
+  const { data, error } = await sb.from('operazioni')
+    .update({ gruppo_id: gruppoId }).in('id', ids).select();
+  if (error) {
+    if ((error.message || '').includes('gruppo_id')) {
+      return toast('Manca la colonna gruppo_id sul DB: esegui prima la migrazione SQL.', 'err');
+    }
+    return toast('Errore: ' + error.message, 'err');
+  }
+  const upd = new Map((data || []).map(r => [r.id, r]));
+  state.operazioni = state.operazioni.map(o => upd.get(o.id) || o);
+  state.opGruppoMode = false;
+  state.opGruppoSel = new Set();
+  toast(gruppoId ? 'Gruppo creato: ' + ids.length + ' commesse' : 'Gruppo sciolto');
+  renderTab('pianificazione');
+}
+async function scioglieGruppoCommessa(o) {
+  const membri = (state.operazioni || []).filter(x => x.gruppo_id && x.gruppo_id === o.gruppo_id);
+  if (!confirm('Sciogliere il gruppo di ' + membri.length + ' commesse?\nTorneranno separate al kiosk.')) return;
+  await salvaGruppoCommesse(membri.map(x => x.id), null);
+}
+
 function renderPianificazione(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.opSearch || '').toLowerCase();
@@ -5381,6 +5405,17 @@ function renderPianificazione(root) {
   if (isAdmin) {
     toolbar.append(el('button', { class:'btnp', onclick:()=>openOperazioneModal() }, '+ Nuova Operazione'));
     toolbar.append(el('button', { class:'btng', onclick:()=>openPrioritaModal() }, '⠿ Ordina priorità'));
+    // Raggruppa: entra in modalità selezione — le commesse scelte diventano
+    // un gruppo, viste come UNA al kiosk (il tempo timbrato si divide in parti
+    // uguali su tutte). Ri-clic esce dalla modalità.
+    toolbar.append(el('button', {
+      class: state.opGruppoMode ? 'btnp' : 'btng',
+      onclick: () => {
+        state.opGruppoMode = !state.opGruppoMode;
+        state.opGruppoSel = new Set();
+        renderTab('pianificazione');
+      },
+    }, state.opGruppoMode ? '✕ Esci da raggruppa' : '⊞ Raggruppa'));
     const fileImp = el('input', {
       type:'file', accept:'.xlsx,.xls', style:'display:none;',
       onchange: (e) => { if (e.target.files[0]) operazioniImportExcel(e.target.files[0]); e.target.value=''; },
@@ -5390,6 +5425,28 @@ function renderPianificazione(root) {
     toolbar.append(el('button', { class:'btng', onclick:()=>openOperazioniExportModal() }, '↓ Esporta Excel'));
   }
   root.append(toolbar);
+
+  // Barra azioni della modalità raggruppa (solo admin, quando attiva)
+  if (isAdmin && state.opGruppoMode) {
+    if (!(state.opGruppoSel instanceof Set)) state.opGruppoSel = new Set();
+    const nSel = state.opGruppoSel.size;
+    const bar = el('div', {
+      style:'display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 10px;padding:10px 14px;'
+        + 'background:var(--sur2);border:1px solid var(--acc);border-radius:6px;',
+    });
+    bar.append(el('span', { style:'font-weight:700;' }, '⊞ Modalità raggruppa'));
+    bar.append(el('span', { class:'sub' },
+      'Clicca le commesse da unire (' + nSel + ' selezionate). Al kiosk saranno una card sola; '
+      + 'il tempo timbrato si divide in parti uguali su tutte.'));
+    const btnCrea = el('button', { class: nSel >= 2 ? 'btnp' : 'btng', style: nSel < 2 ? 'opacity:.5;' : '' },
+      'Crea gruppo (' + nSel + ')');
+    btnCrea.onclick = async () => {
+      if (state.opGruppoSel.size < 2) return toast('Seleziona almeno 2 commesse', 'err');
+      await salvaGruppoCommesse([...state.opGruppoSel], crypto.randomUUID());
+    };
+    bar.append(btnCrea);
+    root.append(bar);
+  }
 
   if (state.aziende.length === 0 || state.articoli.length === 0) {
     root.append(el('div', { class:'empty' },
@@ -5463,16 +5520,41 @@ function renderPianificazione(root) {
       else if (diff <= 3) scadCls = 'scadenza-vicina';
     }
 
+    // In modalità raggruppa il clic seleziona invece di aprire la scheda.
+    const inGruppoMode = isAdmin && state.opGruppoMode;
+    const selezionata = inGruppoMode && state.opGruppoSel instanceof Set && state.opGruppoSel.has(o.id);
     const tr = el('tr', {
-      class: rowClass + ' op-row',
-      style: 'cursor:pointer;',
-      onclick: () => openOperazioneModal(o),
-      title: 'Click per aprire la scheda',
+      class: rowClass + ' op-row' + (selezionata ? ' gruppo-sel' : ''),
+      style: 'cursor:pointer;' + (selezionata ? 'outline:2px solid var(--acc);outline-offset:-2px;' : ''),
+      onclick: () => {
+        if (inGruppoMode) {
+          if (!(state.opGruppoSel instanceof Set)) state.opGruppoSel = new Set();
+          if (state.opGruppoSel.has(o.id)) state.opGruppoSel.delete(o.id);
+          else state.opGruppoSel.add(o.id);
+          renderTab('pianificazione');
+          return;
+        }
+        openOperazioneModal(o);
+      },
+      title: inGruppoMode ? 'Click per selezionare/deselezionare' : 'Click per aprire la scheda',
     });
 
     // Ordine — con eventuale ⚠ se mancano campi obbligatori per la pianificazione
     const mancanti = opCampiMancanti(o);
     const ordineCell = el('td', { class:'mono' });
+    if (inGruppoMode) {
+      ordineCell.append(el('span', { style:'margin-right:6px;' }, selezionata ? '☑' : '☐'));
+    }
+    // Badge gruppo: commessa accorpata → click per sciogliere (fuori da modalità)
+    if (o.gruppo_id) {
+      const nG = (state.operazioni || []).filter(x => x.gruppo_id === o.gruppo_id).length;
+      ordineCell.append(el('span', {
+        style:'display:inline-block;margin-right:6px;padding:0 6px;border-radius:8px;background:var(--acc);'
+          + 'color:#0f0f0e;font-size:10px;font-weight:700;cursor:pointer;',
+        title:'Gruppo di ' + nG + ' commesse (kiosk: una card, tempo diviso). Click per sciogliere.',
+        onclick:(e)=>{ e.stopPropagation(); if (!inGruppoMode) scioglieGruppoCommessa(o); },
+      }, '⊞' + nG));
+    }
     if (mancanti.length > 0) {
       ordineCell.append(el('span', {
         style:'color:var(--yel);font-weight:700;margin-right:5px;cursor:help;',
@@ -10157,9 +10239,12 @@ async function kioskFineFase(sess) {
     const res = await kioskChiudiOScarta(sess);
     if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
     kioskBeep(markOk ? 'ok' : 'err');
-    const durataS = Math.floor((new Date(res.data.fine) - new Date(res.data.inizio)) / 1000);
+    // Mostro il tempo TOTALE lavorato (res.elapsed), non la frazione salvata
+    // sulla singola commessa quando è un gruppo.
+    const durataS = res.elapsed;
     const h = Math.floor(durataS / 3600), m = Math.floor((durataS % 3600) / 60);
-    const dur = (h > 0 ? h + 'h ' + m + 'm' : m + ' min');
+    const dur = (h > 0 ? h + 'h ' + m + 'm' : m + ' min')
+      + (res.gruppoN > 1 ? ' · diviso su ' + res.gruppoN + ' commesse del gruppo' : '');
     if (markOk) {
       const f = (state.opFasi || []).find(ff => ff.id === fid);
       const t = f && state.tipiLav.find(tt => tt.id === f.tipo_lavorazione_id);
@@ -10368,8 +10453,25 @@ function kioskRenderOpList() {
     });
   };
 
-  const mieFiltered = filtra(mie);
-  const altreFiltered = filtra(altre);
+  // ── Collasso GRUPPI: le commesse con lo stesso gruppo_id sono viste come
+  // UNA card. Ogni gruppo compare una volta sola (set globale gruppiVisti),
+  // così l'operatore non può timbrare due volte lo stesso lavoro. Ordine di
+  // priorità: mie → riprendi le eredita → altre → completate. Il leader è la
+  // prima occorrenza; timbrando su di lui la spalmatura raggiunge gli altri.
+  const gruppiVisti = new Set();
+  const collassa = (lista) => {
+    const out = [];
+    lista.forEach(o => {
+      if (!o.gruppo_id) { out.push(o); return; }
+      if (gruppiVisti.has(o.gruppo_id)) return;
+      gruppiVisti.add(o.gruppo_id);
+      const membri = aperte.filter(x => x.gruppo_id === o.gruppo_id);
+      out.push(membri.length > 1 ? Object.assign({}, o, { _gruppoMembri: membri }) : o);
+    });
+    return out;
+  };
+  const mieFiltered = collassa(filtra(mie));
+  const altreFiltered = collassa(filtra(altre));
 
   // ── Sezione "▶ Riprendi": le ultime commesse su cui l'operatore ha
   // timbrato (sessione chiusa, fase non ancora dichiarata finita). Il lavoro
@@ -10463,7 +10565,7 @@ function kioskRenderOpList() {
   // Sezione "Completate da te" (comprimibile): commesse dove l'operatore ha
   // dichiarato finita la propria fase. Da qui può riaprirne una marcata per
   // sbaglio: ricominciando a lavorarci (selezione + tipo) il flag si azzera.
-  const completateFiltered = filtra(completateDaMe);
+  const completateFiltered = collassa(filtra(completateDaMe));
   if (completateFiltered.length > 0) {
     const aperta = kCom.vediCompletate || !!q;
     const sec = el('div', { class:'kiosk-op-section' });
@@ -10592,7 +10694,19 @@ function kioskOpCard(o, opts = {}) {
     : progEl;
   const footer = el('div', { class:'kop-row-foot' }, prepInline, footRight);
   const rowClass = 'kiosk-op-row' + (stato !== 'intonsa' ? ' stato-' + stato : '');
-  const children = [ kioskInfoBlock(o), noteRow, fasiStrip, footer, progBar ];
+  // Banner GRUPPO: la card rappresenta più commesse accorpate. Il tempo che
+  // timbri qui si divide in parti uguali su tutte quelle elencate.
+  let gruppoBanner = null;
+  if (o._gruppoMembri && o._gruppoMembri.length > 1) {
+    const codici = o._gruppoMembri.map(m => {
+      const art = state.articoli.find(a => a.id === m.articolo_id);
+      return art?.codice || m.numero_ordine || '—';
+    });
+    gruppoBanner = el('div', { class:'kop-gruppo-banner',
+      title:'Timbrando qui il tempo si divide in parti uguali su queste ' + codici.length + ' commesse' },
+      '⊞ Gruppo di ' + codici.length + ' — il tempo si divide su: ' + codici.join('  ·  '));
+  }
+  const children = [ gruppoBanner, kioskInfoBlock(o), noteRow, fasiStrip, footer, progBar ];
 
   // Modalità sola lettura: riga non cliccabile.
   if (opts.readonly) {
@@ -11086,12 +11200,48 @@ function kioskFormatDurataLive(inizioDate) {
 // timbratura resta registrata, qualunque sia la sua durata. Aggiorna
 // state.sessioni. Ritorna { scartata:false, elapsed, data }. Lancia in caso d'errore.
 async function kioskChiudiOScarta(sess) {
-  const elapsed = Math.floor((Date.now() - new Date(sess.inizio).getTime()) / 1000);
+  const inizio = sess.inizio;
+  const fineNow = new Date().toISOString();
+  const elapsed = Math.floor((Date.now() - new Date(inizio).getTime()) / 1000);
+
+  // Commessa raggruppata: il tempo si spalma in parti uguali sulle N commesse
+  // del gruppo (spedite/completate escluse). La sessione aperta prende la sua
+  // quota; le altre nascono come sessioni nuove (insert), senza cancellazioni.
+  const op = (state.operazioni || []).find(o => o.id === sess.operazione_id);
+  const gruppo = op ? commesseGruppoLavorabili(op) : [sess.operazione_id];
+
+  if (gruppo.length > 1) {
+    const parti = ripartisciTimbroGruppo(inizio, fineNow, gruppo);
+    // 1) la sessione già aperta = quota della sua commessa (parti[0])
+    const { data, error } = await sb.from('sessioni_lavoro')
+      .update({ fine: parti[0].fine }).eq('id', sess.id).select().single();
+    if (error) throw error;
+    state.sessioni = state.sessioni.map(s => s.id === sess.id ? data : s);
+    // 2) una sessione per ciascuna delle ALTRE commesse del gruppo
+    const nuove = parti.slice(1).map(p => ({
+      operazione_id: p.operazione_id,
+      utente_id: sess.utente_id,
+      tipo_lavorazione_id: sess.tipo_lavorazione_id,
+      fase_id: null,
+      attivita_id: null,
+      sede: sess.sede,
+      inizio: p.inizio,
+      fine: p.fine,
+      note: (sess.note ? sess.note + ' ' : '') + '[gruppo]',
+    }));
+    try {
+      const { data: ins } = await sb.from('sessioni_lavoro').insert(nuove).select();
+      if (ins) ins.forEach(r => { if (!state.sessioni.find(x => x.id === r.id)) state.sessioni.push(r); });
+    } catch (e) { /* best-effort: il timbro principale è già salvo, mai perso */ }
+    return { scartata: false, elapsed, data, gruppoN: gruppo.length };
+  }
+
+  // Chiusura normale (nessun gruppo)
   const { data, error } = await sb.from('sessioni_lavoro')
-    .update({ fine: new Date().toISOString() }).eq('id', sess.id).select().single();
+    .update({ fine: fineNow }).eq('id', sess.id).select().single();
   if (error) throw error;
   state.sessioni = state.sessioni.map(s => s.id === sess.id ? data : s);
-  return { scartata: false, elapsed, data };
+  return { scartata: false, elapsed, data, gruppoN: 1 };
 }
 
 async function kioskStopSessione(sess, modalita) {
@@ -11102,10 +11252,11 @@ async function kioskStopSessione(sess, modalita) {
     if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
 
     if (modalita === 'pause') {
-      const durataS = Math.floor((new Date(res.data.fine) - new Date(res.data.inizio)) / 1000);
+      const durataS = res.elapsed;
       const h = Math.floor(durataS / 3600);
       const m = Math.floor((durataS % 3600) / 60);
-      const durStr = h > 0 ? h+'h '+m+'m' : m+' min';
+      const durStr = (h > 0 ? h+'h '+m+'m' : m+' min')
+        + (res.gruppoN > 1 ? ' · diviso su ' + res.gruppoN + ' commesse del gruppo' : '');
       kioskShowDone({ title: 'Sessione sospesa', detail: 'Durata: ' + durStr, ok: true });
     } else {
       // Switch: vai a lista operazioni per scegliere nuova
