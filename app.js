@@ -11138,6 +11138,7 @@ let ganttLiveTimer = null;
 //     la media: ± alto = lavori troppo diversi, la media non predice)
 // Il calcolo vive in domain/scheduling.js (analisiClienti), tutto live.
 function renderAnalisiClienti(root) {
+  root.innerHTML = '';   // renderTab non svuota: ogni render* pulisce da sé
   const righe = analisiClienti();
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Analisi clienti')));
   root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
