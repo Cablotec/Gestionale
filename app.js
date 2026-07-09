@@ -8648,9 +8648,10 @@ function openMezzoModal(m) {
   openModal(modal);
 }
 
-async function openPrenotazioneModal(p) {
+async function openPrenotazioneModal(p, opts = {}) {
   const isNew = !p?.id;
   p = p || {};
+  const isDup = isNew && !!opts.dup;   // nuova, ma pre-compilata da un'altra
   const today = toLocalISO(new Date());
   const mezziAttivi = state.mezzi.filter(x=>x.attivo);
   if (mezziAttivi.length === 0) return toast('Nessun mezzo attivo. Chiedi a un admin di aggiungerne uno.', 'err');
@@ -8665,6 +8666,12 @@ async function openPrenotazioneModal(p) {
       .sort((a,b) => (a.ordine||0) - (b.ordine||0))
       .map(c => ({ ...c }));
     utentiSel = loadPrenotazioneOperatori(p.id);
+  } else if (isDup) {
+    // Duplica: consegne e operatori arrivano dall'evento sorgente (clonati,
+    // senza id/prenotazione_id: sono righe nuove da inserire).
+    consegne = (opts.dup.consegne || []).map(c => ({
+      cliente_id: c.cliente_id, descrizione: c.descrizione, ordine: c.ordine, _new: true }));
+    utentiSel = (opts.dup.utenti || []).slice();
   } else {
     // Se sto creando: pre-seleziono l'operatore collegato all'account corrente (se c'è)
     const mioUtil = state.utenti.find(u => u.account_id === state.profile.id);
@@ -8674,7 +8681,8 @@ async function openPrenotazioneModal(p) {
 
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
-    el('h2', {}, isNew ? 'Nuova Prenotazione' : (canEdit ? 'Modifica Prenotazione' : 'Prenotazione')),
+    el('h2', {}, isDup ? 'Nuova Prenotazione (duplicata)'
+      : (isNew ? 'Nuova Prenotazione' : (canEdit ? 'Modifica Prenotazione' : 'Prenotazione'))),
     el('button', { class:'mclose', onclick:closeModal }, '✕'),
   ));
 
@@ -8939,6 +8947,22 @@ async function openPrenotazioneModal(p) {
 
   const foot = el('div', { class:'mfoot' });
   foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  // Duplica: solo su eventi esistenti. Riapre come nuova prenotazione già
+  // compilata (mezzo, tipo, orari, operatori, consegne, note) — resta da
+  // cambiare la data. Se resta la stessa, il check sovrapposizioni la blocca.
+  if (!isNew && canEdit) {
+    foot.append(el('button', { class:'btng', onclick: () => {
+      const fd = new FormData(form);
+      const sorgente = {
+        mezzo_id: fd.get('mezzo_id'), tipo: fd.get('tipo'),
+        data_inizio: fd.get('data_inizio'), data_fine: fd.get('data_fine'),
+        ora_inizio: fd.get('ora_inizio') || null, ora_fine: fd.get('ora_fine') || null,
+        note: fd.get('note') || null,
+      };
+      closeModal();
+      openPrenotazioneModal(sorgente, { dup: { consegne, utenti: utentiSel } });
+    }}, '⧉ Duplica'));
+  }
   if (!isNew && canEdit) {
     foot.append(el('button', { class:'btnd', onclick: async () => {
       if (!confirm('Eliminare questa prenotazione?')) return;
