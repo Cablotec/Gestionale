@@ -71,6 +71,7 @@ const state = {
   // Storico
   stoMese: null,           // YYYY-MM filtro mese (null = tutti)
   stoAddetto: '',          // filtro addetto_id
+  stoFornitore: '',        // filtro fornitore (azienda_id)
   stoPunt: 'all',          // 'all' | 'puntuali' | 'ritardo'
   stoSearch: '',
   // Sessioni di lavoro (timbrature kiosk commesse)
@@ -7988,6 +7989,14 @@ function renderStorico(root) {
       return op && getOperazioneAddetti(op.id).includes(filtroAddetto);
     });
   }
+  // Fornitore (dell'operazione collegata)
+  const filtroFornitore = state.stoFornitore || '';
+  if (filtroFornitore) {
+    list = list.filter(s => {
+      const op = opById[s.operazione_id];
+      return op && (getOperazioneFornitori(op.id) || []).includes(filtroFornitore);
+    });
+  }
   // Puntualità: ritardo = data spedizione - scadenza (negativo = anticipo)
   const ritardoSped = (s) => {
     const op = opById[s.operazione_id];
@@ -8111,18 +8120,32 @@ function renderStorico(root) {
     }),
   }, nEsclusiSto > 0 ? `▼ Filtro clienti (${nEsclusiSto})` : '▼ Filtra clienti');
 
-  const selAdd = el('select', { class:'search', style:'width:auto;',
+  // Filtro addetto — stile coerente coi controlli filtro (non più "search box")
+  const selAdd = el('select', { class:'filtsel' + (filtroAddetto ? ' act' : ''),
     onchange: (e) => { state.stoAddetto = e.target.value; renderTab('storico'); }
   },
-    el('option', { value:'' }, '— Tutti gli addetti —'),
-    ...state.utenti.sort((a,b)=>a.nome.localeCompare(b.nome)).map(u =>
-      el('option', { value:u.id }, u.nome))
+    el('option', { value:'' }, '▼ Tutti gli addetti'),
+    ...state.utenti.filter(u => !isKioskRecord(u))
+      .sort((a,b)=>a.nome.localeCompare(b.nome)).map(u =>
+        el('option', { value:u.id }, u.nome))
   );
   selAdd.value = filtroAddetto;
 
+  // Filtro fornitore — stesso stile, gemello dell'addetto
+  const fornitoriAttivi = state.aziende
+    .filter(a => a.is_fornitore)
+    .sort((a,b)=>a.nome.localeCompare(b.nome));
+  const selForn = el('select', { class:'filtsel' + (state.stoFornitore ? ' act' : ''),
+    onchange: (e) => { state.stoFornitore = e.target.value; renderTab('storico'); }
+  },
+    el('option', { value:'' }, '▼ Tutti i fornitori'),
+    ...fornitoriAttivi.map(a => el('option', { value:a.id }, a.nome))
+  );
+  selForn.value = state.stoFornitore || '';
+
   const toolbar = el('div', { class:'toolbar' },
     el('h2', {}, 'Storico spedizioni'),
-    btnFiltroCliSto, selAdd,
+    btnFiltroCliSto, selAdd, selForn,
     el('input', {
       type:'text', class:'search', id:'sto-search',
       placeholder:'Cerca DDT, ordine, OP, rif. cliente, pos, cliente, codice, descrizione…',
