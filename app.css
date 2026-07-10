@@ -174,10 +174,14 @@ input.search:focus{border-color:var(--acc);}
 .opsum-scad{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
 .opsum-scad.late{color:var(--red);font-weight:700;}
 .opsum-ore{display:flex;align-items:center;gap:8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);}
-.opsum-orebar{width:110px;height:8px;background:var(--bg);border:1px solid var(--brd);border-radius:4px;overflow:hidden;position:relative;}
-.opsum-orefill{height:100%;background:var(--blu);}
-.opsum-orefill.over{background:var(--red);}
-.opsum-oretick{position:absolute;top:-1px;bottom:-1px;width:2px;background:var(--acc);}
+.opsum-orebar{width:140px;height:9px;background:var(--bg);border:1px solid var(--brd);border-radius:4px;overflow:hidden;position:relative;}
+/* riempimento = consuntivo entro il pagato */
+.opsum-orefill{position:absolute;left:0;top:0;bottom:0;background:var(--blu);}
+/* segmento OLTRE il pagato (sforamento), visibile graficamente */
+.opsum-oreover{position:absolute;top:0;bottom:0;background:var(--red);
+  background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.18) 0,rgba(0,0,0,.18) 3px,transparent 3px,transparent 6px);}
+/* riferimento "tempo pagato" (il 100%) */
+.opsum-orepag{position:absolute;top:-1px;bottom:-1px;width:2px;background:var(--txt);}
 .optabs{display:flex;gap:4px;border-bottom:1px solid var(--brd);margin-bottom:14px;flex-wrap:wrap;}
 .optab-btn{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:8px 12px;cursor:pointer;}
 .optab-btn.act{color:var(--acc);border-bottom-color:var(--acc);}

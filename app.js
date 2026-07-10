@@ -7391,19 +7391,26 @@ function openOperazioneModal(o) {
     const prev = opCalcOreInterne(o), cons = opCalcOreReali(o);
     const oreEsterneHd = Math.max(0, opCalcOre(o) - prev);
     const pagatoOre = pagatoOreInterne(o);
-    const base = pagatoOre > 0 ? pagatoOre : prev;
-    const percOre = base > 0 ? Math.min(100, Math.round(cons / base * 100)) : 0;
+    const base = pagatoOre > 0 ? pagatoOre : prev;   // riferimento = tempo pagato
     const overOre = base > 0 && cons > base + tolleranzaOre(base);
-    const tackPrev = (pagatoOre > 0 && prev > 0)
-      ? Math.min(100, Math.round(prev / pagatoOre * 100)) : null;
+    const percOre = base > 0 ? Math.round(cons / base * 100) : 0;
+    // La barra si scala sul MASSIMO tra consuntivo e pagato: così il segmento
+    // OLTRE il pagato sporge visibile invece di essere tagliato al 100%.
+    const scaleMax = Math.max(cons, base, 1e-6);
+    const pagatoPct = base > 0 ? Math.min(100, base / scaleMax * 100) : 100;
+    const normalPct = Math.min(cons, base) / scaleMax * 100;         // dentro il pagato
+    const overPct = Math.max(0, (cons - base)) / scaleMax * 100;     // lo sforamento
     const barInner = [
-      el('div', { class:'opsum-orefill' + (overOre ? ' over' : ''), style:'width:' + percOre + '%;' }),
+      el('div', { class:'opsum-orefill', style:'width:' + normalPct + '%;' }),
     ];
-    if (tackPrev !== null) {
-      barInner.push(el('div', {
-        class:'opsum-oretick', style:'left:' + tackPrev + '%;',
-        title:'Preventivo fasi interne: ' + prev.toFixed(1) + 'h',
-      }));
+    if (overPct > 0) {
+      barInner.push(el('div', { class:'opsum-oreover',
+        style:'left:' + pagatoPct + '%;width:' + overPct + '%;',
+        title:'Oltre il pagato: +' + (cons - base).toFixed(1) + 'h' }));
+    }
+    if (base > 0) {
+      barInner.push(el('div', { class:'opsum-orepag',
+        style:'left:' + pagatoPct + '%;', title:'Tempo pagato: ' + base.toFixed(1) + 'h' }));
     }
     body.append(el('div', { class:'opsum' },
       el('div', { class:'opsum-main' },
@@ -7420,13 +7427,15 @@ function openOperazioneModal(o) {
         el('div', { class:'opsum-scad' + (scadLate ? ' late' : '') },
           'Scad. ' + fmtIT(o.scadenza || '') + (scadLate ? ' ⚠' : '')),
         el('div', { class:'opsum-ore', title: (pagatoOre > 0
-            ? 'Solo parte INTERNA. Consuntivo ' + cons.toFixed(1) + 'h · tacca = preventivo fasi interne ' + prev.toFixed(1) + 'h · 100% = quota interna del pagato ' + pagatoOre.toFixed(1) + 'h'
+            ? 'Solo parte INTERNA. Consuntivo ' + cons.toFixed(1) + 'h · riferimento (100%) = tempo pagato ' + pagatoOre.toFixed(1) + 'h'
+              + (overOre ? ' · ⚠ OLTRE di ' + (cons - pagatoOre).toFixed(1) + 'h' : '')
             : 'Ore consuntivate / preventivate (solo parte interna)')
             + (oreEsterneHd > 0.05 ? '\nFasi esterne (fornitori): ' + oreEsterneHd.toFixed(1) + 'h, fuori da questo confronto' : '') },
           el('span', { style:'font-size:9px;letter-spacing:.08em;text-transform:uppercase;' }, 'ore'),
           el('div', { class:'opsum-orebar' }, ...barInner),
-          el('span', {}, (pagatoOre > 0
-            ? cons.toFixed(1) + 'h · fasi ' + prev.toFixed(1) + ' · pag. ' + pagatoOre.toFixed(1)
+          el('span', { style: overOre ? 'color:var(--red);font-weight:700;' : '' }, (pagatoOre > 0
+            ? cons.toFixed(1) + ' / ' + pagatoOre.toFixed(1) + 'h · ' + percOre + '%'
+              + (overOre ? ' · +' + (cons - pagatoOre).toFixed(1) + 'h oltre' : '')
             : cons.toFixed(1) + '/' + prev.toFixed(1) + 'h')
             + (oreEsterneHd > 0.05 ? ' · est. ' + oreEsterneHd.toFixed(1) : ''))),
       ),
