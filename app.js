@@ -5105,6 +5105,73 @@ function openFiltroClientiPopup(anchorBtn, opts) {
   }, 0);
 }
 
+// Popup filtro a SELEZIONE SINGOLA (stile "Filtra clienti"): sostituisce i
+// <select> nativi, che in dark mode il browser disegna col suo tema
+// (testo illeggibile). Riusabile: addetti, fornitori, ecc.
+// opts: { titolo, vuotoLabel, opzioni:[{id,nome}], valore, onPick(id) }
+function openFiltroSingoloPopup(anchorBtn, opts) {
+  opts = opts || {};
+  const opzioni = opts.opzioni || [];
+  document.querySelectorAll('.filtro-cli-popup').forEach(p => p.remove());
+
+  const popup = el('div', { class: 'filtro-cli-popup' });
+  const rect = anchorBtn.getBoundingClientRect();
+  // Ancoro a destra del pulsante se sfora lo schermo a sinistra
+  const left = Math.min(rect.left, window.innerWidth - 300);
+  popup.style.cssText = `
+    position:fixed;top:${rect.bottom + 4}px;left:${left}px;
+    background:var(--sur);border:1px solid var(--brd);border-radius:6px;
+    box-shadow:0 8px 20px rgba(0,0,0,.4);padding:12px;
+    width:280px;max-height:460px;display:flex;flex-direction:column;gap:10px;
+    z-index:500;font-family:inherit;`;
+
+  if (opts.titolo) popup.append(el('div',
+    { style:'font-size:11px;color:var(--mut);font-family:"DM Mono",monospace;' }, opts.titolo));
+
+  const inputRicerca = el('input', {
+    type:'text', placeholder:'Cerca…',
+    style:'width:100%;background:var(--sur2);border:1px solid var(--brd);color:var(--txt);padding:6px 10px;border-radius:3px;font-family:inherit;font-size:12px;outline:none;',
+  });
+  const listaCnt = el('div', {
+    style:'flex:1;overflow-y:auto;border:1px solid var(--brd);border-radius:3px;padding:4px;background:var(--sur2);',
+  });
+
+  const scegli = (id) => { popup.remove(); if (typeof opts.onPick === 'function') opts.onPick(id); };
+  const voce = (id, nome, attivo) => {
+    const row = el('div', {
+      style:'display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:3px;font-size:12px;user-select:none;'
+        + (attivo ? 'background:var(--acc);color:#0f0f0e;font-weight:700;' : 'color:var(--txt);'),
+      onmouseover: e => { if (!attivo) e.currentTarget.style.background = 'var(--sur)'; },
+      onmouseout: e => { if (!attivo) e.currentTarget.style.background = 'transparent'; },
+      onclick: () => scegli(id),
+    }, el('span', { style:'width:12px;flex-shrink:0;' }, attivo ? '✓' : ''), el('span', {}, nome));
+    return row;
+  };
+  const ridisegna = () => {
+    const q = (inputRicerca.value || '').toLowerCase();
+    listaCnt.innerHTML = '';
+    listaCnt.append(voce('', opts.vuotoLabel || 'Tutti', !opts.valore));
+    const filtrati = q ? opzioni.filter(o => (o.nome || '').toLowerCase().includes(q)) : opzioni;
+    filtrati.forEach(o => listaCnt.append(voce(o.id, o.nome, opts.valore === o.id)));
+  };
+  inputRicerca.oninput = ridisegna;
+
+  popup.append(inputRicerca, listaCnt);
+  document.body.append(popup);
+  ridisegna();
+  inputRicerca.focus();
+
+  setTimeout(() => {
+    const closeOnOutside = (e) => {
+      if (!popup.contains(e.target)) {
+        popup.remove();
+        document.removeEventListener('mousedown', closeOnOutside);
+      }
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+  }, 0);
+}
+
 // Lista riordinabile per trascinamento (drag nativo, mouse). Usata sia dal
 // gestionale sia dal kiosk, così il riordino è identico nei due posti.
 // items: array di operazioni. Ritorna { el, order } dove order() ridà gli id
@@ -8120,32 +8187,36 @@ function renderStorico(root) {
     }),
   }, nEsclusiSto > 0 ? `▼ Filtro clienti (${nEsclusiSto})` : '▼ Filtra clienti');
 
-  // Filtro addetto — stile coerente coi controlli filtro (non più "search box")
-  const selAdd = el('select', { class:'filtsel' + (filtroAddetto ? ' act' : ''),
-    onchange: (e) => { state.stoAddetto = e.target.value; renderTab('storico'); }
-  },
-    el('option', { value:'' }, '▼ Tutti gli addetti'),
-    ...state.utenti.filter(u => !isKioskRecord(u))
-      .sort((a,b)=>a.nome.localeCompare(b.nome)).map(u =>
-        el('option', { value:u.id }, u.nome))
-  );
-  selAdd.value = filtroAddetto;
+  // Filtro addetto — pulsante + popup (stile "Filtra clienti"): niente più
+  // <select> nativo (illeggibile in dark mode).
+  const addettiLista = state.utenti.filter(u => !isKioskRecord(u))
+    .sort((a,b)=>a.nome.localeCompare(b.nome)).map(u => ({ id:u.id, nome:u.nome }));
+  const nomeAdd = filtroAddetto ? (state.utenti.find(u=>u.id===filtroAddetto)?.nome || 'Addetto') : '';
+  const btnAdd = el('button', {
+    class: filtroAddetto ? 'btnp' : 'btng',
+    onclick: (e) => openFiltroSingoloPopup(e.currentTarget, {
+      titolo:'Filtra per addetto', vuotoLabel:'Tutti gli addetti',
+      opzioni: addettiLista, valore: filtroAddetto,
+      onPick: (id) => { state.stoAddetto = id; renderTab('storico'); },
+    }),
+  }, filtroAddetto ? '▼ ' + nomeAdd : '▼ Tutti gli addetti');
 
-  // Filtro fornitore — stesso stile, gemello dell'addetto
-  const fornitoriAttivi = state.aziende
-    .filter(a => a.is_fornitore)
-    .sort((a,b)=>a.nome.localeCompare(b.nome));
-  const selForn = el('select', { class:'filtsel' + (state.stoFornitore ? ' act' : ''),
-    onchange: (e) => { state.stoFornitore = e.target.value; renderTab('storico'); }
-  },
-    el('option', { value:'' }, '▼ Tutti i fornitori'),
-    ...fornitoriAttivi.map(a => el('option', { value:a.id }, a.nome))
-  );
-  selForn.value = state.stoFornitore || '';
+  // Filtro fornitore — gemello dell'addetto
+  const fornitoriLista = state.aziende.filter(a => a.is_fornitore)
+    .sort((a,b)=>a.nome.localeCompare(b.nome)).map(a => ({ id:a.id, nome:a.nome }));
+  const nomeForn = state.stoFornitore ? (state.aziende.find(a=>a.id===state.stoFornitore)?.nome || 'Fornitore') : '';
+  const btnForn = el('button', {
+    class: state.stoFornitore ? 'btnp' : 'btng',
+    onclick: (e) => openFiltroSingoloPopup(e.currentTarget, {
+      titolo:'Filtra per fornitore', vuotoLabel:'Tutti i fornitori',
+      opzioni: fornitoriLista, valore: state.stoFornitore,
+      onPick: (id) => { state.stoFornitore = id; renderTab('storico'); },
+    }),
+  }, state.stoFornitore ? '▼ ' + nomeForn : '▼ Tutti i fornitori');
 
   const toolbar = el('div', { class:'toolbar' },
     el('h2', {}, 'Storico spedizioni'),
-    btnFiltroCliSto, selAdd, selForn,
+    btnFiltroCliSto, btnAdd, btnForn,
     el('input', {
       type:'text', class:'search', id:'sto-search',
       placeholder:'Cerca DDT, ordine, OP, rif. cliente, pos, cliente, codice, descrizione…',
