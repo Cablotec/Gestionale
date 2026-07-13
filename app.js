@@ -5315,11 +5315,13 @@ function openNuovoOrdineModal() {
   ));
 
   const clienteId = () => { const v = acCliente.getValue(); return (v.mode==='existing' && v.id) ? v.id : null; };
-  const righeWrap = el('div', { style:'display:flex;flex-direction:column;gap:6px;margin-top:8px;' });
-  const header = el('div', { style:'display:grid;grid-template-columns:'+cols+';gap:8px;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;align-items:end;' },
-    el('span',{},'Pos'), el('span',{},'Codice articolo'), el('span',{},'Numero OP'), el('span',{},'Rif. cliente'), el('span',{},'Q.tà'),
-    ...(prezzoAttivo ? [el('span',{},'€/pz')] : []),
-    el('span',{},'Scadenza'), el('span',{},''));
+  // UNA SOLA griglia per intestazioni + tutte le righe: le colonne sono
+  // garantite identiche (niente drift tra header e input). Ogni riga è un
+  // wrapper display:contents, così le sue celle vivono nella griglia padre.
+  const griglia = el('div', { style:'display:grid;grid-template-columns:'+cols+';column-gap:8px;row-gap:8px;align-items:start;margin-top:10px;' });
+  const hCell = (t) => el('div', { style:'font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;align-self:end;padding-bottom:2px;' }, t);
+  griglia.append(hCell('Pos'), hCell('Codice articolo'), hCell('Numero OP'), hCell('Rif. cliente'), hCell('Q.tà'),
+    ...(prezzoAttivo ? [hCell('€/pz')] : []), hCell('Scadenza'), hCell(''));
   const totBar = el('div', { style:'margin-top:8px;font-family:DM Mono,monospace;font-size:14px;font-weight:700;text-align:right;' });
 
   let righe = [];
@@ -5345,9 +5347,10 @@ function openNuovoOrdineModal() {
     const inQta = el('input', { type:'number', class:'ord-inp', value:'1', min:'1', oninput:()=>aggiornaTotale() });
     const inPrezzo = prezzoAttivo ? el('input', { type:'number', class:'ord-inp', min:'0', step:'0.01', placeholder:'€', oninput:()=>aggiornaTotale() }) : null;
     const inScad = el('input', { type:'date', class:'ord-inp' });
-    const btnX = el('button', { type:'button', class:'btnd', style:'align-self:center;',
+    const btnX = el('button', { type:'button', class:'btnd', style:'align-self:start;padding:6px 8px;',
       onclick:()=>{ righe = righe.filter(r=>r!==riga); riga.el.remove(); if(!righe.length) creaRiga(); aggiornaTotale(); } }, '✕');
-    const row = el('div', { style:'display:grid;grid-template-columns:'+cols+';gap:8px;align-items:start;' },
+    // Wrapper display:contents: le celle entrano nella griglia padre.
+    const row = el('div', { style:'display:contents;' },
       inPos, acArt.container, inOP, inRif, inQta, ...(prezzoAttivo?[inPrezzo]:[]), inScad, btnX);
     const riga = {
       el: row,
@@ -5377,7 +5380,7 @@ function openNuovoOrdineModal() {
       },
     };
     righe.push(riga);
-    righeWrap.append(row);
+    griglia.append(row);
     return riga;
   }
   for (let i = 0; i < 5; i++) creaRiga();  // 5 posizioni pronte; le vuote non si inseriscono
@@ -5387,8 +5390,8 @@ function openNuovoOrdineModal() {
   const btnAddN = el('button', { class:'btnsm',
     onclick:()=>{ const n=Math.max(1,Math.min(50, parseInt(inpAddN.value)||1)); for(let i=0;i<n;i++) creaRiga(); } },
     '+ Aggiungi posizioni');
-  body.append(header, righeWrap,
-    el('div', { style:'display:flex;align-items:center;gap:8px;margin-top:10px;' },
+  body.append(griglia,
+    el('div', { style:'display:flex;align-items:center;gap:8px;margin-top:12px;' },
       btnAddN, inpAddN, el('span', { class:'sub' }, 'righe alla volta')),
     totBar);
   modal.append(body);
