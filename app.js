@@ -5307,14 +5307,16 @@ function openNuovoOrdineModal() {
   const inpOC = el('input', { type:'text', class:'ord-inp', value: new Date().getFullYear() + '/OC/',
     placeholder:'2026/OC/00001', pattern:'\\d{4}/OC/\\d{5}',
     onblur:(e)=>{ const m=e.target.value.trim().match(/^(\d{4})\/OC\/(\d{1,4})$/); if(m) e.target.value=m[1]+'/OC/'+m[2].padStart(5,'0'); } });
-  body.append(el('div', { class:'frow' },
-    el('div', { class:'field' }, el('label', {}, 'Cliente *'), acCliente.container),
-    el('div', { class:'field' }, el('label', {}, 'Numero ordine (OC) *'), inpOC),
+  // Intestazione: due colonne allineate in basso (l'hint sotto il cliente non
+  // deve sfasare il campo OC).
+  body.append(el('div', { style:'display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:end;' },
+    el('div', { class:'field' }, el('label', { style:'white-space:nowrap;' }, 'Cliente *'), acCliente.container),
+    el('div', { class:'field' }, el('label', { style:'white-space:nowrap;' }, 'Numero ordine (OC) *'), inpOC),
   ));
 
   const clienteId = () => { const v = acCliente.getValue(); return (v.mode==='existing' && v.id) ? v.id : null; };
   const righeWrap = el('div', { style:'display:flex;flex-direction:column;gap:6px;margin-top:8px;' });
-  const header = el('div', { style:'display:grid;grid-template-columns:'+cols+';gap:8px;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;padding:0 2px;' },
+  const header = el('div', { style:'display:grid;grid-template-columns:'+cols+';gap:8px;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;align-items:end;' },
     el('span',{},'Pos'), el('span',{},'Codice articolo'), el('span',{},'Numero OP'), el('span',{},'Rif. cliente'), el('span',{},'Q.tà'),
     ...(prezzoAttivo ? [el('span',{},'€/pz')] : []),
     el('span',{},'Scadenza'), el('span',{},''));
@@ -5380,9 +5382,14 @@ function openNuovoOrdineModal() {
   }
   for (let i = 0; i < 5; i++) creaRiga();  // 5 posizioni pronte; le vuote non si inseriscono
 
+  // Aggiungi N posizioni in un colpo (default 1): scrivi il numero e premi.
+  const inpAddN = el('input', { type:'number', class:'ord-inp', value:'1', min:'1', max:'50', style:'width:60px;' });
+  const btnAddN = el('button', { class:'btnsm',
+    onclick:()=>{ const n=Math.max(1,Math.min(50, parseInt(inpAddN.value)||1)); for(let i=0;i<n;i++) creaRiga(); } },
+    '+ Aggiungi posizioni');
   body.append(header, righeWrap,
-    el('button', { class:'btnsm', style:'margin-top:8px;align-self:flex-start;',
-      onclick:()=>{ creaRiga(); } }, '+ Aggiungi posizione'),
+    el('div', { style:'display:flex;align-items:center;gap:8px;margin-top:10px;' },
+      btnAddN, inpAddN, el('span', { class:'sub' }, 'righe alla volta')),
     totBar);
   modal.append(body);
 
