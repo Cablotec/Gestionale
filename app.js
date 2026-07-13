@@ -5289,9 +5289,9 @@ function openNuovoOrdineModal() {
   if (state.aziende.length === 0 || state.articoli.length === 0)
     return toast('Servono prima clienti e articoli.', 'err');
   const prezzoAttivo = (state.operazioni || []).some(x => 'prezzo_unitario' in x);
-  const cols = '58px 1fr 120px 120px 56px' + (prezzoAttivo ? ' 82px' : '') + ' 120px 26px';
+  const cols = '62px minmax(220px,1fr) 140px 150px 64px' + (prezzoAttivo ? ' 96px' : '') + ' 148px 28px';
 
-  const modal = el('div', { class:'modal', style:'max-width:1000px;' });
+  const modal = el('div', { class:'modal', style:'max-width:1240px;width:95vw;' });
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, 'Nuovo ordine'),
     el('button', { class:'mclose', onclick:closeModal }, '✕'),
@@ -5334,7 +5334,9 @@ function openNuovoOrdineModal() {
       placeholder:'Cerca o digita nuovo codice…', entityLabel:'articolo',
       onChange: () => { riga.prefillPrezzo(); aggiornaTotale(); },
     });
-    const inPos = el('input', { type:'text', class:'ord-inp', placeholder:'0010' });
+    // POS pre-compilata a multipli di 10 (0010, 0020, …), modificabile.
+    const posAuto = String((righe.length + 1) * 10).padStart(4, '0');
+    const inPos = el('input', { type:'text', class:'ord-inp', value: posAuto, placeholder:'0010' });
     const inOP = el('input', { type:'text', class:'ord-inp', placeholder:'OP (opz.)',
       onblur:(e)=>{ const m=e.target.value.trim().match(/^(\d{4})\/OP\/(\d{1,4})$/); if(m) e.target.value=m[1]+'/OP/'+m[2].padStart(5,'0'); } });
     const inRif = el('input', { type:'text', class:'ord-inp', placeholder:'rif.' });
@@ -5376,7 +5378,7 @@ function openNuovoOrdineModal() {
     righeWrap.append(row);
     return riga;
   }
-  creaRiga();  // parte da 1 riga (ordine singolo veloce)
+  for (let i = 0; i < 5; i++) creaRiga();  // 5 posizioni pronte; le vuote non si inseriscono
 
   body.append(header, righeWrap,
     el('button', { class:'btnsm', style:'margin-top:8px;align-self:flex-start;',
