@@ -5278,6 +5278,149 @@ async function autoGeneraFasiDaMedia(op) {
   return { creato: data.length, debole: !!p.debole };
 }
 
+// ── NUOVO ORDINE MULTI-RIGA: 1 OC → N posizioni in griglia ──────────────
+// L'intestazione (cliente + numero OC) si mette una volta; ogni riga è una
+// posizione (pos, articolo, quantità, prezzo, scadenza) e diventa una
+// operazione separata che condivide cliente_id + numero_ordine. La vista
+// generale resta per righe. Articoli ESISTENTI (per i nuovi usa "+ Nuova
+// Operazione"). Prezzo pre-compilato dal listino vivo.
+function openNuovoOrdineModal() {
+  if (state.profile?.ruolo !== 'admin') return;
+  if (state.aziende.length === 0 || state.articoli.length === 0)
+    return toast('Servono prima clienti e articoli.', 'err');
+  const prezzoAttivo = (state.operazioni || []).some(x => 'prezzo_unitario' in x);
+
+  const modal = el('div', { class:'modal', style:'max-width:960px;' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Nuovo ordine — più posizioni'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+
+  // Intestazione condivisa
+  const acCliente = makeAutocompleteCreate({
+    items: state.aziende.filter(c => c.attivo && c.is_cliente !== false),
+    getLabel: c => c.nome, placeholder:'Cerca cliente…', entityLabel:'cliente',
+    onChange: () => righe.forEach(r => r.prefillPrezzo()),
+  });
+  const inpOC = el('input', { type:'text', value: new Date().getFullYear() + '/OC/',
+    placeholder:'2026/OC/00001', pattern:'\\d{4}/OC/\\d{5}',
+    style:'font-family:DM Mono,monospace;',
+    onblur:(e)=>{ const m=e.target.value.trim().match(/^(\d{4})\/OC\/(\d{1,4})$/); if(m) e.target.value=m[1]+'/OC/'+m[2].padStart(5,'0'); } });
+  body.append(el('div', { class:'frow' },
+    el('div', { class:'field' }, el('label', {}, 'Cliente *'), acCliente.container),
+    el('div', { class:'field' }, el('label', {}, 'Numero ordine (OC) *'), inpOC),
+  ));
+
+  // Griglia posizioni
+  const clienteId = () => { const v = acCliente.getValue(); return (v.mode==='existing' && v.id) ? v.id : null; };
+  const righeWrap = el('div', { style:'display:flex;flex-direction:column;gap:6px;margin-top:8px;' });
+  const header = el('div', { style:'display:grid;grid-template-columns:70px 1fr 70px' + (prezzoAttivo?' 90px 90px':'') + ' 130px 28px;gap:8px;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;padding:0 2px;' },
+    el('span',{},'Pos'), el('span',{},'Codice articolo'), el('span',{},'Q.tà'),
+    ...(prezzoAttivo ? [el('span',{},'€/pz'), el('span',{},'Totale')] : []),
+    el('span',{},'Scadenza'), el('span',{},''));
+  const totBar = el('div', { style:'margin-top:8px;font-family:DM Mono,monospace;font-size:14px;font-weight:700;text-align:right;' });
+
+  let righe = [];
+  const aggiornaTotale = () => {
+    if (!prezzoAttivo) { totBar.textContent = ''; return; }
+    let tot = 0;
+    righe.forEach(r => { const d = r.getData(); if (d.articoloId && d.quantita>0 && d.prezzo>0) tot += d.quantita*d.prezzo; });
+    totBar.textContent = tot > 0 ? 'Totale ordine: € ' + tot.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
+  };
+
+  function creaRiga() {
+    const acArt = makeAutocompleteCreate({
+      items: state.articoli.filter(a => a.attivo), getLabel:a=>a.codice,
+      placeholder:'Codice…', entityLabel:'articolo',
+      onChange: () => { riga.prefillPrezzo(); aggiornaTot(); },
+    });
+    const inPos = el('input', { type:'text', placeholder:'0010', style:'font-family:DM Mono,monospace;' });
+    const inQta = el('input', { type:'number', value:'1', min:'1', oninput:()=>aggiornaTot() });
+    const inPrezzo = prezzoAttivo ? el('input', { type:'number', min:'0', step:'0.01', placeholder:'€', oninput:()=>aggiornaTot() }) : null;
+    const totCell = prezzoAttivo ? el('div', { style:'font-family:DM Mono,monospace;font-size:12px;align-self:center;color:var(--mut);' }, '—') : null;
+    const inScad = el('input', { type:'date' });
+    const artId = () => { const v = acArt.getValue(); return (v.mode==='existing' && v.id) ? v.id : null; };
+    const aggiornaTot = () => {
+      if (totCell) {
+        const q = Number(inQta.value)||0, p = Number(inPrezzo.value)||0;
+        totCell.textContent = (q>0&&p>0) ? '€ '+(q*p).toLocaleString('it-IT',{minimumFractionDigits:2}) : '—';
+      }
+      aggiornaTotale();
+    };
+    const btnX = el('button', { type:'button', class:'btnd', style:'align-self:center;',
+      onclick:()=>{ righe = righe.filter(r=>r!==riga); riga.el.remove(); if(!righe.length) creaRiga(); aggiornaTotale(); } }, '✕');
+    const row = el('div', { style:'display:grid;grid-template-columns:70px 1fr 70px' + (prezzoAttivo?' 90px 90px':'') + ' 130px 28px;gap:8px;align-items:start;' },
+      inPos, acArt.container, inQta, ...(prezzoAttivo?[inPrezzo, totCell]:[]), inScad, btnX);
+    const riga = {
+      el: row,
+      getData: () => ({
+        pos: (inPos.value||'').trim() || null, articoloId: artId(),
+        quantita: parseInt(inQta.value)||0,
+        prezzo: inPrezzo ? (parseFloat((inPrezzo.value||'').replace(',','.'))||0) : 0,
+        scadenza: inScad.value || null,
+      }),
+      prefillPrezzo: () => {
+        if (!inPrezzo) return;
+        const aId = artId();
+        if (!aId) return;
+        const list = prezzoListino(aId, clienteId());
+        if ((inPrezzo.value||'').trim()==='' && list) inPrezzo.value = String(list.prezzo);
+        aggiornaTot();
+      },
+    };
+    righe.push(riga);
+    righeWrap.append(row);
+    return riga;
+  }
+  creaRiga(); creaRiga(); creaRiga();  // parti con 3 righe pronte
+
+  body.append(header, righeWrap,
+    el('button', { class:'btnsm', style:'margin-top:8px;align-self:flex-start;',
+      onclick:()=>{ creaRiga(); } }, '+ Aggiungi riga'),
+    totBar);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
+  const btnSave = el('button', { class:'btnp' }, 'Crea ordine');
+  btnSave.onclick = async () => {
+    const cId = clienteId();
+    const oc = (inpOC.value||'').trim();
+    if (!cId) return toast('Scegli un cliente esistente', 'err');
+    if (!/^\d{4}\/OC\/\d{5}$/.test(oc)) return toast('Numero ordine nel formato AAAA/OC/NNNNN', 'err');
+    const dati = righe.map(r => r.getData()).filter(d => d.articoloId && d.quantita > 0);
+    if (!dati.length) return toast('Aggiungi almeno una riga con articolo e quantità', 'err');
+    btnSave.disabled = true; btnSave.textContent = 'Creazione…';
+    const payloads = dati.map(d => {
+      const art = state.articoli.find(a => a.id === d.articoloId);
+      const p = {
+        cliente_id: cId, articolo_id: d.articoloId, numero_ordine: oc,
+        pos: d.pos, quantita: d.quantita,
+        minuti_unitari: (art && art.minuti_unitari != null) ? Number(art.minuti_unitari) : 0,
+        scadenza: d.scadenza, stato:'aperta', stato_preparazione:'vuoto',
+      };
+      if (prezzoAttivo) p.prezzo_unitario = d.prezzo > 0 ? d.prezzo : null;
+      return p;
+    });
+    try {
+      const { data, error } = await sb.from('operazioni').insert(payloads).select();
+      if (error) { btnSave.disabled=false; btnSave.textContent='Crea ordine'; return toast('Errore: '+error.message, 'err'); }
+      (data||[]).forEach(r => { if (!state.operazioni.find(x=>x.id===r.id)) state.operazioni.push(r); });
+      // Fasi effettive per ogni nuova commessa (best-effort, come nel modal singolo)
+      for (const r of (data||[])) { try { await autoGeneraFasiDaMedia(r); } catch(e){} }
+      toast('Ordine creato: ' + (data||[]).length + ' posizioni', 'ok');
+      closeModal(); renderTab('pianificazione');
+    } catch (e) {
+      btnSave.disabled=false; btnSave.textContent='Crea ordine';
+      toast('Errore di rete: '+(e.message||e), 'err');
+    }
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+}
+
 // Modale "Ordina priorità" (gestionale): riordino di tutte le commesse aperte.
 function openPrioritaModal() {
   const items = state.operazioni
@@ -5472,6 +5615,7 @@ function renderPianificazione(root) {
   );
   if (isAdmin) {
     toolbar.append(el('button', { class:'btnp', onclick:()=>openOperazioneModal() }, '+ Nuova Operazione'));
+    toolbar.append(el('button', { class:'btng', onclick:()=>openNuovoOrdineModal() }, '+ Ordine multi-riga'));
     toolbar.append(el('button', { class:'btng', onclick:()=>openPrioritaModal() }, '⠿ Ordina priorità'));
     // Raggruppa: entra in modalità selezione — le commesse scelte diventano
     // un gruppo, viste come UNA al kiosk (il tempo timbrato si divide in parti
