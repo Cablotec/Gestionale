@@ -5307,11 +5307,14 @@ function openNuovoOrdineModal() {
   const inpOC = el('input', { type:'text', class:'ord-inp', value: new Date().getFullYear() + '/OC/',
     placeholder:'2026/OC/00001', pattern:'\\d{4}/OC/\\d{5}',
     onblur:(e)=>{ const m=e.target.value.trim().match(/^(\d{4})\/OC\/(\d{1,4})$/); if(m) e.target.value=m[1]+'/OC/'+m[2].padStart(5,'0'); } });
-  // Intestazione: due colonne allineate in basso (l'hint sotto il cliente non
-  // deve sfasare il campo OC).
-  body.append(el('div', { style:'display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:end;' },
+  // Intestazione: il campo OC replica ESATTAMENTE la geometria del cliente
+  // (margin-top:6px come .util-dropwrap + spaziatore alto quanto l'hint),
+  // così i due input sono sovrapponibili al pixel (misurato: 121→153 entrambi).
+  inpOC.style.marginTop = '6px';
+  body.append(el('div', { style:'display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:start;' },
     el('div', { class:'field' }, el('label', { style:'white-space:nowrap;' }, 'Cliente *'), acCliente.container),
-    el('div', { class:'field' }, el('label', { style:'white-space:nowrap;' }, 'Numero ordine (OC) *'), inpOC),
+    el('div', { class:'field' }, el('label', { style:'white-space:nowrap;' }, 'Numero ordine (OC) *'), inpOC,
+      el('div', { style:'min-height:14px;margin-top:4px;' })),
   ));
 
   const clienteId = () => { const v = acCliente.getValue(); return (v.mode==='existing' && v.id) ? v.id : null; };
