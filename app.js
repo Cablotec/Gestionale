@@ -3513,6 +3513,46 @@ function openArticoloModal(a, opts) {
   renderFasi();
   aggiornaConfronto();
 
+  // --- Listino: ultimo prezzo per cliente, DERIVATO dagli ordini (mai una
+  // tabella). Sola lettura: si aggiorna da solo a ogni ordine con €/pz.
+  // Un blocco per cliente, drill-down = andamento (stile fasi). ---
+  const listinoWrap = el('div', { class:'fasi-list' });
+  const listinoRighe = (a.id && typeof storicoPrezziArticolo === 'function')
+    ? storicoPrezziArticolo(a.id) : [];
+  {
+    const fmtEuro = (n) => '€ ' + Number(n).toLocaleString('it-IT',
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtD = (iso) => iso ? fmtIT(String(iso).slice(0, 10)) : '';
+    const perCliente = new Map();
+    listinoRighe.forEach(r => {
+      const k = r.clienteId || '';
+      if (!perCliente.has(k)) perCliente.set(k, []);
+      perCliente.get(k).push(r);
+    });
+    if (perCliente.size === 0) {
+      listinoWrap.append(el('div', { class:'sub' },
+        isNew ? 'Si compila da solo dagli ordini con prezzo €/pz.'
+              : 'Nessun prezzo registrato: si compila da solo dagli ordini con prezzo €/pz.'));
+    } else {
+      // Clienti ordinati per data dell'ultimo prezzo (più recente in alto).
+      [...perCliente.entries()]
+        .sort((x, y) => String(y[1][0].data || '').localeCompare(String(x[1][0].data || '')))
+        .forEach(([cliId, righe]) => {
+          const nome = state.aziende.find(c => c.id === cliId)?.nome || 'Cliente sconosciuto';
+          const ult = righe[0];
+          listinoWrap.append(entityTimeline({
+            sommario: nome + ' — ' + fmtEuro(ult.prezzo)
+              + (ult.data ? ' (' + fmtD(ult.data) + ')' : ''),
+            righe: righe.map(r => ({
+              titolo: r.numero_ordine || '—',
+              meta: (r.data ? fmtD(r.data) + ' · ' : '') + r.quantita + ' pz',
+              valore: fmtEuro(r.prezzo),
+            })),
+          }));
+        });
+    }
+  }
+
   form.append(
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Codice *'), inCodice),
@@ -3532,6 +3572,12 @@ function openArticoloModal(a, opts) {
         'Compilate in automatico dalla MEDIA STORICA (spedite+completate), viva a ogni apertura: '
         + 'è quella che usano le commesse nuove. I valori manuali contano solo per i tipi senza storico. '
         + 'La somma dovrebbe stare entro il tempo pagato.')),
+    el('div', { class:'field' },
+      el('label', {}, 'Listino — ultimo prezzo per cliente'),
+      listinoWrap,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Derivato dagli ordini: ultimo prezzo usato con ciascun cliente (non la media). '
+        + 'Click per l\'andamento. Pre-compila il prezzo nei nuovi ordini.')),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
 
