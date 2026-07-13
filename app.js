@@ -5289,7 +5289,7 @@ function openNuovoOrdineModal() {
   if (state.aziende.length === 0 || state.articoli.length === 0)
     return toast('Servono prima clienti e articoli.', 'err');
   const prezzoAttivo = (state.operazioni || []).some(x => 'prezzo_unitario' in x);
-  const cols = '64px 1fr 120px 64px' + (prezzoAttivo ? ' 88px' : '') + ' 128px 28px';
+  const cols = '58px 1fr 120px 120px 56px' + (prezzoAttivo ? ' 82px' : '') + ' 120px 26px';
 
   const modal = el('div', { class:'modal', style:'max-width:1000px;' });
   modal.append(el('div', { class:'mhd' },
@@ -5304,9 +5304,8 @@ function openNuovoOrdineModal() {
     getLabel: c => c.nome, placeholder:'Cerca o digita nuovo cliente…', entityLabel:'cliente',
     onChange: () => righe.forEach(r => r.prefillPrezzo()),
   });
-  const inpOC = el('input', { type:'text', value: new Date().getFullYear() + '/OC/',
+  const inpOC = el('input', { type:'text', class:'ord-inp', value: new Date().getFullYear() + '/OC/',
     placeholder:'2026/OC/00001', pattern:'\\d{4}/OC/\\d{5}',
-    style:'font-family:DM Mono,monospace;',
     onblur:(e)=>{ const m=e.target.value.trim().match(/^(\d{4})\/OC\/(\d{1,4})$/); if(m) e.target.value=m[1]+'/OC/'+m[2].padStart(5,'0'); } });
   body.append(el('div', { class:'frow' },
     el('div', { class:'field' }, el('label', {}, 'Cliente *'), acCliente.container),
@@ -5316,7 +5315,7 @@ function openNuovoOrdineModal() {
   const clienteId = () => { const v = acCliente.getValue(); return (v.mode==='existing' && v.id) ? v.id : null; };
   const righeWrap = el('div', { style:'display:flex;flex-direction:column;gap:6px;margin-top:8px;' });
   const header = el('div', { style:'display:grid;grid-template-columns:'+cols+';gap:8px;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;padding:0 2px;' },
-    el('span',{},'Pos'), el('span',{},'Codice articolo'), el('span',{},'Rif. cliente'), el('span',{},'Q.tà'),
+    el('span',{},'Pos'), el('span',{},'Codice articolo'), el('span',{},'Numero OP'), el('span',{},'Rif. cliente'), el('span',{},'Q.tà'),
     ...(prezzoAttivo ? [el('span',{},'€/pz')] : []),
     el('span',{},'Scadenza'), el('span',{},''));
   const totBar = el('div', { style:'margin-top:8px;font-family:DM Mono,monospace;font-size:14px;font-weight:700;text-align:right;' });
@@ -5335,25 +5334,28 @@ function openNuovoOrdineModal() {
       placeholder:'Cerca o digita nuovo codice…', entityLabel:'articolo',
       onChange: () => { riga.prefillPrezzo(); aggiornaTotale(); },
     });
-    const inPos = el('input', { type:'text', placeholder:'0010', style:'font-family:DM Mono,monospace;' });
-    const inRif = el('input', { type:'text', placeholder:'rif.' });
-    const inQta = el('input', { type:'number', value:'1', min:'1', oninput:()=>aggiornaTotale() });
-    const inPrezzo = prezzoAttivo ? el('input', { type:'number', min:'0', step:'0.01', placeholder:'€', oninput:()=>aggiornaTotale() }) : null;
-    const inScad = el('input', { type:'date' });
-    const getVal = () => acArt.getValue();
+    const inPos = el('input', { type:'text', class:'ord-inp', placeholder:'0010' });
+    const inOP = el('input', { type:'text', class:'ord-inp', placeholder:'OP (opz.)',
+      onblur:(e)=>{ const m=e.target.value.trim().match(/^(\d{4})\/OP\/(\d{1,4})$/); if(m) e.target.value=m[1]+'/OP/'+m[2].padStart(5,'0'); } });
+    const inRif = el('input', { type:'text', class:'ord-inp', placeholder:'rif.' });
+    const inQta = el('input', { type:'number', class:'ord-inp', value:'1', min:'1', oninput:()=>aggiornaTotale() });
+    const inPrezzo = prezzoAttivo ? el('input', { type:'number', class:'ord-inp', min:'0', step:'0.01', placeholder:'€', oninput:()=>aggiornaTotale() }) : null;
+    const inScad = el('input', { type:'date', class:'ord-inp' });
     const btnX = el('button', { type:'button', class:'btnd', style:'align-self:center;',
       onclick:()=>{ righe = righe.filter(r=>r!==riga); riga.el.remove(); if(!righe.length) creaRiga(); aggiornaTotale(); } }, '✕');
     const row = el('div', { style:'display:grid;grid-template-columns:'+cols+';gap:8px;align-items:start;' },
-      inPos, acArt.container, inRif, inQta, ...(prezzoAttivo?[inPrezzo]:[]), inScad, btnX);
+      inPos, acArt.container, inOP, inRif, inQta, ...(prezzoAttivo?[inPrezzo]:[]), inScad, btnX);
     const riga = {
       el: row,
       getData: () => {
         const v = acArt.getValue();
+        const opRaw = (inOP.value||'').trim();
         return {
           getVal: v,
           articoloId: (v.mode==='existing' && v.id) ? v.id : null,
           nuovoCodice: (v.mode==='new') ? (v.text||'').trim() : null,
           pos: (inPos.value||'').trim() || null,
+          numero_op: /^\d{4}\/OP\/\d{5}$/.test(opRaw) ? opRaw : null,
           riferimento_cliente: (inRif.value||'').trim() || null,
           quantita: parseInt(inQta.value)||0,
           prezzo: inPrezzo ? (parseFloat((inPrezzo.value||'').replace(',','.'))||0) : 0,
@@ -5420,7 +5422,7 @@ function openNuovoOrdineModal() {
         const art = state.articoli.find(a => a.id === artId);
         const p = {
           cliente_id: cId, articolo_id: artId, numero_ordine: oc,
-          pos: d.pos, riferimento_cliente: d.riferimento_cliente, quantita: d.quantita,
+          pos: d.pos, numero_op: d.numero_op, riferimento_cliente: d.riferimento_cliente, quantita: d.quantita,
           minuti_unitari: (art && art.minuti_unitari != null) ? Number(art.minuti_unitari) : 0,
           scadenza: d.scadenza, stato:'aperta', stato_preparazione:'vuoto',
         };

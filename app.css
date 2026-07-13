@@ -193,6 +193,9 @@ input.search:focus{border-color:var(--acc);}
 .field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
 .field label{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);}
 .field input,.field select{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);padding:7px 10px;border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;outline:none;width:100%;}
+/* Input della griglia "Nuovo ordine": stesso aspetto degli input nei .field */
+.ord-inp{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);padding:7px 9px;border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;outline:none;width:100%;box-sizing:border-box;}
+.ord-inp:focus{border-color:var(--acc);}
 .field textarea{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);padding:7px 10px;border-radius:4px;font-family:'Syne',sans-serif;font-size:12px;outline:none;width:100%;resize:vertical;}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--acc);}
 .field input[type=color]{padding:2px;height:34px;cursor:pointer;}
