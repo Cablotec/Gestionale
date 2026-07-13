@@ -1166,3 +1166,39 @@ function commesseGruppoLavorabili(op) {
   const altri = membri.filter(o => o.id !== op.id);
   return [op, ...altri].map(o => ({ operazione_id: o.id, peso: peso(o) }));
 }
+
+// ── LISTINO VIVO: ultimo prezzo per (articolo, cliente) ────────────────
+// Il "listino" non è una tabella: è derivato dai prezzi degli ordini passati.
+// Pre-compila il prezzo di una riga nuova con l'ULTIMO usato (non la media:
+// i prezzi si negoziano). Chiave articolo+cliente; se quel cliente non ha
+// storico su quel codice, ripiega sull'ultimo prezzo con chiunque.
+// Asse temporale: created_at dell'ordine (non la scadenza). Ritorna
+// { prezzo, clienteId, data, proprioCliente } o null.
+function prezzoListino(articoloId, clienteId) {
+  if (!articoloId) return null;
+  const conPrezzo = (state.operazioni || [])
+    .filter(o => o.articolo_id === articoloId && Number(o.prezzo_unitario) > 0);
+  if (!conPrezzo.length) return null;
+  const piuRecente = (arr) => arr.slice().sort((a, b) =>
+    String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
+  const stessoCli = clienteId ? conPrezzo.filter(o => o.cliente_id === clienteId) : [];
+  const scelta = stessoCli.length ? piuRecente(stessoCli) : piuRecente(conPrezzo);
+  return {
+    prezzo: Number(scelta.prezzo_unitario),
+    clienteId: scelta.cliente_id,
+    data: scelta.created_at || scelta.scadenza || null,
+    proprioCliente: stessoCli.length > 0,
+  };
+}
+// Storico prezzi di un articolo: tutte le righe con prezzo, per il drill-down
+// e l'andamento. Ordinate dal più recente. Ritorna [{ prezzo, clienteId,
+// data, numero_ordine, quantita }].
+function storicoPrezziArticolo(articoloId) {
+  if (!articoloId) return [];
+  return (state.operazioni || [])
+    .filter(o => o.articolo_id === articoloId && Number(o.prezzo_unitario) > 0)
+    .map(o => ({ prezzo: Number(o.prezzo_unitario), clienteId: o.cliente_id,
+      data: o.created_at || o.scadenza || null, numero_ordine: o.numero_ordine,
+      quantita: Number(o.quantita) || 0 }))
+    .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+}

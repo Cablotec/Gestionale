@@ -5939,6 +5939,10 @@ function openOperazioneModal(o) {
   // Stato locale degli addetti previsti (modificabile, sincronizzato al salvataggio)
   let addettiSel = isNew ? [] : getOperazioneAddetti(o.id).slice();
   const canEdit = isAdmin;
+  // La colonna prezzo esiste sul DB? (rilevata dai dati caricati). Finché non
+  // c'è la migrazione, non mostro il campo né provo a salvarlo — così il
+  // salvataggio non va in errore su una colonna inesistente.
+  const prezzoAttivo = (state.operazioni || []).some(x => 'prezzo_unitario' in x);
 
   const modal = el('div', { class:'modal', style:'max-width:720px;' });
   modal.append(el('div', { class:'mhd' },
@@ -5957,6 +5961,7 @@ function openOperazioneModal(o) {
     placeholder: 'Cerca o digita nuovo cliente…',
     initialId: o.cliente_id || null,
     entityLabel: 'cliente',
+    onChange: () => { if (typeof aggiornaPrezzoListino === 'function') aggiornaPrezzoListino(); },
   });
 
   // Autocomplete articolo — con creazione al volo.
@@ -5997,6 +6002,9 @@ function openOperazioneModal(o) {
           minuti_unitari: Number(f.minuti_unitari) || 0, _fonte: f.fonte, _nComm: f.nCommesse }));
         if (typeof onFasiChanged === 'function') onFasiChanged();
       }
+      // Prezzo: pre-compila dall'ultimo usato (articolo+cliente) se il campo è
+      // ancora vuoto — non sovrascrive un prezzo già digitato a mano.
+      if (typeof aggiornaPrezzoListino === 'function') aggiornaPrezzoListino();
       // Aggiorna indicatore divergenza (se la funzione è già definita)
       if (typeof aggiornaIndicatoreMinuti === 'function') aggiornaIndicatoreMinuti();
       // Trigga il refresh del preview (se la funzione è già definita)
@@ -6578,6 +6586,19 @@ function openOperazioneModal(o) {
         }),
         el('div', { class:'sub', id:'minuti-hint', style:'margin-top:4px;font-size:10px;color:var(--mut);' },
           'Suggerito automaticamente dall\'articolo selezionato.')),
+    ),
+    // Prezzo di vendita (€/pezzo) + totale riga. Pre-compilato dall'ultimo
+    // prezzo usato per stesso articolo+cliente (listino vivo). Il blocco viene
+    // rimosso se la colonna prezzo_unitario non esiste ancora (pre-migrazione).
+    el('div', { class:'frow', id:'prezzo-frow' },
+      el('div', { class:'field' }, el('label', {}, 'Prezzo unitario (€/pz)'),
+        el('input', { type:'number', name:'prezzo_unitario', id:'prezzo-input',
+          value: String(o.prezzo_unitario != null ? o.prezzo_unitario : ''),
+          min:'0', step:'0.01', placeholder:'€ per pezzo' }),
+        el('div', { class:'sub', id:'prezzo-hint', style:'margin-top:4px;font-size:10px;color:var(--mut);' },
+          'Ultimo prezzo per articolo+cliente (modificabile).')),
+      el('div', { class:'field' }, el('label', {}, 'Totale riga'),
+        el('div', { id:'prezzo-totale', style:'padding:8px 0;font-family:DM Mono,monospace;font-size:15px;font-weight:700;' }, '—')),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Scadenza'),
@@ -7258,6 +7279,42 @@ function openOperazioneModal(o) {
   // a seconda che il valore della commessa coincida o no col valore dell'articolo.
   // Try/catch difensivo: se per qualunque motivo qualcosa va storto qui, NON
   // deve rompere l'apertura/uso del modal commessa (che è funzione critica).
+  // Totale riga = prezzo × quantità (aggiornato live).
+  const aggiornaTotalePrezzo = () => {
+    try {
+      const tot = form.querySelector('#prezzo-totale');
+      if (!tot) return;
+      const pz = parseFloat((form.querySelector('[name=quantita]')?.value || '').toString().replace(',', '.')) || 0;
+      const pr = parseFloat((form.querySelector('#prezzo-input')?.value || '').toString().replace(',', '.')) || 0;
+      tot.textContent = (pz > 0 && pr > 0)
+        ? '€ ' + (pz * pr).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : '—';
+    } catch (e) {}
+  };
+  // Pre-compila il prezzo dall'ultimo usato (listino vivo, articolo+cliente)
+  // solo se il campo è vuoto; aggiorna sempre il suggerimento e il totale.
+  const aggiornaPrezzoListino = () => {
+    try {
+      const inp = form.querySelector('#prezzo-input');
+      const hint = form.querySelector('#prezzo-hint');
+      if (!inp) return;
+      const artVal = acArticolo.getValue();
+      const cliVal = acCliente.getValue();
+      const artId = (artVal.mode === 'existing' && artVal.id) ? artVal.id : null;
+      const cliId = (cliVal.mode === 'existing' && cliVal.id) ? cliVal.id : null;
+      const list = artId ? prezzoListino(artId, cliId) : null;
+      const vuoto = (inp.value || '').toString().trim() === '';
+      if (vuoto && isNew && list) inp.value = String(list.prezzo);
+      if (hint) {
+        hint.textContent = list
+          ? 'Ultimo prezzo: € ' + list.prezzo.toLocaleString('it-IT', { minimumFractionDigits: 2 })
+            + (list.proprioCliente ? ' (questo cliente' : ' (altro cliente')
+            + (list.data ? ', ' + fmtIT(String(list.data).slice(0, 10)) : '') + ')'
+          : 'Primo prezzo per questo articolo: verrà usato come listino la prossima volta.';
+      }
+      aggiornaTotalePrezzo();
+    } catch (e) {}
+  };
   const aggiornaIndicatoreMinuti = () => {
     try {
       const star = form.querySelector('#minuti-diff');
@@ -7420,6 +7477,15 @@ function openOperazioneModal(o) {
     if (f) f.addEventListener('input', aggiornaDataRealistica);
   });
   aggiornaDataRealistica();
+  // Prezzo: se la colonna non esiste ancora (pre-migrazione) tolgo il blocco;
+  // altrimenti aggancio il totale live e pre-compilo dal listino.
+  if (!prezzoAttivo) {
+    form.querySelector('#prezzo-frow')?.remove();
+  } else {
+    form.querySelector('[name=quantita]')?.addEventListener('input', aggiornaTotalePrezzo);
+    form.querySelector('#prezzo-input')?.addEventListener('input', aggiornaTotalePrezzo);
+    aggiornaPrezzoListino();
+  }
   // Bind aggiuntivo: input minuti aggiorna anche l'indicatore di divergenza
   const minInputEl = form.querySelector('#minuti-input');
   if (minInputEl) minInputEl.addEventListener('input', aggiornaIndicatoreMinuti);
@@ -7675,6 +7741,12 @@ function openOperazioneModal(o) {
         note: (fd.get('note')||'').trim() || null,
         fasi_sequenziali: (fasiComm.filter(f => f.tipo_lavorazione_id).length >= 2) ? fasiSeq : false,
       };
+      // Prezzo: solo se la colonna esiste (post-migrazione), così il salvataggio
+      // non fallisce su una colonna inesistente.
+      if (prezzoAttivo) {
+        const v = parseFloat((fd.get('prezzo_unitario') || '').toString().replace(',', '.'));
+        payload.prezzo_unitario = (Number.isFinite(v) && v >= 0) ? v : null;
+      }
       if (!isNew && o.stato === 'spedita') {
         payload.consegnato_il = fd.get('consegnato_il') || null;
         payload.giustificazione_ritardo = (fd.get('giustificazione_ritardo')||'').trim() || null;

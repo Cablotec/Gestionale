@@ -64,6 +64,13 @@
 - **RICHIEDE MIGRAZIONE** (una volta, da pannello Supabase SQL): `alter table operazioni add column gruppo_id uuid;`. Finché la colonna non c'è, nessun effetto (comportamento invariato).
 - **v1, limiti noti**: la "fine fase" marca finita solo la commessa timbrata, non propaga al gruppo; fase_id=null sulle copie (match per tipo). Da valutare con Nico se servono.
 
+## Prezzi / listino vivo (in corso, dal 12 lug 2026)
+- **Piano condiviso con Nico**: prezzo di vendita sulla riga ordine (`operazioni.prezzo_unitario`) → **listino vivo** derivato (ultimo prezzo per articolo+cliente, non media: i prezzi si negoziano) → **storico prezzi** gratis (ogni riga tiene il suo prezzo+data+cliente) → alimenta €/ora cliente e andamento. Niente tabelle listino/storico: tutto derivato, come le fasi.
+- **Sequenza**: (1) colonna prezzo + pre-compilazione nel modal ✔ FATTO; (2) inserimento ordini multi-riga (1 OC → N posizioni in griglia); (3) €/ora per cliente in Analisi clienti; poi traccia fornitori (tariffa → prezzo fasi).
+- **Motore**: `prezzoListino(articoloId, clienteId)` (ultimo per created_at, ripiega su altro cliente) + `storicoPrezziArticolo` in domain (7 test). Asse tempo = `created_at` (non scadenza).
+- **RICHIEDE MIGRAZIONE**: `alter table operazioni add column prezzo_unitario numeric;`. Il campo prezzo nel modal è gated su `prezzoAttivo` (rilevato dai dati caricati): finché la colonna non c'è, il blocco non si mostra e non si salva → nessun errore.
+- **Da fare step 2/3**: griglia multi-riga; sezione listino (per cliente: ultimo prezzo + drill-down andamento) nell'anagrafica articolo; €/ora in Analisi clienti; prezzo base manuale opzionale sull'articolo (fallback cliente nuovo) solo se serve.
+
 ## Diciture unità (Nico ci tiene: UNA dicitura, SEMPRE quella)
 - Tempo per pezzo: **`min/pz`** (mai l'apostrofo `'`).
 - Totali di fase / minuti assoluti: **`min`**.
