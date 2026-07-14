@@ -1406,9 +1406,9 @@ const TAB_STRUCTURE = {
     label: 'Gestione',
     adminOnly: true,
     tabs: [
+      { id: 'articoli',       label: 'Articoli',          adminOnly: true },
       { id: 'aziende',        label: 'Aziende',           adminOnly: true },
       { id: 'analisi_clienti', label: 'Analisi clienti',  adminOnly: true },
-      { id: 'articoli',       label: 'Articoli',          adminOnly: true },
       { id: 'tipi_lav',       label: 'Tipi lavorazione',  adminOnly: true },
       { id: 'mezzi',          label: 'Anagrafica mezzi',  adminOnly: true },
       { id: 'operatori',      label: 'Utenti',            adminOnly: true },
@@ -3391,13 +3391,14 @@ function renderArticoli(root) {
     el('th', { class:'tr' }, 'Min/pz'),
     el('th', {}, 'Note'),
     el('th', { class:'tc' }, 'Stato'),
-    el('th', { class:'tc' }, 'Azioni'),
   )));
   const tb = el('tbody');
+  // Niente colonna Azioni: click sulla riga apre la scheda (modifica per
+  // l'admin, sola lettura per gli altri). L'eliminazione vive nella scheda.
   list.forEach(a => {
     const minutiVal = (a.minuti_unitari != null && a.minuti_unitari !== '')
       ? Number(a.minuti_unitari) : null;
-    tb.append(el('tr', {},
+    tb.append(el('tr', { style:'cursor:pointer;', onclick:()=>openArticoloModal(a) },
       el('td', { class:'cod-cell' }, a.codice || '—'),
       el('td', {}, a.descrizione || ''),
       el('td', { style:'color:var(--mut);font-size:11px;' }, a.categoria || ''),
@@ -3411,15 +3412,6 @@ function renderArticoli(root) {
       el('td', { class:'tc' }, a.attivo
         ? el('span', { class:'badge bok' }, 'attivo')
         : el('span', { class:'badge bgry' }, 'disatt.')),
-      el('td', { class:'tc' },
-        isAdmin
-          ? el('span', {},
-              el('button', { class:'btnsm', onclick:()=>openArticoloModal(a) }, 'Modifica'),
-              ' ',
-              el('button', { class:'btnd', onclick:()=>deleteArticolo(a) }, 'Elimina'),
-            )
-          : el('button', { class:'btnsm', onclick:()=>openArticoloModal(a) }, 'Vedi')
-      ),
     ));
   });
   tbl.append(tb);
@@ -3488,8 +3480,7 @@ function openArticoloModal(a, opts) {
         .sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
         .map(f => ({ tipo_lavorazione_id: f.tipo_lavorazione_id || null, minuti_unitari: Number(f.minuti_unitari) || 0 })));
   const notaMinuti = el('div', { class:'sub', style:'margin-top:4px;' },
-    'Tempo PAGATO per pezzo (lo standard commerciale). Pre-compila le nuove commesse. '
-    + 'Le fasi qui sotto sono la scomposizione interna e dovrebbero starci dentro.');
+    'Lo standard commerciale: pre-compila le nuove commesse.');
   const fasiWrap = el('div', { class:'fasi-list' });
   const notaConfronto = el('div', { class:'sub', style:'margin-top:8px;font-family:DM Mono,monospace;' });
   function pagatoCorrente() {
@@ -3619,38 +3610,49 @@ function openArticoloModal(a, opts) {
     }
   }
 
+  // Corpo a SEZIONI (stile scheda azienda): anagrafica → tempi → listino
+  // → note. Hint corti, uno per campo dove serve davvero.
+  const sez = (t) => el('div', { class:'sub',
+    style:'margin:16px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+    '── ' + t + ' ──');
+  inCategoria.placeholder = 'es. Cablaggi';
   form.append(
-    el('div', { class:'frow' },
+    el('div', { style:'display:grid;grid-template-columns:minmax(160px,2fr) minmax(110px,1fr) 120px;gap:10px;' },
       el('div', { class:'field' }, el('label', {}, 'Codice *'), inCodice),
+      el('div', { class:'field' }, el('label', {}, 'Categoria'), inCategoria),
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
     ),
     el('div', { class:'field' }, el('label', {}, 'Descrizione'), inDesc),
-    el('div', { class:'field' }, el('label', {}, 'Categoria'), inCategoria,
-      el('div', { class:'sub', style:'margin-top:4px;' },
-        'Es. "Elettronica", "Meccanica", "Cablaggi" — utile per raggruppamenti futuri.')),
-    el('div', { class:'field' }, el('label', {}, 'Minuti unitari per pezzo — tempo pagato'), inMinuti, notaMinuti),
+    sez('Tempo pagato e fasi'),
+    el('div', { class:'field' }, el('label', {}, 'Tempo pagato (min/pz)'), inMinuti, notaMinuti),
     el('div', { class:'field' },
-      el('label', {}, 'Fasi (opzionale)'),
+      el('label', {}, 'Fasi — scomposizione interna (opzionale)'),
       fasiWrap,
       btnAddFase,
       notaConfronto,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Compilate in automatico dalla MEDIA STORICA (spedite+completate), viva a ogni apertura: '
-        + 'è quella che usano le commesse nuove. I valori manuali contano solo per i tipi senza storico. '
-        + 'La somma dovrebbe stare entro il tempo pagato.')),
+        'Auto-compilate dalla media storica (viva a ogni apertura); i valori manuali '
+        + 'contano solo per i tipi senza storico. La somma dovrebbe stare entro il tempo pagato.')),
+    sez('Listino'),
     el('div', { class:'field' },
-      el('label', {}, 'Listino — ultimo prezzo per cliente'),
       listinoWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Derivato dagli ordini: ultimo prezzo usato con ciascun cliente (non la media). '
-        + 'Click per l\'andamento. Pre-compila il prezzo nei nuovi ordini.')),
-    el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
+        'Ultimo prezzo per cliente, derivato dagli ordini (non la media). Click per l\'andamento. '
+        + 'Pre-compila il prezzo nei nuovi ordini.')),
+    sez('Note'),
+    el('div', { class:'field' }, inNote),
   );
 
   body.append(form);
   modal.append(body);
 
   const foot = el('div', { class:'mfoot' });
+  // Elimina: vive QUI dentro (la tabella non ha più pulsanti), a sinistra
+  // e lontano da Salva. deleteArticolo chiede già conferma e ridisegna.
+  if (isAdmin && !isNew) {
+    foot.append(el('button', { class:'btnd', style:'margin-right:auto;',
+      onclick: async () => { if (await deleteArticolo(a)) closeModal(); } }, 'Elimina articolo'));
+  }
   foot.append(el('button', { class:'btng', onclick:chiudi }, 'Chiudi'));
   if (isAdmin) {
     const btnSave = el('button', { class:'btnp' }, 'Salva');
@@ -3723,18 +3725,20 @@ function openArticoloModal(a, opts) {
   openModal(modal);
 }
 
+// Ritorna true solo a eliminazione avvenuta (il chiamante decide se chiudere).
 async function deleteArticolo(a) {
-  if (!confirm(`Eliminare l'articolo "${a.codice}"?\nNon sarà possibile se ha operazioni associate.`)) return;
+  if (!confirm(`Eliminare l'articolo "${a.codice}"?\nNon sarà possibile se ha operazioni associate.`)) return false;
   const { data, error } = await sb.from('articoli').delete().eq('id', a.id).select();
   if (error) {
-    if (error.code === '23503') return toast('Impossibile: ci sono operazioni legate a questo articolo', 'err');
-    return toast(error.message, 'err');
+    if (error.code === '23503') { toast('Impossibile: ci sono operazioni legate a questo articolo', 'err'); return false; }
+    toast(error.message, 'err'); return false;
   }
   if (!data || data.length === 0) {
-    return toast('Eliminazione bloccata: verifica le policy DELETE su articoli', 'err');
+    toast('Eliminazione bloccata: verifica le policy DELETE su articoli', 'err'); return false;
   }
   state.articoli = state.articoli.filter(x => x.id !== a.id);
   toast('Articolo eliminato'); renderTab('articoli');
+  return true;
 }
 
 // ─── Import Excel ───
