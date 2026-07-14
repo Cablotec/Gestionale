@@ -2915,16 +2915,38 @@ function openClienteModal(c) {
         'capacità relativa rispetto a 1 operatore interno (1.0 = uguale)'),
     ),
   );
-  // Visibilità coefficiente legata al checkbox fornitore
+  // Tariffa oraria fornitore (€/h): base del prezzo fase suggerito nel modal
+  // commessa (ore fase × tariffa). Colonna nuova su aziende: finché la
+  // migrazione non è eseguita il campo resta spento e il salvataggio non la
+  // tocca (stesso pattern di gruppo_id). Rilevo la colonna dalle righe caricate.
+  const tariffaDisponibile = (state.aziende || []).some(a => a && ('tariffa_oraria' in a));
+  const inTariffa = el('input', {
+    type:'number', name:'tariffa_oraria', step:'0.5', min:'0',
+    value: c.tariffa_oraria != null ? String(c.tariffa_oraria) : '',
+    placeholder:'es. 25', style:'width:100px;',
+  });
+  if (!tariffaDisponibile) inTariffa.disabled = true;
+  const tariffaRow = el('div', { class:'field' },
+    el('label', {}, 'Tariffa oraria (€/h)'),
+    el('div', { style:'display:flex;align-items:center;gap:10px;' },
+      inTariffa,
+      el('span', { style:'font-size:11px;color:var(--mut);' },
+        tariffaDisponibile
+          ? 'per il prezzo fase suggerito nelle commesse: ore fase × tariffa (vuoto = niente suggerimento)'
+          : 'richiede la colonna aziende.tariffa_oraria (migrazione dal pannello Supabase)'),
+    ),
+  );
+  // Visibilità coefficiente e tariffa legata al checkbox fornitore
   const aggiornaCoeff = () => {
     coeffRow.style.display = chkFornitore.checked ? '' : 'none';
+    tariffaRow.style.display = chkFornitore.checked ? '' : 'none';
   };
   aggiornaCoeff();
   chkFornitore.addEventListener('change', aggiornaCoeff);
 
   if (readonly) {
     [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inEmail, inNote, selAttivo,
-     chkCliente, chkFornitore, inCoeff]
+     chkCliente, chkFornitore, inCoeff, inTariffa]
       .forEach(i => i.disabled = true);
   }
 
@@ -2941,6 +2963,7 @@ function openClienteModal(c) {
         chkFornitore, 'Fornitore'),
     ),
     coeffRow,
+    tariffaRow,
     el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
       '── Indirizzo ──'),
     el('div', { class:'field' }, el('label', {}, 'Via e civico'), inVia),
@@ -2992,6 +3015,15 @@ function openClienteModal(c) {
         is_fornitore: isFornitore,
         coefficiente: isFornitore ? coeff : 1.0,
       };
+      // tariffa_oraria solo se la colonna esiste (migrazione eseguita)
+      if (tariffaDisponibile) {
+        const trRaw = (fd.get('tariffa_oraria') || '').toString().trim();
+        const trVal = trRaw === '' ? null : Number(trRaw.replace(',', '.'));
+        if (trRaw !== '' && (!Number.isFinite(trVal) || trVal < 0)) {
+          return toast('Tariffa oraria: valore non valido', 'err');
+        }
+        payload.tariffa_oraria = isFornitore ? trVal : null;
+      }
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
       btnSave.disabled = true;
       btnSave.textContent = 'Salvataggio…';
@@ -6481,6 +6513,31 @@ function openOperazioneModal(o) {
     fornitoriSel = Object.values(byAz);
   }
   const aziendeFornitrici = state.aziende.filter(a => a.is_fornitore && a.attivo);
+  // ── Prezzo fase suggerito (per fornitore): ore assegnate × tariffa €/h ──
+  // Le ore sono la quota di lavoro di QUEL fornitore: somma min/pz delle sue
+  // fasi (nessuna chip = tutta la commessa; commessa senza fasi = budget
+  // pagato) × quantità corrente. Solo un suggerimento a video: niente salvato.
+  // Inerte finché aziende.tariffa_oraria non esiste (tariffa sempre vuota).
+  const suggFornitoriUpd = [];
+  const aggiornaSuggFornitori = () => { suggFornitoriUpd.forEach(fn => { try { fn(); } catch (e) {} }); };
+  const qtaCorrenteComm = () => {
+    const inp = form.querySelector('[name="quantita"]');
+    const v = inp ? parseInt(inp.value, 10) : NaN;
+    return (Number.isFinite(v) && v > 0) ? v : (Number(o.quantita) || 0);
+  };
+  const minPzFornitore = (sel) => {
+    const fasi = fasiAssegnabili();
+    if (fasi.length) {
+      const sue = (sel.fase_keys || []).length
+        ? fasi.filter(f => (sel.fase_keys || []).includes(f._k)) : fasi;
+      return sue.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
+    }
+    const pag = pagatoComm();
+    return pag != null ? pag : (Number(o.minuti_unitari) || 0);
+  };
+  form.addEventListener('input', (e) => {
+    if (e.target && (e.target.name === 'quantita' || e.target.id === 'minuti-input')) aggiornaSuggFornitori();
+  });
   const forSelectedWrap = el('div', { class:'util-selected', style:'display:flex;flex-direction:column;gap:8px;' });
   const forSearchInput = el('input', {
     type:'text', class:'util-search',
@@ -6497,6 +6554,7 @@ function openOperazioneModal(o) {
 
   const renderForSelected = () => {
     forSelectedWrap.innerHTML = '';
+    suggFornitoriUpd.length = 0;
     if (typeof aggiornaDataRealistica === 'function') aggiornaDataRealistica();
     if (fornitoriSel.length === 0) {
       forSelectedWrap.append(el('span', { class:'util-empty' }, 'Nessun fornitore'));
@@ -6558,6 +6616,23 @@ function openOperazioneModal(o) {
             if (aggiornaPreviewInizio) aggiornaPreviewInizio();
           },
         }, '✕'));
+      }
+      // Prezzo suggerito live: solo se il fornitore ha una tariffa €/h
+      const tariffa = Number(a.tariffa_oraria) || 0;
+      if (tariffa > 0) {
+        const sugg = el('div', { style:'flex-basis:100%;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);' });
+        const upd = () => {
+          const ore = minPzFornitore(sel) * qtaCorrenteComm() / 60;
+          sugg.textContent = ore > 0
+            ? 'prezzo suggerito ≈ € '
+              + (ore * tariffa).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+              + ' (' + ore.toFixed(1).replace('.', ',') + 'h × '
+              + String(tariffa).replace('.', ',') + ' €/h)'
+            : '';
+        };
+        suggFornitoriUpd.push(upd);
+        upd();
+        row.append(sugg);
       }
       forSelectedWrap.append(row);
     });
@@ -6660,6 +6735,9 @@ function openOperazioneModal(o) {
       notaConfrontoComm.style.color = 'var(--grn)';
       notaConfrontoComm.textContent = `Somma fasi ${somma}${dett} · pagato ${pagato} · margine ${+(pagato - somma).toFixed(2)} min/pz`;
     }
+    // Le stesse azioni che cambiano il confronto (chip fasi, fornitori,
+    // riallineamento fasi) spostano anche il prezzo suggerito dei fornitori.
+    aggiornaSuggFornitori();
   }
   // Ripulisce le assegnazioni che puntano a fasi non più valide.
   function pruneFaseAssegnazioni() {
