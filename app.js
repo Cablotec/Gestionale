@@ -2936,17 +2936,41 @@ function openClienteModal(c) {
           : 'richiede la colonna aziende.tariffa_oraria (migrazione dal pannello Supabase)'),
     ),
   );
-  // Visibilità coefficiente e tariffa legata al checkbox fornitore
+  // Tariffa cliente (€/h): REGOLA per i clienti a manodopera pura (es.
+  // Elcotec, 27,3 €/h). Se valorizzata, nei NUOVI ordini il tempo pagato
+  // esce dal prezzo riga: min/pz = prezzo ÷ tariffa × 60. La regola vive
+  // QUI come dato d'anagrafica, mai hardcode nel codice. Stesso pattern
+  // inerte: campo spento finché la colonna non esiste.
+  const tariffaCliDisponibile = (state.aziende || []).some(a => a && ('tariffa_cliente' in a));
+  const inTariffaCli = el('input', {
+    type:'number', name:'tariffa_cliente', step:'0.1', min:'0',
+    value: c.tariffa_cliente != null ? String(c.tariffa_cliente) : '',
+    placeholder:'es. 27,3', style:'width:100px;',
+  });
+  if (!tariffaCliDisponibile) inTariffaCli.disabled = true;
+  const tariffaCliRow = el('div', { class:'field' },
+    el('label', {}, 'Tariffa cliente (€/h) — prezzo solo manodopera'),
+    el('div', { style:'display:flex;align-items:center;gap:10px;' },
+      inTariffaCli,
+      el('span', { style:'font-size:11px;color:var(--mut);' },
+        tariffaCliDisponibile
+          ? 'REGOLA: nei nuovi ordini il tempo pagato si calcola dal prezzo riga (prezzo ÷ tariffa). Vuoto = nessuna regola.'
+          : 'richiede la colonna aziende.tariffa_cliente (migrazione dal pannello Supabase)'),
+    ),
+  );
+  // Visibilità dei campi legata ai checkbox ruolo
   const aggiornaCoeff = () => {
     coeffRow.style.display = chkFornitore.checked ? '' : 'none';
     tariffaRow.style.display = chkFornitore.checked ? '' : 'none';
+    tariffaCliRow.style.display = chkCliente.checked ? '' : 'none';
   };
   aggiornaCoeff();
   chkFornitore.addEventListener('change', aggiornaCoeff);
+  chkCliente.addEventListener('change', aggiornaCoeff);
 
   if (readonly) {
     [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inEmail, inNote, selAttivo,
-     chkCliente, chkFornitore, inCoeff, inTariffa]
+     chkCliente, chkFornitore, inCoeff, inTariffa, inTariffaCli]
       .forEach(i => i.disabled = true);
   }
 
@@ -2964,6 +2988,7 @@ function openClienteModal(c) {
     ),
     coeffRow,
     tariffaRow,
+    tariffaCliRow,
     el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
       '── Indirizzo ──'),
     el('div', { class:'field' }, el('label', {}, 'Via e civico'), inVia),
@@ -3023,6 +3048,15 @@ function openClienteModal(c) {
           return toast('Tariffa oraria: valore non valido', 'err');
         }
         payload.tariffa_oraria = isFornitore ? trVal : null;
+      }
+      // tariffa_cliente idem (regola prezzo→tempo pagato sui nuovi ordini)
+      if (tariffaCliDisponibile) {
+        const tcRaw = (fd.get('tariffa_cliente') || '').toString().trim();
+        const tcVal = tcRaw === '' ? null : Number(tcRaw.replace(',', '.'));
+        if (tcRaw !== '' && (!Number.isFinite(tcVal) || tcVal <= 0)) {
+          return toast('Tariffa cliente: valore non valido', 'err');
+        }
+        payload.tariffa_cliente = isCliente ? tcVal : null;
       }
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
       btnSave.disabled = true;
@@ -5510,6 +5544,12 @@ function openNuovoOrdineModal() {
         codiceToId[cod] = na.id;
       }
       // 3) Payload delle posizioni
+      // REGOLA tariffa cliente (dato d'anagrafica, es. Elcotec 27,3 €/h):
+      // il prezzo riga è SOLO manodopera → il tempo pagato esce dal prezzo
+      // (min/pz = prezzo ÷ tariffa × 60) e vince sul default dell'articolo.
+      // Senza prezzo sulla riga, resta il default dell'articolo.
+      const tariffaCli = Number((state.aziende.find(a => a.id === cId) || {}).tariffa_cliente) || 0;
+      let posDaTariffa = 0;
       const payloads = dati.map(d => {
         const artId = d.articoloId || codiceToId[d.nuovoCodice];
         const art = state.articoli.find(a => a.id === artId);
@@ -5520,6 +5560,10 @@ function openNuovoOrdineModal() {
           scadenza: d.scadenza, stato:'aperta', stato_preparazione:'vuoto',
         };
         if (prezzoAttivo) p.prezzo_unitario = d.prezzo > 0 ? d.prezzo : null;
+        if (tariffaCli > 0 && d.prezzo > 0) {
+          p.minuti_unitari = +(d.prezzo / tariffaCli * 60).toFixed(2);
+          posDaTariffa++;
+        }
         return p;
       });
       const { data, error } = await sb.from('operazioni').insert(payloads).select();
@@ -5527,6 +5571,11 @@ function openNuovoOrdineModal() {
       (data||[]).forEach(r => { if (!state.operazioni.find(x=>x.id===r.id)) state.operazioni.push(r); });
       for (const r of (data||[])) { try { await autoGeneraFasiDaMedia(r); } catch(e){} }
       toast('Ordine creato: ' + (data||[]).length + (data.length===1?' posizione':' posizioni'), 'ok');
+      if (posDaTariffa > 0) {
+        toast('Tempo pagato calcolato dal prezzo per ' + posDaTariffa
+          + (posDaTariffa === 1 ? ' posizione' : ' posizioni')
+          + ' (tariffa cliente ' + String(tariffaCli).replace('.', ',') + ' €/h)');
+      }
       closeModal(); renderTab('pianificazione');
     } catch (e) {
       btnSave.disabled=false; btnSave.textContent='Crea ordine';

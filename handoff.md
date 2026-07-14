@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-14.2`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-14.3`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -21,7 +21,8 @@
 ## Stato migrazioni DB (eseguite dal pannello Supabase da Nico)
 - `prezzo_unitario` su operazioni: **ESEGUITA** (colonna attiva, campo €/pz visibile).
 - `gruppo_id` su operazioni (accorpamento): **DA VERIFICARE** se eseguita — il codice è inerte senza; nessun collaudo sul campo ancora fatto.
-- `tariffa_oraria` su aziende (traccia fornitori): **DA ESEGUIRE** — `ALTER TABLE aziende ADD COLUMN tariffa_oraria numeric;` — codice inerte senza (campo spento in scheda azienda, nessun suggerimento nelle commesse).
+- `tariffa_oraria` su aziende (traccia fornitori): **ESEGUITA** (14 lug).
+- `tariffa_cliente` su aziende (regola prezzo→tempo pagato, es. Elcotec): **DA ESEGUIRE** — `ALTER TABLE aziende ADD COLUMN tariffa_cliente numeric;` — codice inerte senza.
 
 ## ▶ Fili aperti (in ordine di priorità)
 
@@ -53,6 +54,7 @@
 - Potatura CSS/rami morti. Cancellare `beta/` e `index-vecchio.html` dal repo GitHub (non presenti nella checkout locale).
 
 ## Decisioni consolidate (mantenere)
+- **Regole per-cliente = DATI d'anagrafica azienda, mai hardcode** (14 lug): `tariffa_cliente` (€/h) su aziende = "il prezzo riga è solo manodopera" → nei NUOVI ordini (griglia) il tempo pagato esce dal prezzo (`min/pz = prezzo ÷ tariffa × 60`, vince sul default articolo; senza prezzo resta il default; toast dichiara quante posizioni). Elcotec = 27,3 €/h (la mette Nico in scheda azienda dopo la migrazione). Il "posto ordinato" delle regole ad hoc è la scheda azienda + questa sezione.
 - **Fasi effettive = media storica VIVA** (spedite+completate, finestra ULTIME 5 per articolo+tipo — `MEDIA_ULTIME_COMMESSE`), template solo fallback senza storico. Modal commessa: fasi SOLA LETTURA dall'anagrafica (matita ✎ apre l'articolo con ritorno), riallineate al salvataggio (mai cancellazioni). Anagrafica: righe auto-compilate dalle effettive.
 - **Esterne dichiarate, mai nascoste**: `opCalcOreInterne` (stessa base di opCalcOre: opFasiPianif), confronti interno-vs-interno ovunque, fornitori "su tutta la commessa" col badge.
 - **Listino/storico prezzi derivati** (mai tabelle), come le fasi. Ultimo prezzo, non media.

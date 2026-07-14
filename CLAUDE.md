@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-14.2`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-14.3`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -23,7 +23,8 @@
 ## Stato migrazioni DB (le esegue Nico dal pannello Supabase)
 - `operazioni.prezzo_unitario`: **ESEGUITA** (campo €/pz attivo).
 - `operazioni.gruppo_id` (accorpamento): **DA VERIFICARE** — codice inerte senza; collaudo sul campo mai fatto.
-- `aziende.tariffa_oraria` (traccia fornitori): **DA ESEGUIRE** — `ALTER TABLE aziende ADD COLUMN tariffa_oraria numeric;` — codice inerte senza.
+- `aziende.tariffa_oraria` (traccia fornitori): **ESEGUITA** (14 lug).
+- `aziende.tariffa_cliente` (regola prezzo→tempo pagato): **DA ESEGUIRE** — `ALTER TABLE aziende ADD COLUMN tariffa_cliente numeric;` — codice inerte senza.
 
 ## ▶ Fili aperti (priorità)
 1. **Nuovo ordine — grana estetica residua** (NON cancellare la feature): "+ Nuovo ordine" è l'unica porta d'inserimento (griglia 5 righe, POS auto, aggiungi-N, autocomplete con creazione al volo, prezzo dal listino, fasi auto; il vecchio modal resta per MODIFICARE). Funziona, ma Nico vede ancora un disallineamento ("lasceremo perdere… troppo complicato?"). Tecnicamente: colonne a delta 0 misurato, intestazione allineata al pixel in pagina di test. Se lo rivede sulla `.8`: misurare sulla **pagina reale loggata**, con suo screenshot segnato.
@@ -38,6 +39,7 @@
 - Fallback `?kiosk` da togliere; colonne `lead_giorni` inerti; potatura CSS/rami morti; cancellare `beta/` e `index-vecchio.html` dal repo GitHub.
 
 ## Decisioni consolidate (mantenere)
+- **Regole per-cliente = DATI d'anagrafica azienda, mai hardcode**: `tariffa_cliente` €/h = prezzo solo manodopera → nei nuovi ordini tempo pagato = prezzo ÷ tariffa × 60 (vince sul default articolo, toast dichiara). Elcotec 27,3 €/h.
 - **Fasi effettive = media storica VIVA** (spedite+completate, finestra **ULTIME 5** per articolo+tipo — `MEDIA_ULTIME_COMMESSE` in domain), template solo fallback senza storico. Modal commessa: fasi **SOLA LETTURA** dall'anagrafica (matita ✎ apre l'articolo con ritorno via `opts.dopoChiusura`), riallineate al salvataggio (aggiorna/aggiunge, MAI cancella). Anagrafica articolo: righe auto-compilate dalle effettive. Toggle sequenza/parallelo rimosso (motore sempre sequenziale).
 - **Esterne dichiarate, mai nascoste**: `opCalcOreInterne` (stessa base di `opCalcOre`: `opFasiPianif`), confronti interno-vs-interno ovunque; fornitore "su tutta la commessa" = badge dedicato; `⚙ nome` sulle barre Gantt.
 - **Listino/storico prezzi derivati** (mai tabelle): `prezzoListino` = ultimo prezzo per articolo+cliente (created_at, ripiego altro cliente), non media. `storicoPrezziArticolo` per l'andamento.
