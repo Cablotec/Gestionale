@@ -6946,7 +6946,8 @@ function openOperazioneModal(o) {
           min:'0', step:'0.5',
         }),
         el('div', { class:'sub', id:'minuti-hint', style:'margin-top:4px;font-size:10px;color:var(--mut);' },
-          'Suggerito automaticamente dall\'articolo selezionato.')),
+          'Suggerito automaticamente dall\'articolo selezionato.'),
+        el('div', { class:'sub', id:'minuti-da-prezzo', style:'margin-top:2px;font-size:10px;display:none;' })),
     ),
     // Prezzo di vendita (€/pezzo) + totale riga. Pre-compilato dall'ultimo
     // prezzo usato per stesso articolo+cliente (listino vivo). Il blocco viene
@@ -7710,6 +7711,39 @@ function openOperazioneModal(o) {
     }
   };
 
+  // Regola tariffa cliente anche in MODIFICA, ma MAI automatica: qui i
+  // minuti esistono già e cambiarli in silenzio è vietato (il tempo pagato
+  // non si auto-aggiorna). Suggerimento + "usa", come per le medie storiche.
+  // Serve soprattutto per gli ordini nati prima della regola (minuti a 0).
+  const aggiornaSuggDaPrezzo = () => {
+    try {
+      const box = form.querySelector('#minuti-da-prezzo');
+      const minInput = form.querySelector('#minuti-input');
+      if (!box || !minInput) return;
+      const cliVal = acCliente.getValue();
+      const cli = (cliVal.mode === 'existing' && cliVal.id)
+        ? state.aziende.find(a => a.id === cliVal.id) : null;
+      const tariffa = Number(cli && cli.tariffa_cliente) || 0;
+      const prezzo = parseFloat((form.querySelector('#prezzo-input')?.value || '').toString().replace(',', '.')) || 0;
+      const propone = (tariffa > 0 && prezzo > 0) ? Math.round(prezzo / tariffa * 60) : null;
+      const cur = parseFloat((minInput.value || '').toString().replace(',', '.'));
+      if (propone == null || propone === cur) { box.style.display = 'none'; box.innerHTML = ''; return; }
+      box.style.display = '';
+      box.innerHTML = '';
+      box.append(
+        el('span', { style:'color:var(--mut);font-family:DM Mono,monospace;' },
+          'da prezzo: ' + propone + ' min/pz ('
+          + prezzo.toLocaleString('it-IT', { minimumFractionDigits: 2 }) + ' € ÷ '
+          + String(tariffa).replace('.', ',') + ' €/h)'),
+        canEdit ? el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
+          onclick: () => {
+            minInput.value = String(propone);
+            minInput.dispatchEvent(new Event('input', { bubbles: true }));
+          } }, 'usa') : null,
+      );
+    } catch (e) {}
+  };
+
   const refreshPreview = () => {
     const fd = new FormData(form);
     const tmp = {
@@ -7845,11 +7879,15 @@ function openOperazioneModal(o) {
   } else {
     form.querySelector('[name=quantita]')?.addEventListener('input', aggiornaTotalePrezzo);
     form.querySelector('#prezzo-input')?.addEventListener('input', aggiornaTotalePrezzo);
+    form.querySelector('#prezzo-input')?.addEventListener('input', aggiornaSuggDaPrezzo);
     aggiornaPrezzoListino();
+    aggiornaSuggDaPrezzo();
   }
   // Bind aggiuntivo: input minuti aggiorna anche l'indicatore di divergenza
+  // e il suggerimento "da prezzo" (che sparisce quando i valori coincidono)
   const minInputEl = form.querySelector('#minuti-input');
   if (minInputEl) minInputEl.addEventListener('input', aggiornaIndicatoreMinuti);
+  if (minInputEl) minInputEl.addEventListener('input', aggiornaSuggDaPrezzo);
   // Click sull'asterisco: ripristina il valore dell'articolo se diverso
   const starEl = form.querySelector('#minuti-diff');
   if (starEl) {
