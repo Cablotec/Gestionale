@@ -11721,6 +11721,7 @@ function renderAnalisiClienti(root) {
   root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
     'Base dati: commesse spedite/completate con almeno 1h timbrata, calcolo live dai timbri. '
     + 'Reale/pagato: ×1,00 = il tempo pagato regge; sopra = il cliente costa più di quanto paga (rosso da ×1,05). '
+    + '€/h: ricavo ÷ ore timbrate, calcolato solo sulle sue commesse con prezzo. '
     + 'Ripartizione: quota media del tipo di lavorazione; il ± dice quanto balla da commessa a commessa.'));
   if (!righe.length) {
     root.append(el('div', { class:'empty' }, 'Nessuna commessa chiusa con timbri.'));
@@ -11737,6 +11738,20 @@ function renderAnalisiClienti(root) {
         title:'Ore timbrate / ore pagate, media sulle sue commesse chiuse',
       }, 'reale/pagato ×' + r.ratio.toFixed(2).replace('.', ','));
     }
+    // €/ora incassati: ricavo ÷ ore timbrate, solo commesse con prezzo.
+    // Copertura dichiarata quando non tutte le commesse hanno un prezzo.
+    let euroOraEl = null;
+    if (r.euroOra != null) {
+      const copertura = r.nConPrezzo < r.nCommesse
+        ? ' (su ' + r.nConPrezzo + (r.nConPrezzo === 1 ? ' commessa' : ' commesse') + ' con prezzo)'
+        : '';
+      euroOraEl = el('span', {
+        style:'font-family:DM Mono,monospace;font-weight:700;font-size:15px;',
+        title:'Ricavo ÷ ore timbrate, solo sulle sue commesse chiuse con prezzo',
+      },
+        r.euroOra.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €/h',
+        copertura ? el('span', { class:'sub', style:'font-weight:400;font-size:11px;' }, copertura) : null);
+    }
     const card = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:10px;' });
     card.append(el('div', { style:'display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;' },
       el('span', { style:'font-weight:700;font-size:14px;' }, cli?.nome || '—'),
@@ -11745,6 +11760,7 @@ function renderAnalisiClienti(root) {
         + ' · ' + r.oreReali.toFixed(1).replace('.', ',') + 'h timbrate'
         + (r.orePagate > 0 ? ' su ' + r.orePagate.toFixed(1).replace('.', ',') + 'h pagate' : '')),
       ratioEl,
+      euroOraEl,
       debole ? el('span', { style:'color:var(--yel);font-size:11px;' }, '⚠ dati deboli (meno di 3 commesse)') : null,
     ));
     const wrap = el('div', { style:'margin-top:8px;display:flex;flex-direction:column;gap:4px;' });

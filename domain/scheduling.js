@@ -1059,6 +1059,9 @@ function stimaFineCommessaNuova(addettiIds, fornitoriRows, fasiNuove, pezzi, ogg
 // Per ogni cliente, sulle commesse spedite/completate con almeno 1h timbrata:
 //  - rapporto ore reali / ore pagate: quanto sfora il prezzo, sistematicamente
 //    (×1,45 = quel cliente costa il 45% più di quanto paga)
+//  - €/ora incassati: ricavo ÷ ore timbrate, SOLO sulle commesse con prezzo
+//    (stesso sottoinsieme sopra e sotto la frazione, altrimenti il numero
+//    si sgonfia con le ore delle commesse senza prezzo)
 //  - quota % media di ogni tipo di lavorazione, con deviazione standard
 //    (deviazione alta = lavori troppo diversi, la media non predice)
 // Tutto live dai timbri: nessun dato materializzato.
@@ -1067,7 +1070,8 @@ function analisiClienti() {
   (state.operazioni || []).forEach(o => {
     if (o.stato !== 'spedita' && o.stato !== 'completata') return;
     perOp[o.id] = { cliente: o.cliente_id, perTipo: {}, tot: 0,
-      pagatoOre: (Number(o.minuti_unitari) || 0) * (Number(o.quantita) || 0) / 60 };
+      pagatoOre: (Number(o.minuti_unitari) || 0) * (Number(o.quantita) || 0) / 60,
+      ricavo: (Number(o.prezzo_unitario) || 0) * (Number(o.quantita) || 0) };
   });
   (state.sessioni || []).forEach(s => {
     const c = perOp[s.operazione_id];
@@ -1080,7 +1084,8 @@ function analisiClienti() {
   Object.values(perOp).forEach(c => {
     if (c.tot < 1) return; // sotto l'ora timbrata: rumore, fuori
     if (!perCliente[c.cliente]) {
-      perCliente[c.cliente] = { quote: [], ratio: [], oreReali: 0, orePagate: 0 };
+      perCliente[c.cliente] = { quote: [], ratio: [], oreReali: 0, orePagate: 0,
+        ricavo: 0, oreConPrezzo: 0, nConPrezzo: 0 };
     }
     const g = perCliente[c.cliente];
     const q = {};
@@ -1088,6 +1093,7 @@ function analisiClienti() {
     g.quote.push(q);
     g.oreReali += c.tot;
     if (c.pagatoOre > 0) { g.ratio.push(c.tot / c.pagatoOre); g.orePagate += c.pagatoOre; }
+    if (c.ricavo > 0) { g.ricavo += c.ricavo; g.oreConPrezzo += c.tot; g.nConPrezzo += 1; }
   });
   const media = (a) => a.reduce((s, x) => s + x, 0) / a.length;
   const out = [];
@@ -1105,6 +1111,9 @@ function analisiClienti() {
       ratio: g.ratio.length ? media(g.ratio) : null,
       oreReali: g.oreReali,
       orePagate: g.orePagate,
+      euroOra: g.oreConPrezzo > 0 ? g.ricavo / g.oreConPrezzo : null,
+      ricavo: g.ricavo,
+      nConPrezzo: g.nConPrezzo,
       tipi,
     });
   });

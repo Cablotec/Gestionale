@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-13.9`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-14.1`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -26,7 +26,7 @@
 
 ## ▶ Fili aperti (priorità)
 1. **Nuovo ordine — grana estetica residua** (NON cancellare la feature): "+ Nuovo ordine" è l'unica porta d'inserimento (griglia 5 righe, POS auto, aggiungi-N, autocomplete con creazione al volo, prezzo dal listino, fasi auto; il vecchio modal resta per MODIFICARE). Funziona, ma Nico vede ancora un disallineamento ("lasceremo perdere… troppo complicato?"). Tecnicamente: colonne a delta 0 misurato, intestazione allineata al pixel in pagina di test. Se lo rivede sulla `.8`: misurare sulla **pagina reale loggata**, con suo screenshot segnato.
-2. **Prezzi step 3**: sezione listino nell'anagrafica articolo **FATTA** (13 lug, `.9`) → **€/ora per cliente** in Analisi clienti → traccia fornitori (tariffa €/h → prezzo fase suggerito). Dati: % per cliente NON predittive (±35); il numero d'oro è **reale/pagato per cliente** (Elcotec ×1,45).
+2. **Prezzi step 3**: sezione listino nell'anagrafica articolo **FATTA** (13 lug) + **€/ora per cliente FATTO** (14 lug, solo commesse con prezzo, copertura dichiarata) → resta traccia fornitori (tariffa €/h → prezzo fase suggerito). Dati: % per cliente NON predittive (±35); il numero d'oro è **reale/pagato per cliente** (Elcotec ×1,45).
 3. **Accorpamento commesse**: collaudare (vedi migrazione). Limiti v1: "fine fase" non propaga al gruppo; fase_id null sulle copie.
 4. **Gantt**: fatti A+B+D (ritardi ancorati a oggi `⚠ RIT. Ng`, barre = quota operatore coi suoi timbri, fornitori dichiarati, legenda in alto, buchi su ferie). Restano **C** (dieta chips stati) ed **E** (riga REPARTO).
 5. **Prospettiva "tutta l'azienda"**: Supabase regge; fatturazione fuori; il salto è SICUREZZA — **repo PUBBLICO con anon key + password kiosk in core/db.js** → privatizzare + ruotare, RPC, backup. Nessuna azione ora.
