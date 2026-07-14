@@ -1394,7 +1394,7 @@ const TAB_STRUCTURE = {
     label: 'Lavoro',
     adminOnly: false,
     tabs: [
-      { id: 'pianificazione', label: 'Pianificazione', adminOnly: false },
+      { id: 'pianificazione', label: 'Ordini cliente', adminOnly: false },
       { id: 'magazzino',      label: 'Magazzino',      adminOnly: false },
       { id: 'prelievi',       label: 'Prelievi',       adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
@@ -5593,6 +5593,84 @@ function openNuovoOrdineModal() {
   openModal(modal);
 }
 
+// ── ORDINE PER INTERO: tutte le posizioni di un OC con totale ─────────────
+// Vista di sola lettura derivata: le righe sono le operazioni che condividono
+// cliente + numero_ordine. Click su una riga = apre quella commessa.
+function openOrdineClienteModal(clienteId, numeroOrdine) {
+  const righe = (state.operazioni || [])
+    .filter(o => o.cliente_id === clienteId && o.numero_ordine === numeroOrdine)
+    .sort((a, b) => String(a.pos || '').localeCompare(String(b.pos || '')));
+  if (!righe.length) return;
+  const cli = state.aziende.find(c => c.id === clienteId);
+  const fmtEuro = (n) => '€ ' + Number(n).toLocaleString('it-IT',
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const modal = el('div', { class:'modal', style:'max-width:900px;' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Ordine ' + (numeroOrdine || '—') + ' — ' + (cli?.nome || '—')),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Pos'),
+    el('th', {}, 'Codice'),
+    el('th', {}, 'Descrizione'),
+    el('th', { class:'tr' }, 'Qtà'),
+    el('th', { class:'tr' }, '€/pz'),
+    el('th', { class:'tr' }, 'Totale'),
+    el('th', {}, 'Scadenza'),
+    el('th', { class:'tc' }, 'Stato'),
+  )));
+  const tb = el('tbody');
+  let totale = 0, senzaPrezzo = 0;
+  righe.forEach(o => {
+    const art = state.articoli.find(a => a.id === o.articolo_id);
+    const prezzo = Number(o.prezzo_unitario) || 0;
+    const qta = Number(o.quantita) || 0;
+    const rTot = prezzo > 0 ? prezzo * qta : null;
+    if (rTot != null) totale += rTot; else senzaPrezzo++;
+    const st = OP_STATI[o.stato] || { label: o.stato, badge:'bgry' };
+    tb.append(el('tr', {
+      style:'cursor:pointer;',
+      title:'Apri questa commessa',
+      onclick: () => { closeModal(); openOperazioneModal(o); },
+    },
+      el('td', { class:'mono', style:'color:var(--mut);' }, o.pos || '—'),
+      el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
+      el('td', { style:'max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;' },
+        art?.descrizione || '—'),
+      el('td', { class:'tr mono' }, String(qta)),
+      el('td', { class:'tr mono' }, prezzo > 0 ? fmtEuro(prezzo) : '—'),
+      el('td', { class:'tr mono', style:'font-weight:700;' }, rTot != null ? fmtEuro(rTot) : '—'),
+      el('td', { class:'mono', style:'font-size:11px;' }, o.scadenza ? fmtIT(o.scadenza) : '—'),
+      el('td', { class:'tc' }, el('span', { class:'badge ' + st.badge }, st.label.toLowerCase())),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  body.append(tw);
+
+  body.append(el('div', { style:'margin-top:12px;text-align:right;font-family:DM Mono,monospace;' },
+    el('div', { style:'font-size:15px;font-weight:700;' },
+      'Totale ordine: ' + (totale > 0 ? fmtEuro(totale) : '—')),
+    senzaPrezzo > 0 ? el('div', { class:'sub', style:'margin-top:2px;' },
+      senzaPrezzo + (senzaPrezzo === 1 ? ' posizione senza prezzo' : ' posizioni senza prezzo')
+      + ' (esclusa dal totale)') : null,
+  ));
+  body.append(el('div', { class:'sub', style:'margin-top:8px;' },
+    righe.length + (righe.length === 1 ? ' posizione' : ' posizioni')
+    + ' · click su una riga per aprire la commessa.'));
+
+  modal.append(body);
+  const foot = el('div', { class:'mfoot' });
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  modal.append(foot);
+  openModal(modal);
+}
+
 // Modale "Ordina priorità" (gestionale): riordino di tutte le commesse aperte.
 function openPrioritaModal() {
   const items = state.operazioni
@@ -5781,7 +5859,7 @@ function renderPianificazione(root) {
   }, nEsclusi > 0 ? `▼ Filtro clienti (${nEsclusi})` : '▼ Filtra clienti');
 
   const toolbar = el('div', { class:'toolbar' },
-    el('h2', {}, 'Pianificazione'),
+    el('h2', {}, 'Ordini cliente'),
     inputSearch,
     btnFiltroCli,
   );
@@ -5945,7 +6023,17 @@ function renderPianificazione(root) {
         onclick:(e)=>{ e.stopPropagation(); openOperazioneModal(o); },
       }, '⚠'));
     }
-    ordineCell.append(document.createTextNode(o.numero_ordine || '—'));
+    // Numero OC cliccabile: apre la vista ORDINE INTERO (tutte le posizioni
+    // + totale). Il resto della riga continua ad aprire la singola commessa.
+    if (o.numero_ordine) {
+      ordineCell.append(el('span', {
+        style:'text-decoration:underline dotted;text-underline-offset:2px;cursor:pointer;',
+        title:'Vedi l\'ordine per intero (tutte le posizioni + totale)',
+        onclick:(e)=>{ e.stopPropagation(); if (!inGruppoMode) openOrdineClienteModal(o.cliente_id, o.numero_ordine); },
+      }, o.numero_ordine));
+    } else {
+      ordineCell.append(document.createTextNode('—'));
+    }
     tr.append(ordineCell);
 
     // Pos
@@ -6574,7 +6662,12 @@ function openOperazioneModal(o) {
   // pagato) × quantità corrente. Solo un suggerimento a video: niente salvato.
   // Inerte finché aziende.tariffa_oraria non esiste (tariffa sempre vuota).
   const suggFornitoriUpd = [];
-  const aggiornaSuggFornitori = () => { suggFornitoriUpd.forEach(fn => { try { fn(); } catch (e) {} }); };
+  const aggiornaSuggFornitori = () => {
+    suggFornitoriUpd.forEach(fn => { try { fn(); } catch (e) {} });
+    // Stesse leve = stesso refresh: il margine sotto il totale riga usa
+    // le medesime stime (hoisted, esce zitta finché il form non è pronto).
+    try { aggiornaMargineRiga(); } catch (e) {}
+  };
   const qtaCorrenteComm = () => {
     const inp = form.querySelector('[name="quantita"]');
     const v = inp ? parseInt(inp.value, 10) : NaN;
@@ -6960,7 +7053,8 @@ function openOperazioneModal(o) {
         el('div', { class:'sub', id:'prezzo-hint', style:'margin-top:4px;font-size:10px;color:var(--mut);' },
           'Ultimo prezzo per articolo+cliente (modificabile).')),
       el('div', { class:'field' }, el('label', {}, 'Totale riga'),
-        el('div', { id:'prezzo-totale', style:'padding:8px 0;font-family:DM Mono,monospace;font-size:15px;font-weight:700;' }, '—')),
+        el('div', { id:'prezzo-totale', style:'padding:8px 0 2px;font-family:DM Mono,monospace;font-size:15px;font-weight:700;' }, '—'),
+        el('div', { class:'sub', id:'margine-riga', style:'font-size:10px;font-family:DM Mono,monospace;' })),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Scadenza'),
@@ -7651,8 +7745,39 @@ function openOperazioneModal(o) {
       tot.textContent = (pz > 0 && pr > 0)
         ? '€ ' + (pz * pr).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : '—';
+      aggiornaMargineRiga();
     } catch (e) {}
   };
+  // Margine live sotto il totale: totale riga − costo fornitori stimato
+  // (ore quota × tariffa €/h, la stessa stima della riga fornitore). Solo le
+  // voci di costo NOTE: i fornitori senza tariffa vengono dichiarati, non
+  // ignorati in silenzio. Function declaration (hoisted): chiamabile anche
+  // dal primo renderForSelected, prima che il form sia completo (esce zitta).
+  function aggiornaMargineRiga() {
+    try {
+      const box = form.querySelector('#margine-riga');
+      if (!box) return;
+      const pz = parseFloat((form.querySelector('[name=quantita]')?.value || '').toString().replace(',', '.')) || 0;
+      const pr = parseFloat((form.querySelector('#prezzo-input')?.value || '').toString().replace(',', '.')) || 0;
+      const tot = pz * pr;
+      let costo = 0, senzaTariffa = 0;
+      (fornitoriSel || []).forEach(sel => {
+        const az = state.aziende.find(x => x.id === sel.azienda_id);
+        const tariffa = Number(az && az.tariffa_oraria) || 0;
+        if (tariffa > 0) costo += minPzFornitore(sel) * qtaCorrenteComm() / 60 * tariffa;
+        else senzaTariffa++;
+      });
+      if (tot <= 0 || (costo <= 0 && senzaTariffa === 0)) { box.textContent = ''; return; }
+      const fmtE = (n) => '€ ' + n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const margine = tot - costo;
+      const perc = Math.round(margine / tot * 100);
+      box.style.color = margine >= 0 ? 'var(--grn)' : 'var(--red)';
+      box.textContent = '− fornitori ≈ ' + fmtE(costo) + ' → margine ≈ ' + fmtE(margine) + ' (' + perc + '%)'
+        + (senzaTariffa > 0
+            ? ' · ' + senzaTariffa + (senzaTariffa === 1 ? ' fornitore' : ' fornitori') + ' senza tariffa'
+            : '');
+    } catch (e) {}
+  }
   // Pre-compila il prezzo dall'ultimo usato (listino vivo, articolo+cliente)
   // solo se il campo è vuoto; aggiorna sempre il suggerimento e il totale.
   const aggiornaPrezzoListino = () => {

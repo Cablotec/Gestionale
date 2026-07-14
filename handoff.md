@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-14.6`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-14.7`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -36,7 +36,7 @@
 - Analisi fatta sui dati: % ripartizione per cliente NON predittiva (±35 punti); il numero d'oro è **reale/pagato per cliente** (Elcotec ×1,45 = sottoprezzato; Sacmi ×0,69). Già in scheda Analisi clienti.
 
 ### 3. Accorpamento commesse (gruppi) — da collaudare
-- Admin: Pianificazione → `⊞ Raggruppa` → selezione → Crea gruppo; badge `⊞N`, click per sciogliere. Kiosk: gruppo = UNA card (banner), split del timbro alla chiusura **proporzionale al peso = qtà × min/pz** (5+2+7 → 500/200/700, 18 test). Insert+update, mai delete (RLS: l'account kiosk NON può cancellare).
+- Admin: Ordini cliente (ex Pianificazione, rinominata 14 lug — id interno resta `pianificazione`) → `⊞ Raggruppa` → selezione → Crea gruppo; badge `⊞N`, click per sciogliere. Kiosk: gruppo = UNA card (banner), split del timbro alla chiusura **proporzionale al peso = qtà × min/pz** (5+2+7 → 500/200/700, 18 test). Insert+update, mai delete (RLS: l'account kiosk NON può cancellare).
 - Manca: conferma migrazione + prova sul campo. Limiti v1: "fine fase" non propaga al gruppo; fase_id null sulle copie.
 
 ### 4. Gantt — restano C ed E delle proposte
@@ -45,6 +45,11 @@
 
 ### 5. Prospettiva "tutta l'azienda su questo gestionale" (domanda di Nico, 12 lug)
 - Risposta data: Supabase regge (volumi minuscoli); fatturazione FUORI (integrare servizio dedicato); il salto è di SICUREZZA: **repo PUBBLICO con anon key + password kiosk in core/db.js** (verificato leggibile da chiunque) → repo privato + rotazione password; RPC per scritture critiche; backup. Nessuna azione ora, ma il repo pubblico è il primo punto quando si concretizza.
+
+## UI Ordini cliente (14 lug, `.7` — richiesta Nico)
+- Tab "Pianificazione" → **"Ordini cliente"** (id interno invariato: `pianificazione`).
+- **Ordine per intero**: numero OC sottolineato-punteggiato in tabella → `openOrdineClienteModal` (posizioni con €/pz, totale riga, totale ordine, posizioni senza prezzo dichiarate; click riga → apre la commessa). Il click sul resto della riga apre la singola commessa come prima.
+- **Margine live nel modal commessa**: sotto "Totale riga", `− fornitori ≈ € X → margine ≈ € Y (Z%)` (`aggiornaMargineRiga`, stessa stima ore×tariffa della riga fornitore; fornitori senza tariffa dichiarati, mai ignorati). Unica voce di costo per ora: fornitori.
 
 ## UI Articoli (14 lug, `.5` — richiesta Nico)
 - Tab Articoli PRIMA in Gestione. Tabella senza colonna Azioni: click sulla riga apre la scheda; Elimina vive nel footer della scheda (a sinistra, chiude solo a eliminazione avvenuta — `deleteArticolo` ora ritorna bool). Scheda a sezioni (`── Tempo pagato e fasi ──`, `── Listino ──`, `── Note ──`), hint accorciati, codice+categoria+stato su una riga.
