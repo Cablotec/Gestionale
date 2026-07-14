@@ -5561,7 +5561,9 @@ function openNuovoOrdineModal() {
         };
         if (prezzoAttivo) p.prezzo_unitario = d.prezzo > 0 ? d.prezzo : null;
         if (tariffaCli > 0 && d.prezzo > 0) {
-          p.minuti_unitari = +(d.prezzo / tariffaCli * 60).toFixed(2);
+          // minuto intero: operazioni.minuti_unitari è INTEGER nel DB
+          // (60 € ÷ 27,3 = 131,87 → 132; scarto economico trascurabile)
+          p.minuti_unitari = Math.round(d.prezzo / tariffaCli * 60);
           posDaTariffa++;
         }
         return p;
