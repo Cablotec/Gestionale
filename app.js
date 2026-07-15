@@ -1407,6 +1407,7 @@ const TAB_STRUCTURE = {
     adminOnly: true,
     tabs: [
       { id: 'articoli',       label: 'Articoli',          adminOnly: true },
+      { id: 'codifica',       label: 'Codifica',          adminOnly: true },
       { id: 'aziende',        label: 'Aziende',           adminOnly: true },
       { id: 'analisi_clienti', label: 'Analisi clienti',  adminOnly: true },
       { id: 'tipi_lav',       label: 'Tipi lavorazione',  adminOnly: true },
@@ -1508,6 +1509,7 @@ function renderTab(name) {
     else if (name === 'gantt_live') renderGanttLiveTab(root);
     else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
     else if (name === 'analisi_clienti') renderAnalisiClienti(root);
+    else if (name === 'codifica') renderCodifica(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
     else if (name === 'attivita_extra') renderAttivitaExtra(root);
@@ -3417,6 +3419,229 @@ function renderArticoli(root) {
   tbl.append(tb);
   tw.append(tbl);
   root.append(tw);
+}
+
+// ═══ GESTIONE → CODIFICA ARTICOLI (20 caratteri) ═══
+// Compositore guidato: 5 (classificazione, da domain/codifica.js) + 4 (sigla
+// produttore, tabella `produttori` — inerte se la migrazione manca: input
+// libero) + 11 (codice del produttore, zeri PRIMA). I codici generati per ora
+// sono a sé stanti (materiali interni/acquisto), NON legati all'anagrafica
+// articoli, che contiene solo prodotti finiti Cablotec.
+let produttoriCache = null;      // null = mai caricati; [] = tabella vuota
+let produttoriTabellaOk = null;  // null = da scoprire; false = migrazione mancante
+async function caricaProduttori() {
+  if (produttoriTabellaOk === false) return;
+  try {
+    const { data, error } = await sb.from('produttori').select('*').order('sigla');
+    if (error) { produttoriTabellaOk = false; return; }
+    produttoriTabellaOk = true;
+    produttoriCache = data || [];
+  } catch (e) { produttoriTabellaOk = false; }
+}
+
+function renderCodifica(root) {
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Codifica articoli')));
+  root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
+    'Codice a 20 caratteri: 5 di classificazione (piano dei conti + tabelle) '
+    + '+ 4 di produttore + 11 di codice produttore (zeri di riempimento davanti). '
+    + 'Le voci con ✎ vengono dagli appunti a mano sui fogli.'));
+
+  // Stato locale della composizione
+  let gruppoIdx = -1, voceIdx = -1;
+  let tabVals = [];        // un carattere scelto per ogni tabella della voce
+  let liberoVal = '';      // 4 caratteri liberi (gruppi senza schema 2+2)
+  let produttoreVal = '', codiceVal = '';
+
+  const box = el('div', { style:'max-width:820px;display:flex;flex-direction:column;gap:2px;' });
+  const wrapVoce = el('div');
+  const wrapTabs = el('div');
+  const wrapNote = el('div');
+  const wrapProd = el('div');
+  const wrapEsito = el('div', { style:'margin-top:14px;' });
+
+  const gruppo = () => PIANO_CODIFICA[gruppoIdx] || null;
+  const voce = () => (gruppo() && !gruppo().libero) ? (gruppo().voci[voceIdx] || null) : null;
+
+  function blocco5() {
+    const g = gruppo();
+    if (!g) return '';
+    if (g.libero) return g.fam + liberoVal.toUpperCase();
+    const v = voce();
+    if (!v) return g.fam;
+    return g.fam + v.cat + (v.c || '') + tabVals.join('') + (v.fisso || '');
+  }
+
+  // ── Select gruppo ──
+  const selGruppo = el('select', {},
+    el('option', { value:'' }, '— scegli il gruppo —'),
+    ...PIANO_CODIFICA.map((g, i) => el('option', { value:String(i) }, g.fam + ' · ' + g.nome)));
+  selGruppo.onchange = () => {
+    gruppoIdx = selGruppo.value === '' ? -1 : Number(selGruppo.value);
+    voceIdx = -1; tabVals = []; liberoVal = '';
+    renderVoce(); renderTabs(); renderNote(); aggiornaEsito();
+  };
+
+  function renderVoce() {
+    wrapVoce.innerHTML = '';
+    const g = gruppo();
+    if (!g) return;
+    if (g.libero) {
+      const inp = el('input', { type:'text', maxlength:'4', placeholder:'4 caratteri',
+        style:'max-width:140px;text-transform:uppercase;font-family:DM Mono,monospace;' });
+      inp.oninput = () => { liberoVal = (inp.value || '').toUpperCase(); aggiornaEsito(); };
+      wrapVoce.append(el('div', { class:'field' },
+        el('label', {}, 'Caratteri dopo la famiglia (schema libero)'), inp));
+      return;
+    }
+    const sel = el('select', {},
+      el('option', { value:'' }, '— scegli la voce —'),
+      ...g.voci.map((v, i) => el('option', { value:String(i) },
+        v.cat + (v.c || '') + (v.tabs.length ? '·' : '') + ' — ' + v.label)));
+    sel.onchange = () => {
+      voceIdx = sel.value === '' ? -1 : Number(sel.value);
+      tabVals = voce() ? voce().tabs.map(() => '') : [];
+      renderTabs(); aggiornaEsito();
+    };
+    wrapVoce.append(el('div', { class:'field' }, el('label', {}, 'Voce'), sel));
+  }
+
+  function renderTabs() {
+    wrapTabs.innerHTML = '';
+    const v = voce();
+    if (!v) return;
+    v.tabs.forEach((tNum, i) => {
+      const tab = TABELLE_CODIFICA[tNum];
+      const sel = el('select', {},
+        el('option', { value:'' }, '— scegli —'),
+        ...Object.entries(tab.voci).map(([ch, label]) =>
+          el('option', { value:ch }, ch + ' — ' + label)));
+      sel.onchange = () => { tabVals[i] = sel.value; aggiornaEsito(); };
+      wrapTabs.append(el('div', { class:'field' },
+        el('label', {}, 'TAB.' + tNum + ' — ' + tab.nome), sel));
+    });
+  }
+
+  function renderNote() {
+    wrapNote.innerHTML = '';
+    const g = gruppo();
+    if (g && g.note) {
+      wrapNote.append(el('div', { class:'sub', style:'margin:4px 0 8px;color:var(--yel);' }, '⚠ ' + g.note));
+    }
+  }
+
+  // ── Produttore: anagrafica se la tabella esiste, input libero altrimenti ──
+  function renderProduttore() {
+    wrapProd.innerHTML = '';
+    const field = el('div', { class:'field' }, el('label', {}, 'Produttore (4 caratteri)'));
+    if (produttoriTabellaOk === true) {
+      const sel = el('select', { style:'max-width:320px;' },
+        el('option', { value:'' }, '— scegli il produttore —'),
+        ...(produttoriCache || []).map(p =>
+          el('option', { value:p.sigla }, p.sigla + (p.nome ? ' — ' + p.nome : ''))));
+      sel.value = produttoreVal;
+      sel.onchange = () => { produttoreVal = sel.value; aggiornaEsito(); };
+      // Mini-anagrafica inline: aggiungi (sigla+nome) / elimina il selezionato
+      const inSigla = el('input', { type:'text', maxlength:'4', placeholder:'SIGL',
+        style:'width:70px;text-transform:uppercase;font-family:DM Mono,monospace;' });
+      const inNome = el('input', { type:'text', placeholder:'nome produttore', style:'width:180px;' });
+      const btnAdd = el('button', { type:'button', class:'btnsm', onclick: async () => {
+        const sigla = (inSigla.value || '').toUpperCase().trim();
+        const nome = (inNome.value || '').trim();
+        if (!/^[A-Z0-9]{4}$/.test(sigla)) return toast('Sigla: esattamente 4 caratteri (lettere/numeri)', 'err');
+        const { data, error } = await sb.from('produttori')
+          .insert({ sigla, nome: nome || null }).select().single();
+        if (error) return toast(error.code === '23505' ? 'Sigla già esistente' : error.message, 'err');
+        produttoriCache.push(data);
+        produttoriCache.sort((a, b) => (a.sigla || '').localeCompare(b.sigla || ''));
+        produttoreVal = sigla; inSigla.value = ''; inNome.value = '';
+        toast('Produttore aggiunto');
+        renderProduttore(); aggiornaEsito();
+      } }, '+ Aggiungi');
+      const btnDel = el('button', { type:'button', class:'btnd', onclick: async () => {
+        if (!produttoreVal) return toast('Seleziona prima un produttore', 'err');
+        if (!confirm('Eliminare il produttore ' + produttoreVal + ' dall\'anagrafica?')) return;
+        const p = (produttoriCache || []).find(x => x.sigla === produttoreVal);
+        if (!p) return;
+        const { error } = await sb.from('produttori').delete().eq('id', p.id);
+        if (error) return toast(error.message, 'err');
+        produttoriCache = produttoriCache.filter(x => x.id !== p.id);
+        produttoreVal = '';
+        toast('Produttore eliminato');
+        renderProduttore(); aggiornaEsito();
+      } }, '✕');
+      field.append(sel,
+        el('div', { style:'display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap;' },
+          inSigla, inNome, btnAdd, btnDel),
+        el('div', { class:'sub', style:'margin-top:4px;' },
+          'Anagrafica produttori: sigla fissa a 4 caratteri. Per il multi-marca usa una sigla neutra (es. 0000).'));
+    } else {
+      const inp = el('input', { type:'text', maxlength:'4', placeholder:'es. TELE',
+        style:'max-width:140px;text-transform:uppercase;font-family:DM Mono,monospace;' });
+      inp.value = produttoreVal;
+      inp.oninput = () => { produttoreVal = (inp.value || '').toUpperCase(); aggiornaEsito(); };
+      field.append(inp, el('div', { class:'sub', style:'margin-top:4px;' },
+        produttoriTabellaOk === false
+          ? 'Anagrafica produttori non attiva: manca la tabella `produttori` (migrazione dal pannello Supabase). Per ora sigla a mano.'
+          : 'Carico l\'anagrafica produttori…'));
+    }
+    wrapProd.append(field);
+  }
+
+  // ── Codice produttore ──
+  const inCodice = el('input', { type:'text', maxlength:'11', placeholder:'es. LC1D18BD',
+    style:'max-width:240px;text-transform:uppercase;font-family:DM Mono,monospace;' });
+  inCodice.oninput = () => { codiceVal = (inCodice.value || '').toUpperCase(); aggiornaEsito(); };
+
+  // ── Esito: i tre blocchi + copia ──
+  function aggiornaEsito() {
+    wrapEsito.innerHTML = '';
+    const b5 = blocco5();
+    const ris = codificaComponi(b5, produttoreVal, codiceVal);
+    const blocchi = el('div', { style:'display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;'
+      + 'font-family:DM Mono,monospace;font-size:22px;font-weight:700;letter-spacing:.06em;' });
+    const seg = (txt, colore, atteso) => el('span', {
+      style:'color:' + (txt.length === atteso ? colore : 'var(--mut)') + ';'
+        + 'border-bottom:2px solid ' + colore + ';padding:0 2px;min-width:30px;display:inline-block;text-align:center;',
+    }, txt.padEnd(atteso, '·'));
+    blocchi.append(
+      seg(b5, 'var(--acc)', 5),
+      seg((produttoreVal || '').toUpperCase(), 'var(--blu)', 4),
+      seg(ris.ok ? ris.codice.slice(9) : (codiceVal || '').toUpperCase(), 'var(--grn)', 11),
+    );
+    wrapEsito.append(blocchi);
+    if (ris.ok) {
+      const codice = ris.codice;
+      wrapEsito.append(el('div', { style:'display:flex;align-items:center;gap:12px;margin-top:10px;flex-wrap:wrap;' },
+        el('span', { style:'font-family:DM Mono,monospace;font-size:14px;' }, codice + ' · 20/20'),
+        el('button', { class:'btnp', onclick: async () => {
+          try { await navigator.clipboard.writeText(codice); toast('Codice copiato: ' + codice); }
+          catch (e) { prompt('Copia il codice:', codice); }
+        } }, '⧉ Copia codice'),
+      ));
+    } else {
+      wrapEsito.append(el('div', { class:'sub', style:'margin-top:8px;' },
+        'Manca: ' + ris.errori.join(' · ')));
+    }
+  }
+
+  box.append(
+    el('div', { class:'field' }, el('label', {}, 'Gruppo (piano dei conti)'), selGruppo),
+    wrapNote, wrapVoce, wrapTabs, wrapProd,
+    el('div', { class:'field' },
+      el('label', {}, 'Codice produttore (max 11 caratteri)'), inCodice,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Se più corto di 11, viene riempito con zeri DAVANTI (es. LC1D18BD → 000LC1D18BD).')),
+    wrapEsito,
+  );
+  root.append(box);
+  renderProduttore();
+  aggiornaEsito();
+
+  // Anagrafica produttori: caricamento pigro alla prima apertura della scheda
+  if (produttoriTabellaOk === null) {
+    caricaProduttori().then(() => { renderProduttore(); });
+  }
 }
 
 function openArticoloModal(a, opts) {

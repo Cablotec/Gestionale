@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-14.7`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-15.1`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -23,6 +23,17 @@
 - `gruppo_id` su operazioni (accorpamento): **DA VERIFICARE** se eseguita — il codice è inerte senza; nessun collaudo sul campo ancora fatto.
 - `tariffa_oraria` su aziende (traccia fornitori): **ESEGUITA** (14 lug).
 - `tariffa_cliente` su aziende (regola prezzo→tempo pagato, es. Elcotec): **ESEGUITA** (14 lug, tariffa Elcotec impostata). NB: `operazioni.minuti_unitari` è **INTEGER** → la regola arrotonda al minuto intero (scoperto sul campo: 131,87 rifiutato).
+- Tabella `produttori` (scheda Codifica): **DA ESEGUIRE** — codice inerte senza (sigla produttore a mano):
+  ```sql
+  CREATE TABLE produttori (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    sigla text NOT NULL UNIQUE,
+    nome text,
+    created_at timestamptz DEFAULT now()
+  );
+  ALTER TABLE produttori ENABLE ROW LEVEL SECURITY;
+  CREATE POLICY produttori_all ON produttori FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  ```
 
 ## ▶ Fili aperti (in ordine di priorità)
 
@@ -45,6 +56,13 @@
 
 ### 5. Prospettiva "tutta l'azienda su questo gestionale" (domanda di Nico, 12 lug)
 - Risposta data: Supabase regge (volumi minuscoli); fatturazione FUORI (integrare servizio dedicato); il salto è di SICUREZZA: **repo PUBBLICO con anon key + password kiosk in core/db.js** (verificato leggibile da chiunque) → repo privato + rotazione password; RPC per scritture critiche; backup. Nessuna azione ora, ma il repo pubblico è il primo punto quando si concretizza.
+
+## Codifica articoli — scheda generatore codici 20 caratteri (15 lug, `2026-07-15.1`)
+- Dai documenti di Matteo (piano dei conti scansionato + 12 tabelle): codice = **5** classificazione (1 famiglia + 2 categoria + 2 caratteristiche) + **4** sigla produttore + **11** codice produttore con **zeri PRIMA** (padStart — decisione Nico). Voci cancellate in rosso NON trascritte; appunti a mano trascritti e marcati ✎.
+- Dati in `domain/codifica.js` (NUOVO file, caricato da index+kiosk): `TABELLE_CODIFICA` (tab 1-8, 11, 12 — le 9/10 sono descrittive, fuori), `PIANO_CODIFICA` (75 gruppi, 462 voci), `codificaComponi` (composizione+validazioni), `codificaVerificaDati` (sanity). Test in scratchpad/test_codifica.js (10 test).
+- UI: tab **Codifica** in Gestione (dopo Articoli), `renderCodifica`: gruppo → voce → select per tabella (o input libero per schemi non 2+2, es. famiglia 3) → produttore → codice → 20 caratteri con blocchi colorati + Copia. I codici generati sono A SÉ STANTI (materiali interni/acquisto/conto lavoro), NON legati all'anagrafica articoli (solo prodotti finiti Cablotec) — collegamento = punto futuro.
+- **Anagrafica produttori**: tabella `produttori` (migrazione DA ESEGUIRE, vedi sezione migrazioni) con mini-gestione inline (aggiungi/elimina); senza tabella il campo è un input libero a 4 caratteri. Multi-marca (filo/fusibili/dadi): sigla neutra (es. 0000).
+- **Ambiguità dei fogli da chiarire con Matteo** (note ⚠ visibili nella scheda): 2.71 `5+0` (dattiloscritto "sonde" vs appunto "ciabatta M8/M12"); 2.65 appunti `9 contagiri / 10 switch ethernet`; famiglia 3 (schema progressivo, lasciato libero); 8.03 "pressacavi passo gas" (barrato a metà); 8.21 TUBI (solo appunto a mano).
 
 ## UI Ordini cliente (14 lug, `.7` — richiesta Nico)
 - Tab "Pianificazione" → **"Ordini cliente"** (id interno invariato: `pianificazione`).
