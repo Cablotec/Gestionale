@@ -5839,7 +5839,29 @@ function openNuovoOrdineModal() {
       if (error) throw new Error(error.message);
       (data||[]).forEach(r => { if (!state.operazioni.find(x=>x.id===r.id)) state.operazioni.push(r); });
       for (const r of (data||[])) { try { await autoGeneraFasiDaMedia(r); } catch(e){} }
+      // Semina i minuti pagati sull'anagrafica articolo SOLO dove mancano
+      // (stesso pattern del modal commessa: si popola il vuoto, mai si
+      // sovrascrive uno standard già impostato). Copre i codici creati al
+      // volo. Best-effort: non blocca la creazione dell'ordine.
+      let seminati = 0;
+      for (const r of (data||[])) {
+        try {
+          const art = state.articoli.find(x => x.id === r.articolo_id);
+          if (!art || !(Number(r.minuti_unitari) > 0)) continue;
+          if (art.minuti_unitari != null && art.minuti_unitari !== '') continue;
+          const { data: artUpd, error: errArt } = await sb.from('articoli')
+            .update({ minuti_unitari: r.minuti_unitari }).eq('id', art.id).select().single();
+          if (!errArt && artUpd) {
+            state.articoli = state.articoli.map(x => x.id === artUpd.id ? artUpd : x);
+            seminati++;
+          }
+        } catch (e) {}
+      }
       toast('Ordine creato: ' + (data||[]).length + (data.length===1?' posizione':' posizioni'), 'ok');
+      if (seminati > 0) {
+        toast('Minuti pagati salvati anche nell\'anagrafica di '
+          + seminati + (seminati === 1 ? ' articolo' : ' articoli'));
+      }
       if (posDaTariffa > 0) {
         toast('Tempo pagato calcolato dal prezzo per ' + posDaTariffa
           + (posDaTariffa === 1 ? ' posizione' : ' posizioni')

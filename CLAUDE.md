@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-15.2`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-15.3`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -41,7 +41,7 @@
 - Fallback `?kiosk` da togliere; colonne `lead_giorni` inerti; potatura CSS/rami morti; cancellare `beta/` e `index-vecchio.html` dal repo GitHub.
 
 ## Decisioni consolidate (mantenere)
-- **Regole per-cliente = DATI d'anagrafica azienda, mai hardcode**: `tariffa_cliente` €/h = prezzo solo manodopera → nei nuovi ordini tempo pagato = prezzo ÷ tariffa × 60 (toast dichiara). In modifica MAI automatica: suggerimento "da prezzo" + usa. Elcotec 27,3 €/h. Griglia nuovo ordine: colonna Min/pz con priorità mano > regola > default articolo, placeholder live col valore automatico.
+- **Regole per-cliente = DATI d'anagrafica azienda, mai hardcode**: `tariffa_cliente` €/h = prezzo solo manodopera → nei nuovi ordini tempo pagato = prezzo ÷ tariffa × 60 (toast dichiara). In modifica MAI automatica: suggerimento "da prezzo" + usa. Elcotec 27,3 €/h. Griglia nuovo ordine: colonna Min/pz con priorità mano > regola > default articolo, placeholder live col valore automatico; i minuti salvati SEMINANO `articoli.minuti_unitari` solo se vuoto (mai sovrascrivere).
 - **Fasi effettive = media storica VIVA** (spedite+completate, finestra **ULTIME 5** per articolo+tipo — `MEDIA_ULTIME_COMMESSE` in domain), template solo fallback senza storico. Modal commessa: fasi **SOLA LETTURA** dall'anagrafica (matita ✎ apre l'articolo con ritorno via `opts.dopoChiusura`), riallineate al salvataggio (aggiorna/aggiunge, MAI cancella). Anagrafica articolo: righe auto-compilate dalle effettive. Toggle sequenza/parallelo rimosso (motore sempre sequenziale).
 - **Esterne dichiarate, mai nascoste**: `opCalcOreInterne` (stessa base di `opCalcOre`: `opFasiPianif`), confronti interno-vs-interno ovunque; fornitore "su tutta la commessa" = badge dedicato; `⚙ nome` sulle barre Gantt.
 - **Listino/storico prezzi derivati** (mai tabelle): `prezzoListino` = ultimo prezzo per articolo+cliente (created_at, ripiego altro cliente), non media. `storicoPrezziArticolo` per l'andamento.
