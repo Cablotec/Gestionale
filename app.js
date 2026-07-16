@@ -5630,7 +5630,7 @@ function openNuovoOrdineModal() {
   if (state.aziende.length === 0 || state.articoli.length === 0)
     return toast('Servono prima clienti e articoli.', 'err');
   const prezzoAttivo = (state.operazioni || []).some(x => 'prezzo_unitario' in x);
-  const cols = '62px minmax(220px,1fr) 140px 150px 64px' + (prezzoAttivo ? ' 96px' : '') + ' 148px 28px';
+  const cols = '62px minmax(220px,1fr) 140px 150px 64px' + (prezzoAttivo ? ' 96px' : '') + ' 76px 148px 28px';
 
   const modal = el('div', { class:'modal', style:'max-width:1240px;width:95vw;' });
   modal.append(el('div', { class:'mhd' },
@@ -5665,7 +5665,7 @@ function openNuovoOrdineModal() {
   const griglia = el('div', { style:'display:grid;grid-template-columns:'+cols+';column-gap:8px;row-gap:8px;align-items:start;margin-top:10px;' });
   const hCell = (t) => el('div', { style:'font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;align-self:end;padding-bottom:2px;' }, t);
   griglia.append(hCell('Pos'), hCell('Codice articolo'), hCell('Numero OP'), hCell('Rif. cliente'), hCell('Q.tà'),
-    ...(prezzoAttivo ? [hCell('€/pz')] : []), hCell('Scadenza'), hCell(''));
+    ...(prezzoAttivo ? [hCell('€/pz')] : []), hCell('Min/pz'), hCell('Scadenza'), hCell(''));
   const totBar = el('div', { style:'margin-top:8px;font-family:DM Mono,monospace;font-size:14px;font-weight:700;text-align:right;' });
 
   let righe = [];
@@ -5689,18 +5689,26 @@ function openNuovoOrdineModal() {
       onblur:(e)=>{ const m=e.target.value.trim().match(/^(\d{4})\/OP\/(\d{1,4})$/); if(m) e.target.value=m[1]+'/OP/'+m[2].padStart(5,'0'); } });
     const inRif = el('input', { type:'text', class:'ord-inp', placeholder:'rif.' });
     const inQta = el('input', { type:'number', class:'ord-inp', value:'1', min:'1', oninput:()=>aggiornaTotale() });
-    const inPrezzo = prezzoAttivo ? el('input', { type:'number', class:'ord-inp', min:'0', step:'0.01', placeholder:'€', oninput:()=>aggiornaTotale() }) : null;
+    const inPrezzo = prezzoAttivo ? el('input', { type:'number', class:'ord-inp', min:'0', step:'0.01', placeholder:'€',
+      oninput:()=>{ aggiornaTotale(); riga.aggiornaMinHint(); } }) : null;
+    // Minuti pagati (min/pz): VUOTO = automatico. Priorità al salvataggio:
+    // 1) valore digitato qui  2) regola tariffa cliente (da prezzo)
+    // 3) default articolo. Il placeholder mostra live il valore automatico.
+    const inMin = el('input', { type:'number', class:'ord-inp', min:'0', step:'1',
+      title:'Minuti pagati per pezzo. Vuoto = automatico: dal prezzo se il cliente ha una tariffa €/h, altrimenti dal default articolo. Un valore scritto qui vince su tutto.' });
     const inScad = el('input', { type:'date', class:'ord-inp' });
     const btnX = el('button', { type:'button', class:'btnd', style:'align-self:start;padding:6px 8px;',
       onclick:()=>{ righe = righe.filter(r=>r!==riga); riga.el.remove(); if(!righe.length) creaRiga(); aggiornaTotale(); } }, '✕');
     // Wrapper display:contents: le celle entrano nella griglia padre.
     const row = el('div', { style:'display:contents;' },
-      inPos, acArt.container, inOP, inRif, inQta, ...(prezzoAttivo?[inPrezzo]:[]), inScad, btnX);
+      inPos, acArt.container, inOP, inRif, inQta, ...(prezzoAttivo?[inPrezzo]:[]), inMin, inScad, btnX);
     const riga = {
       el: row,
       getData: () => {
         const v = acArt.getValue();
         const opRaw = (inOP.value||'').trim();
+        const minRaw = (inMin.value||'').toString().trim();
+        const minVal = minRaw === '' ? null : parseFloat(minRaw.replace(',','.'));
         return {
           getVal: v,
           articoloId: (v.mode==='existing' && v.id) ? v.id : null,
@@ -5710,21 +5718,48 @@ function openNuovoOrdineModal() {
           riferimento_cliente: (inRif.value||'').trim() || null,
           quantita: parseInt(inQta.value)||0,
           prezzo: inPrezzo ? (parseFloat((inPrezzo.value||'').replace(',','.'))||0) : 0,
+          minuti: (Number.isFinite(minVal) && minVal >= 0) ? minVal : null,
           scadenza: inScad.value || null,
         };
       },
       prefillPrezzo: () => {
-        if (!inPrezzo) return;
+        if (!inPrezzo) { riga.aggiornaMinHint(); return; }
         const v = acArt.getValue();
         const aId = (v.mode==='existing' && v.id) ? v.id : null;
-        if (!aId) { aggiornaTotale(); return; }
+        if (!aId) { aggiornaTotale(); riga.aggiornaMinHint(); return; }
         const list = prezzoListino(aId, clienteId());
         if ((inPrezzo.value||'').trim()==='' && list) inPrezzo.value = String(list.prezzo);
         aggiornaTotale();
+        riga.aggiornaMinHint();
+      },
+      // Placeholder = il valore AUTOMATICO che verrà usato se la casella
+      // resta vuota (da prezzo con tariffa cliente, altrimenti articolo).
+      aggiornaMinHint: () => {
+        const cli = state.aziende.find(a => a.id === clienteId());
+        const tariffa = Number(cli && cli.tariffa_cliente) || 0;
+        const prezzo = inPrezzo ? (parseFloat((inPrezzo.value||'').replace(',','.'))||0) : 0;
+        if (tariffa > 0 && prezzo > 0) {
+          inMin.placeholder = String(Math.round(prezzo / tariffa * 60));
+          inMin.title = 'Automatico DA PREZZO: ' + Math.round(prezzo / tariffa * 60)
+            + ' min/pz (' + String(prezzo).replace('.', ',') + ' € ÷ '
+            + String(tariffa).replace('.', ',') + ' €/h). Scrivi un valore per forzarlo.';
+          return;
+        }
+        const v = acArt.getValue();
+        const art = (v.mode==='existing' && v.id) ? state.articoli.find(a => a.id === v.id) : null;
+        if (art && art.minuti_unitari != null && art.minuti_unitari !== '') {
+          inMin.placeholder = String(art.minuti_unitari);
+          inMin.title = 'Automatico dal default articolo: ' + art.minuti_unitari
+            + ' min/pz. Scrivi un valore per forzarlo.';
+        } else {
+          inMin.placeholder = 'min';
+          inMin.title = 'Minuti pagati per pezzo. Vuoto = automatico (da prezzo con tariffa cliente, altrimenti default articolo).';
+        }
       },
     };
     righe.push(riga);
     griglia.append(row);
+    riga.aggiornaMinHint();
     return riga;
   }
   for (let i = 0; i < 5; i++) creaRiga();  // 5 posizioni pronte; le vuote non si inseriscono
@@ -5789,9 +5824,12 @@ function openNuovoOrdineModal() {
           scadenza: d.scadenza, stato:'aperta', stato_preparazione:'vuoto',
         };
         if (prezzoAttivo) p.prezzo_unitario = d.prezzo > 0 ? d.prezzo : null;
-        if (tariffaCli > 0 && d.prezzo > 0) {
-          // minuto intero: operazioni.minuti_unitari è INTEGER nel DB
-          // (60 € ÷ 27,3 = 131,87 → 132; scarto economico trascurabile)
+        // Priorità minuti pagati: 1) digitati a mano nella colonna Min/pz
+        // 2) regola tariffa cliente (da prezzo) 3) default articolo (già in p).
+        // Sempre al minuto intero: operazioni.minuti_unitari è INTEGER nel DB.
+        if (d.minuti != null) {
+          p.minuti_unitari = Math.round(d.minuti);
+        } else if (tariffaCli > 0 && d.prezzo > 0) {
           p.minuti_unitari = Math.round(d.prezzo / tariffaCli * 60);
           posDaTariffa++;
         }
