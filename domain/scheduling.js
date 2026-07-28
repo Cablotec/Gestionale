@@ -1211,3 +1211,75 @@ function storicoPrezziArticolo(articoloId) {
       quantita: Number(o.quantita) || 0 }))
     .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
 }
+
+// ── PREZZO consigliato dal TEMPO EFFETTIVO (consuntivo) ────────────────────
+// Verso opposto alla regola tariffa cliente: lì il prezzo genera il tempo
+// pagato, qui il tempo DAVVERO timbrato genera il prezzo da chiedere.
+// Base = somma dei min/pz delle sole fasi con fonte 'storico' (il template è
+// una stima, non un consuntivo: entra nel conteggio degli esclusi, mai nel
+// numero). Stessa finestra del motore (ultime MEDIA_ULTIME_COMMESSE chiuse).
+// nCommesse = il MINIMO tra le fasi: la fase col campione più magro decide
+// quanto ci si può fidare. `debole` = una sola commessa alle spalle.
+// Derivato e non vincolante: propone, non scrive mai (come tutto il resto).
+// Ritorna { prezzo, minPz, ore, tariffa, nCommesse, debole, fasiConsuntivo,
+//   fasiTotali, fasiSenzaStorico } o null.
+function prezzoDaTempoEffettivo(articoloId, clienteId) {
+  if (!articoloId || !clienteId) return null;
+  const cli = (state.aziende || []).find(a => a.id === clienteId);
+  const tariffa = Number(cli && cli.tariffa_cliente) || 0;
+  if (!(tariffa > 0)) return null;
+  const fasi = (typeof fasiEffettiveArticolo === 'function')
+    ? fasiEffettiveArticolo(articoloId) : [];
+  const cons = fasi.filter(f => f.fonte === 'storico' && Number(f.minuti_unitari) > 0);
+  if (!cons.length) return null;
+  let minPz = 0, nMin = Infinity;
+  cons.forEach(f => {
+    minPz += Number(f.minuti_unitari);
+    nMin = Math.min(nMin, Number(f.nCommesse) || 0);
+  });
+  if (!(minPz > 0)) return null;
+  return {
+    prezzo: Math.round(minPz / 60 * tariffa * 100) / 100,
+    minPz: Math.round(minPz * 10) / 10,
+    ore: minPz / 60,
+    tariffa,
+    nCommesse: nMin === Infinity ? 0 : nMin,
+    debole: nMin <= 1,
+    fasiConsuntivo: cons.length,
+    fasiTotali: fasi.length,
+    fasiSenzaStorico: fasi.length - cons.length,
+  };
+}
+
+// Scostamenti prezzo-vs-consuntivo di un cliente: per ogni suo articolo con
+// prezzo, confronta il listino vivo (ultimo prezzo praticato) col prezzo che
+// le ore realmente timbrate giustificherebbero. Ordinati per scarto assoluto:
+// in cima quelli su cui si perde (o si guadagna) di più, in entrambi i versi.
+// Solo articoli con consuntivo vero; chi non ha storico semplicemente non
+// compare. Ritorna [{ articoloId, prezzo, suggerito, scarto, ... }].
+function scostamentiPrezzoCliente(clienteId) {
+  if (!clienteId) return [];
+  const cli = (state.aziende || []).find(a => a.id === clienteId);
+  if (!cli || !(Number(cli.tariffa_cliente) > 0)) return [];
+  const artIds = [...new Set((state.operazioni || [])
+    .filter(o => o.cliente_id === clienteId && o.articolo_id && Number(o.prezzo_unitario) > 0)
+    .map(o => o.articolo_id))];
+  const out = [];
+  artIds.forEach(artId => {
+    const list = prezzoListino(artId, clienteId);
+    const s = prezzoDaTempoEffettivo(artId, clienteId);
+    if (!list || !s || !(list.prezzo > 0) || !list.proprioCliente) return;
+    out.push({
+      articoloId: artId,
+      prezzo: list.prezzo,
+      suggerito: s.prezzo,
+      scarto: s.prezzo / list.prezzo - 1,
+      minPz: s.minPz,
+      ore: s.ore,
+      nCommesse: s.nCommesse,
+      debole: s.debole,
+      fasiSenzaStorico: s.fasiSenzaStorico,
+    });
+  });
+  return out.sort((a, b) => Math.abs(b.scarto) - Math.abs(a.scarto));
+}

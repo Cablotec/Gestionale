@@ -1,4 +1,4 @@
-# Handoff — Gestionale Cablotec (aggiornato 13 lug 2026)
+# Handoff — Gestionale Cablotec (aggiornato 28 lug 2026)
 
 > Fonte per i fili aperti. CLAUDE.md è derivato da qui: se cambia questo, rigenerare quello.
 
@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-15.3`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-28.1`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -20,7 +20,7 @@
 
 ## Stato migrazioni DB (eseguite dal pannello Supabase da Nico)
 - `prezzo_unitario` su operazioni: **ESEGUITA** (colonna attiva, campo €/pz visibile).
-- `gruppo_id` su operazioni (accorpamento): **DA VERIFICARE** se eseguita — il codice è inerte senza; nessun collaudo sul campo ancora fatto.
+- `gruppo_id` su operazioni (accorpamento): **ESEGUITA** (verificata a DB il 28 lug: la colonna c'è). Resta il collaudo sul campo.
 - `tariffa_oraria` su aziende (traccia fornitori): **ESEGUITA** (14 lug).
 - `tariffa_cliente` su aziende (regola prezzo→tempo pagato, es. Elcotec): **ESEGUITA** (14 lug, tariffa Elcotec impostata). NB: `operazioni.minuti_unitari` è **INTEGER** → la regola arrotonda al minuto intero (scoperto sul campo: 131,87 rifiutato).
 - Tabella `produttori` (scheda Codifica): **DA ESEGUIRE** — codice inerte senza (sigla produttore a mano):
@@ -45,6 +45,11 @@
 - FATTO: `prezzo_unitario` sulla riga + **listino vivo** (`prezzoListino`: ultimo prezzo per articolo+cliente, per created_at, ripiego altro cliente) + `storicoPrezziArticolo` (domain, 7 test) + griglia multi-riga + **sezione listino nell'anagrafica articolo** (13 lug, `.9`: blocco per cliente ordinato per data ultimo prezzo, drill-down andamento con `entityTimeline`, derivato e sola lettura — in `openArticoloModal`, tra Fasi e Note) + **€/ora per cliente** in Analisi clienti (14 lug, `2026-07-14.1`: `analisiClienti()` ritorna `euroOra`/`ricavo`/`nConPrezzo`, ricavo ÷ ore timbrate SOLO su commesse con prezzo — stesso sottoinsieme sopra e sotto la frazione; copertura dichiarata in card quando non tutte hanno prezzo; 9 test in scratchpad/test_eurora.js). NB: `prezzo_unitario` è nuovo (13 lug) → all'inizio quasi tutte le chiuse sono senza prezzo, €/h comparirà man mano.
 - Traccia **fornitori** FATTA lato codice (14 lug, `.2`): campo "Tariffa oraria (€/h)" in scheda azienda (visibile solo se fornitore, si accende solo a colonna presente) + nel modal commessa, riga fornitore, "prezzo suggerito ≈ € X (Yh × Z €/h)" live — ore = somma min/pz delle SUE fasi (nessuna chip = tutta la commessa; senza fasi = budget pagato) × qtà corrente; si aggiorna su chip/qtà/minuti via `aggiornaSuggFornitori`. Nulla viene salvato: solo suggerimento. **Manca la migrazione** (vedi sezione migrazioni) e il collaudo con una tariffa vera.
 - Analisi fatta sui dati: % ripartizione per cliente NON predittiva (±35 punti); il numero d'oro è **reale/pagato per cliente** (Elcotec ×1,45 = sottoprezzato; Sacmi ×0,69). Già in scheda Analisi clienti.
+- **Prezzo consigliato DAL CONSUNTIVO** (28 lug, `2026-07-28.1`, richiesta Nico) — il verso opposto della regola tariffa: lì il prezzo genera il tempo pagato, qui le ore **realmente timbrate** generano il prezzo da chiedere. `prezzoDaTempoEffettivo(articoloId, clienteId)` e `scostamentiPrezzoCliente(clienteId)` in `domain/scheduling.js` (puri, 26 test in scratchpad/test_prezzo_consuntivo.js). Base = somma min/pz delle **sole fasi con fonte 'storico'** (il template è stima, non consuntivo: finisce in `fasiSenzaStorico` e viene dichiarato), × `tariffa_cliente`. `nCommesse` = **minimo** tra le fasi (la fase col campione più magro decide la fiducia); `debole` = una sola commessa.
+  - **Dove**: (a) modal commessa, box `#prezzo-da-consuntivo` sotto il campo prezzo — `da consuntivo: € X (Yh × Z €/h · N commesse) · ±S%` + bottone "usa", **mai automatico** come tutto il resto; (b) Analisi clienti, sezione `entityTimeline` "Prezzi vs consuntivo" per cliente, articoli ordinati per **scarto assoluto** (i peggiori in cima nei DUE versi).
+  - **Dato debole dichiarato** (decisione Nico): con 1 sola commessa il numero si mostra ma marcato giallo (`etl-debole` + ⚠). Oggi su Elcotec **tutti e 8** gli articoli con consuntivo hanno campione 1 — se si nascondessero sotto le 2 commesse non si vedrebbe niente.
+  - **In sospeso**: la commessa `2026/OC/00000` (numero segnaposto in mezzo a OC reali 00329…00361, articolo EL50612MEBE015K3GI10080) — Nico ha allineato i minuti (erano 1873 contro i 1859 della regola: prezzo inserito DOPO la creazione, quindi minuti presi dal default articolo — comportamento corretto, non un bug). Resta da chiarire **se è una riga di prova**: è l'unico prezzo di quell'articolo (quindi ne è il listino) ed è 'spedita', quindi pesa nel €/h Elcotec. Se va cancellata serve SQL dal pannello (l'account kiosk non può DELETE).
+  - **Scoperta sui dati** (28 lug): Elcotec NON è sottoprezzata in blocco. 4 articoli sopra e 4 sotto, scarto pesato complessivo solo **+13%**, ma dispersione da **−67% a +184%**. Il problema è la dispersione per articolo, non il livello: il ×1,45 medio la nascondeva. Da rivedere quando i campioni saranno ≥2.
 
 ### 3. Accorpamento commesse (gruppi) — da collaudare
 - Admin: Ordini cliente (ex Pianificazione, rinominata 14 lug — id interno resta `pianificazione`) → `⊞ Raggruppa` → selezione → Crea gruppo; badge `⊞N`, click per sciogliere. Kiosk: gruppo = UNA card (banner), split del timbro alla chiusura **proporzionale al peso = qtà × min/pz** (5+2+7 → 500/200/700, 18 test). Insert+update, mai delete (RLS: l'account kiosk NON può cancellare).

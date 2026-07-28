@@ -6649,7 +6649,10 @@ function openOperazioneModal(o) {
     placeholder: 'Cerca o digita nuovo cliente…',
     initialId: o.cliente_id || null,
     entityLabel: 'cliente',
-    onChange: () => { if (typeof aggiornaPrezzoListino === 'function') aggiornaPrezzoListino(); },
+    onChange: () => {
+      if (typeof aggiornaPrezzoListino === 'function') aggiornaPrezzoListino();
+      if (typeof aggiornaSuggDaConsuntivo === 'function') aggiornaSuggDaConsuntivo();
+    },
   });
 
   // Autocomplete articolo — con creazione al volo.
@@ -6693,6 +6696,8 @@ function openOperazioneModal(o) {
       // Prezzo: pre-compila dall'ultimo usato (articolo+cliente) se il campo è
       // ancora vuoto — non sovrascrive un prezzo già digitato a mano.
       if (typeof aggiornaPrezzoListino === 'function') aggiornaPrezzoListino();
+      // Prezzo consigliato dalle ore realmente timbrate su questo articolo
+      if (typeof aggiornaSuggDaConsuntivo === 'function') aggiornaSuggDaConsuntivo();
       // Aggiorna indicatore divergenza (se la funzione è già definita)
       if (typeof aggiornaIndicatoreMinuti === 'function') aggiornaIndicatoreMinuti();
       // Trigga il refresh del preview (se la funzione è già definita)
@@ -7336,7 +7341,8 @@ function openOperazioneModal(o) {
           value: String(o.prezzo_unitario != null ? o.prezzo_unitario : ''),
           min:'0', step:'0.01', placeholder:'€ per pezzo' }),
         el('div', { class:'sub', id:'prezzo-hint', style:'margin-top:4px;font-size:10px;color:var(--mut);' },
-          'Ultimo prezzo per articolo+cliente (modificabile).')),
+          'Ultimo prezzo per articolo+cliente (modificabile).'),
+        el('div', { class:'sub', id:'prezzo-da-consuntivo', style:'margin-top:2px;font-size:10px;display:none;' })),
       el('div', { class:'field' }, el('label', {}, 'Totale riga'),
         el('div', { id:'prezzo-totale', style:'padding:8px 0 2px;font-family:DM Mono,monospace;font-size:15px;font-weight:700;' }, '—'),
         el('div', { class:'sub', id:'margine-riga', style:'font-size:10px;font-family:DM Mono,monospace;' })),
@@ -8154,6 +8160,52 @@ function openOperazioneModal(o) {
     } catch (e) {}
   };
 
+  // Verso opposto: il tempo DAVVERO timbrato propone il prezzo da chiedere
+  // (ore effettive × tariffa cliente). Come sopra, MAI automatico: propone e
+  // dichiara su quante commesse poggia. Una sola commessa = giallo, perché a
+  // campione 1 un timbro storto sposta il prezzo più di una trattativa.
+  const aggiornaSuggDaConsuntivo = () => {
+    try {
+      const box = form.querySelector('#prezzo-da-consuntivo');
+      const prezzoInput = form.querySelector('#prezzo-input');
+      if (!box || !prezzoInput) return;
+      const artVal = acArticolo.getValue();
+      const cliVal = acCliente.getValue();
+      const artId = (artVal.mode === 'existing' && artVal.id) ? artVal.id : null;
+      const cliId = (cliVal.mode === 'existing' && cliVal.id) ? cliVal.id : null;
+      const s = (artId && cliId && typeof prezzoDaTempoEffettivo === 'function')
+        ? prezzoDaTempoEffettivo(artId, cliId) : null;
+      if (!s) { box.style.display = 'none'; box.innerHTML = ''; return; }
+      const fmtE = (n) => '€ ' + Number(n).toLocaleString('it-IT',
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const cur = parseFloat((prezzoInput.value || '').toString().replace(',', '.')) || 0;
+      const scarto = cur > 0 ? Math.round((s.prezzo / cur - 1) * 100) : null;
+      box.style.display = '';
+      box.innerHTML = '';
+      box.append(
+        el('span', { class: s.debole ? 'etl-debole' : '', style:'font-family:DM Mono,monospace;'
+            + (s.debole ? '' : 'color:var(--mut);') },
+          'da consuntivo: ' + fmtE(s.prezzo)
+          + ' (' + s.ore.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+          + ' h × ' + String(s.tariffa).replace('.', ',') + ' €/h · '
+          + s.nCommesse + (s.nCommesse === 1 ? ' commessa' : ' commesse') + ')'
+          + (scarto != null && scarto !== 0 ? ' · ' + (scarto > 0 ? '+' : '') + scarto + '%' : '')
+          + (s.fasiSenzaStorico > 0
+              ? ' · ' + s.fasiSenzaStorico
+                + (s.fasiSenzaStorico === 1 ? ' fase senza consuntivo, esclusa' : ' fasi senza consuntivo, escluse')
+              : '')),
+        canEdit ? el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
+          onclick: () => {
+            prezzoInput.value = String(s.prezzo);
+            prezzoInput.dispatchEvent(new Event('input', { bubbles: true }));
+          } }, 'usa') : null,
+      );
+      if (s.debole) box.title = 'Media su UNA sola commessa chiusa: indicativa, non una base di trattativa.';
+      else box.title = 'Ore realmente timbrate (ultime ' + MEDIA_ULTIME_COMMESSE
+        + ' commesse chiuse) × tariffa del cliente.';
+    } catch (e) {}
+  };
+
   const refreshPreview = () => {
     const fd = new FormData(form);
     const tmp = {
@@ -8290,8 +8342,10 @@ function openOperazioneModal(o) {
     form.querySelector('[name=quantita]')?.addEventListener('input', aggiornaTotalePrezzo);
     form.querySelector('#prezzo-input')?.addEventListener('input', aggiornaTotalePrezzo);
     form.querySelector('#prezzo-input')?.addEventListener('input', aggiornaSuggDaPrezzo);
+    form.querySelector('#prezzo-input')?.addEventListener('input', aggiornaSuggDaConsuntivo);
     aggiornaPrezzoListino();
     aggiornaSuggDaPrezzo();
+    aggiornaSuggDaConsuntivo();
   }
   // Bind aggiuntivo: input minuti aggiorna anche l'indicatore di divergenza
   // e il suggerimento "da prezzo" (che sparisce quando i valori coincidono)
@@ -12303,7 +12357,9 @@ function renderAnalisiClienti(root) {
     'Base dati: commesse spedite/completate con almeno 1h timbrata, calcolo live dai timbri. '
     + 'Reale/pagato: ×1,00 = il tempo pagato regge; sopra = il cliente costa più di quanto paga (rosso da ×1,05). '
     + '€/h: ricavo ÷ ore timbrate, calcolato solo sulle sue commesse con prezzo. '
-    + 'Ripartizione: quota media del tipo di lavorazione; il ± dice quanto balla da commessa a commessa.'));
+    + 'Ripartizione: quota media del tipo di lavorazione; il ± dice quanto balla da commessa a commessa. '
+    + 'Prezzi vs consuntivo: quanto varrebbe ogni articolo alle ore realmente timbrate × tariffa del cliente; '
+    + '⚠ = una sola commessa alle spalle, indicativo.'));
   if (!righe.length) {
     root.append(el('div', { class:'empty' }, 'Nessuna commessa chiusa con timbri.'));
     return;
@@ -12357,6 +12413,37 @@ function renderAnalisiClienti(root) {
       ));
     });
     card.append(wrap);
+    // Prezzi vs consuntivo: cosa costa DAVVERO ogni articolo alla tariffa del
+    // cliente, contro quello che gli si chiede. Chiuso di default (è un
+    // approfondimento, non il titolo della card). Solo per i clienti con
+    // tariffa dichiarata: senza, non c'è un prezzo da consigliare.
+    if (typeof scostamentiPrezzoCliente === 'function') {
+      const sc = scostamentiPrezzoCliente(r.clienteId);
+      if (sc.length) {
+        const fmtE = (n) => '€ ' + Number(n).toLocaleString('it-IT',
+          { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const pc = (x) => (x > 0 ? '+' : '') + Math.round(x * 100) + '%';
+        const fuori = sc.filter(x => Math.abs(x.scarto) >= 0.20).length;
+        const deboli = sc.filter(x => x.debole).length;
+        card.append(el('div', { style:'margin-top:10px;' }, entityTimeline({
+          sommario: 'Prezzi vs consuntivo — ' + sc.length
+            + (sc.length === 1 ? ' articolo' : ' articoli')
+            + (fuori ? ' · ' + fuori + ' oltre ±20%' : ' · tutti entro ±20%')
+            + (deboli ? ' · ' + deboli + ' su una sola commessa' : ''),
+          debole: deboli === sc.length,
+          righe: sc.map(x => {
+            const art = state.articoli.find(a => a.id === x.articoloId);
+            return {
+              titolo: (art?.codice || '—') + (x.debole ? ' ⚠' : ''),
+              meta: fmtE(x.prezzo) + ' oggi · ' + x.minPz.toLocaleString('it-IT',
+                  { maximumFractionDigits: 0 }) + ' min/pz timbrati · '
+                + x.nCommesse + (x.nCommesse === 1 ? ' commessa' : ' commesse'),
+              valore: fmtE(x.suggerito) + '  ' + pc(x.scarto),
+            };
+          }),
+        })));
+      }
+    }
     root.append(card);
   });
 }
