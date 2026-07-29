@@ -23,6 +23,10 @@
 - `gruppo_id` su operazioni (accorpamento): **ESEGUITA** (verificata a DB il 28 lug: la colonna c'è). Resta il collaudo sul campo.
 - `tariffa_oraria` su aziende (traccia fornitori): **ESEGUITA** (14 lug).
 - `tariffa_cliente` su aziende (regola prezzo→tempo pagato, es. Elcotec): **ESEGUITA** (14 lug, tariffa Elcotec impostata). NB: `operazioni.minuti_unitari` è **INTEGER** → la regola arrotonda al minuto intero (scoperto sul campo: 131,87 rifiutato).
+- `azienda_id` su utenti (ditta degli esterni in sede): **DA ESEGUIRE** — codice inerte senza (il campo "Ditta di provenienza" non compare e gli esterni si raggruppano sotto "Esterni in sede"):
+  ```sql
+  ALTER TABLE utenti ADD COLUMN azienda_id uuid REFERENCES aziende(id);
+  ```
 - Tabella `produttori` (scheda Codifica): **DA ESEGUIRE** — codice inerte senza (sigla produttore a mano):
   ```sql
   CREATE TABLE produttori (
@@ -76,6 +80,15 @@
 
 ## UI Articoli (14 lug, `.5` — richiesta Nico)
 - Tab Articoli PRIMA in Gestione. Tabella senza colonna Azioni: click sulla riga apre la scheda; Elimina vive nel footer della scheda (a sinistra, chiude solo a eliminazione avvenuta — `deleteArticolo` ora ritorna bool). Scheda a sezioni (`── Tempo pagato e fasi ──`, `── Listino ──`, `── Note ──`), hint accorciati, codice+categoria+stato su una riga.
+
+## Esterni IN SEDE — flag `utenti.esterno` ridefinito (28 lug, `2026-07-28.2`)
+- **Il problema**: Nico ha inserito 4 persone di ditte terze che vengono a lavorare in sede (TECNOCAB 1/2, SINTEC 1/2) come `esterno=true` e non le vedeva al kiosk. Non era un errore suo: `kioskRenderId` escludeva gli esterni **apposta**.
+- **Perché**: `esterno` nasceva come "terzista che lavora FUORI e non timbra". Quel ruolo è passato ai **fornitori sulla commessa** (7 aziende, 122 righe `operazioni_fornitori`) → il ramo era **morto**: 0 utenti esterni, 0 timbri, 0 assegnazioni prima del 28 lug.
+- **Decisione (Nico)**: il flag NON si pota, si **ridefinisce** → "persona di un'altra ditta che lavora IN SEDE e timbra al kiosk". Scartata l'ipotesi di farli interni normali: violerebbe *esterne dichiarate, mai nascoste* e mescolerebbe le loro ore con la manodopera Cablotec proprio dentro la macchina dei prezzi.
+- NB: Tecnocab e SINTEC esistono **anche** come fornitori (19 e 6 commesse). **Non è un doppione**: sono due rapporti veri con la stessa ditta — lavoro mandato fuori (fornitore) e loro persone che lavorano qui (utenti). Il modello ora sa esprimerli entrambi.
+- **Cosa cambia**: kiosk → gli esterni compaiono, in **sezioni finali per ditta** (o "Esterni in sede" senza `azienda_id`); Gantt Live e Calendario mese → **inclusi** (occupano capacità, si pianificano), sempre marcati ✦/giallo; **Riepilogo assenze → esclusi DI PROPOSITO** (ferie e monte ore sono col loro datore, non con Cablotec). Scheda utente: etichetta "Esterno in sede (timbra qui)" + campo **Ditta di provenienza** (elenco = fornitori; si azzera se torna interno).
+- **Da fare**: migrazione `utenti.azienda_id` + assegnare la ditta ai 4. **Quando se ne vanno: `attivo=false`, MAI rimettere `esterno`** — i timbri devono restare nello storico.
+- **Aperto**: le loro ore entrano nelle medie effettive come tutte le altre. Per la **durata** di un articolo è corretto (il tempo è tempo); per i numeri di **costo/efficienza** (reale/pagato, €/h) andrebbe deciso se separarle. Non toccato: sono numeri visibili, serve una decisione di Nico.
 
 ## Sospesi tecnici (invariati)
 - **Step 1b**: timbri di mobile.html con `sb.from()` nudo → avvolgere in `eseguiConRetry`. Il più importante dei sospesi (protegge i timbri).

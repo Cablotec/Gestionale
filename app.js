@@ -2390,7 +2390,11 @@ function renderOperatori(root) {
     tb.append(el('tr', {},
       el('td', {}, u.nome),
       el('td', {}, u.esterno
-        ? el('span', { class:'badge byel' }, 'esterno')
+        ? el('span', { class:'badge byel',
+            title:'Esterno in sede: timbra al kiosk, ore tenute riconoscibili' },
+            'esterno' + (u.azienda_id
+              ? ' · ' + ((state.aziende.find(a => a.id === u.azienda_id) || {}).nome || '?')
+              : ''))
         : el('span', { class:'badge bblu' }, 'interno')),
       el('td', {}, selGruppo),
       el('td', {}, accountCell),
@@ -2650,6 +2654,42 @@ function openOperatoreModal(u) {
   );
   if (u.account_id) selAccount.value = u.account_id;
 
+  // Tipo: "esterno" NON vuol dire più terzista-che-lavora-fuori (quel ruolo è
+  // del fornitore sulla commessa, dal 14 lug), ma persona di un'altra ditta
+  // che lavora IN SEDE e timbra al kiosk. Da qui in poi il flag serve a tenere
+  // le sue ore riconoscibili, non a nasconderla.
+  const selTipo = el('select', { name:'esterno' },
+    el('option', { value:'false' }, 'Interno (Cablotec)'),
+    el('option', { value:'true' }, 'Esterno in sede (timbra qui)'));
+  selTipo.value = String(!!u.esterno);
+
+  // Ditta di provenienza: si accende solo a colonna presente (migrazione
+  // utenti.azienda_id) e ha senso solo per gli esterni. Elenco dai fornitori
+  // già in anagrafica: la stessa ditta è insieme fornitore (lavoro mandato
+  // fuori) e datore di questa persona (lavoro fatto qui) — due rapporti veri.
+  const aziendaAttiva = (state.utenti || []).some(x => x && ('azienda_id' in x));
+  const selAzienda = el('select', { name:'azienda_id' },
+    el('option', { value:'' }, '— non indicata —'),
+    ...(state.aziende || [])
+      .filter(a => a.attivo !== false && a.is_fornitore)
+      .sort((a, b) => (a.nome || '').localeCompare(b.nome || ''))
+      .map(a => el('option', { value:a.id }, a.nome)),
+  );
+  if (u.azienda_id) selAzienda.value = u.azienda_id;
+  const campoAzienda = aziendaAttiva
+    ? el('div', { class:'field', id:'campo-azienda',
+        style: u.esterno ? '' : 'display:none;' },
+        el('label', {}, 'Ditta di provenienza'),
+        selAzienda,
+        el('div', { class:'sub', style:'margin-top:4px;font-size:10px;' },
+          'Serve a tenere le sue ore attribuibili alla ditta giusta nelle analisi. '
+          + 'L\'elenco sono i fornitori in anagrafica.'))
+    : null;
+  // Il campo ditta ha senso solo per gli esterni: compare e sparisce col Tipo.
+  selTipo.addEventListener('change', () => {
+    if (campoAzienda) campoAzienda.style.display = selTipo.value === 'true' ? '' : 'none';
+  });
+
   form.append(
     el('div', { class:'field' }, el('label', {}, 'Nome *'),
       el('input', { type:'text', name:'nome', required:'true', value:u.nome })),
@@ -2660,12 +2700,10 @@ function openOperatoreModal(u) {
     el('div', { class:'field' }, el('label', {}, 'Note (opz.)'),
       el('textarea', { name:'note', rows:'2' }, u.note||'')),
     el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Tipo'), (() => {
-        const s = el('select', { name:'esterno' },
-          el('option', { value:'false' }, 'Interno (Cablotec)'),
-          el('option', { value:'true' }, 'Esterno (collaboratore)'));
-        s.value = String(!!u.esterno); return s;
-      })()),
+      el('div', { class:'field' }, el('label', {}, 'Tipo'), selTipo,
+        el('div', { class:'sub', style:'margin-top:4px;font-size:10px;' },
+          'Esterno in sede = persona di un\'altra ditta che lavora QUI e timbra al kiosk. '
+          + 'Il lavoro mandato fuori non si gestisce da qui: quello è un fornitore sulla commessa.')),
       el('div', { class:'field' }, el('label', {}, 'Stato'), (() => {
         const s = el('select', { name:'attivo' },
           el('option', { value:'true' }, 'Attivo'),
@@ -2673,6 +2711,7 @@ function openOperatoreModal(u) {
         s.value = String(!!u.attivo); return s;
       })()),
     ),
+    campoAzienda,
   );
   body.append(form);
   modal.append(body);
@@ -2687,6 +2726,11 @@ function openOperatoreModal(u) {
         attivo: fd.get('attivo') === 'true',
         esterno: fd.get('esterno') === 'true',
       };
+      // Ditta solo per gli esterni: se torna interno il legame si azzera, così
+      // non restano riferimenti orfani a una ditta che non c'entra più.
+      if (aziendaAttiva) {
+        payload.azienda_id = payload.esterno ? (fd.get('azienda_id') || null) : null;
+      }
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
       const { data, error } = await eseguiConRetry(
         () => isNew ? sb.from('utenti').insert(payload).select().single() : sb.from('utenti').update(payload).eq('id', u.id).select().single(),
@@ -10552,10 +10596,28 @@ function kioskRenderId() {
   // Le card sono raggruppate per gruppo utenti (Trasfertisti, Cablotec 1, ecc.).
   const grid = $('#kiosk-utili-grid');
   grid.innerHTML = '';
-  const lista = state.utenti
-    .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
+  // Gli esterni IN SEDE timbrano come tutti (28 lug): prima erano esclusi
+  // perché "esterno" voleva dire terzista-che-lavora-fuori, ruolo passato ai
+  // fornitori sulla commessa. Restano in fondo, in una sezione per ditta, così
+  // si vedono ma non si confondono con le squadre Cablotec.
+  const attivi = state.utenti
+    .filter(u => u.attivo && !isKioskRecord(u))
     .sort((a,b) => a.nome.localeCompare(b.nome));
-  const sezioni = raggruppaUtenti(lista);
+  const sezioni = raggruppaUtenti(attivi.filter(u => !u.esterno));
+  const esterni = attivi.filter(u => u.esterno);
+  if (esterni.length) {
+    const perDitta = new Map();
+    esterni.forEach(u => {
+      const nome = u.azienda_id
+        ? ((state.aziende.find(a => a.id === u.azienda_id) || {}).nome || 'Esterni in sede')
+        : 'Esterni in sede';
+      if (!perDitta.has(nome)) perDitta.set(nome, []);
+      perDitta.get(nome).push(u);
+    });
+    [...perDitta.entries()]
+      .sort((x, y) => x[0].localeCompare(y[0]))
+      .forEach(([nome, utenti]) => sezioni.push({ key:'__est__' + nome, label: nome, utenti }));
+  }
   sezioni.forEach(sez => {
     // Intestazione di gruppo a tutta larghezza (occupa l'intera riga della griglia)
     grid.appendChild(el('div', {
@@ -12575,8 +12637,9 @@ function buildLiveCard(u, onClick, opts = {}) {
 }
 
 function renderGanttLive(root) {
-  // Filtra operatori attivi (no kiosk, no esterni)
-  const operatori = state.utenti.filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
+  // Operatori attivi, kiosk escluso. Gli esterni IN SEDE ci sono: timbrano e
+  // occupano capacità come gli altri (28 lug). Restano marcati ✦/giallo.
+  const operatori = state.utenti.filter(u => u.attivo && !isKioskRecord(u))
     .sort((a,b) => a.nome.localeCompare(b.nome));
 
   const oggiISO = toLocalISO(new Date());
@@ -14350,9 +14413,10 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
   });
   table.append(trDow);
 
-  // Righe utenti (no kiosk, no esterni)
+  // Righe utenti (kiosk escluso). Gli esterni in sede si pianificano come gli
+  // altri: si assegnano alle commesse e devono comparire nel calendario.
   const utenti = state.utenti
-    .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
+    .filter(u => u.attivo && !isKioskRecord(u))
     .sort((a,b) => a.nome.localeCompare(b.nome));
 
   const mioUtente = getMioUtente();
@@ -14868,6 +14932,9 @@ async function eliminaAssenza(a) {
 
 function renderRiepilogoAssenze(root) {
   const anno = state.assAnno;
+  // Gli esterni in sede restano fuori DI PROPOSITO: ferie, permessi e monte
+  // ore sono rapporti col loro datore di lavoro, non con Cablotec. Qui si
+  // timbra il lavoro fatto, non si gestisce il loro contratto.
   const utenti = state.utenti
     .filter(u => u.attivo && !isKioskRecord(u) && !u.esterno)
     .sort((a,b) => a.nome.localeCompare(b.nome));

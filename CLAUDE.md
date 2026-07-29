@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-28.1`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-28.2`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -25,6 +25,7 @@
 - `operazioni.gruppo_id` (accorpamento): **ESEGUITA** (verificata a DB il 28 lug); resta il collaudo sul campo.
 - `aziende.tariffa_oraria` (traccia fornitori): **ESEGUITA** (14 lug).
 - `aziende.tariffa_cliente` (regola prezzo→tempo pagato): **ESEGUITA** (14 lug). NB: `operazioni.minuti_unitari` è **INTEGER** → arrotondare sempre al minuto intero.
+- `utenti.azienda_id` (ditta degli esterni in sede): **DA ESEGUIRE** — `ALTER TABLE utenti ADD COLUMN azienda_id uuid REFERENCES aziende(id);` codice inerte senza.
 - Tabella `produttori` (scheda Codifica): **DA ESEGUIRE** — SQL in handoff.md; codice inerte senza (sigla a mano).
 
 ## ▶ Fili aperti (priorità)
@@ -49,6 +50,7 @@
 - **Accorpamento**: split del timbro proporzionale al peso = qtà × min/pz (`ripartisciTimbroGruppo` + `commesseGruppoLavorabili`, 18 test); insert+update, mai delete (RLS kiosk non può cancellare).
 - Derivati **live**, mai materializzati. `domain/` resta PURO. Prima di cancellare funzioni: cercare chiamanti anche in `onclick=""`. Tabelle a crescita libera SEMPRE via `fetchTutte`.
 - Il controllo economico è il **tempo pagato** (mai auto-aggiornato). Kiosk "Riprendi" = ultime timbrate non finite in cima.
+- **`utenti.esterno` = "esterno IN SEDE"** (ridefinito 28 lug): persona di un'altra ditta che lavora QUI e **timbra al kiosk**. Il terzista che lavora FUORI è un **fornitore sulla commessa**, non un utente — quel ramo era morto (0 utenti, 0 timbri) e non si pota, si riusa. Gli esterni compaiono al kiosk in sezioni per ditta, entrano in Gantt Live e Calendario (occupano capacità) marcati ✦/giallo, e restano **fuori dal Riepilogo assenze** (ferie = rapporto col loro datore). Fine rapporto → `attivo=false`, MAI rimettere `esterno`: i timbri restano storico. Una ditta può essere insieme fornitore e datore di esterni in sede: due rapporti veri, non un doppione.
 
 ## Strumenti riusabili
 - **DB in lettura** via REST con account kiosk (credenziali in core/db.js) — diagnosi su dati reali; curl con `--ssl-no-revoke`; l'account NON può DELETE → cancellazioni via SQL dal pannello (Nico).
