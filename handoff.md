@@ -23,10 +23,7 @@
 - `gruppo_id` su operazioni (accorpamento): **ESEGUITA** (verificata a DB il 28 lug: la colonna c'è). Resta il collaudo sul campo.
 - `tariffa_oraria` su aziende (traccia fornitori): **ESEGUITA** (14 lug).
 - `tariffa_cliente` su aziende (regola prezzo→tempo pagato, es. Elcotec): **ESEGUITA** (14 lug, tariffa Elcotec impostata). NB: `operazioni.minuti_unitari` è **INTEGER** → la regola arrotonda al minuto intero (scoperto sul campo: 131,87 rifiutato).
-- `azienda_id` su utenti (ditta degli esterni in sede): **DA ESEGUIRE** — codice inerte senza (il campo "Ditta di provenienza" non compare e gli esterni si raggruppano sotto "Esterni in sede"):
-  ```sql
-  ALTER TABLE utenti ADD COLUMN azienda_id uuid REFERENCES aziende(id);
-  ```
+- `azienda_id` su utenti (ditta degli esterni in sede): **ESEGUITA** (28 lug, verificata a DB). I 4 esterni hanno già la ditta collegata: SINTEC 1/2 → SINTEC DI SINANI QERIM, TECNOCAB 1/2 → Tecnocab SNC. Al kiosk compaiono in due sezioni finali coi nomi delle ditte.
 - Tabella `produttori` (scheda Codifica): **DA ESEGUIRE** — codice inerte senza (sigla produttore a mano):
   ```sql
   CREATE TABLE produttori (
@@ -90,12 +87,21 @@
 - **Da fare**: migrazione `utenti.azienda_id` + assegnare la ditta ai 4. **Quando se ne vanno: `attivo=false`, MAI rimettere `esterno`** — i timbri devono restare nello storico.
 - **Aperto**: le loro ore entrano nelle medie effettive come tutte le altre. Per la **durata** di un articolo è corretto (il tempo è tempo); per i numeri di **costo/efficienza** (reale/pagato, €/h) andrebbe deciso se separarle. Non toccato: sono numeri visibili, serve una decisione di Nico.
 
-## Sospesi tecnici (invariati)
-- **Step 1b**: timbri di mobile.html con `sb.from()` nudo → avvolgere in `eseguiConRetry`. Il più importante dei sospesi (protegge i timbri).
+## Sospesi tecnici
+- ~~**Step 1b**: timbri con `sb.from()` nudo~~ **FATTO** (28 lug, `2026-07-28.3`) — vedi sezione dedicata sotto.
 - De-dup helper mobile/prelievo (`core/util.js`), `domain/formato.js` mai estratto.
 - Togliere fallback `?kiosk` quando postazioni confermate su kiosk.html.
 - Colonne `lead_giorni` inerti su aziende/operazioni_fornitori (DROP mai fatto).
-- Potatura CSS/rami morti. Cancellare `beta/` e `index-vecchio.html` dal repo GitHub (non presenti nella checkout locale).
+- Potatura CSS/rami morti. (`beta/` e `index-vecchio.html`: **già assenti dal repo**, verificato 28 lug con `git ls-files` — voce chiusa.)
+
+## Step 1b — retry sulle scritture di timbro (28 lug, `2026-07-28.3`)
+- **Scoperta**: il sospeso segnalava solo `mobile.html`, ma **anche il kiosk** aveva gli stessi `sb.from()` nudi (`kioskAvviaSessione`, `kioskChiudiOScarta`, `kioskSelectAttivita`, `kioskFineFase`, `kioskAssicuraAddetto`, `kioskRiapriFaseSeCompletata`, `kioskRisolviOCreaFase`) — ed è la postazione che timbra di più. Coperti entrambi.
+- **Coperto** (tutto il flusso di cattura del timbro, non solo la sessione): avvio timbratura, chiusura, chiusura con split del gruppo + insert delle quote, avvio attività extra, completamento fase, riapertura fase, iscrizione addetto, creazione fase al volo. `mobile.html` non ha **più nessuna** scrittura nuda su `sessioni_lavoro`/`operazioni_addetti`/`operazioni_fasi`.
+- **NON coperto di proposito**: i percorsi **admin** (`app.js` 1112, 8551, 8821, 14134, 14160 — sync fasi/addetti dal modal commessa, chiusure su eliminazione commessa, modifica/eliminazione sessione in Storico consuntivi). Lì c'è una persona davanti allo schermo che vede l'errore e ritenta: profilo di rischio diverso dalla cattura non presidiata in reparto.
+- **Due trappole trovate e risolte, da ricordare se si estende il pattern**:
+  1. **Un builder Supabase è monouso**: `await q` dopo un timeout non rieseguirebbe nulla. Dove la query si costruisce a pezzi (filtri condizionali) va avvolta in una `buildQ = () => …` che la **ricostruisce a ogni tentativo**. Fatto in `fineFase`, `riapriFaseSilenziosa` (mobile), `kioskFineFase`, `kioskRiapriFaseSeCompletata`.
+  2. **Il timestamp si calcola PRIMA del retry**, mai dentro la closure: altrimenti il secondo tentativo scriverebbe l'ora del retry invece di quella in cui l'operatore ha premuto. Fatto in `stopSessione` e `kioskSelectAttivita`.
+- **Limite noto (accettato)**: `eseguiConRetry` ritenta solo sul TIMEOUT (10s). Su una INSERT andata a buon fine ma con risposta persa, il secondo tentativo può creare un doppione. È il compromesso già scelto dal progetto (stesso helper ovunque in app.js) e resta preferibile al timbro perso: il 7 lug se ne sono persi 3 in silenzio.
 
 ## Decisioni consolidate (mantenere)
 - **Regole per-cliente = DATI d'anagrafica azienda, mai hardcode** (14 lug): `tariffa_cliente` (€/h) su aziende = "il prezzo riga è solo manodopera" → nei NUOVI ordini (griglia) il tempo pagato esce dal prezzo (`min/pz = prezzo ÷ tariffa × 60`, arrotondato al minuto intero; toast dichiara quante posizioni). Elcotec = 27,3 €/h (impostata in scheda azienda). In MODIFICA la regola NON è mai automatica: suggerimento `da prezzo: N min/pz` + bottone "usa" sotto il campo minuti (`aggiornaSuggDaPrezzo`, `.6`) — per gli ordini nati prima della regola. Il "posto ordinato" delle regole ad hoc è la scheda azienda + questa sezione.

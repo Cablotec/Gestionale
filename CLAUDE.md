@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-28.2`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-28.3`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -25,7 +25,7 @@
 - `operazioni.gruppo_id` (accorpamento): **ESEGUITA** (verificata a DB il 28 lug); resta il collaudo sul campo.
 - `aziende.tariffa_oraria` (traccia fornitori): **ESEGUITA** (14 lug).
 - `aziende.tariffa_cliente` (regola prezzo→tempo pagato): **ESEGUITA** (14 lug). NB: `operazioni.minuti_unitari` è **INTEGER** → arrotondare sempre al minuto intero.
-- `utenti.azienda_id` (ditta degli esterni in sede): **DA ESEGUIRE** — `ALTER TABLE utenti ADD COLUMN azienda_id uuid REFERENCES aziende(id);` codice inerte senza.
+- `utenti.azienda_id` (ditta degli esterni in sede): **ESEGUITA** (28 lug); i 4 esterni hanno già la ditta collegata (Tecnocab SNC, SINTEC DI SINANI QERIM).
 - Tabella `produttori` (scheda Codifica): **DA ESEGUIRE** — SQL in handoff.md; codice inerte senza (sigla a mano).
 
 ## ▶ Fili aperti (priorità)
@@ -37,9 +37,9 @@
 5. **Prospettiva "tutta l'azienda"**: Supabase regge; fatturazione fuori; il salto è SICUREZZA — **repo PUBBLICO con anon key + password kiosk in core/db.js** → privatizzare + ruotare, RPC, backup. Nessuna azione ora.
 
 ## Sospesi tecnici
-- **Step 1b** (il più importante): timbri di mobile.html con `sb.from()` nudo → `eseguiConRetry`.
+- ~~Step 1b: timbri con `sb.from()` nudo~~ **FATTO** 28 lug (`2026-07-28.3`): `eseguiConRetry` su TUTTO il flusso di cattura, in `mobile.html` **e nel kiosk** (esposto uguale, non era segnalato). Admin esclusi di proposito (c'è una persona che vede l'errore e ritenta). Due trappole da ricordare: un **builder Supabase è monouso** → ricostruirlo in una `buildQ = () => …` a ogni tentativo; il **timestamp si calcola prima** del retry, mai dentro la closure, o il secondo tentativo scrive l'ora sbagliata.
 - De-dup helper mobile/prelievo (`core/util.js`); `domain/formato.js` mai estratto.
-- Fallback `?kiosk` da togliere; colonne `lead_giorni` inerti; potatura CSS/rami morti; cancellare `beta/` e `index-vecchio.html` dal repo GitHub.
+- Fallback `?kiosk` da togliere; colonne `lead_giorni` inerti; potatura CSS/rami morti. (`beta/` e `index-vecchio.html` già assenti dal repo: voce chiusa.)
 
 ## Decisioni consolidate (mantenere)
 - **Regole per-cliente = DATI d'anagrafica azienda, mai hardcode**: `tariffa_cliente` €/h = prezzo solo manodopera → nei nuovi ordini tempo pagato = prezzo ÷ tariffa × 60 (toast dichiara). In modifica MAI automatica: suggerimento "da prezzo" + usa. Elcotec 27,3 €/h. Griglia nuovo ordine: colonna Min/pz con priorità mano > regola > default articolo, placeholder live col valore automatico; i minuti salvati SEMINANO `articoli.minuti_unitari` solo se vuoto (mai sovrascrivere).

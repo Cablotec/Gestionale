@@ -11334,13 +11334,14 @@ async function kioskFineFase(sess) {
     //    successo ma 0 righe → va reso visibile, non silenzioso.
     let markOk = false;
     if (riga) {
-      let q = sb.from('operazioni_addetti').update({ completata_il: ora });
-      if (riga.id) q = q.eq('id', riga.id);
-      else {
+      // Query ricostruita a ogni tentativo: un builder Supabase è monouso.
+      const buildQ = () => {
+        let q = sb.from('operazioni_addetti').update({ completata_il: ora });
+        if (riga.id) return q.eq('id', riga.id).select();
         q = q.eq('operazione_id', sess.operazione_id).eq('utente_id', uid);
-        q = riga.fase_id ? q.eq('fase_id', riga.fase_id) : q.is('fase_id', null);
-      }
-      const { data: upd, error } = await q.select();
+        return (riga.fase_id ? q.eq('fase_id', riga.fase_id) : q.is('fase_id', null)).select();
+      };
+      const { data: upd, error } = await eseguiConRetry(buildQ, { label: 'completamento fase' });
       if (error) { kioskBeep('err'); kioskShowError('Errore: ' + error.message); return; }
       markOk = Array.isArray(upd) && upd.length > 0;
       if (markOk) {
@@ -11351,9 +11352,12 @@ async function kioskFineFase(sess) {
             ? { ...x, completata_il: ora } : x);
       }
     } else if (fid) {
-      const { data, error } = await sb.from('operazioni_addetti')
-        .insert({ operazione_id: sess.operazione_id, utente_id: uid, fase_id: fid, completata_il: ora })
-        .select().single();
+      const { data, error } = await eseguiConRetry(
+        () => sb.from('operazioni_addetti')
+          .insert({ operazione_id: sess.operazione_id, utente_id: uid, fase_id: fid, completata_il: ora })
+          .select().single(),
+        { label: 'completamento fase' }
+      );
       if (error) { kioskBeep('err'); kioskShowError('Errore: ' + error.message); return; }
       markOk = !!data;
       if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
@@ -11422,7 +11426,10 @@ async function kioskAssicuraAddetto(uid, opId, faseId, tipoId) {
     // fasi: accenderebbe TUTTE le fasi e romperebbe il match per fase.
     if (!fid && fasiOp.length) return;
     const row = { operazione_id: opId, utente_id: uid, fase_id: fid };
-    const { data, error } = await sb.from('operazioni_addetti').insert(row).select().single();
+    const { data, error } = await eseguiConRetry(
+      () => sb.from('operazioni_addetti').insert(row).select().single(),
+      { label: 'iscrizione addetto' }
+    );
     if (error) return;
     if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
   } catch (e) { /* best-effort */ }
@@ -11437,13 +11444,14 @@ async function kioskRiapriFaseSeCompletata(uid, opId, faseId) {
   if (righe.length === 0) return;
   try {
     for (const r of righe) {
-      let q = sb.from('operazioni_addetti').update({ completata_il: null });
-      if (r.id) q = q.eq('id', r.id);
-      else {
+      // Query ricostruita a ogni tentativo: un builder Supabase è monouso.
+      const buildQ = () => {
+        let q = sb.from('operazioni_addetti').update({ completata_il: null });
+        if (r.id) return q.eq('id', r.id);
         q = q.eq('operazione_id', opId).eq('utente_id', uid);
-        q = r.fase_id ? q.eq('fase_id', r.fase_id) : q.is('fase_id', null);
-      }
-      const { error } = await q;
+        return r.fase_id ? q.eq('fase_id', r.fase_id) : q.is('fase_id', null);
+      };
+      const { error } = await eseguiConRetry(buildQ, { label: 'riapertura fase' });
       if (error) continue;
       state.opAddetti = state.opAddetti.map(x =>
         (r.id ? x.id === r.id
@@ -12014,7 +12022,10 @@ async function kioskAvviaSessione(tipoId, faseId) {
   if (fid) payload.fase_id = fid;
 
   try {
-    const { data, error } = await sb.from('sessioni_lavoro').insert(payload).select().single();
+    const { data, error } = await eseguiConRetry(
+      () => sb.from('sessioni_lavoro').insert(payload).select().single(),
+      { label: 'avvio timbratura' }
+    );
     if (error) {
       kioskBeep('err');
       kioskShowError('Errore: ' + error.message);
@@ -12046,9 +12057,12 @@ async function kioskRisolviOCreaFase(opId, tipoId) {
   if (esistente) return esistente.id;
   const ordine = fasiOp.reduce((m, f) => Math.max(m, Number(f.ordine) || 0), 0) + 1;
   try {
-    const { data, error } = await sb.from('operazioni_fasi')
-      .insert({ operazione_id: opId, tipo_lavorazione_id: tipoId, minuti_unitari: 0, ordine })
-      .select().single();
+    const { data, error } = await eseguiConRetry(
+      () => sb.from('operazioni_fasi')
+        .insert({ operazione_id: opId, tipo_lavorazione_id: tipoId, minuti_unitari: 0, ordine })
+        .select().single(),
+      { label: 'creazione fase al volo' }
+    );
     if (error || !data) return null;
     if (!state.opFasi.find(x => x.id === data.id)) state.opFasi.push(data);
     return data.id;
@@ -12119,14 +12133,18 @@ async function kioskSelectAttivita(a) {
 
   // Apro nuova sessione su attività extra (operazione_id resta null)
   try {
-    const { data, error } = await sb.from('sessioni_lavoro').insert({
-      operazione_id: null,
-      attivita_id: a.id,
-      utente_id: u.id,
-      tipo_lavorazione_id: null,
-      sede: 'kiosk',
-      inizio: new Date().toISOString(),
-    }).select().single();
+    const inizio = new Date().toISOString();
+    const { data, error } = await eseguiConRetry(
+      () => sb.from('sessioni_lavoro').insert({
+        operazione_id: null,
+        attivita_id: a.id,
+        utente_id: u.id,
+        tipo_lavorazione_id: null,
+        sede: 'kiosk',
+        inizio,
+      }).select().single(),
+      { label: 'avvio attività extra' }
+    );
     if (error) {
       kioskBeep('err');
       kioskShowError('Errore: ' + error.message);
@@ -12336,8 +12354,11 @@ async function kioskChiudiOScarta(sess) {
   if (gruppo.length > 1) {
     const parti = ripartisciTimbroGruppo(inizio, fineNow, gruppo);
     // 1) la sessione già aperta = quota della sua commessa (parti[0])
-    const { data, error } = await sb.from('sessioni_lavoro')
-      .update({ fine: parti[0].fine }).eq('id', sess.id).select().single();
+    const { data, error } = await eseguiConRetry(
+      () => sb.from('sessioni_lavoro')
+        .update({ fine: parti[0].fine }).eq('id', sess.id).select().single(),
+      { label: 'chiusura timbratura (gruppo)' }
+    );
     if (error) throw error;
     state.sessioni = state.sessioni.map(s => s.id === sess.id ? data : s);
     // 2) una sessione per ciascuna delle ALTRE commesse del gruppo
@@ -12353,15 +12374,20 @@ async function kioskChiudiOScarta(sess) {
       note: (sess.note ? sess.note + ' ' : '') + '[gruppo]',
     }));
     try {
-      const { data: ins } = await sb.from('sessioni_lavoro').insert(nuove).select();
+      const { data: ins } = await eseguiConRetry(
+        () => sb.from('sessioni_lavoro').insert(nuove).select(),
+        { label: 'quote timbro del gruppo' }
+      );
       if (ins) ins.forEach(r => { if (!state.sessioni.find(x => x.id === r.id)) state.sessioni.push(r); });
     } catch (e) { /* best-effort: il timbro principale è già salvo, mai perso */ }
     return { scartata: false, elapsed, data, gruppoN: gruppo.length };
   }
 
   // Chiusura normale (nessun gruppo)
-  const { data, error } = await sb.from('sessioni_lavoro')
-    .update({ fine: fineNow }).eq('id', sess.id).select().single();
+  const { data, error } = await eseguiConRetry(
+    () => sb.from('sessioni_lavoro').update({ fine: fineNow }).eq('id', sess.id).select().single(),
+    { label: 'chiusura timbratura' }
+  );
   if (error) throw error;
   state.sessioni = state.sessioni.map(s => s.id === sess.id ? data : s);
   return { scartata: false, elapsed, data, gruppoN: 1 };
