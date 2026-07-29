@@ -3589,17 +3589,36 @@ function renderCodifica(root) {
       const inSigla = el('input', { type:'text', maxlength:'4', placeholder:'SIGL',
         style:'width:70px;text-transform:uppercase;font-family:DM Mono,monospace;' });
       const inNome = el('input', { type:'text', placeholder:'nome produttore', style:'width:180px;' });
+      // Sigle corte: riempite con ZERI IN FONDO (decisione Nico, 28 lug).
+      // TDK → TDK0. La quarta casella esiste sempre perché il codice ha
+      // posizioni fisse; lo zero non si confonde con una lettera del marchio
+      // e non richiede una scelta marchio per marchio. I marchi PIÙ LUNGHI di
+      // 4 si abbreviano a mano: nessun taglio automatico (PHOE o PHCO per
+      // Phoenix Contact è buon senso, non una regola).
+      const siglaNormalizzata = () =>
+        (inSigla.value || '').toUpperCase().replace(/\s+/g, '').padEnd(4, '0');
+      const notaSigla = el('div', { class:'sub', style:'margin-top:4px;font-size:10px;min-height:13px;' });
+      const aggiornaNotaSigla = () => {
+        const grezza = (inSigla.value || '').toUpperCase().replace(/\s+/g, '');
+        notaSigla.textContent = (grezza.length > 0 && grezza.length < 4)
+          ? 'Verrà salvata come ' + siglaNormalizzata() + ' (riempita con zeri: la sigla occupa sempre 4 caselle).'
+          : '';
+      };
+      inSigla.oninput = aggiornaNotaSigla;
       const btnAdd = el('button', { type:'button', class:'btnsm', onclick: async () => {
-        const sigla = (inSigla.value || '').toUpperCase().trim();
+        const grezza = (inSigla.value || '').toUpperCase().replace(/\s+/g, '');
         const nome = (inNome.value || '').trim();
-        if (!/^[A-Z0-9]{4}$/.test(sigla)) return toast('Sigla: esattamente 4 caratteri (lettere/numeri)', 'err');
+        if (!grezza) return toast('Sigla: scrivi almeno un carattere', 'err');
+        if (grezza.length > 4) return toast('Sigla: massimo 4 caratteri — abbrevia il marchio a mano', 'err');
+        if (!/^[A-Z0-9]+$/.test(grezza)) return toast('Sigla: solo lettere e numeri', 'err');
+        const sigla = siglaNormalizzata();
         const { data, error } = await sb.from('produttori')
           .insert({ sigla, nome: nome || null }).select().single();
         if (error) return toast(error.code === '23505' ? 'Sigla già esistente' : error.message, 'err');
         produttoriCache.push(data);
         produttoriCache.sort((a, b) => (a.sigla || '').localeCompare(b.sigla || ''));
         produttoreVal = sigla; inSigla.value = ''; inNome.value = '';
-        toast('Produttore aggiunto');
+        toast('Produttore aggiunto: ' + sigla);
         renderProduttore(); aggiornaEsito();
       } }, '+ Aggiungi');
       const btnDel = el('button', { type:'button', class:'btnd', onclick: async () => {
@@ -3617,16 +3636,39 @@ function renderCodifica(root) {
       field.append(sel,
         el('div', { style:'display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap;' },
           inSigla, inNome, btnAdd, btnDel),
+        notaSigla,
         el('div', { class:'sub', style:'margin-top:4px;' },
-          'Anagrafica produttori: sigla fissa a 4 caratteri. Per il multi-marca usa una sigla neutra (es. 0000).'));
+          'Sigla fissa a 4 caselle. Marchio più corto (TDK, ABB) → riempito con zeri in fondo: TDK0. '
+          + 'Marchio più lungo → abbrevialo tu a 4. Per il multi-marca usa una sigla neutra (es. 0000).'));
     } else {
       const inp = el('input', { type:'text', maxlength:'4', placeholder:'es. TELE',
         style:'max-width:140px;text-transform:uppercase;font-family:DM Mono,monospace;' });
       inp.value = produttoreVal;
-      inp.oninput = () => { produttoreVal = (inp.value || '').toUpperCase(); aggiornaEsito(); };
-      field.append(inp, el('div', { class:'sub', style:'margin-top:4px;' },
+      // Stessa regola dell'anagrafica: sigla corta riempita con zeri in fondo,
+      // ma solo quando l'utente ha finito di scrivere (su ogni tasto darebbe
+      // fastidio: digitando "T" diventerebbe subito "T000").
+      const notaLibera = el('div', { class:'sub', style:'margin-top:2px;font-size:10px;min-height:13px;' });
+      inp.oninput = () => {
+        produttoreVal = (inp.value || '').toUpperCase();
+        const g = produttoreVal.replace(/\s+/g, '');
+        notaLibera.textContent = (g.length > 0 && g.length < 4)
+          ? 'Diventerà ' + g.padEnd(4, '0') + ' quando esci dal campo.'
+          : '';
+        aggiornaEsito();
+      };
+      inp.onblur = () => {
+        const g = (inp.value || '').toUpperCase().replace(/\s+/g, '');
+        if (g.length > 0 && g.length < 4) {
+          inp.value = g.padEnd(4, '0');
+          produttoreVal = inp.value;
+          notaLibera.textContent = '';
+          aggiornaEsito();
+        }
+      };
+      field.append(inp, notaLibera, el('div', { class:'sub', style:'margin-top:4px;' },
         produttoriTabellaOk === false
-          ? 'Anagrafica produttori non attiva: manca la tabella `produttori` (migrazione dal pannello Supabase). Per ora sigla a mano.'
+          ? 'Anagrafica produttori non attiva: manca la tabella `produttori` (migrazione dal pannello Supabase). '
+            + 'Per ora sigla a mano: se scrivi meno di 4 caratteri viene riempita con zeri in fondo (TDK → TDK0).'
           : 'Carico l\'anagrafica produttori…'));
     }
     wrapProd.append(field);
