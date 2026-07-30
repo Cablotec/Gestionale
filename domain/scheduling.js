@@ -1251,6 +1251,96 @@ function prezzoDaTempoEffettivo(articoloId, clienteId) {
   };
 }
 
+// ── ORE ESTERNE a CONSUNTIVO di una commessa ───────────────────────────────
+// Un posto solo per guardare il lavoro esterno già fatto, con DUE fonti che
+// non si confondono mai (28 lug, decisione Nico):
+//   ⏱ 'timbro'      → ore degli ESTERNI IN SEDE (utenti.esterno con azienda_id)
+//                     ricavate dai timbri chiusi. DERIVATE, mai copiate:
+//                     tariffa presa live da aziende.tariffa_oraria.
+//   📄 'dichiarata'  → righe di `ore_esterne` inserite a mano da rapportino,
+//                     per il lavoro fatto NELLA sede del fornitore, che qui
+//                     nessuno può timbrare. Tariffa CONGELATA sulla riga: un
+//                     costo già sostenuto è un fatto e non si riscrive quando
+//                     l'anagrafica cambia (stesso principio di prezzo_unitario).
+// NB: questo è CONSUNTIVO. La stima "prezzo suggerito" sulla riga fornitore è
+// un PREVENTIVO e vive altrove: le due non vanno sommate.
+// Le due fonti sono fisicamente disgiunte (lavoro fatto QUI vs DA LORO), ma il
+// doppio conteggio è l'errore che si nasconderebbe meglio → le ditte presenti
+// in ENTRAMBE le fonti finiscono in `conflitti`, da dichiarare in UI.
+// Ritorna { righe, oreTot, costoTot, senzaTariffa, conflitti }.
+function oreEsterneCommessa(operazioneId) {
+  const vuoto = { righe: [], oreTot: 0, costoTot: 0, senzaTariffa: [], conflitti: [] };
+  if (!operazioneId) return vuoto;
+  const nomeAz = (id) => ((state.aziende || []).find(a => a.id === id) || {}).nome || 'Ditta sconosciuta';
+  const tariffaAz = (id) => Number(((state.aziende || []).find(a => a.id === id) || {}).tariffa_oraria) || 0;
+  const righe = [];
+
+  // 1) TIMBRATE: sessioni chiuse di utenti esterni con una ditta dichiarata.
+  //    Senza azienda_id non si sa a chi attribuirle → restano fuori (l'utente
+  //    va completato in anagrafica, non indovinato qui).
+  const perDitta = new Map();
+  (state.sessioni || []).forEach(s => {
+    if (!s.fine || s.operazione_id !== operazioneId) return;
+    const u = (state.utenti || []).find(x => x.id === s.utente_id);
+    if (!u || !u.esterno || !u.azienda_id) return;
+    const sec = Number(s.durata_secondi) || 0;
+    if (sec <= 0) return;
+    const cur = perDitta.get(u.azienda_id) || { sec: 0, nSess: 0 };
+    cur.sec += sec; cur.nSess += 1;
+    perDitta.set(u.azienda_id, cur);
+  });
+  perDitta.forEach((v, aziendaId) => {
+    const ore = v.sec / 3600;
+    const tariffa = tariffaAz(aziendaId);
+    righe.push({
+      fonte: 'timbro', aziendaId, azienda: nomeAz(aziendaId),
+      ore: Math.round(ore * 100) / 100, tariffa,
+      costo: tariffa > 0 ? Math.round(ore * tariffa * 100) / 100 : null,
+      nSessioni: v.nSess, faseId: null, data: null, riferimento: null, note: null, id: null,
+    });
+  });
+
+  // 2) DICHIARATE: righe di ore_esterne (tariffa congelata; se la riga non ce
+  //    l'ha si ripiega sull'anagrafica, dichiarandolo con tariffaDaAnagrafica).
+  (state.oreEsterne || []).forEach(r => {
+    if (r.operazione_id !== operazioneId) return;
+    const ore = Number(r.ore) || 0;
+    if (ore <= 0) return;
+    const congelata = Number(r.tariffa) || 0;
+    const tariffa = congelata > 0 ? congelata : tariffaAz(r.azienda_id);
+    righe.push({
+      fonte: 'dichiarata', aziendaId: r.azienda_id, azienda: nomeAz(r.azienda_id),
+      ore: Math.round(ore * 100) / 100, tariffa,
+      costo: tariffa > 0 ? Math.round(ore * tariffa * 100) / 100 : null,
+      tariffaDaAnagrafica: !(congelata > 0),
+      nSessioni: 0, faseId: r.fase_id || null, data: r.data || null,
+      riferimento: r.riferimento || null, note: r.note || null, id: r.id,
+    });
+  });
+
+  righe.sort((a, b) => (a.azienda || '').localeCompare(b.azienda || '')
+    || (a.fonte === b.fonte ? 0 : (a.fonte === 'timbro' ? -1 : 1)));
+
+  let oreTot = 0, costoTot = 0;
+  const senzaTariffa = new Set();
+  righe.forEach(r => {
+    oreTot += r.ore;
+    if (r.costo != null) costoTot += r.costo; else senzaTariffa.add(r.azienda);
+  });
+  // Ditte presenti in entrambe le fonti: possibile doppio conteggio.
+  const conTimbro = new Set(righe.filter(r => r.fonte === 'timbro').map(r => r.aziendaId));
+  const conDich = new Set(righe.filter(r => r.fonte === 'dichiarata').map(r => r.aziendaId));
+  const conflitti = [...conTimbro].filter(id => conDich.has(id)).map(nomeAz);
+
+  return {
+    righe,
+    oreTot: Math.round(oreTot * 100) / 100,
+    costoTot: Math.round(costoTot * 100) / 100,
+    senzaTariffa: [...senzaTariffa],
+    conflitti,
+  };
+}
+
 // Scostamenti prezzo-vs-consuntivo di un cliente: per ogni suo articolo con
 // prezzo, confronta il listino vivo (ultimo prezzo praticato) col prezzo che
 // le ore realmente timbrate giustificherebbero. Ordinati per scarto assoluto:

@@ -24,17 +24,25 @@
 - `tariffa_oraria` su aziende (traccia fornitori): **ESEGUITA** (14 lug).
 - `tariffa_cliente` su aziende (regola prezzo→tempo pagato, es. Elcotec): **ESEGUITA** (14 lug, tariffa Elcotec impostata). NB: `operazioni.minuti_unitari` è **INTEGER** → la regola arrotonda al minuto intero (scoperto sul campo: 131,87 rifiutato).
 - `azienda_id` su utenti (ditta degli esterni in sede): **ESEGUITA** (28 lug, verificata a DB). I 4 esterni hanno già la ditta collegata: SINTEC 1/2 → SINTEC DI SINANI QERIM, TECNOCAB 1/2 → Tecnocab SNC. Al kiosk compaiono in due sezioni finali coi nomi delle ditte.
-- Tabella `produttori` (scheda Codifica): **DA ESEGUIRE** — codice inerte senza (sigla produttore a mano):
+- Tabella `ore_esterne` (consuntivo ore fornitori dichiarate): **DA ESEGUIRE** — codice inerte senza (la sezione mostra solo le ore timbrate e dichiara che l'inserimento a mano non è attivo):
   ```sql
-  CREATE TABLE produttori (
+  CREATE TABLE ore_esterne (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    sigla text NOT NULL UNIQUE,
-    nome text,
+    operazione_id uuid NOT NULL REFERENCES operazioni(id) ON DELETE CASCADE,
+    azienda_id uuid NOT NULL REFERENCES aziende(id),
+    fase_id uuid REFERENCES operazioni_fasi(id) ON DELETE SET NULL,
+    ore numeric NOT NULL CHECK (ore > 0),
+    tariffa numeric,
+    data date,
+    riferimento text,
+    note text,
     created_at timestamptz DEFAULT now()
   );
-  ALTER TABLE produttori ENABLE ROW LEVEL SECURITY;
-  CREATE POLICY produttori_all ON produttori FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  ALTER TABLE ore_esterne ENABLE ROW LEVEL SECURITY;
+  CREATE POLICY ore_esterne_all ON ore_esterne FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  CREATE INDEX ore_esterne_op ON ore_esterne (operazione_id);
   ```
+- Tabella `produttori` (scheda Codifica): **ESEGUITA** (28 lug, verificata via REST: lettura OK, cache PostgREST aggiornata, anagrafica ATTIVA). Tabella vuota, da popolare.
 
 ## ▶ Fili aperti (in ordine di priorità)
 
@@ -51,6 +59,19 @@
   - **Dato debole dichiarato** (decisione Nico): con 1 sola commessa il numero si mostra ma marcato giallo (`etl-debole` + ⚠). Oggi su Elcotec **tutti e 8** gli articoli con consuntivo hanno campione 1 — se si nascondessero sotto le 2 commesse non si vedrebbe niente.
   - **In sospeso**: la commessa `2026/OC/00000` (numero segnaposto in mezzo a OC reali 00329…00361, articolo EL50612MEBE015K3GI10080) — Nico ha allineato i minuti (erano 1873 contro i 1859 della regola: prezzo inserito DOPO la creazione, quindi minuti presi dal default articolo — comportamento corretto, non un bug). Resta da chiarire **se è una riga di prova**: è l'unico prezzo di quell'articolo (quindi ne è il listino) ed è 'spedita', quindi pesa nel €/h Elcotec. Se va cancellata serve SQL dal pannello (l'account kiosk non può DELETE).
   - **Scoperta sui dati** (28 lug): Elcotec NON è sottoprezzata in blocco. 4 articoli sopra e 4 sotto, scarto pesato complessivo solo **+13%**, ma dispersione da **−67% a +184%**. Il problema è la dispersione per articolo, non il livello: il ×1,45 medio la nascondeva. Da rivedere quando i campioni saranno ≥2.
+
+### 2-bis. ORE ESTERNE a consuntivo — la quadra sul lavoro di terzi (28 lug, `2026-07-28.5`)
+- **Il nodo posto da Nico**: evitare che tre cose facciano lo stesso mestiere. La distinzione che lo scioglie: il **prezzo suggerito** sulla riga fornitore (ore stimate dai min/pz × tariffa) è un **PREVENTIVO**; le **ore timbrate dagli esterni in sede** e le **ore dichiarate dal fornitore su rapportino** sono **CONSUNTIVO**. Preventivo e consuntivo non si fondono e non si sommano — è la stessa frattura fra "tempo pagato" e "tempo timbrato" che regge tutto il resto.
+- **Soluzione**: UNA sezione "Ore esterne — consuntivo" nel modal commessa (sotto Fornitori esterni, solo su commesse esistenti), con **due fonti sempre dichiarate**: `⏱ timbrate qui` e `📄 da rapportino`. Un posto solo dove guardare, due sorgenti che non possono confondersi.
+- `oreEsterneCommessa(operazioneId)` in `domain/scheduling.js` (puro, 25 test in scratchpad/test_ore_esterne.js) ritorna `{righe, oreTot, costoTot, senzaTariffa, conflitti}`.
+- **Le timbrate sono DERIVATE** dai timbri chiusi degli utenti `esterno` con `azienda_id` (mai copiate in tabella: regola "derivati live, mai materializzati"), tariffa presa **live** dall'anagrafica. Un esterno **senza** `azienda_id` resta fuori: non si indovina a chi attribuirlo, si completa l'anagrafica.
+- **Le dichiarate stanno in `ore_esterne`** con la **tariffa CONGELATA sulla riga** (decisione Nico): un costo già sostenuto è un fatto e non si riscrive quando l'anagrafica cambia — stesso principio di `prezzo_unitario`. Se la riga non ha tariffa si ripiega sull'anagrafica **dichiarandolo** (`tariffaDaAnagrafica`). Asimmetria accettata e voluta: timbrate = tariffa corrente (sono derivate), dichiarate = congelata.
+- **Fatturazione a ore × tariffa** (confermato da Nico): la tabella registra ORE, il costo si calcola. Se un domani ci fosse un forfait per fase servirebbe un campo importo.
+- **Rischio n.1 = doppio conteggio.** Le due fonti sono fisicamente disgiunte (lavoro fatto QUI vs DA LORO) ma è l'errore che si nasconderebbe meglio → le ditte presenti in **entrambe** le fonti finiscono in `conflitti` e la sezione lo dichiara in giallo. Non si somma in silenzio.
+- **Ditta senza tariffa**: ore contate, costo no (mai gonfiato), ditta nominata sotto l'elenco.
+- **Margine riga rifatto**: usa le ore VERE dove ci sono e la stima solo per le ditte che non ne hanno ancora, **ditta per ditta** (così non somma mai stima + consuntivo della stessa ditta). Dichiara la composizione: `− esterni ≈ € X → margine ≈ € Y (Z%) · ore vere € A + stima € B`. Il `≈` compare solo se c'è ancora una stima dentro.
+- Solo le righe **dichiarate** si cancellano dalla sezione; le timbrate si correggono sui timbri, non lì.
+- **Aperto**: le ore degli esterni in sede entrano ancora nelle medie effettive (`storicoMinutiPz`) come quelle dei dipendenti. Per la DURATA di un articolo è corretto (il tempo è tempo), per i numeri di **efficienza Cablotec** (reale/pagato, €/h in Analisi clienti) andrebbe deciso se separarle. Non toccato: numeri visibili, serve una decisione. Da riprendere quando gli esterni avranno timbrato qualcosa.
 
 ### 3. Accorpamento commesse (gruppi) — da collaudare
 - Admin: Ordini cliente (ex Pianificazione, rinominata 14 lug — id interno resta `pianificazione`) → `⊞ Raggruppa` → selezione → Crea gruppo; badge `⊞N`, click per sciogliere. Kiosk: gruppo = UNA card (banner), split del timbro alla chiusura **proporzionale al peso = qtà × min/pz** (5+2+7 → 500/200/700, 18 test). Insert+update, mai delete (RLS: l'account kiosk NON può cancellare).

@@ -88,6 +88,7 @@ const state = {
   opAddetti: [],           // [{operazione_id, utente_id, fase_id, completata_il}]
   // Operazioni: fornitori esterni (aziende con is_fornitore=true)
   opFornitori: [],         // [{id, operazione_id, azienda_id, allocazione, creato_il}]
+  oreEsterne: [],          // ore DICHIARATE da rapportino (tabella ore_esterne)
   // Operazioni: fasi (scomposizione per tipo di lavorazione)
   opFasi: [],              // [{id, operazione_id, tipo_lavorazione_id, minuti_unitari, ordine, creato_il}]
   // Gantt
@@ -738,6 +739,9 @@ async function loadAllData() {
   state.impostazioni = Object.fromEntries((impostazioni.data||[]).map(r=>[r.chiave, r.valore]));
   state.consegneCommessa = consegneCommessa.data || [];
   state.spedizioni = spedizioni.data || [];
+  // Fuori dal Promise.all: la tabella può non esistere ancora (migrazione) e
+  // un suo errore non deve far cadere tutto il caricamento.
+  await caricaOreEsterne();
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -3471,6 +3475,22 @@ function renderArticoli(root) {
 // libero) + 11 (codice del produttore, zeri PRIMA). I codici generati per ora
 // sono a sé stanti (materiali interni/acquisto), NON legati all'anagrafica
 // articoli, che contiene solo prodotti finiti Cablotec.
+// Ore esterne DICHIARATE (rapportini dei fornitori). Tabella `ore_esterne`:
+// inerte se la migrazione manca — la sezione mostra solo le ore timbrate e
+// dichiara che l'inserimento a mano non è attivo. Caricata una volta e tenuta
+// in state.oreEsterne, che è la fonte letta dal domain.
+let oreEsterneTabellaOk = null;  // null = da scoprire; false = migrazione mancante
+async function caricaOreEsterne() {
+  if (oreEsterneTabellaOk === false) return;
+  try {
+    const { data, error } = await fetchTutte(() =>
+      sb.from('ore_esterne').select('*').order('data', { ascending:false }).order('id'));
+    if (error) { oreEsterneTabellaOk = false; state.oreEsterne = []; return; }
+    oreEsterneTabellaOk = true;
+    state.oreEsterne = data || [];
+  } catch (e) { oreEsterneTabellaOk = false; state.oreEsterne = []; }
+}
+
 let produttoriCache = null;      // null = mai caricati; [] = tabella vuota
 let produttoriTabellaOk = null;  // null = da scoprire; false = migrazione mancante
 async function caricaProduttori() {
@@ -7205,6 +7225,151 @@ function openOperazioneModal(o) {
   forSearchInput.oninput = renderForDropList;
   renderForSelected();
 
+  // ── ORE ESTERNE (consuntivo) ──────────────────────────────────────────
+  // Un posto SOLO per il lavoro esterno già fatto, con la fonte sempre in
+  // chiaro: ⏱ timbrate qui dagli esterni in sede (derivate dai timbri, mai
+  // copiate) e 📄 dichiarate da rapportino (inserite a mano, tariffa congelata
+  // sulla riga). Il "prezzo suggerito" sulla riga fornitore resta un
+  // PREVENTIVO e sta di proposito da un'altra parte: qui c'è il consuntivo.
+  const wrapOreEsterne = el('div', { class:'field' });
+  const renderOreEsterne = () => {
+    wrapOreEsterne.innerHTML = '';
+    if (typeof oreEsterneCommessa !== 'function') return;
+    const r = oreEsterneCommessa(o.id);
+    const fmtE = (n) => '€ ' + Number(n).toLocaleString('it-IT',
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtH = (n) => Number(n).toLocaleString('it-IT',
+      { minimumFractionDigits: 1, maximumFractionDigits: 2 }) + ' h';
+    wrapOreEsterne.append(el('label', {}, 'Ore esterne — consuntivo'));
+    const lista = el('div', { style:'display:flex;flex-direction:column;gap:4px;' });
+    if (!r.righe.length) {
+      lista.append(el('div', { class:'sub' },
+        'Nessuna ora esterna registrata su questa commessa.'));
+    }
+    r.righe.forEach(x => {
+      const riga = el('div', {
+        style:'display:flex;align-items:center;gap:10px;font-family:DM Mono,monospace;'
+          + 'font-size:11px;padding:3px 0;border-bottom:1px solid var(--brd);' },
+        el('span', { style:'width:16px;flex-shrink:0;',
+          title: x.fonte === 'timbro' ? 'Ore timbrate qui dai suoi uomini' : 'Ore dichiarate dal fornitore (rapportino)' },
+          x.fonte === 'timbro' ? '⏱' : '📄'),
+        el('span', { style:'flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+          x.azienda),
+        el('span', { style:'width:70px;text-align:right;flex-shrink:0;' }, fmtH(x.ore)),
+        el('span', { style:'width:78px;text-align:right;flex-shrink:0;color:var(--mut);' },
+          x.tariffa > 0 ? String(x.tariffa).replace('.', ',') + ' €/h' : '— €/h'),
+        el('span', { style:'width:88px;text-align:right;flex-shrink:0;font-weight:700;' },
+          x.costo != null ? fmtE(x.costo) : '—'),
+      );
+      // Dettaglio: da dove arriva questa riga, senza farlo indovinare.
+      const det = [];
+      if (x.fonte === 'timbro') det.push(x.nSessioni + (x.nSessioni === 1 ? ' timbro' : ' timbri'));
+      if (x.data) det.push(fmtIT(String(x.data).slice(0, 10)));
+      if (x.riferimento) det.push(x.riferimento);
+      if (x.tariffaDaAnagrafica) det.push('tariffa dall\'anagrafica (non congelata)');
+      if (x.costo == null) det.push('ditta senza tariffa: ore contate, costo no');
+      if (det.length) riga.append(el('span', {
+        class:'sub', style:'flex-basis:100%;font-size:10px;padding-left:26px;' }, det.join(' · ')));
+      // Solo le righe DICHIARATE si cancellano: le timbrate sono derivate dai
+      // timbri e si correggono là, non qui.
+      if (canEdit && x.fonte === 'dichiarata' && x.id) {
+        riga.append(el('button', { type:'button', class:'btnd',
+          style:'padding:0 6px;flex-shrink:0;', title:'Elimina questa riga di rapportino',
+          onclick: async () => {
+            if (!confirm('Eliminare ' + fmtH(x.ore) + ' dichiarate da ' + x.azienda + '?')) return;
+            const { error } = await eseguiConRetry(
+              () => sb.from('ore_esterne').delete().eq('id', x.id),
+              { label: 'eliminazione ore esterne' });
+            if (error) return toast(error.message, 'err');
+            state.oreEsterne = state.oreEsterne.filter(y => y.id !== x.id);
+            toast('Riga eliminata');
+            renderOreEsterne(); aggiornaMargineRiga();
+          } }, '✕'));
+      }
+      lista.append(riga);
+    });
+    if (r.righe.length) {
+      lista.append(el('div', {
+        style:'display:flex;align-items:center;gap:10px;font-family:DM Mono,monospace;'
+          + 'font-size:11px;padding-top:5px;font-weight:700;' },
+        el('span', { style:'width:16px;flex-shrink:0;' }, ''),
+        el('span', { style:'flex:1;min-width:120px;' }, 'totale'),
+        el('span', { style:'width:70px;text-align:right;flex-shrink:0;' }, fmtH(r.oreTot)),
+        el('span', { style:'width:78px;flex-shrink:0;' }, ''),
+        el('span', { style:'width:88px;text-align:right;flex-shrink:0;' }, fmtE(r.costoTot)),
+      ));
+    }
+    wrapOreEsterne.append(lista);
+    // Il doppio conteggio è l'errore che si nasconderebbe meglio: dichiarato.
+    if (r.conflitti.length) {
+      wrapOreEsterne.append(el('div', { class:'sub',
+        style:'margin-top:6px;color:var(--yel);font-size:11px;' },
+        '⚠ ' + r.conflitti.join(', ') + (r.conflitti.length === 1 ? ' ha' : ' hanno')
+        + ' sia ore timbrate qui sia ore da rapportino su questa commessa. '
+        + 'Verifica che non siano le stesse ore contate due volte.'));
+    }
+    if (r.senzaTariffa.length) {
+      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:4px;font-size:10px;' },
+        'Senza tariffa oraria in anagrafica: ' + r.senzaTariffa.join(', ')
+        + ' — le ore sono contate, il costo no.'));
+    }
+    // Inserimento a mano (solo con la tabella attiva)
+    if (oreEsterneTabellaOk === true && canEdit) {
+      const selAz = el('select', { style:'max-width:200px;' },
+        el('option', { value:'' }, '— ditta —'),
+        ...(state.aziende || []).filter(a => a.is_fornitore && a.attivo !== false)
+          .sort((a, b) => (a.nome || '').localeCompare(b.nome || ''))
+          .map(a => el('option', { value:a.id }, a.nome)));
+      const inOre = el('input', { type:'number', step:'0.25', min:'0', placeholder:'ore',
+        style:'width:72px;' });
+      const inData = el('input', { type:'date', style:'width:140px;' });
+      const inRif = el('input', { type:'text', placeholder:'rif. rapportino', style:'width:140px;' });
+      const notaTar = el('div', { class:'sub', style:'font-size:10px;flex-basis:100%;min-height:13px;' });
+      const aggiornaNotaTar = () => {
+        const az = (state.aziende || []).find(a => a.id === selAz.value);
+        const t = Number(az && az.tariffa_oraria) || 0;
+        const ore = parseFloat((inOre.value || '').replace(',', '.')) || 0;
+        notaTar.textContent = !az ? ''
+          : (t > 0
+              ? 'Tariffa ' + String(t).replace('.', ',') + ' €/h'
+                + (ore > 0 ? ' → ' + fmtE(ore * t) : '')
+                + ' · viene CONGELATA sulla riga: cambiarla in anagrafica non toccherà questo consuntivo.'
+              : '⚠ ' + az.nome + ' non ha una tariffa oraria in anagrafica: le ore si salvano, il costo resterà vuoto.');
+      };
+      selAz.onchange = aggiornaNotaTar;
+      inOre.oninput = aggiornaNotaTar;
+      const btnAdd = el('button', { type:'button', class:'btnsm', onclick: async () => {
+        const ore = parseFloat((inOre.value || '').replace(',', '.')) || 0;
+        if (!selAz.value) return toast('Scegli la ditta', 'err');
+        if (!(ore > 0)) return toast('Ore: serve un numero maggiore di zero', 'err');
+        const az = (state.aziende || []).find(a => a.id === selAz.value);
+        const tariffa = Number(az && az.tariffa_oraria) || null;
+        const { data, error } = await eseguiConRetry(
+          () => sb.from('ore_esterne').insert({
+            operazione_id: o.id, azienda_id: selAz.value, ore,
+            tariffa, data: inData.value || null,
+            riferimento: (inRif.value || '').trim() || null,
+          }).select().single(),
+          { label: 'inserimento ore esterne' });
+        if (error) return toast(error.message, 'err');
+        state.oreEsterne.push(data);
+        inOre.value = ''; inRif.value = ''; notaTar.textContent = '';
+        toast('Ore esterne registrate');
+        renderOreEsterne(); aggiornaMargineRiga();
+      } }, '+ Aggiungi ore');
+      wrapOreEsterne.append(
+        el('div', { style:'display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;' },
+          selAz, inOre, inData, inRif, btnAdd, notaTar));
+      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:4px;font-size:10px;' },
+        'Inserisci qui le ore che il fornitore ti dichiara per il lavoro fatto nella SUA sede. '
+        + 'Le ore dei suoi uomini che timbrano qui compaiono da sole (⏱) e non vanno riscritte.'));
+    } else if (oreEsterneTabellaOk === false) {
+      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:6px;font-size:10px;' },
+        'Inserimento a mano non attivo: manca la tabella `ore_esterne` (migrazione dal pannello '
+        + 'Supabase). Le ore timbrate dagli esterni in sede si vedono comunque.'));
+    }
+  };
+
   // Stato + preparazione
   const selStato = el('select', { name:'stato' },
     el('option', { value:'aperta' }, 'Aperta'),
@@ -7534,7 +7699,9 @@ function openOperazioneModal(o) {
     el('div', { class:'field' }, el('label', {}, 'Fornitori esterni'),
       forSelectedWrap, forDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Ditte terze che contribuiscono alla lavorazione (con coefficiente di capacità).')),
+        'Ditte terze che contribuiscono alla lavorazione (con coefficiente di capacità). '
+        + 'Il prezzo suggerito qui è una STIMA a preventivo: le ore vere stanno in "Ore esterne" più sotto.')),
+    ...(isNew ? [] : [wrapOreEsterne]),
     ...(fieldRealistica ? [fieldRealistica] : []),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
@@ -8137,19 +8304,37 @@ function openOperazioneModal(o) {
       const pz = parseFloat((form.querySelector('[name=quantita]')?.value || '').toString().replace(',', '.')) || 0;
       const pr = parseFloat((form.querySelector('#prezzo-input')?.value || '').toString().replace(',', '.')) || 0;
       const tot = pz * pr;
-      let costo = 0, senzaTariffa = 0;
+      // Le ore ESTERNE VERE (timbrate o da rapportino) battono la stima, ditta
+      // per ditta: dove il consuntivo c'è si usa quello, dove manca resta il
+      // preventivo. Così il margine diventa vero man mano che i dati arrivano,
+      // senza mai sommare stima e consuntivo della stessa ditta.
+      const oreEst = (typeof oreEsterneCommessa === 'function' && !isNew)
+        ? oreEsterneCommessa(o.id) : { righe: [], costoTot: 0 };
+      const conReale = new Set(oreEst.righe.filter(x => x.costo != null).map(x => x.aziendaId));
+      let costo = oreEst.righe.reduce((s, x) => s + (x.costo || 0), 0);
+      let costoReale = costo, costoStima = 0, senzaTariffa = 0;
       (fornitoriSel || []).forEach(sel => {
+        if (conReale.has(sel.azienda_id)) return;   // per lei il vero c'è già
         const az = state.aziende.find(x => x.id === sel.azienda_id);
         const tariffa = Number(az && az.tariffa_oraria) || 0;
-        if (tariffa > 0) costo += minPzFornitore(sel) * qtaCorrenteComm() / 60 * tariffa;
-        else senzaTariffa++;
+        if (tariffa > 0) {
+          const q = minPzFornitore(sel) * qtaCorrenteComm() / 60 * tariffa;
+          costo += q; costoStima += q;
+        } else senzaTariffa++;
       });
       if (tot <= 0 || (costo <= 0 && senzaTariffa === 0)) { box.textContent = ''; return; }
       const fmtE = (n) => '€ ' + n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const margine = tot - costo;
       const perc = Math.round(margine / tot * 100);
       box.style.color = margine >= 0 ? 'var(--grn)' : 'var(--red)';
-      box.textContent = '− fornitori ≈ ' + fmtE(costo) + ' → margine ≈ ' + fmtE(margine) + ' (' + perc + '%)'
+      // La composizione va dichiarata: un margine mezzo stimato non deve
+      // sembrare un dato consolidato.
+      const comp = [];
+      if (costoReale > 0) comp.push('ore vere ' + fmtE(costoReale));
+      if (costoStima > 0) comp.push('stima ' + fmtE(costoStima));
+      box.textContent = '− esterni ' + (costoStima > 0 ? '≈ ' : '') + fmtE(costo)
+        + ' → margine ' + (costoStima > 0 ? '≈ ' : '') + fmtE(margine) + ' (' + perc + '%)'
+        + (comp.length > 1 ? ' · ' + comp.join(' + ') : '')
         + (senzaTariffa > 0
             ? ' · ' + senzaTariffa + (senzaTariffa === 1 ? ' fornitore' : ' fornitori') + ' senza tariffa'
             : '');
@@ -8433,6 +8618,8 @@ function openOperazioneModal(o) {
     aggiornaSuggDaPrezzo();
     aggiornaSuggDaConsuntivo();
   }
+  // Ore esterne: solo su commesse esistenti (una nuova non ha consuntivo).
+  if (!isNew) renderOreEsterne();
   // Bind aggiuntivo: input minuti aggiorna anche l'indicatore di divergenza
   // e il suggerimento "da prezzo" (che sparisce quando i valori coincidono)
   const minInputEl = form.querySelector('#minuti-input');
