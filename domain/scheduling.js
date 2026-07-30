@@ -1386,12 +1386,24 @@ function consuntivoCommessa(op) {
   const prevInt = opCalcOreInterne(op);
   const base = oreEsterne > 0 ? prevTot : prevInt;
   const tolleranza = tolleranzaOre(base);
+  // Stessa regola applicata all'altro riferimento del sistema: il TEMPO PAGATO
+  // (quello che il cliente riconosce), usato dalla barra ore in intestazione.
+  // Se il consuntivo comprende ore esterne, il pagato di confronto è quello
+  // INTERO e non la sola quota interna — altrimenti si confronta il lavoro di
+  // tutti con la paga di una parte sola.
+  const pagatoInt = pagatoOreInterne(op);
+  const pagatoTot = (Number(op.minuti_unitari) || 0) * (Number(op.quantita) || 0) / 60;
+  const pagato = oreEsterne > 0 ? pagatoTot : pagatoInt;
+  const tollPagato = tolleranzaOre(pagato);
   return {
     oreInterne, oreEsterneTimbrate, oreEsterneDichiarate, oreEsterne, oreTot,
     base, baseTotale: oreEsterne > 0 && prevTot !== prevInt,
     perc: base > 0 ? Math.round(oreTot / base * 100) : 0,
     sforo: base > 0 && oreTot > base + tolleranza,
     tolleranza,
+    pagato, pagatoTotale: oreEsterne > 0 && pagatoTot !== pagatoInt,
+    percPagato: pagato > 0 ? Math.round(oreTot / pagato * 100) : 0,
+    sforoPagato: pagato > 0 && oreTot > pagato + tollPagato,
   };
 }
 

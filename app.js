@@ -7232,9 +7232,11 @@ function openOperazioneModal(o) {
   // sulla riga). Il "prezzo suggerito" sulla riga fornitore resta un
   // PREVENTIVO e sta di proposito da un'altra parte: qui c'è il consuntivo.
   const wrapOreEsterne = el('div', { class:'field' });
-  // Assegnata più sotto, quando i totali del Consuntivo vengono costruiti:
-  // permette alla sezione di ridisegnarli quando si aggiunge/toglie una riga.
+  // Assegnate più sotto, quando i blocchi che dipendono dalle ore vengono
+  // costruiti: permettono alla sezione di ridisegnarli quando si aggiunge o
+  // toglie una riga di ore esterne, senza salvare e riaprire il modal.
   let aggiornaTotaliCons = null;
+  let aggiornaBarraOre = null;
   const renderOreEsterne = () => {
     wrapOreEsterne.innerHTML = '';
     if (typeof oreEsterneCommessa !== 'function') return;
@@ -7291,6 +7293,7 @@ function openOperazioneModal(o) {
             toast('Riga eliminata');
             renderOreEsterne(); aggiornaMargineRiga();
             if (aggiornaTotaliCons) aggiornaTotaliCons();
+            if (aggiornaBarraOre) aggiornaBarraOre();
           } }, '✕'));
       }
       lista.append(riga);
@@ -7379,6 +7382,7 @@ function openOperazioneModal(o) {
         toast('Ore esterne registrate');
         renderOreEsterne(); aggiornaMargineRiga();
         if (aggiornaTotaliCons) aggiornaTotaliCons();
+        if (aggiornaBarraOre) aggiornaBarraOre();
       } }, '+ Aggiungi ore');
       wrapOreEsterne.append(
         el('div', { style:'display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;' },
@@ -8721,12 +8725,23 @@ function openOperazioneModal(o) {
     // Confronto INTERNO-contro-interno: i timbri sono solo interni, quindi
     // preventivo e pagato escludono la quota delle fasi esternalizzate
     // (pagatoOreInterne ripartisce il pagato sulla quota di lavoro in casa).
-    const prev = opCalcOreInterne(o), cons = opCalcOreReali(o);
+    // Ridisegnabile: aggiungere ore esterne nel Consuntivo deve muovere anche
+    // questa barra, che altrimenti resterebbe ferma finché non riapri.
+    const boxSum = el('div', { class:'opsum' });
+    const renderSum = () => {
+    boxSum.innerHTML = '';
+    const prev = opCalcOreInterne(o);
     const oreEsterneHd = Math.max(0, opCalcOre(o) - prev);
-    const pagatoOre = pagatoOreInterne(o);
+    // Consuntivo COMPLETO (timbri + rapportini) e pagato di confronto coerente:
+    // stessa regola del Consuntivo — se conto ore esterne, il pagato è l'intero.
+    const cc = (typeof consuntivoCommessa === 'function') ? consuntivoCommessa(o) : null;
+    const cons = cc ? cc.oreTot : opCalcOreReali(o);
+    const pagatoOre = cc ? cc.pagato : pagatoOreInterne(o);
     const base = pagatoOre > 0 ? pagatoOre : prev;   // riferimento = tempo pagato
-    const overOre = base > 0 && cons > base + tolleranzaOre(base);
-    const percOre = base > 0 ? Math.round(cons / base * 100) : 0;
+    const overOre = cc && pagatoOre > 0 ? cc.sforoPagato
+      : (base > 0 && cons > base + tolleranzaOre(base));
+    const percOre = cc && pagatoOre > 0 ? cc.percPagato
+      : (base > 0 ? Math.round(cons / base * 100) : 0);
     // La barra si scala sul MASSIMO tra consuntivo e pagato: così il segmento
     // OLTRE il pagato sporge visibile invece di essere tagliato al 100%.
     const scaleMax = Math.max(cons, base, 1e-6);
@@ -8745,7 +8760,7 @@ function openOperazioneModal(o) {
       barInner.push(el('div', { class:'opsum-orepag',
         style:'left:' + pagatoPct + '%;', title:'Tempo pagato: ' + base.toFixed(1) + 'h' }));
     }
-    body.append(el('div', { class:'opsum' },
+    boxSum.append(
       el('div', { class:'opsum-main' },
         el('div', { class:'opsum-cod' },
           (art?.codice || '—'),
@@ -8770,9 +8785,15 @@ function openOperazioneModal(o) {
             ? cons.toFixed(1) + ' / ' + pagatoOre.toFixed(1) + 'h · ' + percOre + '%'
               + (overOre ? ' · +' + (cons - pagatoOre).toFixed(1) + 'h oltre' : '')
             : cons.toFixed(1) + '/' + prev.toFixed(1) + 'h')
-            + (oreEsterneHd > 0.05 ? ' · est. ' + oreEsterneHd.toFixed(1) : ''))),
+            + (cc && cc.oreEsterne > 0.05 ? ' · di cui est. ' + cc.oreEsterne.toFixed(1) : '')
+            + (oreEsterneHd > 0.05 ? ' · fasi est. ' + oreEsterneHd.toFixed(1) : ''))),
       ),
-    ));
+    );
+    };
+    renderSum();
+    // La sezione ore esterne ridisegna anche questa barra.
+    aggiornaBarraOre = renderSum;
+    body.append(boxSum);
   }
 
   // ── Barra schede ──
