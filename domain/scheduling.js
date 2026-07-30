@@ -1280,13 +1280,23 @@ function oreEsterneCommessa(operazioneId) {
   //    va completato in anagrafica, non indovinato qui).
   const perDitta = new Map();
   (state.sessioni || []).forEach(s => {
-    if (!s.fine || s.operazione_id !== operazioneId) return;
+    if (s.operazione_id !== operazioneId) return;
     const u = (state.utenti || []).find(x => x.id === s.utente_id);
     if (!u || !u.esterno || !u.azienda_id) return;
-    const sec = Number(s.durata_secondi) || 0;
-    if (sec <= 0) return;
-    const cur = perDitta.get(u.azienda_id) || { sec: 0, nSess: 0 };
-    cur.sec += sec; cur.nSess += 1;
+    // Le sessioni APERTE contano fino a ora, come in opCalcOreReali: se le
+    // escludessimo, "Ore consuntivate" (che le conta) attribuirebbe le ore di
+    // un esterno ancora al lavoro alla quota INTERNA, per differenza.
+    let sec;
+    if (s.fine) sec = Number(s.durata_secondi) || 0;
+    else {
+      // `inizio` mancante o illeggibile: 0, non NaN. Un dato sporco non deve
+      // propagare NaN nelle ore e far sparire un intero totale.
+      const t = new Date(s.inizio).getTime();
+      sec = Number.isFinite(t) ? Math.max(0, Math.floor((Date.now() - t) / 1000)) : 0;
+    }
+    if (!(sec > 0)) return;
+    const cur = perDitta.get(u.azienda_id) || { sec: 0, nSess: 0, nAperte: 0 };
+    cur.sec += sec; cur.nSess += 1; if (!s.fine) cur.nAperte += 1;
     perDitta.set(u.azienda_id, cur);
   });
   perDitta.forEach((v, aziendaId) => {
@@ -1296,7 +1306,8 @@ function oreEsterneCommessa(operazioneId) {
       fonte: 'timbro', aziendaId, azienda: nomeAz(aziendaId),
       ore: Math.round(ore * 100) / 100, tariffa,
       costo: tariffa > 0 ? Math.round(ore * tariffa * 100) / 100 : null,
-      nSessioni: v.nSess, faseId: null, data: null, riferimento: null, note: null, id: null,
+      nSessioni: v.nSess, nAperte: v.nAperte,
+      faseId: null, data: null, riferimento: null, note: null, id: null,
     });
   });
 

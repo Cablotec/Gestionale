@@ -7232,6 +7232,9 @@ function openOperazioneModal(o) {
   // sulla riga). Il "prezzo suggerito" sulla riga fornitore resta un
   // PREVENTIVO e sta di proposito da un'altra parte: qui c'è il consuntivo.
   const wrapOreEsterne = el('div', { class:'field' });
+  // Assegnata più sotto, quando i totali del Consuntivo vengono costruiti:
+  // permette alla sezione di ridisegnarli quando si aggiunge/toglie una riga.
+  let aggiornaTotaliCons = null;
   const renderOreEsterne = () => {
     wrapOreEsterne.innerHTML = '';
     if (typeof oreEsterneCommessa !== 'function') return;
@@ -7265,7 +7268,8 @@ function openOperazioneModal(o) {
       );
       // Dettaglio: da dove arriva questa riga, senza farlo indovinare.
       const det = [];
-      if (x.fonte === 'timbro') det.push(x.nSessioni + (x.nSessioni === 1 ? ' timbro' : ' timbri'));
+      if (x.fonte === 'timbro') det.push(x.nSessioni + (x.nSessioni === 1 ? ' timbro' : ' timbri')
+        + (x.nAperte > 0 ? ' · ' + x.nAperte + ' ancora aperto, il totale sta salendo' : ''));
       if (x.data) det.push(fmtIT(String(x.data).slice(0, 10)));
       if (x.riferimento) det.push(x.riferimento);
       if (x.tariffaDaAnagrafica) det.push('tariffa dall\'anagrafica (non congelata)');
@@ -7286,6 +7290,7 @@ function openOperazioneModal(o) {
             state.oreEsterne = state.oreEsterne.filter(y => y.id !== x.id);
             toast('Riga eliminata');
             renderOreEsterne(); aggiornaMargineRiga();
+            if (aggiornaTotaliCons) aggiornaTotaliCons();
           } }, '✕'));
       }
       lista.append(riga);
@@ -7373,6 +7378,7 @@ function openOperazioneModal(o) {
         inOre.value = ''; inRif.value = ''; notaTar.textContent = '';
         toast('Ore esterne registrate');
         renderOreEsterne(); aggiornaMargineRiga();
+        if (aggiornaTotaliCons) aggiornaTotaliCons();
       } }, '+ Aggiungi ore');
       wrapOreEsterne.append(
         el('div', { style:'display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;' },
@@ -7758,19 +7764,13 @@ function openOperazioneModal(o) {
       .sort((a,b) => (b.inizio||'').localeCompare(a.inizio||''));
 
     const orePrev = opCalcOre(o);
-    const oreReali = opCalcOreReali(o);
-    // I timbri sono SOLO interni: il confronto usa le ore previste INTERNE
-    // (le fasi esternalizzate escono dal preventivo, non dal costo).
     const orePrevInt = opCalcOreInterne(o);
     // NB: questo è il PREVISTO delle fasi esternalizzate (budget), non le ore
     // realmente fatte da terzi — quelle stanno in `cons.oreEsterne`.
+    // Il preventivo non cambia mentre il modal è aperto, quindi si calcola una
+    // volta; consuntivo, percentuale e sforo li ricalcola `renderTotali`, che
+    // rigira a ogni riga di ore esterne aggiunta o rimossa.
     const prevEsterno = Math.max(0, orePrev - orePrevInt);
-    // Consuntivo COMPLETO: tutti i timbri + le ore da rapportino, confrontati
-    // su una base omogenea (vedi consuntivoCommessa nel domain).
-    const cons = (typeof consuntivoCommessa === 'function') ? consuntivoCommessa(o) : null;
-    const perc = cons ? cons.perc : (orePrevInt > 0 ? Math.round((oreReali / orePrevInt) * 100) : 0);
-    const overBudget = cons ? cons.sforo
-      : (orePrevInt > 0 && oreReali > orePrevInt + tolleranzaOre(orePrevInt));
 
     pCons.append(
       el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
@@ -7833,8 +7833,20 @@ function openOperazioneModal(o) {
       pCons.append(el('div', { style:'color:var(--mut);font-size:11px;padding:8px 0;' },
         'Nessuna sessione registrata. Le sessioni si creano dal kiosk quando un operatore inizia un lavoro.'));
     } else {
-      // Riepilogo totali
-      pCons.append(el('div', {
+      // Riepilogo totali — RIDISEGNABILE: aggiungere o togliere una riga di ore
+      // esterne cambia questi numeri, e devono muoversi subito. Prima erano
+      // costruiti una volta sola all'apertura del modal: la sezione si
+      // aggiornava e i totali no, così sembrava che non fosse cambiato niente
+      // finché non si salvava e riapriva (segnalato da Nico).
+      const boxTotali = el('div');
+      const renderTotali = () => {
+      boxTotali.innerHTML = '';
+      const cons = (typeof consuntivoCommessa === 'function') ? consuntivoCommessa(o) : null;
+      const oreReali = opCalcOreReali(o);
+      const perc = cons ? cons.perc : (orePrevInt > 0 ? Math.round((oreReali / orePrevInt) * 100) : 0);
+      const overBudget = cons ? cons.sforo
+        : (orePrevInt > 0 && oreReali > orePrevInt + tolleranzaOre(orePrevInt));
+      boxTotali.append(el('div', {
         style: 'background:var(--sur2);border:1px solid '+(overBudget?'var(--red)':'var(--brd)')+';border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;',
       },
         el('div', { style:'display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;' },
@@ -7874,6 +7886,12 @@ function openOperazioneModal(o) {
               '⚠ Ore consuntivate oltre il previsto')
           : null,
       ));
+      };
+      renderTotali();
+      // La sezione ore esterne ora sa ridisegnare anche i totali: aggiungere o
+      // togliere un rapportino li muove all'istante, senza salvare e riaprire.
+      aggiornaTotaliCons = renderTotali;
+      pCons.append(boxTotali);
 
       // Lista sessioni
       const sessList = el('div', { style:'max-height:240px;overflow-y:auto;font-family:monospace;font-size:11px;' });
