@@ -7240,7 +7240,9 @@ function openOperazioneModal(o) {
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const fmtH = (n) => Number(n).toLocaleString('it-IT',
       { minimumFractionDigits: 1, maximumFractionDigits: 2 }) + ' h';
-    wrapOreEsterne.append(el('label', {}, 'Ore esterne — consuntivo'));
+    wrapOreEsterne.append(el('div', { class:'sub',
+      style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+      '── Ore esterne ──'));
     const lista = el('div', { style:'display:flex;flex-direction:column;gap:4px;' });
     if (!r.righe.length) {
       lista.append(el('div', { class:'sub' },
@@ -7300,6 +7302,21 @@ function openOperazioneModal(o) {
       ));
     }
     wrapOreEsterne.append(lista);
+    // I totali devono QUADRARE con il riepilogo per fase qui sopra, che conta
+    // tutti i timbri (esterni compresi). Quindi: le ⏱ sono già lì dentro, le
+    // 📄 no — nessuno le ha timbrate. Senza questa riga uno legge 12,59 sopra
+    // e 12,59 qui e pensa che siano 25.
+    const oreTimbrate = r.righe.filter(x => x.fonte === 'timbro')
+      .reduce((s, x) => s + x.ore, 0);
+    const oreDich = r.righe.filter(x => x.fonte === 'dichiarata')
+      .reduce((s, x) => s + x.ore, 0);
+    if (oreTimbrate > 0 || oreDich > 0) {
+      const parti = [];
+      if (oreTimbrate > 0) parti.push('⏱ ' + fmtH(oreTimbrate) + ' sono già dentro il riepilogo per fase qui sopra');
+      if (oreDich > 0) parti.push('📄 ' + fmtH(oreDich) + ' non sono timbrate da nessuno: si sommano a quelle ore');
+      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:6px;font-size:10px;' },
+        parti.join(' · ')));
+    }
     // Il doppio conteggio è l'errore che si nasconderebbe meglio: dichiarato.
     if (r.conflitti.length) {
       wrapOreEsterne.append(el('div', { class:'sub',
@@ -7700,8 +7717,8 @@ function openOperazioneModal(o) {
       forSelectedWrap, forDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Ditte terze che contribuiscono alla lavorazione (con coefficiente di capacità). '
-        + 'Il prezzo suggerito qui è una STIMA a preventivo: le ore vere stanno in "Ore esterne" più sotto.')),
-    ...(isNew ? [] : [wrapOreEsterne]),
+        + 'Il prezzo suggerito qui è una STIMA a preventivo: le ore realmente fatte stanno '
+        + 'nella scheda Consuntivo, sezione "Ore esterne".')),
     ...(fieldRealistica ? [fieldRealistica] : []),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
@@ -7800,6 +7817,11 @@ function openOperazioneModal(o) {
       }
       pCons.append(box);
     }
+
+    // Ore esterne: sta QUI e non in Lavorazione (dove ci sono i fornitori)
+    // perché è consuntivo, e perché è la SCOMPOSIZIONE PER DITTA dello stesso
+    // monte ore che il riepilogo qui sopra spacca per fase.
+    pCons.append(wrapOreEsterne);
 
     if (sessOp.length === 0) {
       pCons.append(el('div', { style:'color:var(--mut);font-size:11px;padding:8px 0;' },
