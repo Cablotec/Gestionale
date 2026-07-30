@@ -1341,6 +1341,49 @@ function oreEsterneCommessa(operazioneId) {
   };
 }
 
+// ── CONSUNTIVO COMPLETO di una commessa ────────────────────────────────────
+// Il consuntivo conta TUTTO il lavoro fatto sul pezzo (28 lug, decisione Nico):
+// timbri dei dipendenti + timbri degli esterni in sede + ore dichiarate dai
+// fornitori su rapportino. Motivo: la differenza fra interno ed esterno è di
+// COSTO, non di DURATA — un pezzo lavorato 24h è a 24h chiunque le abbia fatte.
+// Escludere le esterne farebbe leggere il 14% su un pezzo che è al 32%.
+//
+// BASE DEL CONFRONTO — la regola che evita gli sfori falsi: se nel consuntivo
+// conto ore esterne, allora nel preventivo devo ricontare anche il budget
+// esterno. Prima di questa funzione il codice assumeva "i timbri sono solo
+// interni" (vero finché gli esterni non timbravano): confrontava un consuntivo
+// che le comprendeva con un preventivo che le escludeva.
+//   nessuna ora esterna → base = previsto INTERNO   (comportamento storico)
+//   almeno una          → base = previsto TOTALE    (omogeneo)
+// Quando nessuna fase è esternalizzata i due valori coincidono e non cambia
+// nulla: la regola morde solo dove serve.
+// Ritorna { oreInterne, oreEsterneTimbrate, oreEsterneDichiarate, oreEsterne,
+//   oreTot, base, baseTotale, perc, sforo, tolleranza }.
+function consuntivoCommessa(op) {
+  if (!op) return null;
+  const oreTimbri = opCalcOreReali(op);   // dipendenti + esterni in sede
+  const oe = (typeof oreEsterneCommessa === 'function')
+    ? oreEsterneCommessa(op.id) : { righe: [] };
+  const somma = (f) => oe.righe.filter(f).reduce((s, x) => s + x.ore, 0);
+  const oreEsterneTimbrate = somma(x => x.fonte === 'timbro');
+  const oreEsterneDichiarate = somma(x => x.fonte === 'dichiarata');
+  const oreEsterne = oreEsterneTimbrate + oreEsterneDichiarate;
+  // Le timbrate sono GIÀ dentro oreTimbri (sono sessioni); le dichiarate no.
+  const oreInterne = Math.max(0, oreTimbri - oreEsterneTimbrate);
+  const oreTot = oreTimbri + oreEsterneDichiarate;
+  const prevTot = opCalcOre(op);
+  const prevInt = opCalcOreInterne(op);
+  const base = oreEsterne > 0 ? prevTot : prevInt;
+  const tolleranza = tolleranzaOre(base);
+  return {
+    oreInterne, oreEsterneTimbrate, oreEsterneDichiarate, oreEsterne, oreTot,
+    base, baseTotale: oreEsterne > 0 && prevTot !== prevInt,
+    perc: base > 0 ? Math.round(oreTot / base * 100) : 0,
+    sforo: base > 0 && oreTot > base + tolleranza,
+    tolleranza,
+  };
+}
+
 // Scostamenti prezzo-vs-consuntivo di un cliente: per ogni suo articolo con
 // prezzo, confronta il listino vivo (ultimo prezzo praticato) col prezzo che
 // le ore realmente timbrate giustificherebbero. Ordinati per scarto assoluto:

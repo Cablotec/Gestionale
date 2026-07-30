@@ -7762,9 +7762,15 @@ function openOperazioneModal(o) {
     // I timbri sono SOLO interni: il confronto usa le ore previste INTERNE
     // (le fasi esternalizzate escono dal preventivo, non dal costo).
     const orePrevInt = opCalcOreInterne(o);
-    const oreEsterne = Math.max(0, orePrev - orePrevInt);
-    const perc = orePrevInt > 0 ? Math.round((oreReali / orePrevInt) * 100) : 0;
-    const overBudget = orePrevInt > 0 && oreReali > orePrevInt + tolleranzaOre(orePrevInt);
+    // NB: questo è il PREVISTO delle fasi esternalizzate (budget), non le ore
+    // realmente fatte da terzi — quelle stanno in `cons.oreEsterne`.
+    const prevEsterno = Math.max(0, orePrev - orePrevInt);
+    // Consuntivo COMPLETO: tutti i timbri + le ore da rapportino, confrontati
+    // su una base omogenea (vedi consuntivoCommessa nel domain).
+    const cons = (typeof consuntivoCommessa === 'function') ? consuntivoCommessa(o) : null;
+    const perc = cons ? cons.perc : (orePrevInt > 0 ? Math.round((oreReali / orePrevInt) * 100) : 0);
+    const overBudget = cons ? cons.sforo
+      : (orePrevInt > 0 && oreReali > orePrevInt + tolleranzaOre(orePrevInt));
 
     pCons.append(
       el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
@@ -7833,19 +7839,36 @@ function openOperazioneModal(o) {
       },
         el('div', { style:'display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;' },
           el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Ore previste (interne): '),
-            el('span', { style:'color:var(--txt);font-weight:600;' }, orePrevInt.toFixed(2) + 'h'),
-            oreEsterne > 0.05
-              ? el('span', { style:'color:var(--mut);font-size:10px;' }, ' + ' + oreEsterne.toFixed(1) + 'h esterne')
+            el('span', { style:'color:var(--mut)' },
+              'Ore previste' + (cons && cons.baseTotale ? ' (totali): ' : ' (interne): ')),
+            el('span', { style:'color:var(--txt);font-weight:600;' },
+              (cons ? cons.base : orePrevInt).toFixed(2) + 'h'),
+            (!cons || !cons.baseTotale) && prevEsterno > 0.05
+              ? el('span', { style:'color:var(--mut);font-size:10px;' }, ' + ' + prevEsterno.toFixed(1) + 'h esterne')
               : null),
           el('div', {},
             el('span', { style:'color:var(--mut)' }, 'Ore consuntivate: '),
-            el('span', { style:'color:'+(overBudget?'var(--red)':'var(--grn)')+';font-weight:600;' }, oreReali.toFixed(2) + 'h')),
+            el('span', { style:'color:'+(overBudget?'var(--red)':'var(--grn)')+';font-weight:600;' },
+              (cons ? cons.oreTot : oreReali).toFixed(2) + 'h')),
           el('div', {},
             el('span', { style:'color:var(--mut)' }, 'Avanzamento: '),
             el('span', { style:'color:'+(overBudget?'var(--red)':'var(--txt)')+';font-weight:700;' },
-              orePrevInt > 0 ? perc + '%' : '—'))
+              (cons ? cons.base : orePrevInt) > 0 ? perc + '%' : '—'))
         ),
+        // "di cui esterne": il totale resta il complessivo, ma non deve
+        // sembrare tutto lavoro tuo. Timbrate e dichiarate distinte.
+        (cons && cons.oreEsterne > 0.05)
+          ? el('div', { style:'margin-top:6px;color:var(--mut);font-size:10px;' },
+              'di cui ' + cons.oreEsterne.toFixed(2) + 'h esterne ('
+              + [cons.oreEsterneTimbrate > 0.005 ? '⏱ ' + cons.oreEsterneTimbrate.toFixed(2) + 'h timbrate qui' : null,
+                 cons.oreEsterneDichiarate > 0.005 ? '📄 ' + cons.oreEsterneDichiarate.toFixed(2) + 'h da rapportino' : null]
+                .filter(Boolean).join(' · ')
+              + ') · interne ' + cons.oreInterne.toFixed(2) + 'h'
+              + (cons.baseTotale
+                  ? ' — il previsto qui sopra è quello TOTALE (comprende le fasi esternalizzate), '
+                    + 'perché il consuntivo comprende ore esterne'
+                  : ''))
+          : null,
         overBudget
           ? el('div', { style:'margin-top:6px;color:var(--red);font-size:10px;' },
               '⚠ Ore consuntivate oltre il previsto')

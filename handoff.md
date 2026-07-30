@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-28.6`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-28.7`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -74,6 +74,12 @@
 - **Ditta senza tariffa**: ore contate, costo no (mai gonfiato), ditta nominata sotto l'elenco.
 - **Margine riga rifatto**: usa le ore VERE dove ci sono e la stima solo per le ditte che non ne hanno ancora, **ditta per ditta** (così non somma mai stima + consuntivo della stessa ditta). Dichiara la composizione: `− esterni ≈ € X → margine ≈ € Y (Z%) · ore vere € A + stima € B`. Il `≈` compare solo se c'è ancora una stima dentro.
 - Solo le righe **dichiarate** si cancellano dalla sezione; le timbrate si correggono sui timbri, non lì.
+- **Le ore esterne INCIDONO su totali e sfori** (28 lug, `.7`, segnalato da Nico) — `consuntivoCommessa(op)` in domain, 28 test in scratchpad/test_consuntivo.js.
+  - **Verità di partenza**: le ore **timbrate** dagli esterni in sede incidevano **già** (sono `sessioni_lavoro`, e `opCalcOreReali` le contava). Su OC/00236 l'avanzamento del 32% comprende le 12,59 h di Tecnocab: senza sarebbe 14%. Nico non lo vedeva perché nessuna delle due commesse è in sforo e il costo è 0 (Tecnocab senza tariffa). Le **dichiarate** invece non incidevano su niente: quello era il buco vero.
+  - **Difetto trovato**: il codice assumeva *"i timbri sono SOLO interni"* — vero finché gli esterni non timbravano. Con una fase affidata a un fornitore, il suo budget **usciva** da `opCalcOreInterne` ma le ore timbrate dai suoi uomini **entravano** in `opCalcOreReali` → **sforo falso**. Su OC/00236 non si vedeva solo perché le fasi non sono pianificabili e quindi l'esclusione non scattava: fortuna, non correttezza.
+  - **Decisione Nico**: contare TUTTO nell'avanzamento (la differenza interno/esterno è di **costo**, non di **durata**) + riga "di cui esterne" sotto il totale.
+  - **Regola della base** (documentata nel domain): *se conto ore esterne, riconto anche il budget esterno*. Nessuna ora esterna → base = previsto INTERNO (comportamento storico invariato); almeno una → base = previsto TOTALE, e l'etichetta cambia in "Ore previste (totali)" dichiarando il perché. Dove nessuna fase è esternalizzata i due valori coincidono e non cambia nulla.
+  - **Non-regressione verificata**: rieseguito su **203 commesse con timbri**, zero differenze di percentuale o di sforo. Oggi cambia solo la comparsa della riga "di cui esterne"; la correzione morde quando arriveranno i primi rapportini o un caso di fase esternalizzata con timbri esterni.
 - **Aperto**: le ore degli esterni in sede entrano ancora nelle medie effettive (`storicoMinutiPz`) come quelle dei dipendenti. Per la DURATA di un articolo è corretto (il tempo è tempo), per i numeri di **efficienza Cablotec** (reale/pagato, €/h in Analisi clienti) andrebbe deciso se separarle. Non toccato: numeri visibili, serve una decisione. Da riprendere quando gli esterni avranno timbrato qualcosa.
 
 ### 3. Accorpamento commesse (gruppi) — da collaudare
