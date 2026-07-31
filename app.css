@@ -1,17 +1,26 @@
 /* APP.CSS — stili del gestionale Cablotec (estratti da index.html) */
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
 
+/* Contrasti verificati sul fondo PEGGIORE di ogni tema (--sur2): tutti i testi
+   stanno sopra 4.5:1, la soglia di leggibilità WCAG AA per testo normale.
+   Qui quasi tutto è a 10-11px, quindi la soglia vale per intero.
+   Misurato, non stimato: rilanciare scratchpad/contrasto.js dopo ogni ritocco. */
 :root{
   --bg:#0f0f0e; --sur:#1a1a18; --sur2:#222220; --brd:#2e2e2a;
-  --acc:#d4ff4e; --or:#ff6b35; --txt:#e8e8e2; --mut:#6b6b64;
-  --grn:#4effa3; --red:#ff4e6b; --yel:#ffcc4e; --blu:#4eb8ff; --vio:#b84eff;
+  /* --mut era #6b6b64: 2,97 su sur2, illeggibile — ed è il colore più usato
+     dell'app (.sub, note, meta delle tabelle). Ora 4,64. */
+  --acc:#d4ff4e; --or:#ff6b35; --txt:#e8e8e2; --mut:#8b8b83;
+  --grn:#4effa3; --red:#ff4e6b; --yel:#ffcc4e; --blu:#4eb8ff; --vio:#c46eff;
   --hover:rgba(255,255,255,.02); --hover2:rgba(255,255,255,.04); --hover3:rgba(255,255,255,.1);
   --weekend:rgba(255,255,255,.015); --shadow:rgba(0,0,0,.75);
 }
+/* Nel tema chiaro i colori accesi sono i più deboli: su fondo chiaro un verde
+   o un giallo brillanti spariscono. Scuriti quel tanto che basta a superare
+   4,5:1 su --sur2, tinte invariate. */
 :root[data-theme="light"]{
   --bg:#f5f5f1; --sur:#ffffff; --sur2:#f0f0ec; --brd:#dcdcd6;
-  --acc:#5a8000; --or:#cc4a16; --txt:#1a1a18; --mut:#7a7a72;
-  --grn:#0d8f4c; --red:#c92648; --yel:#a87600; --blu:#1872c4; --vio:#7a2bc7;
+  --acc:#537600; --or:#bc4414; --txt:#1a1a18; --mut:#6b6b64;
+  --grn:#0b7c42; --red:#c92648; --yel:#8f6400; --blu:#176dbb; --vio:#7a2bc7;
   --hover:rgba(0,0,0,.025); --hover2:rgba(0,0,0,.05); --hover3:rgba(0,0,0,.08);
   --weekend:rgba(0,0,0,.02); --shadow:rgba(0,0,0,.4);
 }
@@ -397,7 +406,7 @@ input.search:focus{border-color:var(--acc);}
 .kiosk-rientro-title{font-family:'DM Mono',monospace;font-size:11px;color:var(--blu);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;}
 .kiosk-rientro-mezzo{font-size:24px;font-weight:700;margin-bottom:14px;}
 .kiosk-rientro-info{font-family:'DM Mono',monospace;font-size:13px;color:var(--mut);margin-bottom:18px;}
-.kiosk-rientro-btn{width:100%;padding:22px;background:var(--blu);color:#fff;font-family:'Syne',sans-serif;font-size:18px;font-weight:700;border:none;border-radius:6px;cursor:pointer;text-transform:uppercase;letter-spacing:.06em;transition:all .15s;}
+.kiosk-rientro-btn{width:100%;padding:22px;background:var(--blu);color:var(--bg);font-family:'Syne',sans-serif;font-size:18px;font-weight:700;border:none;border-radius:6px;cursor:pointer;text-transform:uppercase;letter-spacing:.06em;transition:all .15s;}
 .kiosk-rientro-btn:hover,.kiosk-rientro-btn:active{filter:brightness(1.15);transform:scale(.99);}
 .kiosk-section-title{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin:8px 0 12px;}
 .kiosk-empty{text-align:center;padding:40px;font-family:'DM Mono',monospace;color:var(--mut);font-size:13px;}
@@ -439,7 +448,7 @@ input.search:focus{border-color:var(--acc);}
 .kib-desc{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--txt);line-height:1.25;margin-top:3px;}
 .kib-meta{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);letter-spacing:.04em;margin-top:6px;line-height:1.4;}
 .kop-note-row{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.kop-gruppo-banner{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:#0f0f0e;background:var(--acc);border-radius:5px;padding:5px 10px;margin-bottom:8px;white-space:normal;line-height:1.3;}
+.kop-gruppo-banner{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:var(--bg);background:var(--acc);border-radius:5px;padding:5px 10px;margin-bottom:8px;white-space:normal;line-height:1.3;}
 .kop-prep-row{font-family:'DM Mono',monospace;font-size:13px;color:var(--txt);display:flex;align-items:center;}
 .kop-prep-row .prep-dot{width:12px;height:12px;}
 /* Griglia commesse: fino a 3 colonne, scende a 2 o 1 se non c'è spazio.
@@ -564,8 +573,8 @@ input.search:focus{border-color:var(--acc);}
 .kas-value{font-family:'DM Mono',monospace;font-size:28px;color:var(--grn);font-weight:500;}
 .kiosk-attiva-actions{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
 .kiosk-attiva-btn{padding:24px;font-family:'Syne',sans-serif;font-size:17px;font-weight:700;border:none;border-radius:8px;cursor:pointer;text-transform:uppercase;letter-spacing:.05em;transition:all .15s;}
-.kiosk-attiva-btn.pause{background:var(--yel);color:#0f0f0e;}
-.kiosk-attiva-btn.switch{background:var(--blu);color:#fff;}
+.kiosk-attiva-btn.pause{background:var(--yel);color:var(--bg);}
+.kiosk-attiva-btn.switch{background:var(--blu);color:var(--bg);}
 .kiosk-attiva-btn:hover,.kiosk-attiva-btn:active{filter:brightness(1.1);transform:scale(.99);}
 
 /* Warning sessione dimenticata */
@@ -577,7 +586,7 @@ input.search:focus{border-color:var(--acc);}
 .switch-bar{display:flex;gap:0;background:var(--sur);border:1px solid var(--brd);border-radius:4px;overflow:hidden;}
 .switch-bar button{padding:6px 14px;background:transparent;border:none;color:var(--mut);font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border-right:1px solid var(--brd);}
 .switch-bar button:last-child{border-right:none;}
-.switch-bar button.act{background:var(--acc);color:#0f0f0e;font-weight:700;}
+.switch-bar button.act{background:var(--acc);color:var(--bg);font-weight:700;}
 .switch-bar button:hover:not(.act){color:var(--txt);background:var(--sur2);}
 .gantt-nav{display:flex;gap:4px;align-items:center;}
 .gantt-nav button{padding:6px 10px;background:var(--sur);border:1px solid var(--brd);color:var(--mut);cursor:pointer;border-radius:3px;font-family:'DM Mono',monospace;font-size:11px;}
@@ -629,7 +638,10 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .gantt-cell{background:var(--bg);border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);position:relative;min-height:42px;}
 .gantt-cell.weekend{background:rgba(255,107,53,.03);}
 .gantt-cell.oggi{background:rgba(212,255,78,.03);}
-.gantt-bar{position:absolute;top:6px;bottom:6px;border-radius:3px;cursor:pointer;padding:2px 6px;font-size:10px;color:#0f0f0e;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;display:flex;flex-direction:column;justify-content:center;transition:transform .1s;border:1px solid transparent;z-index:1;}
+/* Testo SCURO fisso, non var(--bg): lo sfondo di questa barra è il colore del
+   tipo di lavorazione, scelto in anagrafica e quindi sempre acceso. Seguire il
+   tema qui darebbe testo chiaro su fondo chiaro in modalità giorno. */
+.gantt-bar{position:absolute;top:6px;bottom:6px;border-radius:3px;cursor:pointer;padding:2px 6px;font-size:10px;color:#14140f;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;display:flex;flex-direction:column;justify-content:center;transition:transform .1s;border:1px solid transparent;z-index:1;}
 .gantt-bar:hover{transform:scaleY(1.06);z-index:5;border-color:var(--txt);}
 .gantt-bar.aperta{box-shadow:0 0 0 2px var(--grn);}
 .gantt-bar-cod{font-family:'DM Mono',monospace;font-size:9px;opacity:.85;}
@@ -654,7 +666,10 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .gantt-cmbar.sfora{background:#5c2a35;}
 /* Commessa IN RITARDO (scadenza passata, lavoro residuo): barra ancorata a
    oggi, rossa piena — deve saltare all'occhio prima di tutto il resto. */
-.gantt-cmbar.inritardo{background:var(--red);border:1px solid var(--red);}
+/* Rosso FISSO e non var(--red): il testo della barra è chiaro e fisso, e il
+   rosso chiaro del tema giorno lo renderebbe illeggibile (2,6:1). Così sta a
+   5,4:1 in entrambi i temi. */
+.gantt-cmbar.inritardo{background:#c92648;border:1px solid #c92648;}
 .gantt-cmbar.attiva{box-shadow:0 0 0 2px var(--grn);}
 .gantt-cmbar.attiva:hover{box-shadow:0 0 0 2px var(--grn),0 0 0 3px var(--txt);}
 .gantt-cmbar.mzconflict{box-shadow:0 0 0 2px var(--red);z-index:2;}
@@ -665,7 +680,9 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .gantt-cmbar-fill{position:absolute;left:0;top:0;bottom:0;background:var(--blu);opacity:.85;z-index:0;}
 .gantt-cmbar-fill.sfora{background:var(--red);opacity:.9;}
 .gantt-cmbar-txt{position:relative;z-index:1;font-family:'DM Mono',monospace;font-size:9px;
-  font-weight:700;color:#0f0f0e;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  /* Testo CHIARO fisso: qui gli sfondi della barra sono fissi e scuri
+     (#3a6c8f, #5c2a35, rosso ritardo), uguali nei due temi. */
+  font-weight:700;color:#f2f2ee;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .gantt-cmdeadline{position:absolute;width:0;border-left:2px dashed var(--red);z-index:4;pointer-events:auto;}
 /* Interruzione barra su giorni non lavorati (weekend/festivi/assenze intere):
    maschera color sfondo + la stessa tinta della colonna sotto. */
@@ -678,7 +695,7 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .sess-row-clic:hover{background:var(--sur2) !important;}
 
 /* Overlay assenza sul gantt — strato sotto le barre, non interattivo per il clic */
-.gantt-ass-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:#0f0f0e;letter-spacing:.05em;pointer-events:none;z-index:0;}
+.gantt-ass-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:var(--bg);letter-spacing:.05em;pointer-events:none;z-index:0;}
 .gantt-ass-overlay.partial{justify-content:flex-end;padding-right:3px;opacity:.7;}
 .gantt-cell.has-ass{background:repeating-linear-gradient(135deg,rgba(107,107,100,.18) 0,rgba(107,107,100,.18) 6px,transparent 6px,transparent 12px);}
 
@@ -687,10 +704,10 @@ tr.gruppo-hd-row.nogroup td{color:var(--mut);border-top-color:var(--mut);}
 .assv2-tabbar{display:flex;gap:2px;flex-wrap:wrap;margin-bottom:10px;}
 .assv2-tab{font-family:'DM Mono',monospace;font-size:10px;padding:5px 11px;cursor:pointer;font-weight:700;color:var(--mut);border:1px solid var(--brd);background:var(--sur);border-radius:3px;letter-spacing:.05em;text-transform:uppercase;transition:all .15s;}
 .assv2-tab:hover{color:var(--txt);border-color:var(--mut);}
-.assv2-tab.active{background:var(--acc);color:#0f0f0e;border-color:var(--acc);}
+.assv2-tab.active{background:var(--acc);color:var(--bg);border-color:var(--acc);}
 .assv2-yearpick{display:flex;gap:4px;margin-bottom:8px;}
 .assv2-yearpick button{padding:4px 14px;font-family:'DM Mono',monospace;font-size:11px;background:var(--sur);border:1px solid var(--brd);color:var(--mut);cursor:pointer;border-radius:3px;font-weight:700;}
-.assv2-yearpick button.act{background:var(--acc);color:#0f0f0e;border-color:var(--acc);}
+.assv2-yearpick button.act{background:var(--acc);color:var(--bg);border-color:var(--acc);}
 
 .assv2-hint{font-family:'DM Mono',monospace;font-size:10px;color:var(--acc);padding:5px 8px;background:rgba(212,255,78,.06);border-left:3px solid var(--acc);border-radius:2px;margin-bottom:8px;}
 
@@ -756,7 +773,7 @@ td.assv2-col-name.assv2-ch-name{background:rgba(255,107,53,.08);font-style:itali
 .assv2-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
 .assv2-chip{padding:9px 12px;border:2px solid;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;cursor:pointer;flex:1;min-width:60px;text-align:center;border-radius:3px;background:var(--sur2);color:var(--txt);border-color:var(--brd);transition:all .15s;}
 .assv2-chip:hover{border-color:var(--acc);}
-.assv2-chip.sel{background:var(--acc);color:#0f0f0e;border-color:var(--acc);}
+.assv2-chip.sel{background:var(--acc);color:var(--bg);border-color:var(--acc);}
 .assv2-chip.del{background:rgba(255,78,107,.15);color:var(--red);border-color:var(--red);}
 
 /* Riepilogo annuale */
@@ -788,12 +805,13 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
 .asscal-cell.nonlav{background:rgba(255,107,53,.04);}
 .asscal-cell.oggi{background:rgba(212,255,78,.05);}
 .asscal-cell.has-ass{cursor:pointer;}
-.asscal-ass{position:absolute;inset:2px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#0f0f0e;overflow:hidden;}
+/* Come .gantt-bar: lo sfondo è il colore del tipo di assenza, dall'anagrafica. */
+.asscal-ass{position:absolute;inset:2px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#14140f;overflow:hidden;}
 .asscal-ass.annull{opacity:.3;}
 .asscal-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);align-items:center;}
 .asscal-legend .lg-item{display:inline-flex;align-items:center;gap:5px;}
 .asscal-legend .lg-swatch{display:inline-block;width:16px;height:10px;border-radius:2px;}
-.kiosk-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;padding:14px 24px;border-radius:6px;font-family:'Syne',sans-serif;font-size:15px;font-weight:600;z-index:10000;box-shadow:0 4px 20px rgba(0,0,0,.4);}
+.kiosk-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--red);color:var(--bg);padding:14px 24px;border-radius:6px;font-family:'Syne',sans-serif;font-size:15px;font-weight:600;z-index:10000;box-shadow:0 4px 20px rgba(0,0,0,.4);}
 /* ── KIOSK su TABLET (701–1024px): riduzione moderata ── */
 @media (min-width:701px) and (max-width:1024px){
   .kiosk-menu-btn{padding:34px 24px;}

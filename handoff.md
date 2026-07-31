@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-31.6`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-31.7`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -199,3 +199,11 @@
 - **DB in lettura via API REST** con account kiosk (`kiosk@cablotec.local` / vedi core/db.js): per diagnosi su dati reali. curl con `--ssl-no-revoke` su questa macchina. L'account NON può DELETE (RLS) — per cancellazioni: SQL dal pannello (Nico).
 - **Test Node a tavolino** in scratchpad: suite test_livella/finestra/fasi_eff/mero/interne/quote/stima/gruppo/listino — caricano domain/scheduling.js con stub. Rilanciarle dopo modifiche al domain.
 - **Data realistica** nel modal commessa nuova: motore `livellaOperatore` + `stimaFineCommessaNuova` (coda addetti + ferie → fine in avanti). Fondamenta per Gantt livellato / autodistribuzione futuri.
+## Leggibilità e temi (31 lug, `2026-07-31.7`)
+- **Si MISURA, non si stima** — come per il layout. `scratchpad/contrasto.js` calcola il rapporto WCAG di ogni testo su ogni fondo nei due temi: **rilanciarlo dopo ogni ritocco ai colori**. Soglia 4,5:1 (qui quasi tutto è a 10-11px, quindi vale per intero). Prima: **18 combinazioni su 54 sotto soglia**; ora **0**.
+- Corretto `--mut` (era 2,97 nel tema scuro: illeggibile, ed è il colore **più usato** dell'app — `.sub`, note, meta) e i colori accesi del tema **chiaro** (acc/grn/yel/blu/or), scuriti quel tanto che basta. Tinte invariate.
+- **Regola**: testo su fondo TEMATICO (`var(--acc)`, `var(--blu)`, `var(--red)`) → `color:var(--bg)`, che segue il tema. Prima erano fissi (`#0f0f0e`, `#fff`) e si rompevano in una delle due modalità: dark-on-dark in chiaro (3,6) o white-on-lightblue in scuro (2,18).
+- **Eccezioni volute, con testo FISSO**: `.gantt-bar` e `.asscal-ass` (sfondo = colore scelto in anagrafica, sempre acceso → testo scuro fisso) e `.gantt-cmbar-txt` (sfondi fissi e scuri → testo chiaro fisso; per questo `.gantt-cmbar.inritardo` usa un rosso FISSO e non `var(--red)`, che nel tema chiaro darebbe 2,6).
+- **Resta aperto**: se in anagrafica si sceglie un colore CUPO per un tipo di lavorazione, il testo scuro sulla sua barra Gantt scende a 3,44. È un problema di dato, non di CSS; si risolverebbe scegliendo il testo in base alla luminosità del colore.
+
+## Sospesi tecnici

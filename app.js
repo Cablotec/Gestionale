@@ -2882,11 +2882,11 @@ function renderAziende(root) {
     // Badge ruolo
     let ruoloBadge;
     if (c.is_cliente && c.is_fornitore) {
-      ruoloBadge = el('span', { class:'badge', style:'background:rgba(132,73,200,.18);color:#c8b6ff;border:1px solid rgba(132,73,200,.4);' }, 'C + F');
+      ruoloBadge = el('span', { class:'badge', style:'background:rgba(132,73,200,.18);color:var(--vio);border:1px solid rgba(132,73,200,.4);' }, 'C + F');
     } else if (c.is_cliente) {
       ruoloBadge = el('span', { class:'badge bblu' }, 'Cliente');
     } else if (c.is_fornitore) {
-      ruoloBadge = el('span', { class:'badge', style:'background:rgba(212,140,40,.18);color:#f0c070;border:1px solid rgba(212,140,40,.4);' }, 'Fornitore');
+      ruoloBadge = el('span', { class:'badge', style:'background:rgba(212,140,40,.18);color:var(--yel);border:1px solid rgba(212,140,40,.4);' }, 'Fornitore');
     } else {
       ruoloBadge = el('span', { class:'badge bgry' }, '—');
     }
@@ -6025,7 +6025,7 @@ function openFiltroSingoloPopup(anchorBtn, opts) {
   const voce = (id, nome, attivo) => {
     const row = el('div', {
       style:'display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:3px;font-size:12px;user-select:none;'
-        + (attivo ? 'background:var(--acc);color:#0f0f0e;font-weight:700;' : 'color:var(--txt);'),
+        + (attivo ? 'background:var(--acc);color:var(--bg);font-weight:700;' : 'color:var(--txt);'),
       onmouseover: e => { if (!attivo) e.currentTarget.style.background = 'var(--sur)'; },
       onmouseout: e => { if (!attivo) e.currentTarget.style.background = 'transparent'; },
       onclick: () => scegli(id),
@@ -6840,7 +6840,7 @@ function renderPianificazione(root) {
       const nG = (state.operazioni || []).filter(x => x.gruppo_id === o.gruppo_id).length;
       ordineCell.append(el('span', {
         style:'display:inline-block;margin-right:6px;padding:0 6px;border-radius:8px;background:var(--acc);'
-          + 'color:#0f0f0e;font-size:10px;font-weight:700;cursor:pointer;',
+          + 'color:var(--bg);font-size:10px;font-weight:700;cursor:pointer;',
         title:'Gruppo di ' + nG + ' commesse (kiosk: una card, tempo diviso). Click per sciogliere.',
         onclick:(e)=>{ e.stopPropagation(); if (!inGruppoMode) scioglieGruppoCommessa(o); },
       }, '⊞' + nG));
@@ -7583,7 +7583,7 @@ function openOperazioneModal(o) {
         style:'display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 10px;background:rgba(212,140,40,.08);border:1px solid rgba(212,140,40,.3);border-radius:4px;',
       });
       // Nome fornitore + coefficiente: mai sotto i 140px, come le righe addetti
-      row.append(el('div', { style:'flex:1 1 auto;min-width:140px;color:#f0c070;font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+      row.append(el('div', { style:'flex:1 1 auto;min-width:140px;color:var(--yel);font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
         a.nome + (a.coefficiente && a.coefficiente !== 1
           ? ` · coef ${Number(a.coefficiente).toFixed(2)}` : '')));
       // Input numero ordine fornitore.
@@ -7620,7 +7620,7 @@ function openOperazioneModal(o) {
       if (canEdit) {
         row.append(el('button', {
           type:'button',
-          style:'background:none;border:none;color:#f0c070;font-size:14px;cursor:pointer;padding:0 4px;',
+          style:'background:none;border:none;color:var(--yel);font-size:14px;cursor:pointer;padding:0 4px;',
           title:'Rimuovi questo fornitore',
           onclick: () => {
             fornitoriSel = fornitoriSel.filter((_, i) => i !== idx);
@@ -13115,7 +13115,7 @@ function kioskRenderAttiva() {
   const actions = el('div', { class:'kiosk-attiva-actions' });
   if (sess.operazione_id) {
     actions.append(el('button', {
-      class:'kiosk-attiva-btn', style:'background:var(--grn);color:#0f0f0e;',
+      class:'kiosk-attiva-btn', style:'background:var(--grn);color:var(--bg);',
       onclick: () => kioskFineFase(sess),
     }, '✅ Ho finito la mia fase'));
     actions.append(el('button', {
@@ -14395,7 +14395,7 @@ function renderGanttCommesse(root) {
         el('div', {
           style: 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
             + `font-size:10px;font-family:'DM Mono',monospace;font-weight:700;`
-            + 'color:#0a0a0a;letter-spacing:.02em;text-shadow:0 0 2px rgba(255,255,255,.4);',
+            + 'color:var(--bg);letter-spacing:.02em;text-shadow:0 0 2px rgba(255,255,255,.4);',
         }, percTxt),
       ),
     ));
@@ -14648,7 +14648,7 @@ function renderGanttCommesse(root) {
           + `${carico.oreCarico.toFixed(1)}h di lavoro residuo su `
           + `${carico.oreCapacita.toFixed(0)}h di capacità nel periodo visibile (${percTxt})`,
       },
-        el('div', { style:'font-weight:600;line-height:1.1;color:#f0c070;' },
+        el('div', { style:'font-weight:600;line-height:1.1;color:var(--yel);' },
           a.nome + (carico.coefficiente !== 1
             ? ` · ${carico.coefficiente.toFixed(2)}` : '')),
         el('div', {
@@ -14660,7 +14660,7 @@ function renderGanttCommesse(root) {
           el('div', {
             style: 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
               + `font-size:10px;font-family:'DM Mono',monospace;font-weight:700;`
-              + 'color:#0a0a0a;letter-spacing:.02em;text-shadow:0 0 2px rgba(255,255,255,.4);',
+              + 'color:var(--bg);letter-spacing:.02em;text-shadow:0 0 2px rgba(255,255,255,.4);',
           }, percTxt),
         ),
       ));
