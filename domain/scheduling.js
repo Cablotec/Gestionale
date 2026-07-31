@@ -1365,26 +1365,76 @@ function odlANumeroOp(odl) {
   const m = String(odl || '').trim().toUpperCase().match(/^(\d{4})\s*OP\s*(\d+)$/);
   return m ? m[1] + '/OP/' + m[2].padStart(5, '0') : null;
 }
+// Una riga è BLOCCANTE se il pezzo è ancora da ordinare: nessuno l'ha
+// comprato, quindi non c'è né data né speranza a breve. Se invece è già
+// ordinato ha una consegna prevista: manca, ma arriva. La differenza è tutta
+// qui, ed è quella che distingue una commessa ferma da una che parte.
+function mancanteBloccante(m) { return Number(m && m.qta_da_ordinare) > 0; }
+// Consegne previste di una riga, ordinate per data. Le righe arrivano dal
+// fabbisogno con fino a 5 previsioni di entrata.
+function mancanteConsegne(m) {
+  const c = (m && m.consegne) || [];
+  return (Array.isArray(c) ? c : []).filter(x => x && x.data)
+    .slice().sort((a, b) => String(a.data).localeCompare(String(b.data)));
+}
 // Mancanti di una commessa + coerenza con la tendina "Preparazione materiale".
 // `incoerente` = il fabbisogno dice che manca roba ma la preparazione è
 // dichiarata completa: contraddizione da mostrare, non da nascondere.
-// Ritorna { righe, nCodici, incoerente, dataImport } — righe [] se non ce ne sono.
-function mancantiCommessa(op) {
-  const vuoto = { righe: [], nCodici: 0, incoerente: false, dataImport: null };
+// Ritorna { righe, nCodici, nBloccanti, nInArrivo, prossima, nRitardo,
+//   incoerente, dataImport }.
+function mancantiCommessa(op, oggiIso) {
+  const vuoto = { righe: [], nCodici: 0, nBloccanti: 0, nInArrivo: 0,
+    prossima: null, nRitardo: 0, incoerente: false, dataImport: null };
   if (!op || !op.numero_op) return vuoto;
   const righe = (state.mancanti || [])
     .filter(m => m.numero_op === op.numero_op)
     .slice()
-    .sort((a, b) => String(a.codice || '').localeCompare(String(b.codice || '')));
+    // Bloccanti in cima: sono quelle su cui bisogna agire.
+    .sort((a, b) => (mancanteBloccante(b) ? 1 : 0) - (mancanteBloccante(a) ? 1 : 0)
+      || String(a.codice || '').localeCompare(String(b.codice || '')));
   if (!righe.length) return vuoto;
-  const dataImport = righe.reduce((d, m) =>
-    (!d || String(m.import_data || '') > d) ? (m.import_data || d) : d, null);
+  const oggi = oggiIso || new Date().toISOString().slice(0, 10);
+  const bloccanti = righe.filter(mancanteBloccante);
+  let prossima = null, nRitardo = 0;
+  righe.forEach(m => {
+    mancanteConsegne(m).forEach(c => {
+      if (c.data < oggi) nRitardo++;
+      else if (!prossima || c.data < prossima) prossima = c.data;
+    });
+  });
   return {
     righe,
     nCodici: righe.length,
+    nBloccanti: bloccanti.length,
+    nInArrivo: righe.length - bloccanti.length,
+    prossima,
+    nRitardo,
     incoerente: op.stato_preparazione === 'completo',
-    dataImport,
+    dataImport: righe.reduce((d, m) =>
+      (!d || String(m.import_data || '') > d) ? (m.import_data || d) : d, null),
   };
+}
+// Tutte le consegne previste, appiattite e ordinate per data: una riga del
+// fabbisogno può averne fino a 5. `scadute` = attese prima di oggi e mai
+// arrivate — è il segnale più utile dell'intero file, e prima non si vedeva.
+// Ritorna { prossime, scadute } con righe { data, qta, codice, descrizione,
+//   numero_op, ordine, fornitore, mancante }.
+function consegnePreviste(oggiIso) {
+  const oggi = oggiIso || new Date().toISOString().slice(0, 10);
+  const prossime = [], scadute = [];
+  (state.mancanti || []).forEach(m => {
+    mancanteConsegne(m).forEach(c => {
+      const riga = {
+        data: c.data, qta: Number(c.qta) || null,
+        codice: m.codice, descrizione: m.descrizione,
+        numero_op: m.numero_op, ordine: c.ordine || null,
+        fornitore: c.fornitore || null, mancante: m,
+      };
+      (c.data < oggi ? scadute : prossime).push(riga);
+    });
+  });
+  const perData = (a, b) => String(a.data).localeCompare(String(b.data));
+  return { prossime: prossime.sort(perData), scadute: scadute.sort(perData) };
 }
 
 // ── CONSUNTIVO COMPLETO di una commessa ────────────────────────────────────

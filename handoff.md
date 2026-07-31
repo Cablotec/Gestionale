@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-31.2`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-31.3`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -74,6 +74,20 @@
 - **Dove si vedono**: (a) modal commessa, sotto "Preparazione materiale", elenco `entityTimeline` **sempre** se ci sono mancanti; (b) badge `⚠N` nella colonna prep. della lista Ordini cliente. **Incoerenza dichiarata** (decisione Nico): se la tendina dice "completo" ma il fabbisogno riporta mancanti, la contraddizione si vede in rosso invece di restare nascosta.
 - **Dato inutile scoperto sui dati**: la colonna "Data Prossima Previsione Entrata" è compilata su **2 righe su 317** (se manca ed è da ordinare, una data d'arrivo non c'è ancora). Importata ma non ci si costruisce niente sopra.
 - 19 test in scratchpad/test_mancanti.js.
+
+### Mancanti v2 — sotto scorta, consegne e ritardi (31 lug, `2026-07-31.3`, idee di Nico)
+- **Migrazione aggiuntiva** (DA ESEGUIRE): `ALTER TABLE mancanti ADD COLUMN impegno numeric; ADD COLUMN consegne jsonb; ADD COLUMN prima_consegna date;` — dopo va **rifatto l'import**, il vecchio archivio non ha le consegne.
+- **Scoperta che ha ribaltato il disegno**: l'import teneva solo `Qta da ord > 0` (317 righe) — ma **quelle righe non hanno quasi mai una data** (2 su 317). Le date ce l'hanno solo le righe **già ordinate** (47 su 47), che venivano **scartate**. La vista "prossime consegne" chiesta da Nico era quindi impossibile: stavo buttando via esattamente la metà utile del file.
+- **Nuova definizione**: si importa tutto ciò che è **sotto scorta** (`giacenza < impegno`) o da ordinare → 364 righe. Due categorie, sempre distinte:
+  - **DA ORDINARE** (317): nessuno l'ha comprato → **ferma la commessa**, nessuna data.
+  - **IN ARRIVO** (47): già ordinato, con consegna prevista.
+- **Fino a 5 previsioni di entrata per riga** (`FABB_CONSEGNE`, colonne "Prossima" + "2..5"), salvate in `consegne` jsonb con qta/data/ordine fornitore/fornitore. Sul file del 31 lug: 51 consegne, **35 future e 16 GIÀ IN RITARDO**.
+- **I 16 ritardi sono il dato più utile dell'intero file** e prima non si vedevano da nessuna parte: roba attesa il 05/05, il 09/06, mai arrivata. Blocco rosso in cima alla scheda.
+- **Scheda rinominata "Mancanti"** (era "Fabbisogno"): il file si chiama così nel gestionale di magazzino, ma quello che si guarda sono i mancanti — e "mancanti" è la parola che usa Nico (regola: una dicitura sola, sempre quella).
+- **Contenuto scheda**: ritardi (rosso) → prossime consegne (5) → tabella completa filtrabile per commessa e per tipo, con link diretto alla commessa. Bloccanti sempre in cima.
+- **Triangolo a due numeri** `⚠7/67`: bloccanti su totale. **Rosso se c'è almeno un bloccante, giallo se è tutto in arrivo** — distingue una commessa ferma da una che parte, cosa che il numero unico non diceva. Tooltip con i primi 8 codici bloccanti + "e altri N" (con 67 righe un tooltip intero è illeggibile), prossima consegna e ritardi. **Clic → scheda Mancanti già filtrata** su quella commessa (`apriMancantiFiltrati`).
+- Nel modal commessa il sommario dice per primo quanti **fermano** la commessa; ⛔ bloccante, 📦 in arrivo con la data (in rosso se scaduta).
+- **Verificato facendo girare il codice di import VERO sull'Excel vero**: 364 righe, 317+47, 361 agganciabili, 51 consegne, 35 future / 16 in ritardo. 25 test in scratchpad/test_mancanti2.js.
 
 ## ▶ Fili aperti (in ordine di priorità)
 

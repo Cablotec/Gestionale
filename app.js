@@ -1413,7 +1413,7 @@ const TAB_STRUCTURE = {
     adminOnly: true,
     tabs: [
       { id: 'articoli',       label: 'Articoli',          adminOnly: true },
-      { id: 'fabbisogno',     label: 'Fabbisogno',        adminOnly: true },
+      { id: 'fabbisogno',     label: 'Mancanti',          adminOnly: true },
       { id: 'codifica',       label: 'Codifica',          adminOnly: true },
       { id: 'aziende',        label: 'Aziende',           adminOnly: true },
       { id: 'analisi_clienti', label: 'Analisi clienti',  adminOnly: true },
@@ -3550,32 +3550,71 @@ const FABB_COLONNE = {
   qtaDaOrd:    ['Qta da ord', 'Qta da ordinare'],
   qtaRich:     ['Qta richiesta'],
   giacenza:    ['Giacenza'],
+  impegno:     ['Impegno'],
   odl:         ['OdL Prossimo Impegno'],
-  dataArrivo:  ['Data Prossima Previsione Entrata'],
-  fornitore:   ['Ragione Sociale'],
   um:          ['Um Interna', 'UM'],
 };
-// Da riga-foglio a riga-mancante. Ritorna null se non è un mancante
-// (Qta da ord ≤ 0: c'è già tutto) — l'estrazione contiene anche quelli.
+// Le 5 previsioni di entrata: la prima ha nomi suoi, le altre sono numerate.
+// Sono la METÀ UTILE del file — le uniche righe con una data (31 lug: 47 righe
+// su 364, e sono tutte quelle già ordinate). Prima venivano scartate.
+const FABB_CONSEGNE = [
+  { qta:'Qta Prossima Previsione Entrata', data:'Data Prossima Previsione Entrata',
+    ordine:'Orf Prossima Previsione Entrata', fornitore:'Ragione Sociale' },
+  { qta:'Qta Previsione Entrata 2', data:'Data Previsione Entrata 2',
+    ordine:'Orf Previsione Entrata 2', fornitore:'Ragione Sociale 2' },
+  { qta:'Qta Previsione Entrata 3', data:'Data Previsione Entrata 3',
+    ordine:'Orf Previsione Entrata 3', fornitore:'Ragione Sociale 3' },
+  { qta:'Qta Previsione Entrata 4', data:'Data Previsione Entrata 4',
+    ordine:'Orf Previsione Entrata 4', fornitore:'Ragione Sociale 4' },
+  { qta:'Qta Previsione Entrata 5', data:'Data Previsione Entrata 5',
+    ordine:'Orf Previsione Entrata 5', fornitore:'Ragione Sociale 5' },
+];
+// Una data dal foglio: Date vero, seriale Excel, o testo ISO.
+function fabbData(v) {
+  if (v instanceof Date) return toLocalISO(v);
+  const n = Number(v);
+  // Seriale Excel (giorni dal 30/12/1899). Sotto 1000 è spazzatura, non una data.
+  if (Number.isFinite(n) && n > 1000) {
+    return new Date(Date.UTC(1899, 11, 30) + n * 86400000).toISOString().slice(0, 10);
+  }
+  const s = String(v || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+// Da riga-foglio a riga-mancante. Si tiene TUTTO ciò che è sotto scorta
+// (giacenza < impegno) o ancora da ordinare — non solo il da ordinare: le
+// righe già ordinate sono le uniche che hanno una data di consegna, e senza
+// di loro "quando arriva" non esisterebbe. Ritorna null se non manca niente.
 function fabbRigaNormalizza(r, mappa) {
   const val = (k) => { const c = mappa[k]; return c == null ? '' : r[c]; };
-  const num = (k) => {
-    const v = String(val(k) == null ? '' : val(k)).trim().replace(',', '.');
-    const n = parseFloat(v);
+  const numDi = (v) => {
+    const n = parseFloat(String(v == null ? '' : v).trim().replace(',', '.'));
     return Number.isFinite(n) ? n : null;
   };
+  const num = (k) => numDi(val(k));
   const codice = String(val('codice') || '').trim();
-  const daOrd = num('qtaDaOrd');
-  if (!codice || !(daOrd > 0)) return null;
-  const dataArr = (() => {
-    const v = val('dataArrivo');
-    if (v instanceof Date) return toLocalISO(v);
-    const n = Number(v);
-    // Seriale Excel (giorni dal 30/12/1899). Sotto 1000 è spazzatura, non una data.
-    if (Number.isFinite(n) && n > 1000) return new Date(Date.UTC(1899, 11, 30) + n * 86400000).toISOString().slice(0, 10);
-    const s = String(v || '').trim();
-    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
-  })();
+  if (!codice) return null;
+  const daOrd = num('qtaDaOrd') || 0;
+  const giac = num('giacenza');
+  const imp = num('impegno');
+  const scoperto = (giac != null && imp != null) ? (giac - imp) : null;
+  // Sotto scorta OPPURE da ordinare. Se non manca niente, la riga non serve.
+  if (!(daOrd > 0) && !(scoperto != null && scoperto < 0)) return null;
+  // Consegne previste: fino a 5, si tengono solo quelle con una data.
+  const consegne = [];
+  FABB_CONSEGNE.forEach(c => {
+    const col = (nome) => {
+      const k = Object.keys(r).find(i => String(i).trim().toLowerCase() === nome.toLowerCase());
+      return k ? r[k] : '';
+    };
+    const data = fabbData(col(c.data));
+    if (!data) return;
+    consegne.push({
+      data, qta: numDi(col(c.qta)),
+      ordine: String(col(c.ordine) || '').trim() || null,
+      fornitore: String(col(c.fornitore) || '').trim() || null,
+    });
+  });
+  consegne.sort((a, b) => a.data.localeCompare(b.data));
   return {
     numero_op: odlANumeroOp(val('odl')),
     odlGrezzo: String(val('odl') || '').trim(),
@@ -3583,20 +3622,33 @@ function fabbRigaNormalizza(r, mappa) {
     descrizione: String(val('descrizione') || '').trim() || null,
     qta_da_ordinare: daOrd,
     qta_richiesta: num('qtaRich'),
-    giacenza: num('giacenza'),
+    giacenza: giac,
+    impegno: imp,
     um: String(val('um') || '').trim() || null,
-    data_arrivo: dataArr,
-    fornitore: String(val('fornitore') || '').trim() || null,
+    consegne,
+    prima_consegna: consegne.length ? consegne[0].data : null,
+    // Retro-compatibili con le colonne già esistenti
+    data_arrivo: consegne.length ? consegne[0].data : null,
+    fornitore: consegne.length ? consegne[0].fornitore : null,
   };
+}
+
+// Filtro attivo sulla scheda Mancanti, impostato dal triangolo nella lista
+// Ordini cliente: si arriva già sulla commessa che interessa.
+let mancantiFiltroOp = null;
+function apriMancantiFiltrati(numeroOp) {
+  mancantiFiltroOp = numeroOp || null;
+  renderTab('fabbisogno');
 }
 
 function renderFabbisogno(root) {
   root.innerHTML = '';
-  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Fabbisogno — materiale mancante')));
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Materiale mancante')));
   root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
-    'Carica l\'estrazione "Fabbisogno Massivo" del gestionale di magazzino. '
-    + 'I codici mancanti si agganciano alle commesse tramite il numero OP e compaiono nella scheda della commessa. '
-    + 'Ogni import SOSTITUISCE il precedente: è una fotografia, non uno storico.'));
+    'Tutto ciò che è sotto scorta secondo l\'ultima estrazione del magazzino. '
+    + 'DA ORDINARE = nessuno l\'ha ancora comprato: ferma la commessa e non ha una data. '
+    + 'IN ARRIVO = già ordinato, con la consegna prevista. '
+    + 'Ogni import sostituisce il precedente: è una fotografia, non uno storico.'));
 
   if (mancantiTabellaOk === false) {
     root.append(el('div', { class:'empty' },
@@ -3604,17 +3656,58 @@ function renderFabbisogno(root) {
     return;
   }
 
-  // Stato attuale
-  const box = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:14px;' });
   const righeOra = state.mancanti || [];
-  const opOra = new Set(righeOra.map(m => m.numero_op).filter(Boolean));
+  const nf = (n) => n == null ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
   const dataOra = righeOra.reduce((d, m) => (!d || String(m.import_data || '') > d) ? (m.import_data || d) : d, null);
+
+  // ── Stato attuale ──
+  const opOra = new Set(righeOra.map(m => m.numero_op).filter(Boolean));
+  const nBlocc = righeOra.filter(mancanteBloccante).length;
+  const box = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:14px;' });
   box.append(el('div', { style:'font-weight:700;margin-bottom:4px;' }, 'In archivio adesso'),
     el('div', { class:'sub' }, righeOra.length
-      ? righeOra.length + ' codici mancanti su ' + opOra.size + (opOra.size === 1 ? ' commessa' : ' commesse')
+      ? righeOra.length + ' codici sotto scorta su ' + opOra.size + (opOra.size === 1 ? ' commessa' : ' commesse')
+        + ' · ' + nBlocc + ' da ordinare, ' + (righeOra.length - nBlocc) + ' in arrivo'
         + (dataOra ? ' · estrazione del ' + fmtIT(String(dataOra).slice(0, 10)) : '')
-      : 'Nessun fabbisogno importato.'));
+      : 'Nessuna estrazione importata.'));
   root.append(box);
+
+  // ── Prossime consegne e ritardi ──
+  if (righeOra.length && typeof consegnePreviste === 'function') {
+    const { prossime, scadute } = consegnePreviste(toLocalISO(new Date()));
+    const rigaCons = (c, inRitardo) => el('div', {
+      style:'display:flex;align-items:center;gap:10px;font-family:DM Mono,monospace;font-size:11px;padding:3px 0;border-bottom:1px solid var(--brd);' },
+      el('span', { style:'width:78px;flex-shrink:0;font-weight:700;color:' + (inRitardo ? 'var(--red)' : 'var(--txt)') + ';' },
+        fmtIT(c.data)),
+      el('span', { style:'width:66px;text-align:right;flex-shrink:0;' }, nf(c.qta)),
+      el('span', { style:'width:170px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, c.codice),
+      el('span', { style:'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mut);' },
+        c.descrizione || '—'),
+      el('span', { style:'width:120px;flex-shrink:0;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+        c.fornitore || '—'),
+      el('span', { style:'width:120px;flex-shrink:0;' }, c.numero_op || '—'),
+    );
+    if (scadute.length) {
+      const b = el('div', { style:'background:var(--sur2);border:1px solid var(--red);border-radius:6px;padding:12px 14px;margin-bottom:12px;' });
+      b.append(el('div', { style:'font-weight:700;color:var(--red);margin-bottom:6px;' },
+        '⚠ ' + scadute.length + (scadute.length === 1 ? ' consegna in ritardo' : ' consegne in ritardo')),
+        el('div', { class:'sub', style:'margin-bottom:6px;font-size:10px;' },
+          'Erano attese prima di oggi e non risultano arrivate.'));
+      scadute.slice(0, 10).forEach(c => b.append(rigaCons(c, true)));
+      if (scadute.length > 10) b.append(el('div', { class:'sub', style:'margin-top:6px;font-size:10px;' },
+        'e altre ' + (scadute.length - 10) + '.'));
+      root.append(b);
+    }
+    if (prossime.length) {
+      const b = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:14px;' });
+      b.append(el('div', { style:'font-weight:700;margin-bottom:6px;' },
+        'Prossime consegne'),
+        el('div', { class:'sub', style:'margin-bottom:6px;font-size:10px;' },
+          prossime.length + ' previste in totale.'));
+      prossime.slice(0, 5).forEach(c => b.append(rigaCons(c, false)));
+      root.append(b);
+    }
+  }
 
   const inFile = el('input', { type:'file', accept:'.xlsx,.xls', style:'max-width:340px;' });
   const stato = el('div', { class:'sub', style:'margin-top:10px;' });
@@ -3677,8 +3770,10 @@ function renderFabbisogno(root) {
             const payload = daImportare.mancanti.filter(m => m.numero_op).map(m => ({
               numero_op: m.numero_op, codice: m.codice, descrizione: m.descrizione,
               qta_da_ordinare: m.qta_da_ordinare, qta_richiesta: m.qta_richiesta,
-              giacenza: m.giacenza, um: m.um, data_arrivo: m.data_arrivo,
-              fornitore: m.fornitore, import_data: toLocalISO(new Date()),
+              giacenza: m.giacenza, impegno: m.impegno, um: m.um,
+              consegne: m.consegne, prima_consegna: m.prima_consegna,
+              data_arrivo: m.data_arrivo, fornitore: m.fornitore,
+              import_data: toLocalISO(new Date()),
             }));
             // SOSTITUZIONE: prima si svuota, poi si inserisce. Se l'insert
             // fallisse a metà lo si vede subito dal conteggio in archivio.
@@ -3709,6 +3804,89 @@ function renderFabbisogno(root) {
   };
   root.append(el('div', { class:'field' }, el('label', {}, 'Estrazione Fabbisogno Massivo (.xlsx)'), inFile, stato));
   root.append(anteprima);
+
+  // ── Elenco completo, filtrabile ──────────────────────────────────────
+  if (!righeOra.length) return;
+  const opDelGest = new Map();
+  (state.operazioni || []).forEach(o => { if (o.numero_op) opDelGest.set(o.numero_op, o); });
+  const opConMancanti = [...new Set(righeOra.map(m => m.numero_op))].filter(Boolean).sort();
+
+  const selOp = el('select', { style:'max-width:280px;' },
+    el('option', { value:'' }, 'Tutte le commesse (' + righeOra.length + ' codici)'),
+    ...opConMancanti.map(op => {
+      const o = opDelGest.get(op);
+      const n = righeOra.filter(m => m.numero_op === op).length;
+      return el('option', { value: op },
+        op + (o ? ' — ' + (o.numero_ordine || '') + '/' + (o.pos || '') : ' — (nessuna commessa)')
+        + ' · ' + n + (n === 1 ? ' codice' : ' codici'));
+    }));
+  if (mancantiFiltroOp) selOp.value = mancantiFiltroOp;
+  const selTipo = el('select', { style:'max-width:200px;' },
+    el('option', { value:'' }, 'Tutti'),
+    el('option', { value:'blocc' }, 'Solo da ordinare'),
+    el('option', { value:'arrivo' }, 'Solo in arrivo'));
+  const tabWrap = el('div');
+
+  const renderTab2 = () => {
+    tabWrap.innerHTML = '';
+    let righe = righeOra.slice();
+    if (selOp.value) righe = righe.filter(m => m.numero_op === selOp.value);
+    if (selTipo.value === 'blocc') righe = righe.filter(mancanteBloccante);
+    if (selTipo.value === 'arrivo') righe = righe.filter(m => !mancanteBloccante(m));
+    // Bloccanti in cima, poi per data di consegna, poi per codice.
+    righe.sort((a, b) => (mancanteBloccante(b) ? 1 : 0) - (mancanteBloccante(a) ? 1 : 0)
+      || String(a.prima_consegna || '9999').localeCompare(String(b.prima_consegna || '9999'))
+      || String(a.codice || '').localeCompare(String(b.codice || '')));
+    if (!righe.length) { tabWrap.append(el('div', { class:'empty' }, 'Nessun codice con questi filtri.')); return; }
+    const tb = el('tbody');
+    const oggi = toLocalISO(new Date());
+    righe.forEach(m => {
+      const blocc = mancanteBloccante(m);
+      const cons = mancanteConsegne(m);
+      const prima = cons[0];
+      const inRitardo = prima && prima.data < oggi;
+      const o = opDelGest.get(m.numero_op);
+      tb.append(el('tr', {},
+        el('td', {}, el('span', {
+          class: 'badge ' + (blocc ? 'byel' : 'bblu'),
+          title: blocc ? 'Nessuno l\'ha ancora ordinato: ferma la commessa'
+                       : 'Già ordinato: manca ma è in arrivo',
+        }, blocc ? 'da ordinare' : 'in arrivo')),
+        el('td', { style:'font-family:DM Mono,monospace;font-size:11px;' }, m.codice),
+        el('td', {}, m.descrizione || '—'),
+        el('td', { class:'tr', style:'font-family:DM Mono,monospace;' },
+          nf(blocc ? m.qta_da_ordinare : Math.abs((Number(m.giacenza) || 0) - (Number(m.impegno) || 0)))
+          + (m.um ? ' ' + m.um : '')),
+        el('td', { class:'tr', style:'font-family:DM Mono,monospace;color:var(--mut);' }, nf(m.giacenza)),
+        el('td', { style:'font-family:DM Mono,monospace;font-size:11px;color:' + (inRitardo ? 'var(--red)' : 'var(--txt)') + ';' },
+          prima ? (fmtIT(prima.data) + (inRitardo ? ' ⚠' : '')
+            + (cons.length > 1 ? ' +' + (cons.length - 1) : '')) : '—'),
+        el('td', { style:'font-size:11px;color:var(--mut);' }, (prima && prima.fornitore) || '—'),
+        el('td', { style:'font-family:DM Mono,monospace;font-size:11px;' },
+          o ? el('a', { href:'#', style:'color:var(--blu);',
+                onclick:(e)=>{ e.preventDefault(); openOperazioneModal(o); } },
+              (o.numero_ordine || '—') + '/' + (o.pos || '—'))
+            : el('span', { style:'color:var(--mut);', title:'Questo OP non ha una commessa nel gestionale' },
+                m.numero_op + ' (assente)')),
+      ));
+    });
+    tabWrap.append(el('div', { class:'sub', style:'margin-bottom:6px;' },
+      righe.length + (righe.length === 1 ? ' codice' : ' codici')),
+      el('table', { class:'tbl' },
+        el('thead', {}, el('tr', {},
+          el('th', {}, 'Stato'), el('th', {}, 'Codice'), el('th', {}, 'Descrizione'),
+          el('th', { class:'tr' }, 'Manca'), el('th', { class:'tr' }, 'Giacenza'),
+          el('th', {}, 'Consegna'), el('th', {}, 'Fornitore'), el('th', {}, 'Commessa'))),
+        tb));
+  };
+  selOp.onchange = () => { mancantiFiltroOp = selOp.value || null; renderTab2(); };
+  selTipo.onchange = renderTab2;
+  root.append(el('div', { style:'display:flex;gap:8px;align-items:center;margin:18px 0 8px;flex-wrap:wrap;' },
+    el('span', { class:'sub' }, 'Filtra:'), selOp, selTipo,
+    mancantiFiltroOp ? el('button', { class:'btnsm',
+      onclick:()=>{ mancantiFiltroOp = null; selOp.value = ''; renderTab2(); } }, 'Mostra tutte') : null));
+  root.append(tabWrap);
+  renderTab2();
 }
 
 function renderCodifica(root) {
@@ -6740,13 +6918,31 @@ function renderPianificazione(root) {
     if (typeof mancantiCommessa === 'function') {
       const mc = mancantiCommessa(o);
       if (mc.nCodici) {
+        // Due numeri: quanti FERMANO la commessa e quanti sono solo in arrivo.
+        // 67 tutti da ordinare è una commessa bloccata; 67 di cui 60 in arrivo
+        // domani è una commessa che parte. Rosso solo se c'è un bloccante.
+        const etichetta = mc.nInArrivo
+          ? mc.nBloccanti + '/' + mc.nCodici
+          : String(mc.nBloccanti || mc.nCodici);
+        // Anteprima nel tooltip: i primi codici bloccanti, poi il resto contato.
+        // Con 67 righe un tooltip intero sarebbe illeggibile.
+        const primi = mc.righe.filter(mancanteBloccante).slice(0, 8)
+          .map(x => '· ' + x.codice + (x.descrizione ? '  ' + String(x.descrizione).slice(0, 34) : ''));
+        const restanti = mc.nBloccanti - primi.length;
         prepCell.append(el('span', {
-          style: 'margin-left:6px;font-size:10px;font-family:DM Mono,monospace;font-weight:700;color:'
-            + (mc.incoerente ? 'var(--red)' : 'var(--yel)') + ';',
-          title: mc.nCodici + ' codici mancanti dal fabbisogno'
-            + (mc.dataImport ? ' del ' + fmtIT(String(mc.dataImport).slice(0, 10)) : '')
-            + (mc.incoerente ? ' — ma la preparazione è dichiarata COMPLETA' : ''),
-        }, '⚠' + mc.nCodici));
+          style: 'margin-left:6px;font-size:10px;font-family:DM Mono,monospace;font-weight:700;cursor:pointer;color:'
+            + (mc.nBloccanti ? 'var(--red)' : 'var(--yel)') + ';',
+          title: (mc.nBloccanti
+              ? mc.nBloccanti + (mc.nBloccanti === 1 ? ' codice DA ORDINARE (ferma la commessa)' : ' codici DA ORDINARE (fermano la commessa)')
+              : 'Nessun codice da ordinare')
+            + (mc.nInArrivo ? '\n' + mc.nInArrivo + ' in arrivo'
+                + (mc.prossima ? ', prossima consegna ' + fmtIT(mc.prossima) : '') : '')
+            + (mc.nRitardo ? '\n⚠ ' + mc.nRitardo + (mc.nRitardo === 1 ? ' consegna in ritardo' : ' consegne in ritardo') : '')
+            + (primi.length ? '\n\n' + primi.join('\n') + (restanti > 0 ? '\n… e altri ' + restanti : '') : '')
+            + (mc.incoerente ? '\n\n⚠ Ma la preparazione è dichiarata COMPLETA.' : '')
+            + '\n\nClicca per vedere l\'elenco completo.',
+          onclick: (e) => { e.stopPropagation(); apriMancantiFiltrati(o.numero_op); },
+        }, '⚠' + etichetta));
       }
     }
     tr.append(prepCell);
@@ -7653,17 +7849,33 @@ function openOperazioneModal(o) {
       return;
     }
     const nf = (n) => n == null ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
-    const righe = m.righe.map(x => ({
-      titolo: x.codice,
-      meta: (x.descrizione ? String(x.descrizione).slice(0, 46) : '—')
-        + (x.um ? ' · ' + x.um : ''),
-      valore: 'mancano ' + nf(x.qta_da_ordinare)
-        + (Number(x.giacenza) > 0 ? ' (giac. ' + nf(x.giacenza) + ')' : ''),
-    }));
+    const oggi = toLocalISO(new Date());
+    const righe = m.righe.map(x => {
+      const blocc = mancanteBloccante(x);
+      const cons = mancanteConsegne(x);
+      const prima = cons[0];
+      return {
+        titolo: (blocc ? '⛔ ' : '📦 ') + x.codice,
+        meta: (x.descrizione ? String(x.descrizione).slice(0, 40) : '—')
+          + (blocc ? ' · da ordinare'
+                   : (prima ? ' · in arrivo ' + fmtIT(prima.data)
+                       + (prima.data < oggi ? ' ⚠ in ritardo' : '') : ' · già ordinato')),
+        valore: 'mancano ' + nf(blocc ? x.qta_da_ordinare
+            : Math.abs((Number(x.giacenza) || 0) - (Number(x.impegno) || 0)))
+          + (x.um ? ' ' + x.um : ''),
+      };
+    });
+    // Il sommario dice subito la cosa che conta: quanti FERMANO la commessa.
+    const sommario = m.nBloccanti
+      ? '⛔ ' + m.nBloccanti + (m.nBloccanti === 1 ? ' codice da ordinare' : ' codici da ordinare')
+        + (m.nInArrivo ? ' · 📦 ' + m.nInArrivo + ' in arrivo' : '')
+      : '📦 ' + m.nCodici + (m.nCodici === 1 ? ' codice in arrivo' : ' codici in arrivo')
+        + (m.prossima ? ', prossima consegna ' + fmtIT(m.prossima) : '');
     notaMancanti.append(entityTimeline({
-      sommario: '⚠ ' + m.nCodici + (m.nCodici === 1 ? ' codice mancante' : ' codici mancanti')
-        + (m.dataImport ? ' · fabbisogno del ' + fmtIT(String(m.dataImport).slice(0, 10)) : ''),
-      debole: true,
+      sommario: sommario
+        + (m.nRitardo ? ' · ⚠ ' + m.nRitardo + ' in ritardo' : '')
+        + (m.dataImport ? ' · estrazione del ' + fmtIT(String(m.dataImport).slice(0, 10)) : ''),
+      debole: m.nBloccanti > 0,
       // APERTO di default: qui lo scopo è vedere i codici, non doverli cercare.
       // Sopra una certa lunghezza resta chiuso, altrimenti 67 righe sommergono
       // il resto della scheda: il riepilogo basta, il dettaglio si apre.
