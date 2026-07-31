@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-31.8`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-31.9`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -207,3 +207,11 @@
 - **Resta aperto**: se in anagrafica si sceglie un colore CUPO per un tipo di lavorazione, il testo scuro sulla sua barra Gantt scende a 3,44. È un problema di dato, non di CSS; si risolverebbe scegliendo il testo in base alla luminosità del colore.
 
 ## Sospesi tecnici
+
+### Mancanti v3 — import CSV (31 lug, `2026-07-31.9`)
+- **La "matrice" NON è cambiata**: le 39 colonne del nuovo export sono le stesse dell'xlsx, nomi identici. È cambiato il **formato del file**, ed è lì che si rompeva.
+- Cinque differenze, tutte gestite: separatore `;` (indovinato sull'intestazione fra `;`, tab e `,`); **decimali con virgola** (`20,00`); **date gg/mm/aaaa** (`01/12/2025`) invece del seriale Excel — questa era quella che rompeva davvero, `fabbData` non le riconosceva; **codifica Windows-1252** (le `à` di "Disponibilità" e i `RELÈ`); virgolette CSV.
+- **La codifica si indovina**: prima UTF-8, e se compaiono caratteri di sostituzione si rilegge in Windows-1252. Così valgono sia gli export vecchi sia eventuali futuri in UTF-8, senza chiedere niente a Nico.
+- `fabbNumero` sostituisce il vecchio parser: toglie il punto **solo** quando fa da separatore di migliaia (`1.234,56`), mai quando è il decimale (l'xlsx dà `20.5`, il CSV `20,5`).
+- **Il CSV non usa SheetJS**: si legge da sé, nessun download, nessuna attesa. La libreria si scarica solo se il file è xlsx. Entrambi i formati restano accettati (`accept=".csv,.xlsx,.xls,.txt"`).
+- **Verificato col codice VERO sul CSV VERO**: 396 righe, 313 da ordinare + 83 in arrivo, 394 agganciabili, 90 consegne (82 future, 8 in ritardo), **zero numeri illeggibili, zero date malformate, zero accenti rotti**. Un articolo con 5 previsioni di entrata legge tutte e 5.

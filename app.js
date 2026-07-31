@@ -3569,16 +3569,69 @@ const FABB_CONSEGNE = [
   { qta:'Qta Previsione Entrata 5', data:'Data Previsione Entrata 5',
     ordine:'Orf Previsione Entrata 5', fornitore:'Ragione Sociale 5' },
 ];
-// Una data dal foglio: Date vero, seriale Excel, o testo ISO.
+// Una data dal foglio: Date vero, seriale Excel, gg/mm/aaaa (CSV italiano) o
+// testo ISO. Il CSV esporta le date all'italiana, l'xlsx come seriale: qui si
+// accettano entrambi, così il formato del file non detta il codice.
 function fabbData(v) {
   if (v instanceof Date) return toLocalISO(v);
-  const n = Number(v);
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return null;
+  const it = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (it) return it[3] + '-' + it[2].padStart(2, '0') + '-' + it[1].padStart(2, '0');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const n = Number(s.replace(',', '.'));
   // Seriale Excel (giorni dal 30/12/1899). Sotto 1000 è spazzatura, non una data.
   if (Number.isFinite(n) && n > 1000) {
     return new Date(Date.UTC(1899, 11, 30) + n * 86400000).toISOString().slice(0, 10);
   }
-  const s = String(v || '').trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  return null;
+}
+// Un numero all'italiana: "20,00" → 20 ; "1.234,56" → 1234.56. Il punto si
+// toglie solo quando fa da separatore di migliaia, mai quando è il decimale
+// (l'xlsx dà "20.5", il CSV dà "20,5": vanno letti tutti e due).
+function fabbNumero(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  let s = String(v == null ? '' : v).trim();
+  if (!s) return null;
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, '');
+  const n = parseFloat(s.replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+// Testo di un file, indovinando la codifica: prima UTF-8; se compaiono
+// caratteri di sostituzione (le "à" rotte) si rilegge in Windows-1252, che è
+// quello che sputa fuori l'export in CSV. Così vanno bene entrambi.
+function fabbDecodifica(buf) {
+  const utf8 = new TextDecoder('utf-8').decode(buf);
+  if (!utf8.includes('�')) return utf8;
+  try { return new TextDecoder('windows-1252').decode(buf); } catch (e) { return utf8; }
+}
+// CSV → righe come oggetti {intestazione: valore}, la stessa forma che
+// produce il lettore xlsx: da lì in poi il codice è uno solo.
+// Separatore indovinato sull'intestazione (il nostro export usa ';').
+// Gestisce le virgolette e i campi che contengono il separatore.
+function fabbLeggiCsv(testo) {
+  const t = testo.replace(/^﻿/, '');
+  const primaRiga = (t.split(/\r?\n/)[0] || '');
+  const sep = [';', '\t', ','].reduce((best, s) =>
+    (primaRiga.split(s).length > primaRiga.split(best).length ? s : best), ';');
+  const righe = [];
+  let campo = '', riga = [], inVirg = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inVirg) {
+      if (c === '"') { if (t[i + 1] === '"') { campo += '"'; i++; } else inVirg = false; }
+      else campo += c;
+    } else if (c === '"') inVirg = true;
+    else if (c === sep) { riga.push(campo); campo = ''; }
+    else if (c === '\n') { riga.push(campo); righe.push(riga); riga = []; campo = ''; }
+    else if (c !== '\r') campo += c;
+  }
+  if (campo !== '' || riga.length) { riga.push(campo); righe.push(riga); }
+  if (!righe.length) return [];
+  const intest = righe[0].map(x => String(x).trim());
+  return righe.slice(1)
+    .filter(r => r.some(x => String(x).trim() !== ''))
+    .map(r => { const o = {}; intest.forEach((k, i) => { o[k] = r[i] == null ? '' : r[i]; }); return o; });
 }
 // Da riga-foglio a riga-mancante. Si tiene TUTTO ciò che è sotto scorta
 // (giacenza < impegno) o ancora da ordinare — non solo il da ordinare: le
@@ -3586,10 +3639,7 @@ function fabbData(v) {
 // di loro "quando arriva" non esisterebbe. Ritorna null se non manca niente.
 function fabbRigaNormalizza(r, mappa) {
   const val = (k) => { const c = mappa[k]; return c == null ? '' : r[c]; };
-  const numDi = (v) => {
-    const n = parseFloat(String(v == null ? '' : v).trim().replace(',', '.'));
-    return Number.isFinite(n) ? n : null;
-  };
+  const numDi = fabbNumero;
   const num = (k) => numDi(val(k));
   const codice = String(val('codice') || '').trim();
   if (!codice) return null;
@@ -3728,7 +3778,7 @@ function renderFabbisogno(root) {
     }
   }
 
-  const inFile = el('input', { type:'file', accept:'.xlsx,.xls', style:'max-width:340px;' });
+  const inFile = el('input', { type:'file', accept:'.csv,.xlsx,.xls,.txt', style:'max-width:340px;' });
   const stato = el('div', { class:'sub', style:'margin-top:10px;' });
   const anteprima = el('div', { style:'margin-top:12px;' });
   let daImportare = null;
@@ -3739,14 +3789,22 @@ function renderFabbisogno(root) {
     if (!f) return;
     stato.textContent = 'Leggo il file…';
     try {
-      const XLSX = await caricaXLSX();
       const buf = await f.arrayBuffer();
-      const wb = XLSX.read(buf, { cellDates: true });
+      const isCsv = /\.(csv|txt)$/i.test(f.name);
+      // Il CSV si legge da sé: niente libreria da scaricare, niente attesa.
+      // L'xlsx la richiede, e solo in quel caso.
+      let fogli;
+      if (isCsv) {
+        fogli = [fabbLeggiCsv(fabbDecodifica(buf))];
+      } else {
+        const XLSX = await caricaXLSX();
+        const wb = XLSX.read(buf, { cellDates: true });
+        fogli = wb.SheetNames.map(n => XLSX.utils.sheet_to_json(wb.Sheets[n], { defval: '' }));
+      }
       // Il foglio giusto è quello che contiene la colonna Codice: non mi fido
       // del nome, che potrebbe cambiare.
       let righe = null, mappa = null;
-      for (const nome of wb.SheetNames) {
-        const js = XLSX.utils.sheet_to_json(wb.Sheets[nome], { defval: '' });
+      for (const js of fogli) {
         if (!js.length) continue;
         const intest = Object.keys(js[0]);
         const m = {};
@@ -3821,7 +3879,11 @@ function renderFabbisogno(root) {
         'Non riesco a leggere il file: ' + (err.message || err)));
     }
   };
-  root.append(el('div', { class:'field' }, el('label', {}, 'Estrazione Fabbisogno Massivo (.xlsx)'), inFile, stato));
+  root.append(el('div', { class:'field' },
+    el('label', {}, 'Estrazione Fabbisogno Massivo (.csv o .xlsx)'), inFile, stato,
+    el('div', { class:'sub', style:'margin-top:4px;font-size:11px;' },
+      'Il CSV si legge subito; l\'xlsx richiede il download di una libreria alla prima apertura. '
+      + 'Separatore, virgole decimali, date gg/mm/aaaa e accenti Windows sono gestiti da soli.')));
   root.append(anteprima);
 
   // ── Elenco completo, filtrabile ──────────────────────────────────────
