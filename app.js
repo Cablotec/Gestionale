@@ -3683,6 +3683,9 @@ function renderFabbisogno(root) {
       el('span', { style:'width:170px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, c.codice),
       el('span', { style:'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mut);' },
         c.descrizione || '—'),
+      // Numero dell'ordine fornitore: serve per andarlo a cercare o sollecitare.
+      el('span', { style:'width:104px;flex-shrink:0;', title: c.ordine ? 'Ordine fornitore ' + c.ordine : '' },
+        c.ordine || '—'),
       el('span', { style:'width:120px;flex-shrink:0;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
         c.fornitore || '—'),
       el('span', { style:'width:120px;flex-shrink:0;' }, c.numero_op || '—'),
@@ -3884,11 +3887,16 @@ function renderFabbisogno(root) {
                 + (c.qta != null ? ' · ' + nf(c.qta) : '')
                 + (c.data < oggi ? ' ⚠' : '')))
             : [el('span', { style:'color:var(--mut);' }, '—')])),
+        // Ordine fornitore in chiaro, una riga per consegna: allineato alla
+        // colonna Consegne, così si legge "questa data ← quest'ordine".
+        el('td', { style:'font-family:DM Mono,monospace;font-size:11px;' },
+          ...(cons.length
+            ? cons.map(c => el('div', { style:'white-space:nowrap;' }, c.ordine || '—'))
+            : [el('span', { style:'color:var(--mut);' }, '—')])),
         el('td', { style:'font-size:11px;color:var(--mut);' },
           ...(cons.length
             ? cons.map(c => el('div', { style:'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;',
-                title: (c.fornitore || '') + (c.ordine ? ' · ordine ' + c.ordine : '') },
-                c.fornitore || '—'))
+                title: c.fornitore || '' }, c.fornitore || '—'))
             : [el('span', {}, '—')])),
         el('td', { style:'font-family:DM Mono,monospace;font-size:11px;' },
           o ? el('a', { href:'#', style:'color:var(--blu);',
@@ -3919,8 +3927,8 @@ function renderFabbisogno(root) {
         el('thead', {}, el('tr', {},
           el('th', {}, 'Stato'), el('th', {}, 'Codice'), el('th', {}, 'Descrizione'),
           el('th', { class:'tr' }, 'Manca'), el('th', { class:'tr' }, 'Giacenza'),
-          el('th', {}, 'Consegne'), el('th', {}, 'Fornitore'), el('th', {}, 'Commessa'),
-          el('th', { class:'tc' }, ''))),
+          el('th', {}, 'Consegne'), el('th', {}, 'Ordine forn.'), el('th', {}, 'Fornitore'),
+          el('th', {}, 'Commessa'), el('th', { class:'tc' }, ''))),
         tb));
   };
   selOp.onchange = () => { mancantiFiltroOp = selOp.value || null; renderTab2(); };
