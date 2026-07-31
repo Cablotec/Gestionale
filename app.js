@@ -7664,6 +7664,10 @@ function openOperazioneModal(o) {
       sommario: '⚠ ' + m.nCodici + (m.nCodici === 1 ? ' codice mancante' : ' codici mancanti')
         + (m.dataImport ? ' · fabbisogno del ' + fmtIT(String(m.dataImport).slice(0, 10)) : ''),
       debole: true,
+      // APERTO di default: qui lo scopo è vedere i codici, non doverli cercare.
+      // Sopra una certa lunghezza resta chiuso, altrimenti 67 righe sommergono
+      // il resto della scheda: il riepilogo basta, il dettaglio si apre.
+      apertaDiDefault: righe.length <= 15,
       righe,
     }));
     if (m.incoerente) {
