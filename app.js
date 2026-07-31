@@ -638,7 +638,7 @@ const APP_VERSIONE = (() => {
   // giorni, senza questa scritta non si sa mai cosa stanno eseguendo.
   const kt = document.querySelector('.kiosk-title');
   if (kt) kt.append(el('div', {
-    style:'font-size:10px;color:var(--mut);font-family:DM Mono,monospace;letter-spacing:.05em;margin-top:2px;',
+    style:'font-size:11px;color:var(--mut);font-family:JetBrains Mono,monospace;letter-spacing:.05em;margin-top:2px;',
   }, 'v. ' + APP_VERSIONE));
 })();
 
@@ -1694,7 +1694,7 @@ function renderCalMezziBarre(root) {
       title: m.nome + (sub ? ' — ' + sub : ''),
     },
       el('div', { style:'font-weight:600;line-height:1.1;' }, m.nome || '—'),
-      sub ? el('div', { style:'font-family:DM Mono,monospace;font-size:9px;color:var(--mut);' }, sub) : null,
+      sub ? el('div', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);' }, sub) : null,
     ));
 
     const track = el('div', { class:'gantt-cmrow',
@@ -2243,7 +2243,7 @@ function renderMezzi(root) {
     const utentiCell = utentiOrdinati.length === 0
       ? el('span', { class:'sub' }, '—')
       : el('div', { style:'display:flex;flex-wrap:wrap;gap:4px;' },
-          ...utentiOrdinati.map(u => el('span', { class:'badge bgry', style:'font-size:10px;' }, u))
+          ...utentiOrdinati.map(u => el('span', { class:'badge bgry', style:'font-size:11px;' }, u))
         );
 
     tb.append(el('tr', {},
@@ -2570,7 +2570,7 @@ function showConfirmCredenziali(nome, email, pwd) {
     `Comunica queste credenziali a `, el('strong', {}, nome),
     `. Annotale ora: la password non sarà più visibile.`));
   body.append(el('div', {
-    style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:12px 14px;font-family:DM Mono,monospace;font-size:13px;line-height:1.9;'
+    style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:12px 14px;font-family:JetBrains Mono,monospace;font-size:13px;line-height:1.9;'
   },
     el('div', {}, el('span', { style:'color:var(--mut);' }, 'Email:  '),
       el('strong', { style:'color:var(--acc);' }, email)),
@@ -2689,7 +2689,7 @@ function openOperatoreModal(u) {
         style: u.esterno ? '' : 'display:none;' },
         el('label', {}, 'Ditta di provenienza'),
         selAzienda,
-        el('div', { class:'sub', style:'margin-top:4px;font-size:10px;' },
+        el('div', { class:'sub', style:'margin-top:4px;font-size:11px;' },
           'Serve a tenere le sue ore attribuibili alla ditta giusta nelle analisi. '
           + 'L\'elenco sono i fornitori in anagrafica.'))
     : null;
@@ -2709,7 +2709,7 @@ function openOperatoreModal(u) {
       el('textarea', { name:'note', rows:'2' }, u.note||'')),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Tipo'), selTipo,
-        el('div', { class:'sub', style:'margin-top:4px;font-size:10px;' },
+        el('div', { class:'sub', style:'margin-top:4px;font-size:11px;' },
           'Esterno in sede = persona di un\'altra ditta che lavora QUI e timbra al kiosk. '
           + 'Il lavoro mandato fuori non si gestisce da qui: quello è un fornitore sulla commessa.')),
       el('div', { class:'field' }, el('label', {}, 'Stato'), (() => {
@@ -3032,7 +3032,7 @@ function openClienteModal(c) {
     el('div', { class:'field' }, el('label', {}, 'Nome *'), inNome,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Es. "TEMA SINERGIE" — usato come identificativo veloce nelle operazioni e prenotazioni.')),
-    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
       '── Ruolo (almeno uno) ──'),
     el('div', { class:'frow' },
       el('label', { style:'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:8px 12px;border:1px solid var(--brd);border-radius:4px;flex:1;' },
@@ -3043,7 +3043,7 @@ function openClienteModal(c) {
     coeffRow,
     tariffaRow,
     tariffaCliRow,
-    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
       '── Indirizzo ──'),
     el('div', { class:'field' }, el('label', {}, 'Via e civico'), inVia),
     el('div', { class:'frow' },
@@ -3051,7 +3051,7 @@ function openClienteModal(c) {
       el('div', { class:'field' }, el('label', {}, 'CAP'), inCap),
       el('div', { class:'field' }, el('label', {}, 'Prov.'), inProvincia),
     ),
-    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
       '── Altri dati ──'),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'P. IVA / C.F.'), inPIva),
@@ -3460,7 +3460,7 @@ function renderArticoli(root) {
       minutiVal != null
         ? el('td', { class:'tr mono', style:'font-size:11px;color:var(--grn);font-weight:600;' },
             minutiVal + " min")
-        : el('td', { class:'tr mono', style:'font-size:10px;color:var(--mut);font-style:italic;' },
+        : el('td', { class:'tr mono', style:'font-size:11px;color:var(--mut);font-style:italic;' },
             '— da definire'),
       el('td', { style:'max-width:280px;font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, a.note || ''),
       el('td', { class:'tc' }, a.attivo
@@ -3676,7 +3676,7 @@ function renderFabbisogno(root) {
   if (righeOra.length && typeof consegnePreviste === 'function') {
     const { prossime, scadute } = consegnePreviste(toLocalISO(new Date()));
     const rigaCons = (c, inRitardo) => el('div', {
-      style:'display:flex;align-items:center;gap:10px;font-family:DM Mono,monospace;font-size:11px;padding:3px 0;border-bottom:1px solid var(--brd);' },
+      style:'display:flex;align-items:center;gap:10px;font-family:JetBrains Mono,monospace;font-size:11px;padding:3px 0;border-bottom:1px solid var(--brd);' },
       el('span', { style:'width:78px;flex-shrink:0;font-weight:700;color:' + (inRitardo ? 'var(--red)' : 'var(--txt)') + ';' },
         fmtIT(c.data)),
       el('span', { style:'width:66px;text-align:right;flex-shrink:0;' }, nf(c.qta)),
@@ -3694,7 +3694,7 @@ function renderFabbisogno(root) {
       const b = el('div', { style:'background:var(--sur2);border:1px solid var(--red);border-radius:6px;padding:12px 14px;margin-bottom:12px;' });
       b.append(el('div', { style:'font-weight:700;color:var(--red);margin-bottom:6px;' },
         '⚠ ' + scadute.length + (scadute.length === 1 ? ' consegna in ritardo' : ' consegne in ritardo')),
-        el('div', { class:'sub', style:'margin-bottom:6px;font-size:10px;' },
+        el('div', { class:'sub', style:'margin-bottom:6px;font-size:11px;' },
           'Erano attese prima di oggi e non risultano arrivate. Dalla più vecchia.'));
       // TUTTE e per intero, senza riquadro che scorre (richiesta Nico): un
       // ritardo va visto tutto d'un colpo, non cercato dentro una finestrella.
@@ -3714,7 +3714,7 @@ function renderFabbisogno(root) {
       };
       disegnaP();
       b.append(el('div', { style:'font-weight:700;margin-bottom:6px;' }, 'Prossime consegne'),
-        el('div', { class:'sub', style:'margin-bottom:6px;font-size:10px;' },
+        el('div', { class:'sub', style:'margin-bottom:6px;font-size:11px;' },
           prossime.length + ' previste in totale, dalla più vicina.'),
         listaP);
       if (prossime.length > 5) {
@@ -3871,15 +3871,15 @@ function renderFabbisogno(root) {
           title: blocc ? 'Nessuno l\'ha ancora ordinato: ferma la commessa'
                        : 'Già ordinato: manca ma è in arrivo',
         }, blocc ? 'da ordinare' : 'in arrivo')),
-        el('td', { style:'font-family:DM Mono,monospace;font-size:11px;' }, m.codice),
+        el('td', { style:'font-family:JetBrains Mono,monospace;font-size:11px;' }, m.codice),
         el('td', {}, m.descrizione || '—'),
-        el('td', { class:'tr', style:'font-family:DM Mono,monospace;' },
+        el('td', { class:'tr', style:'font-family:JetBrains Mono,monospace;' },
           nf(blocc ? m.qta_da_ordinare : Math.abs((Number(m.giacenza) || 0) - (Number(m.impegno) || 0)))
           + (m.um ? ' ' + m.um : '')),
-        el('td', { class:'tr', style:'font-family:DM Mono,monospace;color:var(--mut);' }, nf(m.giacenza)),
+        el('td', { class:'tr', style:'font-family:JetBrains Mono,monospace;color:var(--mut);' }, nf(m.giacenza)),
         // Una riga per consegna, numerate: con più previsioni di entrata
         // "06/08 +1" nascondeva proprio il dato che serve.
-        el('td', { style:'font-family:DM Mono,monospace;font-size:11px;' },
+        el('td', { style:'font-family:JetBrains Mono,monospace;font-size:11px;' },
           ...(cons.length
             ? cons.map((c, i) => el('div', {
                 style:'white-space:nowrap;color:' + (c.data < oggi ? 'var(--red)' : 'var(--txt)') + ';' },
@@ -3889,7 +3889,7 @@ function renderFabbisogno(root) {
             : [el('span', { style:'color:var(--mut);' }, '—')])),
         // Ordine fornitore in chiaro, una riga per consegna: allineato alla
         // colonna Consegne, così si legge "questa data ← quest'ordine".
-        el('td', { style:'font-family:DM Mono,monospace;font-size:11px;' },
+        el('td', { style:'font-family:JetBrains Mono,monospace;font-size:11px;' },
           ...(cons.length
             ? cons.map(c => el('div', { style:'white-space:nowrap;' }, c.ordine || '—'))
             : [el('span', { style:'color:var(--mut);' }, '—')])),
@@ -3898,7 +3898,7 @@ function renderFabbisogno(root) {
             ? cons.map(c => el('div', { style:'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;',
                 title: c.fornitore || '' }, c.fornitore || '—'))
             : [el('span', {}, '—')])),
-        el('td', { style:'font-family:DM Mono,monospace;font-size:11px;' },
+        el('td', { style:'font-family:JetBrains Mono,monospace;font-size:11px;' },
           o ? el('a', { href:'#', style:'color:var(--blu);',
                 onclick:(e)=>{ e.preventDefault(); openOperazioneModal(o); } },
               (o.numero_ordine || '—') + '/' + (o.pos || '—'))
@@ -3990,7 +3990,7 @@ function renderCodifica(root) {
     if (!g) return;
     if (g.libero) {
       const inp = el('input', { type:'text', maxlength:'4', placeholder:'4 caratteri',
-        style:'max-width:140px;text-transform:uppercase;font-family:DM Mono,monospace;' });
+        style:'max-width:140px;text-transform:uppercase;font-family:JetBrains Mono,monospace;' });
       inp.oninput = () => { liberoVal = (inp.value || '').toUpperCase(); aggiornaEsito(); };
       wrapVoce.append(el('div', { class:'field' },
         el('label', {}, 'Caratteri dopo la famiglia (schema libero)'), inp));
@@ -4045,7 +4045,7 @@ function renderCodifica(root) {
       sel.onchange = () => { produttoreVal = sel.value; aggiornaEsito(); };
       // Mini-anagrafica inline: aggiungi (sigla+nome) / elimina il selezionato
       const inSigla = el('input', { type:'text', maxlength:'4', placeholder:'SIGL',
-        style:'width:70px;text-transform:uppercase;font-family:DM Mono,monospace;' });
+        style:'width:70px;text-transform:uppercase;font-family:JetBrains Mono,monospace;' });
       const inNome = el('input', { type:'text', placeholder:'nome produttore', style:'width:180px;' });
       // Sigle corte: riempite con ZERI IN FONDO (decisione Nico, 28 lug).
       // TDK → TDK0. La quarta casella esiste sempre perché il codice ha
@@ -4055,7 +4055,7 @@ function renderCodifica(root) {
       // Phoenix Contact è buon senso, non una regola).
       const siglaNormalizzata = () =>
         (inSigla.value || '').toUpperCase().replace(/\s+/g, '').padEnd(4, '0');
-      const notaSigla = el('div', { class:'sub', style:'margin-top:4px;font-size:10px;min-height:13px;' });
+      const notaSigla = el('div', { class:'sub', style:'margin-top:4px;font-size:11px;min-height:13px;' });
       const aggiornaNotaSigla = () => {
         const grezza = (inSigla.value || '').toUpperCase().replace(/\s+/g, '');
         notaSigla.textContent = (grezza.length > 0 && grezza.length < 4)
@@ -4100,12 +4100,12 @@ function renderCodifica(root) {
           + 'Marchio più lungo → abbrevialo tu a 4. Per il multi-marca usa una sigla neutra (es. 0000).'));
     } else {
       const inp = el('input', { type:'text', maxlength:'4', placeholder:'es. TELE',
-        style:'max-width:140px;text-transform:uppercase;font-family:DM Mono,monospace;' });
+        style:'max-width:140px;text-transform:uppercase;font-family:JetBrains Mono,monospace;' });
       inp.value = produttoreVal;
       // Stessa regola dell'anagrafica: sigla corta riempita con zeri in fondo,
       // ma solo quando l'utente ha finito di scrivere (su ogni tasto darebbe
       // fastidio: digitando "T" diventerebbe subito "T000").
-      const notaLibera = el('div', { class:'sub', style:'margin-top:2px;font-size:10px;min-height:13px;' });
+      const notaLibera = el('div', { class:'sub', style:'margin-top:2px;font-size:11px;min-height:13px;' });
       inp.oninput = () => {
         produttoreVal = (inp.value || '').toUpperCase();
         const g = produttoreVal.replace(/\s+/g, '');
@@ -4134,7 +4134,7 @@ function renderCodifica(root) {
 
   // ── Codice produttore ──
   const inCodice = el('input', { type:'text', maxlength:'11', placeholder:'es. LC1D18BD',
-    style:'max-width:240px;text-transform:uppercase;font-family:DM Mono,monospace;' });
+    style:'max-width:240px;text-transform:uppercase;font-family:JetBrains Mono,monospace;' });
   inCodice.oninput = () => { codiceVal = (inCodice.value || '').toUpperCase(); aggiornaEsito(); };
 
   // ── Esito: i tre blocchi + copia ──
@@ -4143,7 +4143,7 @@ function renderCodifica(root) {
     const b5 = blocco5();
     const ris = codificaComponi(b5, produttoreVal, codiceVal);
     const blocchi = el('div', { style:'display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;'
-      + 'font-family:DM Mono,monospace;font-size:22px;font-weight:700;letter-spacing:.06em;' });
+      + 'font-family:JetBrains Mono,monospace;font-size:22px;font-weight:700;letter-spacing:.06em;' });
     const seg = (txt, colore, atteso) => el('span', {
       style:'color:' + (txt.length === atteso ? colore : 'var(--mut)') + ';'
         + 'border-bottom:2px solid ' + colore + ';padding:0 2px;min-width:30px;display:inline-block;text-align:center;',
@@ -4157,7 +4157,7 @@ function renderCodifica(root) {
     if (ris.ok) {
       const codice = ris.codice;
       wrapEsito.append(el('div', { style:'display:flex;align-items:center;gap:12px;margin-top:10px;flex-wrap:wrap;' },
-        el('span', { style:'font-family:DM Mono,monospace;font-size:14px;' }, codice + ' · 20/20'),
+        el('span', { style:'font-family:JetBrains Mono,monospace;font-size:14px;' }, codice + ' · 20/20'),
         el('button', { class:'btnp', onclick: async () => {
           try { await navigator.clipboard.writeText(codice); toast('Codice copiato: ' + codice); }
           catch (e) { prompt('Copia il codice:', codice); }
@@ -4251,7 +4251,7 @@ function openArticoloModal(a, opts) {
   const notaMinuti = el('div', { class:'sub', style:'margin-top:4px;' },
     'Lo standard commerciale: pre-compila le nuove commesse.');
   const fasiWrap = el('div', { class:'fasi-list' });
-  const notaConfronto = el('div', { class:'sub', style:'margin-top:8px;font-family:DM Mono,monospace;' });
+  const notaConfronto = el('div', { class:'sub', style:'margin-top:8px;font-family:JetBrains Mono,monospace;' });
   function pagatoCorrente() {
     const v = parseFloat((inMinuti.value || '').toString().replace(',', '.'));
     return Number.isFinite(v) ? v : null;
@@ -4290,7 +4290,7 @@ function openArticoloModal(a, opts) {
       // Metrica (sola lettura) + drill-down sulle spedite che la compongono.
       // Il template fasi qui sopra resta l'INTENZIONE: la media la affianca,
       // mai la sovrascrive. Vedi la divergenza piano-vs-realtà.
-      const sugg = el('div', { class:'sub', style:'font-family:DM Mono,monospace;font-size:11px;flex-basis:100%;margin:2px 0 2px 28px;' });
+      const sugg = el('div', { class:'sub', style:'font-family:JetBrains Mono,monospace;font-size:11px;flex-basis:100%;margin:2px 0 2px 28px;' });
       const fmtD = (iso) => { if (!iso) return ''; const p = String(iso).slice(0,10).split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0].slice(2) : String(iso); };
       function refreshSugg() {
         sugg.innerHTML = '';
@@ -4382,7 +4382,7 @@ function openArticoloModal(a, opts) {
   // Corpo a SEZIONI (stile scheda azienda): anagrafica → tempi → listino
   // → note. Hint corti, uno per campo dove serve davvero.
   const sez = (t) => el('div', { class:'sub',
-    style:'margin:16px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+    style:'margin:16px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
     '── ' + t + ' ──');
   inCategoria.placeholder = 'es. Cablaggi';
   form.append(
@@ -4764,7 +4764,7 @@ function openOperazioniExportModal() {
     };
     checks[s.key] = cb;
     const row = el('label', {
-      style:'display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;font-family:DM Mono,monospace;font-size:12px;',
+      style:'display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;font-family:JetBrains Mono,monospace;font-size:12px;',
     }, cb,
       el('span', { style:'flex:1;' }, s.label),
       el('span', { style:'color:var(--mut);font-size:11px;' },
@@ -4775,7 +4775,7 @@ function openOperazioniExportModal() {
   body.append(elenco);
 
   body.append(el('div', {
-    style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);text-align:right;',
+    style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);text-align:right;',
   }, 'Totale selezionate: ', contaSel));
   aggiornaConteggioSel();
 
@@ -5047,7 +5047,7 @@ function openOperazioniImportPreviewModal(rows) {
     body.append(tbl);
   }
 
-  body.append(el('div', { class:'sub', style:'margin:14px 0 0;color:var(--mut);font-size:10px;' },
+  body.append(el('div', { class:'sub', style:'margin:14px 0 0;color:var(--mut);font-size:11px;' },
     'Le commesse saranno create con stato "aperta" e minuti unitari a 0 ' +
     '(da impostare poi). Le righe con errori non vengono importate.'));
 
@@ -5828,8 +5828,8 @@ function renderMagazzino(root) {
     // Stato: badge "Completa" o "Parziale"
     tr.append(el('td', { class:'tc' },
       completa
-        ? el('span', { class:'badge bok', style:'font-size:10px;' }, 'COMPLETA')
-        : el('span', { class:'badge byel', style:'font-size:10px;' }, 'PARZIALE')
+        ? el('span', { class:'badge bok', style:'font-size:11px;' }, 'COMPLETA')
+        : el('span', { class:'badge byel', style:'font-size:11px;' }, 'PARZIALE')
     ));
 
     tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
@@ -5901,7 +5901,7 @@ function openFiltroClientiPopup(anchorBtn, opts) {
   `;
 
   // Intestazione + ricerca
-  popup.append(el('div', { style:'font-size:11px;color:var(--mut);font-family:"DM Mono",monospace;' },
+  popup.append(el('div', { style:'font-size:11px;color:var(--mut);font-family:"JetBrains Mono",monospace;' },
     'Spunta i clienti da mostrare. Deseleziona quelli da nascondere.'));
 
   const inputRicerca = el('input', {
@@ -6011,7 +6011,7 @@ function openFiltroSingoloPopup(anchorBtn, opts) {
     z-index:500;font-family:inherit;`;
 
   if (opts.titolo) popup.append(el('div',
-    { style:'font-size:11px;color:var(--mut);font-family:"DM Mono",monospace;' }, opts.titolo));
+    { style:'font-size:11px;color:var(--mut);font-family:"JetBrains Mono",monospace;' }, opts.titolo));
 
   const inputRicerca = el('input', {
     type:'text', placeholder:'Cerca…',
@@ -6207,10 +6207,10 @@ function openNuovoOrdineModal() {
   // garantite identiche (niente drift tra header e input). Ogni riga è un
   // wrapper display:contents, così le sue celle vivono nella griglia padre.
   const griglia = el('div', { style:'display:grid;grid-template-columns:'+cols+';column-gap:8px;row-gap:8px;align-items:start;margin-top:10px;' });
-  const hCell = (t) => el('div', { style:'font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;align-self:end;padding-bottom:2px;' }, t);
+  const hCell = (t) => el('div', { style:'font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;align-self:end;padding-bottom:2px;' }, t);
   griglia.append(hCell('Pos'), hCell('Codice articolo'), hCell('Numero OP'), hCell('Rif. cliente'), hCell('Q.tà'),
     ...(prezzoAttivo ? [hCell('€/pz')] : []), hCell('Min/pz'), hCell('Scadenza'), hCell(''));
-  const totBar = el('div', { style:'margin-top:8px;font-family:DM Mono,monospace;font-size:14px;font-weight:700;text-align:right;' });
+  const totBar = el('div', { style:'margin-top:8px;font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;text-align:right;' });
 
   let righe = [];
   const aggiornaTotale = () => {
@@ -6482,7 +6482,7 @@ function openOrdineClienteModal(clienteId, numeroOrdine) {
   tw.append(tbl);
   body.append(tw);
 
-  body.append(el('div', { style:'margin-top:12px;text-align:right;font-family:DM Mono,monospace;' },
+  body.append(el('div', { style:'margin-top:12px;text-align:right;font-family:JetBrains Mono,monospace;' },
     el('div', { style:'font-size:15px;font-weight:700;' },
       'Totale ordine: ' + (totale > 0 ? fmtEuro(totale) : '—')),
     senzaPrezzo > 0 ? el('div', { class:'sub', style:'margin-top:2px;' },
@@ -6840,7 +6840,7 @@ function renderPianificazione(root) {
       const nG = (state.operazioni || []).filter(x => x.gruppo_id === o.gruppo_id).length;
       ordineCell.append(el('span', {
         style:'display:inline-block;margin-right:6px;padding:0 6px;border-radius:8px;background:var(--acc);'
-          + 'color:var(--bg);font-size:10px;font-weight:700;cursor:pointer;',
+          + 'color:var(--bg);font-size:11px;font-weight:700;cursor:pointer;',
         title:'Gruppo di ' + nG + ' commesse (kiosk: una card, tempo diviso). Click per sciogliere.',
         onclick:(e)=>{ e.stopPropagation(); if (!inGruppoMode) scioglieGruppoCommessa(o); },
       }, '⊞' + nG));
@@ -6982,7 +6982,7 @@ function renderPianificazione(root) {
           .map(x => '· ' + x.codice + (x.descrizione ? '  ' + String(x.descrizione).slice(0, 34) : ''));
         const restanti = mc.nBloccanti - primi.length;
         prepCell.append(el('span', {
-          style: 'margin-left:6px;font-size:10px;font-family:DM Mono,monospace;font-weight:700;cursor:pointer;color:'
+          style: 'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;cursor:pointer;color:'
             + (mc.nBloccanti ? 'var(--red)' : 'var(--yel)') + ';',
           title: (mc.nBloccanti
               ? mc.nBloccanti + (mc.nBloccanti === 1 ? ' codice DA ORDINARE (ferma la commessa)' : ' codici DA ORDINARE (fermano la commessa)')
@@ -7069,7 +7069,7 @@ function renderPianificazione(root) {
   root.append(tw);
 
   // Legenda
-  root.append(el('div', { class:'sub', style:'margin-top:14px;font-size:10px;' },
+  root.append(el('div', { class:'sub', style:'margin-top:14px;font-size:11px;' },
     'Click su una riga per aprire la scheda completa dell\'operazione.'));
 }
 
@@ -7111,7 +7111,7 @@ function makeAutocompleteCreate(opts) {
   });
   const dropList = el('div', { class:'util-droplist' });
   const hint = el('div', {
-    style:'font-family:DM Mono,monospace;font-size:10px;margin-top:4px;min-height:14px;'
+    style:'font-family:JetBrains Mono,monospace;font-size:11px;margin-top:4px;min-height:14px;'
   });
   const wrap = el('div', { class:'util-dropwrap', style:'position:relative;' }, input, dropList);
   const container = el('div', {}, wrap, hint);
@@ -7348,7 +7348,7 @@ function openOperazioneModal(o) {
         const on = keys().includes(f._k);
         wrap.append(el('button', {
           type:'button',
-          style:'font-size:10px;padding:2px 7px;border-radius:10px;cursor:pointer;font-family:DM Mono,monospace;'
+          style:'font-size:11px;padding:2px 7px;border-radius:10px;cursor:pointer;font-family:JetBrains Mono,monospace;'
             + (on ? 'background:var(--acc);color:var(--bg);border:1px solid var(--acc);font-weight:700;'
                   : 'background:transparent;color:var(--mut);border:1px solid var(--brd);'),
           title: (on ? 'Togli da' : 'Assegna a') + ' #' + (i+1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id),
@@ -7364,7 +7364,7 @@ function openOperazioneModal(o) {
         }, '#' + (i + 1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id)));
       });
       if (keys().length === 0) {
-        wrap.append(el('span', { style:'font-size:10px;color:var(--mut);font-family:DM Mono,monospace;font-style:italic;opacity:.7;' }, 'tutta la commessa'));
+        wrap.append(el('span', { style:'font-size:11px;color:var(--mut);font-family:JetBrains Mono,monospace;font-style:italic;opacity:.7;' }, 'tutta la commessa'));
       }
     };
     ridisegna();
@@ -7474,7 +7474,7 @@ function openOperazioneModal(o) {
         const on = sel.fase_keys.includes(f._k);
         wrap.append(el('button', {
           type:'button',
-          style:'font-size:10px;padding:2px 7px;border-radius:10px;cursor:pointer;font-family:DM Mono,monospace;'
+          style:'font-size:11px;padding:2px 7px;border-radius:10px;cursor:pointer;font-family:JetBrains Mono,monospace;'
             + (on ? 'background:var(--acc);color:var(--bg);border:1px solid var(--acc);font-weight:700;'
                   : 'background:transparent;color:var(--mut);border:1px solid var(--brd);'),
           title: (on ? 'Togli da' : 'Assegna a') + ' #' + (i+1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id),
@@ -7490,7 +7490,7 @@ function openOperazioneModal(o) {
         }, '#' + (i + 1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id)));
       });
       if (sel.fase_keys.length === 0) {
-        wrap.append(el('span', { style:'font-size:10px;color:var(--mut);font-family:DM Mono,monospace;' }, '· tutta la commessa'));
+        wrap.append(el('span', { style:'font-size:11px;color:var(--mut);font-family:JetBrains Mono,monospace;' }, '· tutta la commessa'));
       }
     };
     ridisegna();
@@ -7596,7 +7596,7 @@ function openOperazioneModal(o) {
         placeholder:'2026/OF/00001 o 2026/OL/00001',
         pattern:'\\d{4}/(OF|OL)/\\d{5}',
         title:'Formato richiesto: AAAA/OF/NNNNN o AAAA/OL/NNNNN (opzionale)',
-        style:'width:140px;padding:4px 8px;font-family:DM Mono,monospace;font-size:11px;background:var(--sur);border:1px solid var(--brd);border-radius:3px;color:var(--txt);',
+        style:'width:140px;padding:4px 8px;font-family:JetBrains Mono,monospace;font-size:11px;background:var(--sur);border:1px solid var(--brd);border-radius:3px;color:var(--txt);',
         // Padding automatico al blur. Preserva OF/OL come scelto dall'utente.
         onblur: (e) => {
           const v = e.target.value.trim();
@@ -7634,7 +7634,7 @@ function openOperazioneModal(o) {
       // Prezzo suggerito live: solo se il fornitore ha una tariffa €/h
       const tariffa = Number(a.tariffa_oraria) || 0;
       if (tariffa > 0) {
-        const sugg = el('div', { style:'flex-basis:100%;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);' });
+        const sugg = el('div', { style:'flex-basis:100%;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);' });
         const upd = () => {
           const ore = minPzFornitore(sel) * qtaCorrenteComm() / 60;
           sugg.textContent = ore > 0
@@ -7716,7 +7716,7 @@ function openOperazioneModal(o) {
     const fmtH = (n) => Number(n).toLocaleString('it-IT',
       { minimumFractionDigits: 1, maximumFractionDigits: 2 }) + ' h';
     wrapOreEsterne.append(el('div', { class:'sub',
-      style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+      style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
       '── Ore esterne ──'));
     const lista = el('div', { style:'display:flex;flex-direction:column;gap:4px;' });
     if (!r.righe.length) {
@@ -7725,7 +7725,7 @@ function openOperazioneModal(o) {
     }
     r.righe.forEach(x => {
       const riga = el('div', {
-        style:'display:flex;align-items:center;gap:10px;font-family:DM Mono,monospace;'
+        style:'display:flex;align-items:center;gap:10px;font-family:JetBrains Mono,monospace;'
           + 'font-size:11px;padding:3px 0;border-bottom:1px solid var(--brd);' },
         el('span', { style:'width:16px;flex-shrink:0;',
           title: x.fonte === 'timbro' ? 'Ore timbrate qui dai suoi uomini' : 'Ore dichiarate dal fornitore (rapportino)' },
@@ -7747,7 +7747,7 @@ function openOperazioneModal(o) {
       if (x.tariffaDaAnagrafica) det.push('tariffa dall\'anagrafica (non congelata)');
       if (x.costo == null) det.push('ditta senza tariffa: ore contate, costo no');
       if (det.length) riga.append(el('span', {
-        class:'sub', style:'flex-basis:100%;font-size:10px;padding-left:26px;' }, det.join(' · ')));
+        class:'sub', style:'flex-basis:100%;font-size:11px;padding-left:26px;' }, det.join(' · ')));
       // Solo le righe DICHIARATE si cancellano: le timbrate sono derivate dai
       // timbri e si correggono là, non qui.
       if (canEdit && x.fonte === 'dichiarata' && x.id) {
@@ -7770,7 +7770,7 @@ function openOperazioneModal(o) {
     });
     if (r.righe.length) {
       lista.append(el('div', {
-        style:'display:flex;align-items:center;gap:10px;font-family:DM Mono,monospace;'
+        style:'display:flex;align-items:center;gap:10px;font-family:JetBrains Mono,monospace;'
           + 'font-size:11px;padding-top:5px;font-weight:700;' },
         el('span', { style:'width:16px;flex-shrink:0;' }, ''),
         el('span', { style:'flex:1;min-width:120px;' }, 'totale'),
@@ -7792,7 +7792,7 @@ function openOperazioneModal(o) {
       const parti = [];
       if (oreTimbrate > 0) parti.push('⏱ ' + fmtH(oreTimbrate) + ' sono già dentro il riepilogo per fase qui sopra');
       if (oreDich > 0) parti.push('📄 ' + fmtH(oreDich) + ' non sono timbrate da nessuno: si sommano a quelle ore');
-      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:6px;font-size:10px;' },
+      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:6px;font-size:11px;' },
         parti.join(' · ')));
     }
     // Il doppio conteggio è l'errore che si nasconderebbe meglio: dichiarato.
@@ -7804,7 +7804,7 @@ function openOperazioneModal(o) {
         + 'Verifica che non siano le stesse ore contate due volte.'));
     }
     if (r.senzaTariffa.length) {
-      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:4px;font-size:10px;' },
+      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:4px;font-size:11px;' },
         'Senza tariffa oraria in anagrafica: ' + r.senzaTariffa.join(', ')
         + ' — le ore sono contate, il costo no.'));
     }
@@ -7819,7 +7819,7 @@ function openOperazioneModal(o) {
         style:'width:72px;' });
       const inData = el('input', { type:'date', style:'width:140px;' });
       const inRif = el('input', { type:'text', placeholder:'rif. rapportino', style:'width:140px;' });
-      const notaTar = el('div', { class:'sub', style:'font-size:10px;flex-basis:100%;min-height:13px;' });
+      const notaTar = el('div', { class:'sub', style:'font-size:11px;flex-basis:100%;min-height:13px;' });
       const aggiornaNotaTar = () => {
         const az = (state.aziende || []).find(a => a.id === selAz.value);
         const t = Number(az && az.tariffa_oraria) || 0;
@@ -7857,11 +7857,11 @@ function openOperazioneModal(o) {
       wrapOreEsterne.append(
         el('div', { style:'display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;' },
           selAz, inOre, inData, inRif, btnAdd, notaTar));
-      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:4px;font-size:10px;' },
+      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:4px;font-size:11px;' },
         'Inserisci qui le ore che il fornitore ti dichiara per il lavoro fatto nella SUA sede. '
         + 'Le ore dei suoi uomini che timbrano qui compaiono da sole (⏱) e non vanno riscritte.'));
     } else if (oreEsterneTabellaOk === false) {
-      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:6px;font-size:10px;' },
+      wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:6px;font-size:11px;' },
         'Inserimento a mano non attivo: manca la tabella `ore_esterne` (migrazione dal pannello '
         + 'Supabase). Le ore timbrate dagli esterni in sede si vedono comunque.'));
     }
@@ -7895,7 +7895,7 @@ function openOperazioneModal(o) {
     const m = mancantiCommessa({ ...o, stato_preparazione: selPrep.value });
     if (!m.nCodici) {
       if (o.numero_op && (state.mancanti || []).length) {
-        notaMancanti.append(el('div', { class:'sub', style:'font-size:10px;' },
+        notaMancanti.append(el('div', { class:'sub', style:'font-size:11px;' },
           'Nessun codice mancante per ' + o.numero_op + ' nell\'ultimo fabbisogno importato.'));
       }
       return;
@@ -8021,7 +8021,7 @@ function openOperazioneModal(o) {
         .map(s => (state.aziende.find(a => a.id === s.azienda_id) || {}).nome || '?');
       if (!tutti.length) return null;
       return el('div', { class:'sub',
-        style:'margin-top:6px;font-family:DM Mono,monospace;font-size:11px;color:var(--yel);' },
+        style:'margin-top:6px;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--yel);' },
         '⚙ Fornitore su tutta la commessa: ' + tutti.join(', ') + ' (in quota con gli interni)');
     } catch (e) { return null; }
   }
@@ -8055,13 +8055,13 @@ function openOperazioneModal(o) {
         el('span', { style:'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + (tipo?.colore || '#6b6b64') + ';' }),
         el('span', { style:'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' },
           tipo?.nome || '—'),
-        el('span', { style:'font-family:DM Mono,monospace;font-size:12px;flex-shrink:0;' },
+        el('span', { style:'font-family:JetBrains Mono,monospace;font-size:12px;flex-shrink:0;' },
           String(f.minuti_unitari).replace('.', ',') + ' min/pz'),
         est.length
-          ? el('span', { style:'flex-shrink:0;font-size:10px;font-family:DM Mono,monospace;color:var(--yel);font-weight:700;' },
+          ? el('span', { style:'flex-shrink:0;font-size:11px;font-family:JetBrains Mono,monospace;color:var(--yel);font-weight:700;' },
               '→ ' + est.join(', ') + ' (esterna)')
           : null,
-        el('span', { class:'sub', style:'flex-shrink:0;font-size:10px;color:var(--mut);' }, fonte),
+        el('span', { class:'sub', style:'flex-shrink:0;font-size:11px;color:var(--mut);' }, fonte),
       ));
     });
     const bTot = badgeFornitoriTuttaCommessa();
@@ -8136,9 +8136,9 @@ function openOperazioneModal(o) {
           value: String(o.minuti_unitari != null ? o.minuti_unitari : ''),
           min:'0', step:'0.5',
         }),
-        el('div', { class:'sub', id:'minuti-hint', style:'margin-top:4px;font-size:10px;color:var(--mut);' },
+        el('div', { class:'sub', id:'minuti-hint', style:'margin-top:4px;font-size:11px;color:var(--mut);' },
           'Suggerito automaticamente dall\'articolo selezionato.'),
-        el('div', { class:'sub', id:'minuti-da-prezzo', style:'margin-top:2px;font-size:10px;display:none;' })),
+        el('div', { class:'sub', id:'minuti-da-prezzo', style:'margin-top:2px;font-size:11px;display:none;' })),
     ),
     // Prezzo di vendita (€/pezzo) + totale riga. Pre-compilato dall'ultimo
     // prezzo usato per stesso articolo+cliente (listino vivo). Il blocco viene
@@ -8148,12 +8148,12 @@ function openOperazioneModal(o) {
         el('input', { type:'number', name:'prezzo_unitario', id:'prezzo-input',
           value: String(o.prezzo_unitario != null ? o.prezzo_unitario : ''),
           min:'0', step:'0.01', placeholder:'€ per pezzo' }),
-        el('div', { class:'sub', id:'prezzo-hint', style:'margin-top:4px;font-size:10px;color:var(--mut);' },
+        el('div', { class:'sub', id:'prezzo-hint', style:'margin-top:4px;font-size:11px;color:var(--mut);' },
           'Ultimo prezzo per articolo+cliente (modificabile).'),
-        el('div', { class:'sub', id:'prezzo-da-consuntivo', style:'margin-top:2px;font-size:10px;display:none;' })),
+        el('div', { class:'sub', id:'prezzo-da-consuntivo', style:'margin-top:2px;font-size:11px;display:none;' })),
       el('div', { class:'field' }, el('label', {}, 'Totale riga'),
-        el('div', { id:'prezzo-totale', style:'padding:8px 0 2px;font-family:DM Mono,monospace;font-size:15px;font-weight:700;' }, '—'),
-        el('div', { class:'sub', id:'margine-riga', style:'font-size:10px;font-family:DM Mono,monospace;' })),
+        el('div', { id:'prezzo-totale', style:'padding:8px 0 2px;font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;' }, '—'),
+        el('div', { class:'sub', id:'margine-riga', style:'font-size:11px;font-family:JetBrains Mono,monospace;' })),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Scadenza'),
@@ -8188,7 +8188,7 @@ function openOperazioneModal(o) {
   // nuove sulla capacità della squadra, ferie e chiusure comprese.
   const boxRealistica = isNew ? el('div', { class:'sub',
     style:'padding:8px 10px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;'
-      + 'font-family:DM Mono,monospace;font-size:11px;' }) : null;
+      + 'font-family:JetBrains Mono,monospace;font-size:11px;' }) : null;
   // Wrapper con etichetta: nascosto TUTTO finché non c'è una stima
   // (senza dati l'etichetta orfana sembrerebbe un riquadro rotto).
   const fieldRealistica = boxRealistica
@@ -8223,7 +8223,7 @@ function openOperazioneModal(o) {
               return (un ? un.nome.split(' ')[0] : '?')
                 + (l.libero <= oggi ? ': libero' : ': occupato fino al ' + fmtIT(l.libero));
             }).join(' · ')),
-        el('div', { style:'color:var(--mut);font-size:10px;margin-top:3px;' },
+        el('div', { style:'color:var(--mut);font-size:11px;margin-top:3px;' },
           'Coda attuale degli addetti scelti + ferie/chiusure. Solo indicativa: nessuna data viene salvata.'),
       );
     } catch (e) { /* setup non ancora completo o dati parziali: niente box */ }
@@ -8276,7 +8276,7 @@ function openOperazioneModal(o) {
   // Sezione storico (solo se spedita)
   if (!isNew && o.stato === 'spedita') {
     pDati.append(
-      el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+      el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
         '── Dati consegna ──'),
       el('div', { class:'frow' },
         el('div', { class:'field' }, el('label', {}, 'Consegnato il'),
@@ -8307,7 +8307,7 @@ function openOperazioneModal(o) {
     const prevEsterno = Math.max(0, orePrev - orePrevInt);
 
     pCons.append(
-      el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+      el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
         '── Sessioni di lavoro ──'),
     );
 
@@ -8317,7 +8317,7 @@ function openOperazioneModal(o) {
       .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
     if (fasiOp.length > 0) {
       const box = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;' });
-      box.append(el('div', { style:'color:var(--mut);font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;' }, 'Riepilogo per fase'));
+      box.append(el('div', { style:'color:var(--mut);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;' }, 'Riepilogo per fase'));
       // Totali di fase in MINUTI (i minuti/pezzo delle fasi sono in minuti:
       // stessa unità, confronto immediato senza conversioni a mente).
       let sommaConsFasi = 0;
@@ -8390,7 +8390,7 @@ function openOperazioneModal(o) {
             el('span', { style:'color:var(--txt);font-weight:600;' },
               (cons ? cons.base : orePrevInt).toFixed(2) + 'h'),
             (!cons || !cons.baseTotale) && prevEsterno > 0.05
-              ? el('span', { style:'color:var(--mut);font-size:10px;' }, ' + ' + prevEsterno.toFixed(1) + 'h esterne')
+              ? el('span', { style:'color:var(--mut);font-size:11px;' }, ' + ' + prevEsterno.toFixed(1) + 'h esterne')
               : null),
           el('div', {},
             el('span', { style:'color:var(--mut)' }, 'Ore consuntivate: '),
@@ -8404,7 +8404,7 @@ function openOperazioneModal(o) {
         // "di cui esterne": il totale resta il complessivo, ma non deve
         // sembrare tutto lavoro tuo. Timbrate e dichiarate distinte.
         (cons && cons.oreEsterne > 0.05)
-          ? el('div', { style:'margin-top:6px;color:var(--mut);font-size:10px;' },
+          ? el('div', { style:'margin-top:6px;color:var(--mut);font-size:11px;' },
               'di cui ' + cons.oreEsterne.toFixed(2) + 'h esterne ('
               + [cons.oreEsterneTimbrate > 0.005 ? '⏱ ' + cons.oreEsterneTimbrate.toFixed(2) + 'h timbrate qui' : null,
                  cons.oreEsterneDichiarate > 0.005 ? '📄 ' + cons.oreEsterneDichiarate.toFixed(2) + 'h da rapportino' : null]
@@ -8416,7 +8416,7 @@ function openOperazioneModal(o) {
                   : ''))
           : null,
         overBudget
-          ? el('div', { style:'margin-top:6px;color:var(--red);font-size:10px;' },
+          ? el('div', { style:'margin-top:6px;color:var(--red);font-size:11px;' },
               '⚠ Ore consuntivate oltre il previsto')
           : null,
       ));
@@ -8450,8 +8450,8 @@ function openOperazioneModal(o) {
         },
           el('div', { style:'width:6px;height:6px;border-radius:50%;background:'+(tipo?.colore||'#6b6b64')+';' }),
           el('div', {}, oper?.nome || '—'),
-          el('div', { style:'color:var(--mut);font-size:10px;' }, tipo?.nome || '—'),
-          el('div', { style:'color:var(--mut);font-size:10px;' },
+          el('div', { style:'color:var(--mut);font-size:11px;' }, tipo?.nome || '—'),
+          el('div', { style:'color:var(--mut);font-size:11px;' },
             fmtIT(toLocalISO(ini)) + ' ' + z(ini.getHours()) + ':' + z(ini.getMinutes())
               + (fin ? ' → '+z(fin.getHours())+':'+z(fin.getMinutes()) : ' → in corso')),
           el('div', { style:'font-weight:700;color:'+(s.fine?'var(--txt)':'var(--grn)')+';min-width:60px;text-align:right;' },
@@ -8470,7 +8470,7 @@ function openOperazioneModal(o) {
   // Al raggiungimento del 100% propone di marcare la commessa come 'completata'.
   if (!isNew) {
     pProd.append(
-      el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:10px;' },
+      el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
         '── Produzione ──'),
     );
 
@@ -8651,10 +8651,10 @@ function openOperazioneModal(o) {
         const formCons = el('div', {
           style:'background:var(--sur);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;display:grid;grid-template-columns:130px 100px 1fr 1fr auto;gap:8px;align-items:end;',
         },
-          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Data'), dataInput),
-          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Quantità'), qtaInput),
-          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Lotto/Rif.'), ddtInput),
-          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Nota'), notaInput),
+          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Data'), dataInput),
+          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Quantità'), qtaInput),
+          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Lotto/Rif.'), ddtInput),
+          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Nota'), notaInput),
           btnAdd,
         );
         consegneBox.append(formCons);
@@ -8733,7 +8733,7 @@ function openOperazioneModal(o) {
               (s.destinatario || '') + (s.note?(' · '+s.note):'') || '—'),
             isAdmin ? el('button', {
               class:'btnsm', type:'button',
-              style:'padding:2px 6px;font-size:10px;background:transparent;border:1px solid var(--red);color:var(--red);',
+              style:'padding:2px 6px;font-size:11px;background:transparent;border:1px solid var(--red);color:var(--red);',
               title:'Elimina questa spedizione',
               onclick: async () => {
                 if (!confirm(`Eliminare la spedizione del ${fmtIT(s.data)} (${s.quantita} pz)?`)) return;
@@ -8836,18 +8836,18 @@ function openOperazioneModal(o) {
         const formSped = el('div', {
           style:'background:var(--sur);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;display:grid;grid-template-columns:130px 90px 1fr 1fr 1fr auto;gap:8px;align-items:end;',
         },
-          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Data'), dataInputS),
-          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Quantità'), qtaInputS),
-          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'DDT'), ddtInputS),
-          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Destinatario'), destInputS),
-          el('div', { class:'field' }, el('label', { style:'font-size:10px;' }, 'Note'), noteInputS),
+          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Data'), dataInputS),
+          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Quantità'), qtaInputS),
+          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'DDT'), ddtInputS),
+          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Destinatario'), destInputS),
+          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Note'), noteInputS),
           btnAddS,
         );
         spedBox.append(formSped);
 
         // Avviso se in magazzino ci sono meno pezzi del massimo selezionabile
         if (pronti < daSpedire) {
-          spedBox.append(el('div', { style:'color:var(--yel);font-size:10px;padding:6px 0 0;' },
+          spedBox.append(el('div', { style:'color:var(--yel);font-size:11px;padding:6px 0 0;' },
             `Solo ${pronti} pz pronti in magazzino (${daSpedire - pronti} ancora da produrre).`));
         }
       } else if (isAdmin && daSpedire <= 0) {
@@ -9015,7 +9015,7 @@ function openOperazioneModal(o) {
       box.style.display = '';
       box.innerHTML = '';
       box.append(
-        el('span', { style:'color:var(--mut);font-family:DM Mono,monospace;' },
+        el('span', { style:'color:var(--mut);font-family:JetBrains Mono,monospace;' },
           'da prezzo: ' + propone + ' min/pz ('
           + prezzo.toLocaleString('it-IT', { minimumFractionDigits: 2 }) + ' € ÷ '
           + String(tariffa).replace('.', ',') + ' €/h)'),
@@ -9051,7 +9051,7 @@ function openOperazioneModal(o) {
       box.style.display = '';
       box.innerHTML = '';
       box.append(
-        el('span', { class: s.debole ? 'etl-debole' : '', style:'font-family:DM Mono,monospace;'
+        el('span', { class: s.debole ? 'etl-debole' : '', style:'font-family:JetBrains Mono,monospace;'
             + (s.debole ? '' : 'color:var(--mut);') },
           'da consuntivo: ' + fmtE(s.prezzo)
           + ' (' + s.ore.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
@@ -9153,7 +9153,7 @@ function openOperazioneModal(o) {
         el('span', { style:'margin:0 10px;color:var(--brd)' }, '·'),
         el('span', { style:'color:var(--acc)' }, 'Giorni lavorativi: '), String(giorni),
       ),
-      el('div', { style:'margin-top:4px;font-size:10px;color:var(--mut);' },
+      el('div', { style:'margin-top:4px;font-size:11px;color:var(--mut);' },
         conFasi
           ? ('Inizio calcolato per fase — ognuna sulla capacità dei suoi assegnatari — '
              + 'in sequenza'
@@ -9168,14 +9168,14 @@ function openOperazioneModal(o) {
       const inizioForzato = inizioInput?.value || '';
       if (inizioForzato && inizioCalc && tmp.scadenza && inizioForzato > inizioCalc) {
         previewBox.append(el('div', {
-          style:'margin-top:6px;font-size:10px;color:var(--yel);' },
+          style:'margin-top:6px;font-size:11px;color:var(--yel);' },
           '⚠ La data forzata è più tardi del calcolo automatico: il tempo ' +
           'tra inizio e scadenza potrebbe non bastare per le ore previste. ' +
           'Valuta se aggiungere addetti.'));
       }
       if (inizioForzato && tmp.scadenza && inizioForzato > tmp.scadenza) {
         previewBox.append(el('div', {
-          style:'margin-top:4px;font-size:10px;color:var(--red);' },
+          style:'margin-top:4px;font-size:11px;color:var(--red);' },
           '⚠ La data di inizio è successiva alla scadenza.'));
       }
     }
@@ -9310,7 +9310,7 @@ function openOperazioneModal(o) {
               + (overOre ? ' · ⚠ OLTRE di ' + (cons - pagatoOre).toFixed(1) + 'h' : '')
             : 'Ore consuntivate / preventivate (solo parte interna)')
             + (oreEsterneHd > 0.05 ? '\nFasi esterne (fornitori): ' + oreEsterneHd.toFixed(1) + 'h, fuori da questo confronto' : '') },
-          el('span', { style:'font-size:9px;letter-spacing:.08em;text-transform:uppercase;' }, 'ore'),
+          el('span', { style:'font-size:11px;letter-spacing:.08em;text-transform:uppercase;' }, 'ore'),
           el('div', { class:'opsum-orebar' }, ...barInner),
           el('span', { style: overOre ? 'color:var(--red);font-weight:700;' : '' }, (pagatoOre > 0
             ? cons.toFixed(1) + ' / ' + pagatoOre.toFixed(1) + 'h · ' + percOre + '%'
@@ -10344,7 +10344,7 @@ function quickRegistraSpedizione(o) {
   // Avviso se questa spedizione NON completerà la commessa
   const previewSpedTot = totSped + pronti;
   if (previewSpedTot < qtaOrd) {
-    body.append(el('div', { style:'color:var(--yel);font-size:10px;padding:6px 0 10px;font-style:italic;' },
+    body.append(el('div', { style:'color:var(--yel);font-size:11px;padding:6px 0 10px;font-style:italic;' },
       'Dopo questa spedizione resteranno ' + (qtaOrd - previewSpedTot) + ' pz ancora da produrre/spedire.'));
   }
 
@@ -12492,7 +12492,7 @@ function kioskRenderOpList() {
       card.style.borderColor = 'var(--acc)';
       card.style.boxShadow = '0 0 0 1px var(--acc)';
       card.append(el('div', {
-        style:'margin-top:8px;font-family:DM Mono,monospace;font-size:12px;color:var(--acc);font-weight:700;',
+        style:'margin-top:8px;font-family:JetBrains Mono,monospace;font-size:12px;color:var(--acc);font-weight:700;',
       }, '⏸ ultima timbratura: ' + fmtUltima(ultimaSess[o.id])));
       grid.append(card);
     });
@@ -12715,7 +12715,7 @@ function kioskRenderTipo() {
 
   // Riepilogo operazione (blocco-info standard)
   root.append(el('div', { style:'background:var(--sur);border:1px solid var(--brd);border-radius:8px;padding:14px 18px;margin-bottom:20px;' },
-    el('div', { style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;' }, 'Operazione selezionata'),
+    el('div', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;' }, 'Operazione selezionata'),
     kioskInfoBlock(o),
   ));
 
@@ -13303,7 +13303,7 @@ function renderAnalisiClienti(root) {
     if (r.ratio != null) {
       const col = r.ratio > 1.05 ? 'var(--red)' : (r.ratio < 0.95 ? 'var(--grn)' : 'var(--txt)');
       ratioEl = el('span', {
-        style:'font-family:DM Mono,monospace;font-weight:700;font-size:15px;color:' + col + ';',
+        style:'font-family:JetBrains Mono,monospace;font-weight:700;font-size:15px;color:' + col + ';',
         title:'Ore timbrate / ore pagate, media sulle sue commesse chiuse',
       }, 'reale/pagato ×' + r.ratio.toFixed(2).replace('.', ','));
     }
@@ -13315,7 +13315,7 @@ function renderAnalisiClienti(root) {
         ? ' (su ' + r.nConPrezzo + (r.nConPrezzo === 1 ? ' commessa' : ' commesse') + ' con prezzo)'
         : '';
       euroOraEl = el('span', {
-        style:'font-family:DM Mono,monospace;font-weight:700;font-size:15px;',
+        style:'font-family:JetBrains Mono,monospace;font-weight:700;font-size:15px;',
         title:'Ricavo ÷ ore timbrate, solo sulle sue commesse chiuse con prezzo',
       },
         r.euroOra.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €/h',
@@ -13336,7 +13336,7 @@ function renderAnalisiClienti(root) {
     r.tipi.forEach(t => {
       const tipo = state.tipiLav.find(x => x.id === t.tipoId);
       const pM = Math.round(t.media * 100), pD = Math.round(t.dev * 100);
-      wrap.append(el('div', { style:'display:flex;align-items:center;gap:10px;font-family:DM Mono,monospace;font-size:11px;' },
+      wrap.append(el('div', { style:'display:flex;align-items:center;gap:10px;font-family:JetBrains Mono,monospace;font-size:11px;' },
         el('span', { style:'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + (tipo?.colore || '#6b6b64') + ';' }),
         el('span', { style:'width:170px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, tipo?.nome || '?'),
         el('div', { style:'flex:1;max-width:320px;height:10px;background:var(--sur);border:1px solid var(--brd);border-radius:3px;position:relative;overflow:hidden;' },
@@ -13465,14 +13465,14 @@ function buildLiveCard(u, onClick, opts = {}) {
       const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
       const ore = parseFloat(assOggi.ore) || 0;
       card.append(el('div', {
-        style: 'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-top:4px;opacity:.85;',
+        style: 'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-top:4px;opacity:.85;',
       }, `◷ ${tipo?.nome || 'Assenza'} ${ore}h oggi${assOggi.note ? ' — '+assOggi.note : ''}`));
     }
   } else if (assOggi) {
     const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
     const ore = parseFloat(assOggi.ore) || 0;
     card.append(el('div', {
-      style: 'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-top:6px;',
+      style: 'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-top:6px;',
     }, `${tipo?.nome || 'Assenza'} · ${ore}h${assOggi.note ? ' — '+assOggi.note : ''}`));
   } else {
     // Mostra ultima sessione chiusa oggi se c'è
@@ -13629,7 +13629,7 @@ function openCartellinoExportModal() {
 
   const inDa = el('input', { type:'date', value: toLocalISO(primoMese) });
   const inA  = el('input', { type:'date', value: toLocalISO(oggi) });
-  const conteggio = el('div', { style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-top:2px;' });
+  const conteggio = el('div', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-top:2px;' });
 
   function aggiornaConteggio() {
     if (!inDa.value || !inA.value || inA.value < inDa.value) { conteggio.textContent = ''; return; }
@@ -13768,7 +13768,7 @@ function apriStoricoConsuntivi(utente) {
   const modal = el('div', { class:'modal side' });
   modal.append(el('div', { class:'mhd' },
     el('div', {},
-      el('div', { style:'font-family:DM Mono,monospace;font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px;' },
+      el('div', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px;' },
         'Storico consuntivi'),
       el('h2', { style:'margin:0;' }, utente.nome),
     ),
@@ -14182,7 +14182,7 @@ function renderGanttCommesse(root) {
     const on = statiVis.has(key);
     chipBar.append(el('button', {
       style: 'display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:20px;cursor:pointer;'
-        + `font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.03em;`
+        + `font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.03em;`
         + (on
           ? `background:var(--sur2);border:1px solid ${def.color};color:var(--txt);`
           : 'background:transparent;border:1px solid var(--brd);color:var(--mut);opacity:.55;'),
@@ -14240,7 +14240,7 @@ function renderGanttCommesse(root) {
         onmouseleave:(e)=>{ e.currentTarget.style.background=''; },
         onmousedown:(e)=>{ e.preventDefault(); vaiACommessa(o); },
       },
-        el('span', { style:'font-family:DM Mono,monospace;color:var(--txt);' }, o.numero_ordine || o.numero_op || '—'),
+        el('span', { style:'font-family:JetBrains Mono,monospace;color:var(--txt);' }, o.numero_ordine || o.numero_op || '—'),
         el('span', { style:'color:var(--mut);' }, '  ' + (cli ? cli.nome : '') + (art && art.codice ? ' · ' + art.codice : '')),
       ));
     });
@@ -14260,9 +14260,9 @@ function renderGanttCommesse(root) {
     { style:'display:inline-block;width:22px;height:12px;border-radius:3px;flex-shrink:0;' + style });
   root.append(el('div', {
     style:'margin:6px 0 10px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;'
-      + 'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);',
+      + 'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);',
   },
-    el('span', { style:'font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:9px;' }, 'Legenda:'),
+    el('span', { style:'font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:11px;' }, 'Legenda:'),
     legVoce(legChip('background:var(--sur2);border:1px solid var(--brd);position:relative;overflow:hidden;'
       + 'background-image:linear-gradient(to right, var(--blu) 0 55%, transparent 55%);'),
       'barra = quota operatore · riempimento = suoi timbri'),
@@ -14394,7 +14394,7 @@ function renderGanttCommesse(root) {
         }),
         el('div', {
           style: 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
-            + `font-size:10px;font-family:'DM Mono',monospace;font-weight:700;`
+            + `font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:700;`
             + 'color:var(--bg);letter-spacing:.02em;text-shadow:0 0 2px rgba(255,255,255,.4);',
         }, percTxt),
       ),
@@ -14659,7 +14659,7 @@ function renderGanttCommesse(root) {
           }),
           el('div', {
             style: 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
-              + `font-size:10px;font-family:'DM Mono',monospace;font-weight:700;`
+              + `font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:700;`
               + 'color:var(--bg);letter-spacing:.02em;text-shadow:0 0 2px rgba(255,255,255,.4);',
           }, percTxt),
         ),
@@ -15133,28 +15133,28 @@ function renderAssenze(root) {
       style: 'background:var(--sur);border:1px solid var(--brd);border-left:3px solid var(--acc);border-radius:4px;padding:10px 14px;margin-bottom:14px;'
     });
     riass.append(el('div', {
-      style: 'font-family:DM Mono,monospace;font-size:9px;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;'
+      style: 'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;'
     }, `★ Le tue assenze — ${annoCorr}`));
 
     const statsRow = el('div', {
       style: 'display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;'
     });
     statsRow.append(el('div', {},
-      el('span', { style:'font-family:DM Mono,monospace;font-size:18px;font-weight:700;color:var(--acc);' }, oreAnno + 'h'),
-      el('span', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-left:6px;' }, 'totale'),
+      el('span', { style:'font-family:JetBrains Mono,monospace;font-size:18px;font-weight:700;color:var(--acc);' }, oreAnno + 'h'),
+      el('span', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-left:6px;' }, 'totale'),
     ));
     const tipiAttivi = state.tipiAssenza.filter(t => t.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0));
     tipiAttivi.forEach(t => {
       const ore = orePerTipo[t.id] || 0;
       if (ore === 0) return;
       statsRow.append(el('div', {},
-        el('span', { style:`font-family:DM Mono,monospace;font-size:14px;font-weight:700;color:${t.colore};` }, ore + 'h'),
-        el('span', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-left:4px;' },
+        el('span', { style:`font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:${t.colore};` }, ore + 'h'),
+        el('span', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-left:4px;' },
           t.codice ? `${t.codice} (${t.nome})` : t.nome),
       ));
     });
     if (oreAnno === 0) {
-      statsRow.append(el('span', { style:'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);' },
+      statsRow.append(el('span', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);' },
         'Nessuna assenza registrata quest\'anno'));
     }
     riass.append(statsRow);
@@ -15229,7 +15229,7 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
 
   // Legenda
   const legend = el('div', { class:'assv2-legend' });
-  legend.append(el('span', { style:'font-weight:700;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;font-size:9px;' }, 'Legenda:'));
+  legend.append(el('span', { style:'font-weight:700;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;font-size:11px;' }, 'Legenda:'));
   legend.append(el('span', { class:'leg' },
     el('span', { class:'ld', style:'background:rgba(255,78,107,.5);' }), 'Sab/Dom'));
   legend.append(el('span', { class:'leg' },
@@ -15437,7 +15437,7 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     assEsistente ? `${utente.nome} · ${fmtIT(iso)}` : utente.nome));
 
   // Step 1: tipo
-  body.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;' }, 'Tipo:'));
+  body.append(el('div', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;' }, 'Tipo:'));
   let tipoSel = assEsistente?.tipo_assenza_id || '';
   let oreSel = assEsistente ? parseFloat(assEsistente.ore) : null;
 
@@ -15482,7 +15482,7 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
 
   // Step 2: sezione ore (cambia in base al tipo)
   const oreLabel = el('div', {
-    style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;'
+    style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;'
   }, 'Ore:');
   body.append(oreLabel);
 
@@ -15504,7 +15504,7 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
       oreLabel.style.display = 'none';
       const tipo = state.tipiAssenza.find(t => t.id === tipoSel);
       oreContainer.append(el('div', {
-        style: `background:var(--sur2);border:1px solid var(--brd);border-left:3px solid ${tipo?.colore || 'var(--mut)'};padding:9px 12px;border-radius:3px;font-family:DM Mono,monospace;font-size:11px;color:var(--mut);margin-bottom:12px;`
+        style: `background:var(--sur2);border:1px solid var(--brd);border-left:3px solid ${tipo?.colore || 'var(--mut)'};padding:9px 12px;border-radius:3px;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-bottom:12px;`
       },
         el('span', { style:'color:var(--txt);font-weight:700;' }, '8h '),
         '— giornata intera',
@@ -15530,7 +15530,7 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
         min:'0',
         max:'8',
         value: String(oreSel ?? 0.5),
-        style:'flex:1;height:38px;text-align:center;font-family:DM Mono,monospace;font-size:16px;font-weight:700;background:var(--sur2);border:2px solid var(--acc);color:var(--acc);border-radius:3px;outline:none;',
+        style:'flex:1;height:38px;text-align:center;font-family:JetBrains Mono,monospace;font-size:16px;font-weight:700;background:var(--sur2);border:2px solid var(--acc);color:var(--acc);border-radius:3px;outline:none;',
       });
       inputOre.onchange = () => {
         const v = parseFloat(inputOre.value);
@@ -15549,11 +15549,11 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
           refresh();
         },
       }, '+');
-      const lbl = el('span', { style:'font-family:DM Mono,monospace;font-size:13px;color:var(--mut);min-width:28px;' }, 'h');
+      const lbl = el('span', { style:'font-family:JetBrains Mono,monospace;font-size:13px;color:var(--mut);min-width:28px;' }, 'h');
       stepper.append(btnMinus, inputOre, lbl, btnPlus);
       oreContainer.append(stepper);
       oreContainer.append(el('div', {
-        style:'font-family:DM Mono,monospace;font-size:9px;color:var(--mut);'
+        style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);'
       }, 'Da 0 a 8 ore, scaglioni di 30 minuti'));
     } else {
       // "presets" — chips 8/4/2/1/0.5 + input altro (per tipo "Altro/V")
@@ -15567,7 +15567,7 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
       });
       const inputAltro = el('input', {
         type:'number', step:'0.5', min:'0', max:'24', placeholder:'altro',
-        style:'flex:0 0 70px;height:auto;padding:9px 8px;font-family:DM Mono,monospace;font-size:11px;background:var(--sur2);border:2px solid var(--brd);color:var(--txt);border-radius:3px;',
+        style:'flex:0 0 70px;height:auto;padding:9px 8px;font-family:JetBrains Mono,monospace;font-size:11px;background:var(--sur2);border:2px solid var(--brd);color:var(--txt);border-radius:3px;',
         value: oreSel !== null && !orePresets.includes(oreSel) ? oreSel : '',
       });
       inputAltro.onchange = () => {
@@ -15617,7 +15617,7 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
 
   // Riepilogo selezione
   const riepilogo = el('div', {
-    style: 'font-family:DM Mono,monospace;font-size:11px;color:var(--mut);padding:8px 10px;background:var(--sur2);border-radius:3px;margin-top:10px;'
+    style: 'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);padding:8px 10px;background:var(--sur2);border-radius:3px;margin-top:10px;'
   });
   body.append(riepilogo);
 
@@ -15907,7 +15907,7 @@ function renderImpostazioni(root) {
     const inp = el('input', {
       type:'text', placeholder:'gg-mm', maxlength:'5',
       value: getImpostazione(chiave, defaultVal),
-      style:'width:80px;padding:5px 8px;background:var(--sur2);border:1px solid var(--brd);border-radius:3px;color:var(--txt);font-family:DM Mono,monospace;font-size:12px;text-align:center;',
+      style:'width:80px;padding:5px 8px;background:var(--sur2);border:1px solid var(--brd);border-radius:3px;color:var(--txt);font-family:JetBrains Mono,monospace;font-size:12px;text-align:center;',
     });
     inputs[chiave] = inp;
     wrap.append(el('label', { style:'font-size:11px;font-family:Syne,sans-serif;font-weight:600;min-width:220px;' }, label), inp);
@@ -15918,11 +15918,11 @@ function renderImpostazioni(root) {
   const blocchiEstivi = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:14px;margin-bottom:14px;' });
   blocchiEstivi.append(el('div', { style:'font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--txt);margin-bottom:10px;' },
     '☀ Finestra ESTIVA'));
-  blocchiEstivi.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;' },
+  blocchiEstivi.append(el('div', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;' },
     'Quando si possono inserire (apertura):'));
   blocchiEstivi.append(fieldGGMM('finestra_estiva_apertura_da', 'Apertura dal:', '01-03'));
   blocchiEstivi.append(fieldGGMM('finestra_estiva_apertura_a',  'Apertura al:',  '31-03'));
-  blocchiEstivi.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.05em;' },
+  blocchiEstivi.append(el('div', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.05em;' },
     'Su quale periodo si possono inserire:'));
   blocchiEstivi.append(fieldGGMM('finestra_estiva_periodo_da', 'Periodo coperto dal:', '01-04'));
   blocchiEstivi.append(fieldGGMM('finestra_estiva_periodo_a',  'Periodo coperto al:',  '30-09'));
@@ -15932,11 +15932,11 @@ function renderImpostazioni(root) {
   const blocchiInvernali = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:14px;margin-bottom:14px;' });
   blocchiInvernali.append(el('div', { style:'font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--txt);margin-bottom:10px;' },
     '❄ Finestra INVERNALE'));
-  blocchiInvernali.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;' },
+  blocchiInvernali.append(el('div', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;' },
     'Quando si possono inserire (apertura):'));
   blocchiInvernali.append(fieldGGMM('finestra_invernale_apertura_da', 'Apertura dal:', '01-09'));
   blocchiInvernali.append(fieldGGMM('finestra_invernale_apertura_a',  'Apertura al:',  '30-09'));
-  blocchiInvernali.append(el('div', { style:'font-family:DM Mono,monospace;font-size:10px;color:var(--mut);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.05em;' },
+  blocchiInvernali.append(el('div', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.05em;' },
     'Su quale periodo si possono inserire:'));
   blocchiInvernali.append(fieldGGMM('finestra_invernale_periodo_da', 'Periodo coperto dal:', '01-10'));
   blocchiInvernali.append(fieldGGMM('finestra_invernale_periodo_a',  'Periodo coperto al:',  '31-03'));
@@ -15955,7 +15955,7 @@ function renderImpostazioni(root) {
     'I gruppi spuntati possono inserire/modificare le proprie assenze in qualsiasi data, ignorando le finestre di apertura e il blocco sulle date passate.'));
   GRUPPI_UTENTI.forEach(g => {
     const row = el('label', {
-      style:'display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:3px;cursor:pointer;font-family:DM Mono,monospace;font-size:11px;',
+      style:'display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:3px;cursor:pointer;font-family:JetBrains Mono,monospace;font-size:11px;',
       onmouseenter: function(){ this.style.background='var(--sur)'; },
       onmouseleave: function(){ this.style.background='transparent'; },
     });
@@ -15977,7 +15977,7 @@ function renderImpostazioni(root) {
     const aperta = isoDentroIntervallo(oggiIso, f.aperturaDa, f.aperturaA);
     return { nome:f.nome, aperta };
   });
-  const statoBox = el('div', { style:'background:var(--sur2);border-left:3px solid var(--acc);border-radius:2px;padding:10px 14px;margin-bottom:18px;font-family:DM Mono,monospace;font-size:11px;' });
+  const statoBox = el('div', { style:'background:var(--sur2);border-left:3px solid var(--acc);border-radius:2px;padding:10px 14px;margin-bottom:18px;font-family:JetBrains Mono,monospace;font-size:11px;' });
   statoBox.append(el('div', { style:'color:var(--mut);margin-bottom:4px;' }, 'Stato oggi:'));
   stati.forEach(s => {
     statoBox.append(el('div', {},
@@ -15987,7 +15987,7 @@ function renderImpostazioni(root) {
   });
   box.append(statoBox);
 
-  const msgArea = el('div', { style:'min-height:18px;margin-bottom:10px;font-size:11px;font-family:DM Mono,monospace;' });
+  const msgArea = el('div', { style:'min-height:18px;margin-bottom:10px;font-size:11px;font-family:JetBrains Mono,monospace;' });
   const btnSalva = el('button', { class:'btnp' }, 'Salva impostazioni');
   btnSalva.onclick = async () => {
     // Validazione: tutte le coppie devono essere gg-mm valide

@@ -10,11 +10,11 @@
 <title>Prelievo Magazzino — Cablotec</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-07-31.7"></script>
+<script src="core/db.js?v=2026-07-31.8"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
 :root{
   --bg:#161614; --sur:#1f1f1c; --sur2:#262622; --brd:#3a3a34;
   --txt:#eaeae4; --mut:#8a8a80; --acc:#d4ff4e;
@@ -35,14 +35,14 @@ button{font-family:inherit;}
 .hdr-title{font-size:18px;font-weight:800;letter-spacing:-.01em;}
 .hdr-title span{color:var(--acc);}
 .hdr-right{display:flex;align-items:center;gap:8px;}
-.hdr-op{font-family:'DM Mono',monospace;font-size:12px;color:var(--bg);background:var(--acc);border:none;border-radius:20px;padding:7px 14px;font-weight:700;cursor:pointer;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.hdr-op{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--bg);background:var(--acc);border:none;border-radius:20px;padding:7px 14px;font-weight:700;cursor:pointer;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .hdr-btn{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;width:38px;height:34px;font-size:16px;cursor:pointer;}
 
 /* ── Layout step ── */
 .step{flex:1;display:none;flex-direction:column;overflow:hidden;padding:14px 14px 18px;}
 .step.on{display:flex;}
 .step-title{font-size:16px;font-weight:700;margin-bottom:12px;text-align:center;}
-.step-sub{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);text-align:center;margin:-8px 0 12px;}
+.step-sub{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mut);text-align:center;margin:-8px 0 12px;}
 
 /* ── Stato boot / errori ── */
 .boot{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--mut);text-align:center;padding:24px;}
@@ -57,42 +57,42 @@ button{font-family:inherit;}
 .op-tile:active{border-color:var(--acc);background:rgba(212,255,78,.06);}
 
 /* ── Ricerca + lista commesse ── */
-.search{width:100%;background:var(--sur);border:1px solid var(--brd);border-radius:10px;color:var(--txt);font-family:'DM Mono',monospace;font-size:14px;padding:13px 14px;margin-bottom:12px;outline:none;}
+.search{width:100%;background:var(--sur);border:1px solid var(--brd);border-radius:10px;color:var(--txt);font-family:'JetBrains Mono',monospace;font-size:14px;padding:13px 14px;margin-bottom:12px;outline:none;}
 .search:focus{border-color:var(--acc);}
 .comm-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-bottom:8px;}
 .comm-row{background:var(--sur);border:1px solid var(--brd);border-radius:10px;padding:12px 14px;text-align:left;cursor:pointer;color:var(--txt);width:100%;}
 .comm-row:active{border-color:var(--acc);background:rgba(212,255,78,.06);}
 .cr-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
-.cr-cod{font-family:'DM Mono',monospace;font-size:16px;font-weight:700;}
+.cr-cod{font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;}
 .cr-cli{font-size:12px;color:var(--mut);}
 .cr-sub{font-size:12px;color:var(--mut);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .empty{color:var(--mut);text-align:center;padding:26px 12px;font-size:13px;}
 
 /* ── Scanner ── */
-.scan-comm{font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);text-align:center;margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.scan-comm{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mut);text-align:center;margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .scan-wrap{position:relative;border-radius:14px;overflow:hidden;background:#000;}
 .scan-wrap video{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;}
 .scan-frame{position:absolute;inset:16%;border:3px solid var(--acc);border-radius:14px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.25);}
 .scan-pause{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);}
 .scan-pause.on{display:flex;}
 .scan-pause button{background:var(--acc);color:var(--bg);border:none;border-radius:12px;padding:16px 22px;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);}
-.scan-status{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);text-align:center;min-height:17px;margin:10px 4px;}
+.scan-status{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--mut);text-align:center;min-height:17px;margin:10px 4px;}
 .scan-status.ok{color:var(--grn);}
 .scan-status.err{color:var(--red);}
 .manual{display:flex;gap:8px;margin-bottom:12px;}
-.manual input{flex:1;background:var(--sur);border:1px solid var(--brd);border-radius:8px;color:var(--txt);font-family:'DM Mono',monospace;font-size:14px;padding:11px 12px;outline:none;}
+.manual input{flex:1;background:var(--sur);border:1px solid var(--brd);border-radius:8px;color:var(--txt);font-family:'JetBrains Mono',monospace;font-size:14px;padding:11px 12px;outline:none;}
 .manual input:focus{border-color:var(--acc);}
 .manual button{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:0 16px;font-weight:700;cursor:pointer;}
 
 .rows{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-bottom:8px;}
 .row{display:flex;align-items:center;gap:10px;background:var(--sur);border:1px solid var(--brd);border-radius:10px;padding:10px 12px;}
 .row-main{flex:1;min-width:0;}
-.row-cod{font-family:'DM Mono',monospace;font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.row-cod{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .row-desc{font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .row-desc.warn{color:var(--yel);}
 .qty{display:flex;align-items:center;gap:6px;flex-shrink:0;}
 .qty button{width:38px;height:38px;border-radius:8px;border:1px solid var(--brd);background:var(--sur2);color:var(--txt);font-size:20px;line-height:1;cursor:pointer;}
-.qty .val{font-family:'DM Mono',monospace;font-size:16px;font-weight:700;min-width:30px;text-align:center;}
+.qty .val{font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;min-width:30px;text-align:center;}
 .row-del{background:none;border:none;color:var(--red);font-size:17px;cursor:pointer;flex-shrink:0;padding:4px;}
 
 .savebar{display:flex;gap:10px;margin-top:10px;}
@@ -107,7 +107,7 @@ button{font-family:inherit;}
 .done-icon{font-size:46px;color:var(--grn);margin-bottom:12px;}
 .done-card.err .done-icon{color:var(--red);}
 .done-msg{font-size:20px;font-weight:800;margin-bottom:8px;}
-.done-detail{font-family:'DM Mono',monospace;font-size:12px;color:var(--mut);white-space:pre-line;}
+.done-detail{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--mut);white-space:pre-line;}
 </style>
 </head>
 <body>
