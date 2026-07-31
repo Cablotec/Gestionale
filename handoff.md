@@ -76,7 +76,7 @@
 - 19 test in scratchpad/test_mancanti.js.
 
 ### Mancanti v2 — sotto scorta, consegne e ritardi (31 lug, `2026-07-31.3`, idee di Nico)
-- **Migrazione aggiuntiva** (DA ESEGUIRE): `ALTER TABLE mancanti ADD COLUMN impegno numeric; ADD COLUMN consegne jsonb; ADD COLUMN prima_consegna date;` — dopo va **rifatto l'import**, il vecchio archivio non ha le consegne.
+- **Migrazione aggiuntiva ESEGUITA** (31 lug, verificata via REST: scrittura/rilettura del jsonb `consegne` OK, torna un array vero): `impegno numeric`, `consegne jsonb`, `prima_consegna date`. **Dopo la migrazione va RIFATTO l import**: il vecchio archivio (314 righe) non ha le consegne.
 - **Scoperta che ha ribaltato il disegno**: l'import teneva solo `Qta da ord > 0` (317 righe) — ma **quelle righe non hanno quasi mai una data** (2 su 317). Le date ce l'hanno solo le righe **già ordinate** (47 su 47), che venivano **scartate**. La vista "prossime consegne" chiesta da Nico era quindi impossibile: stavo buttando via esattamente la metà utile del file.
 - **Nuova definizione**: si importa tutto ciò che è **sotto scorta** (`giacenza < impegno`) o da ordinare → 364 righe. Due categorie, sempre distinte:
   - **DA ORDINARE** (317): nessuno l'ha comprato → **ferma la commessa**, nessuna data.
