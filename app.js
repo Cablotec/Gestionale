@@ -3692,19 +3692,34 @@ function renderFabbisogno(root) {
       b.append(el('div', { style:'font-weight:700;color:var(--red);margin-bottom:6px;' },
         '⚠ ' + scadute.length + (scadute.length === 1 ? ' consegna in ritardo' : ' consegne in ritardo')),
         el('div', { class:'sub', style:'margin-bottom:6px;font-size:10px;' },
-          'Erano attese prima di oggi e non risultano arrivate.'));
-      scadute.slice(0, 10).forEach(c => b.append(rigaCons(c, true)));
-      if (scadute.length > 10) b.append(el('div', { class:'sub', style:'margin-top:6px;font-size:10px;' },
-        'e altre ' + (scadute.length - 10) + '.'));
+          'Erano attese prima di oggi e non risultano arrivate. Dalla più vecchia.'));
+      // TUTTE, non le prime N: se una consegna è in ritardo va vista, non
+      // contata. Lo scorrimento tiene il blocco entro un'altezza leggibile.
+      const lista = el('div', { style:'max-height:300px;overflow-y:auto;' });
+      scadute.forEach(c => lista.append(rigaCons(c, true)));
+      b.append(lista);
       root.append(b);
     }
     if (prossime.length) {
       const b = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:14px;' });
-      b.append(el('div', { style:'font-weight:700;margin-bottom:6px;' },
-        'Prossime consegne'),
+      let apertaTutte = false;
+      const listaP = el('div', { style:'max-height:300px;overflow-y:auto;' });
+      const disegnaP = () => {
+        listaP.innerHTML = '';
+        (apertaTutte ? prossime : prossime.slice(0, 5)).forEach(c => listaP.append(rigaCons(c, false)));
+      };
+      disegnaP();
+      b.append(el('div', { style:'font-weight:700;margin-bottom:6px;' }, 'Prossime consegne'),
         el('div', { class:'sub', style:'margin-bottom:6px;font-size:10px;' },
-          prossime.length + ' previste in totale.'));
-      prossime.slice(0, 5).forEach(c => b.append(rigaCons(c, false)));
+          prossime.length + ' previste in totale, dalla più vicina.'),
+        listaP);
+      if (prossime.length > 5) {
+        const btn = el('button', { class:'btnsm', style:'margin-top:8px;', onclick: () => {
+          apertaTutte = !apertaTutte; disegnaP();
+          btn.textContent = apertaTutte ? 'Mostra solo le prossime 5' : 'Vedi tutte le ' + prossime.length;
+        } }, 'Vedi tutte le ' + prossime.length);
+        b.append(btn);
+      }
       root.append(b);
     }
   }
@@ -3858,16 +3873,43 @@ function renderFabbisogno(root) {
           nf(blocc ? m.qta_da_ordinare : Math.abs((Number(m.giacenza) || 0) - (Number(m.impegno) || 0)))
           + (m.um ? ' ' + m.um : '')),
         el('td', { class:'tr', style:'font-family:DM Mono,monospace;color:var(--mut);' }, nf(m.giacenza)),
-        el('td', { style:'font-family:DM Mono,monospace;font-size:11px;color:' + (inRitardo ? 'var(--red)' : 'var(--txt)') + ';' },
-          prima ? (fmtIT(prima.data) + (inRitardo ? ' ⚠' : '')
-            + (cons.length > 1 ? ' +' + (cons.length - 1) : '')) : '—'),
-        el('td', { style:'font-size:11px;color:var(--mut);' }, (prima && prima.fornitore) || '—'),
+        // Una riga per consegna, numerate: con più previsioni di entrata
+        // "06/08 +1" nascondeva proprio il dato che serve.
+        el('td', { style:'font-family:DM Mono,monospace;font-size:11px;' },
+          ...(cons.length
+            ? cons.map((c, i) => el('div', {
+                style:'white-space:nowrap;color:' + (c.data < oggi ? 'var(--red)' : 'var(--txt)') + ';' },
+                (cons.length > 1 ? (i + 1) + 'ª ' : '') + fmtIT(c.data)
+                + (c.qta != null ? ' · ' + nf(c.qta) : '')
+                + (c.data < oggi ? ' ⚠' : '')))
+            : [el('span', { style:'color:var(--mut);' }, '—')])),
+        el('td', { style:'font-size:11px;color:var(--mut);' },
+          ...(cons.length
+            ? cons.map(c => el('div', { style:'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;',
+                title: (c.fornitore || '') + (c.ordine ? ' · ordine ' + c.ordine : '') },
+                c.fornitore || '—'))
+            : [el('span', {}, '—')])),
         el('td', { style:'font-family:DM Mono,monospace;font-size:11px;' },
           o ? el('a', { href:'#', style:'color:var(--blu);',
                 onclick:(e)=>{ e.preventDefault(); openOperazioneModal(o); } },
               (o.numero_ordine || '—') + '/' + (o.pos || '—'))
             : el('span', { style:'color:var(--mut);', title:'Questo OP non ha una commessa nel gestionale' },
                 m.numero_op + ' (assente)')),
+        // Elimina: correzione manuale (es. "questo è arrivato stamattina").
+        // Dura fino al prossimo import: l'estrazione resta la fonte di verità.
+        el('td', { class:'tc' }, el('button', { class:'btnd', style:'padding:1px 7px;',
+          title:'Togli questa riga dall\'elenco. Torna al prossimo import se il magazzino la segnala ancora.',
+          onclick: async (e) => {
+            e.stopPropagation();
+            if (!confirm('Togliere ' + m.codice + ' dall\'elenco mancanti?\n\n'
+              + 'È una correzione manuale: se la prossima estrazione lo segnala ancora, ricompare.')) return;
+            const { error } = await eseguiConRetry(
+              () => sb.from('mancanti').delete().eq('id', m.id), { label: 'elimina mancante' });
+            if (error) return toast(error.message, 'err');
+            state.mancanti = state.mancanti.filter(x => x.id !== m.id);
+            toast('Riga tolta dall\'elenco');
+            renderFabbisogno(root);
+          } }, '✕')),
       ));
     });
     tabWrap.append(el('div', { class:'sub', style:'margin-bottom:6px;' },
@@ -3876,7 +3918,8 @@ function renderFabbisogno(root) {
         el('thead', {}, el('tr', {},
           el('th', {}, 'Stato'), el('th', {}, 'Codice'), el('th', {}, 'Descrizione'),
           el('th', { class:'tr' }, 'Manca'), el('th', { class:'tr' }, 'Giacenza'),
-          el('th', {}, 'Consegna'), el('th', {}, 'Fornitore'), el('th', {}, 'Commessa'))),
+          el('th', {}, 'Consegne'), el('th', {}, 'Fornitore'), el('th', {}, 'Commessa'),
+          el('th', { class:'tc' }, ''))),
         tb));
   };
   selOp.onchange = () => { mancantiFiltroOp = selOp.value || null; renderTab2(); };
