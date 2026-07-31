@@ -43,7 +43,7 @@
   CREATE INDEX ore_esterne_op ON ore_esterne (operazione_id);
   ```
 - Tabella `produttori` (scheda Codifica): **ESEGUITA** (28 lug, verificata via REST: lettura OK, cache PostgREST aggiornata, anagrafica ATTIVA). Tabella vuota, da popolare.
-- Tabella `mancanti` (fabbisogno materiale, 31 lug): **DA ESEGUIRE** — codice inerte senza (scheda Fabbisogno spenta, nessun badge):
+- Tabella `mancanti` (fabbisogno materiale): **ESEGUITA** (31 lug, verificata via REST: lettura, insert e delete OK). Primo import fatto: 314 codici, 33 commesse agganciate. SQL usata:
   ```sql
   CREATE TABLE mancanti (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
