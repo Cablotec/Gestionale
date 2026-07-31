@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-28.9`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-31.1`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -28,7 +28,7 @@
 - `utenti.azienda_id` (ditta degli esterni in sede): **ESEGUITA** (28 lug); i 4 esterni hanno già la ditta collegata (Tecnocab SNC, SINTEC DI SINANI QERIM).
 - Tabella `produttori` (scheda Codifica): **ESEGUITA** (28 lug, verificata via REST); vuota, da popolare.
 - Tabella `ore_esterne` (ore fornitori dichiarate): **ESEGUITA** (28 lug, verificata via REST: esiste, vuota).
-- **Tutte le migrazioni note sono eseguite.** Nessuna in attesa.
+- Tabella `mancanti` (fabbisogno materiale): **DA ESEGUIRE** — SQL in handoff.md; codice inerte senza (scheda Fabbisogno spenta).
 
 ## ▶ Fili aperti (priorità)
 0. **Codifica articoli** (15 lug, `2026-07-15.1`): tab Codifica in Gestione genera codici a 20 caratteri (5 classificazione da `domain/codifica.js` + 4 produttore + 11 codice con zeri PRIMA). Migrazione `produttori` **eseguita** (28 lug): anagrafica attiva, tabella da popolare. Manca: chiarire con Matteo le ambiguità dei fogli (note ⚠ in scheda e in handoff). Codici a sé stanti: collegamento all'anagrafica articoli = futuro.
@@ -38,6 +38,8 @@
 3. **Accorpamento commesse**: collaudare (vedi migrazione). Limiti v1: "fine fase" non propaga al gruppo; fase_id null sulle copie.
 4. **Gantt**: fatti A+B+D (ritardi ancorati a oggi `⚠ RIT. Ng`, barre = quota operatore coi suoi timbri, fornitori dichiarati, legenda in alto, buchi su ferie). Restano **C** (dieta chips stati) ed **E** (riga REPARTO).
 5. **Prospettiva "tutta l'azienda"**: Supabase regge; fatturazione fuori; il salto è SICUREZZA — **repo PUBBLICO con anon key + password kiosk in core/db.js** → privatizzare + ruotare, RPC, backup. Nessuna azione ora.
+
+6. **Fabbisogno materiale** (31 lug, `2026-07-31.1`): scheda Gestione → Fabbisogno importa l'estrazione "Fabbisogno Massivo" (.xlsx). Chiave = **numero OP** (`OdL Prossimo Impegno` → `odlANumeroOp`: `2026OP1727` → `2026/OP/01727`). Aggancio per **chiave scritta, non FK**: gli OP senza commessa si salvano e si agganciano da soli quando la commessa nasce. **Ogni import SOSTITUISCE** il precedente (è una fotografia). Colonne cercate **per nome, non per posizione**. Libreria xlsx da CDN caricata **solo all'apertura della scheda**. Si vedono nel modal commessa sotto "Preparazione materiale" e come badge `⚠N` in Ordini cliente; se la tendina dice "completo" ma ci sono mancanti, **la contraddizione si dichiara in rosso**. Manca: migrazione `mancanti`.
 
 ## Sospesi tecnici
 - ~~Step 1b: timbri con `sb.from()` nudo~~ **FATTO** 28 lug (`2026-07-28.3`): `eseguiConRetry` su TUTTO il flusso di cattura, in `mobile.html` **e nel kiosk** (esposto uguale, non era segnalato). Admin esclusi di proposito (c'è una persona che vede l'errore e ritenta). Due trappole da ricordare: un **builder Supabase è monouso** → ricostruirlo in una `buildQ = () => …` a ogni tentativo; il **timestamp si calcola prima** del retry, mai dentro la closure, o il secondo tentativo scrive l'ora sbagliata.

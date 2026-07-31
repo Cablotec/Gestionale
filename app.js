@@ -89,6 +89,7 @@ const state = {
   // Operazioni: fornitori esterni (aziende con is_fornitore=true)
   opFornitori: [],         // [{id, operazione_id, azienda_id, allocazione, creato_il}]
   oreEsterne: [],          // ore DICHIARATE da rapportino (tabella ore_esterne)
+  mancanti: [],            // materiale mancante dal fabbisogno importato
   // Operazioni: fasi (scomposizione per tipo di lavorazione)
   opFasi: [],              // [{id, operazione_id, tipo_lavorazione_id, minuti_unitari, ordine, creato_il}]
   // Gantt
@@ -739,9 +740,10 @@ async function loadAllData() {
   state.impostazioni = Object.fromEntries((impostazioni.data||[]).map(r=>[r.chiave, r.valore]));
   state.consegneCommessa = consegneCommessa.data || [];
   state.spedizioni = spedizioni.data || [];
-  // Fuori dal Promise.all: la tabella può non esistere ancora (migrazione) e
-  // un suo errore non deve far cadere tutto il caricamento.
+  // Fuori dal Promise.all: le tabelle possono non esistere ancora (migrazione)
+  // e un loro errore non deve far cadere tutto il caricamento.
   await caricaOreEsterne();
+  await caricaMancanti();
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -1411,6 +1413,7 @@ const TAB_STRUCTURE = {
     adminOnly: true,
     tabs: [
       { id: 'articoli',       label: 'Articoli',          adminOnly: true },
+      { id: 'fabbisogno',     label: 'Fabbisogno',        adminOnly: true },
       { id: 'codifica',       label: 'Codifica',          adminOnly: true },
       { id: 'aziende',        label: 'Aziende',           adminOnly: true },
       { id: 'analisi_clienti', label: 'Analisi clienti',  adminOnly: true },
@@ -1514,6 +1517,7 @@ function renderTab(name) {
     else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
     else if (name === 'analisi_clienti') renderAnalisiClienti(root);
     else if (name === 'codifica') renderCodifica(root);
+    else if (name === 'fabbisogno') renderFabbisogno(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
     else if (name === 'attivita_extra') renderAttivitaExtra(root);
@@ -3479,6 +3483,20 @@ function renderArticoli(root) {
 // inerte se la migrazione manca — la sezione mostra solo le ore timbrate e
 // dichiara che l'inserimento a mano non è attivo. Caricata una volta e tenuta
 // in state.oreEsterne, che è la fonte letta dal domain.
+// Materiale mancante dal fabbisogno importato. Tabella `mancanti`: inerte se
+// la migrazione manca (nessuna sezione, nessun badge, nessun errore).
+let mancantiTabellaOk = null;
+async function caricaMancanti() {
+  if (mancantiTabellaOk === false) return;
+  try {
+    const { data, error } = await fetchTutte(() =>
+      sb.from('mancanti').select('*').order('numero_op').order('codice'));
+    if (error) { mancantiTabellaOk = false; state.mancanti = []; return; }
+    mancantiTabellaOk = true;
+    state.mancanti = data || [];
+  } catch (e) { mancantiTabellaOk = false; state.mancanti = []; }
+}
+
 let oreEsterneTabellaOk = null;  // null = da scoprire; false = migrazione mancante
 async function caricaOreEsterne() {
   if (oreEsterneTabellaOk === false) return;
@@ -3501,6 +3519,196 @@ async function caricaProduttori() {
     produttoriTabellaOk = true;
     produttoriCache = data || [];
   } catch (e) { produttoriTabellaOk = false; }
+}
+
+// ═══ GESTIONE → FABBISOGNO (import materiale mancante) ═══
+// L'estrazione "Fabbisogno Massivo" è una FOTOGRAFIA: ogni import sostituisce
+// il precedente, altrimenti dopo tre estrazioni si vedrebbero come mancanti
+// codici già arrivati. La data dell'estrazione resta scritta e visibile.
+// La libreria che legge l'xlsx si carica SOLO qui, alla prima apertura della
+// scheda: è ~1 MB e non deve pesare sull'avvio di tutto il gestionale.
+const XLSX_CDN = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+let xlsxPromise = null;
+function caricaXLSX() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (xlsxPromise) return xlsxPromise;
+  xlsxPromise = new Promise((risolvi, rifiuta) => {
+    const s = document.createElement('script');
+    s.src = XLSX_CDN;
+    s.onload = () => window.XLSX ? risolvi(window.XLSX) : rifiuta(new Error('libreria caricata ma non disponibile'));
+    s.onerror = () => { xlsxPromise = null; rifiuta(new Error('impossibile scaricare la libreria (serve connessione)')); };
+    document.head.appendChild(s);
+  });
+  return xlsxPromise;
+}
+
+// Colonne attese nell'estrazione. Cerco per NOME, non per posizione: se domani
+// il gestionale di magazzino sposta una colonna, l'import continua a funzionare.
+const FABB_COLONNE = {
+  codice:      ['Codice'],
+  descrizione: ['Descrizione Articolo', 'Descrizione'],
+  qtaDaOrd:    ['Qta da ord', 'Qta da ordinare'],
+  qtaRich:     ['Qta richiesta'],
+  giacenza:    ['Giacenza'],
+  odl:         ['OdL Prossimo Impegno'],
+  dataArrivo:  ['Data Prossima Previsione Entrata'],
+  fornitore:   ['Ragione Sociale'],
+  um:          ['Um Interna', 'UM'],
+};
+// Da riga-foglio a riga-mancante. Ritorna null se non è un mancante
+// (Qta da ord ≤ 0: c'è già tutto) — l'estrazione contiene anche quelli.
+function fabbRigaNormalizza(r, mappa) {
+  const val = (k) => { const c = mappa[k]; return c == null ? '' : r[c]; };
+  const num = (k) => {
+    const v = String(val(k) == null ? '' : val(k)).trim().replace(',', '.');
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const codice = String(val('codice') || '').trim();
+  const daOrd = num('qtaDaOrd');
+  if (!codice || !(daOrd > 0)) return null;
+  const dataArr = (() => {
+    const v = val('dataArrivo');
+    if (v instanceof Date) return toLocalISO(v);
+    const n = Number(v);
+    // Seriale Excel (giorni dal 30/12/1899). Sotto 1000 è spazzatura, non una data.
+    if (Number.isFinite(n) && n > 1000) return new Date(Date.UTC(1899, 11, 30) + n * 86400000).toISOString().slice(0, 10);
+    const s = String(v || '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  })();
+  return {
+    numero_op: odlANumeroOp(val('odl')),
+    odlGrezzo: String(val('odl') || '').trim(),
+    codice,
+    descrizione: String(val('descrizione') || '').trim() || null,
+    qta_da_ordinare: daOrd,
+    qta_richiesta: num('qtaRich'),
+    giacenza: num('giacenza'),
+    um: String(val('um') || '').trim() || null,
+    data_arrivo: dataArr,
+    fornitore: String(val('fornitore') || '').trim() || null,
+  };
+}
+
+function renderFabbisogno(root) {
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Fabbisogno — materiale mancante')));
+  root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
+    'Carica l\'estrazione "Fabbisogno Massivo" del gestionale di magazzino. '
+    + 'I codici mancanti si agganciano alle commesse tramite il numero OP e compaiono nella scheda della commessa. '
+    + 'Ogni import SOSTITUISCE il precedente: è una fotografia, non uno storico.'));
+
+  if (mancantiTabellaOk === false) {
+    root.append(el('div', { class:'empty' },
+      'Manca la tabella `mancanti` (migrazione dal pannello Supabase). Import non attivo.'));
+    return;
+  }
+
+  // Stato attuale
+  const box = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:14px;' });
+  const righeOra = state.mancanti || [];
+  const opOra = new Set(righeOra.map(m => m.numero_op).filter(Boolean));
+  const dataOra = righeOra.reduce((d, m) => (!d || String(m.import_data || '') > d) ? (m.import_data || d) : d, null);
+  box.append(el('div', { style:'font-weight:700;margin-bottom:4px;' }, 'In archivio adesso'),
+    el('div', { class:'sub' }, righeOra.length
+      ? righeOra.length + ' codici mancanti su ' + opOra.size + (opOra.size === 1 ? ' commessa' : ' commesse')
+        + (dataOra ? ' · estrazione del ' + fmtIT(String(dataOra).slice(0, 10)) : '')
+      : 'Nessun fabbisogno importato.'));
+  root.append(box);
+
+  const inFile = el('input', { type:'file', accept:'.xlsx,.xls', style:'max-width:340px;' });
+  const stato = el('div', { class:'sub', style:'margin-top:10px;' });
+  const anteprima = el('div', { style:'margin-top:12px;' });
+  let daImportare = null;
+
+  inFile.onchange = async () => {
+    anteprima.innerHTML = ''; daImportare = null;
+    const f = inFile.files && inFile.files[0];
+    if (!f) return;
+    stato.textContent = 'Leggo il file…';
+    try {
+      const XLSX = await caricaXLSX();
+      const buf = await f.arrayBuffer();
+      const wb = XLSX.read(buf, { cellDates: true });
+      // Il foglio giusto è quello che contiene la colonna Codice: non mi fido
+      // del nome, che potrebbe cambiare.
+      let righe = null, mappa = null;
+      for (const nome of wb.SheetNames) {
+        const js = XLSX.utils.sheet_to_json(wb.Sheets[nome], { defval: '' });
+        if (!js.length) continue;
+        const intest = Object.keys(js[0]);
+        const m = {};
+        for (const k in FABB_COLONNE) {
+          const trovata = FABB_COLONNE[k].find(nomeCol =>
+            intest.some(i => String(i).trim().toLowerCase() === nomeCol.toLowerCase()));
+          if (trovata) m[k] = intest.find(i => String(i).trim().toLowerCase() === trovata.toLowerCase());
+        }
+        if (m.codice && m.qtaDaOrd) { righe = js; mappa = m; break; }
+      }
+      if (!righe) throw new Error('nessun foglio con le colonne "Codice" e "Qta da ord"');
+      const mancanti = righe.map(r => fabbRigaNormalizza(r, mappa)).filter(Boolean);
+      if (!mancanti.length) throw new Error('nessuna riga con "Qta da ord" maggiore di zero');
+      // Aggancio: quali OP esistono davvero fra le commesse
+      const opNote = new Set((state.operazioni || []).map(o => o.numero_op).filter(Boolean));
+      const agganciate = new Set(), orfane = new Set(), senzaOdl = [];
+      mancanti.forEach(m => {
+        if (!m.numero_op) { senzaOdl.push(m); return; }
+        (opNote.has(m.numero_op) ? agganciate : orfane).add(m.numero_op);
+      });
+      daImportare = { mancanti, nomeFile: f.name };
+      stato.textContent = '';
+      anteprima.append(
+        el('div', { style:'font-weight:700;margin-bottom:6px;' }, 'Anteprima di ' + f.name),
+        el('div', { class:'sub' },
+          mancanti.length + ' codici mancanti (righe con "Qta da ord" > 0) · '
+          + agganciate.size + (agganciate.size === 1 ? ' commessa agganciata' : ' commesse agganciate')
+          + (orfane.size ? ' · ' + orfane.size + ' OP senza commessa nel gestionale' : '')
+          + (senzaOdl.length ? ' · ' + senzaOdl.length + ' righe senza OdL (verranno scartate)' : '')),
+        orfane.size
+          ? el('div', { class:'sub', style:'margin-top:6px;color:var(--yel);font-size:11px;' },
+              '⚠ OP presenti nell\'estrazione ma non nel gestionale: ' + [...orfane].join(', ')
+              + ' — le righe si salvano lo stesso e si agganceranno da sole se quelle commesse verranno inserite.')
+          : null,
+        el('div', { class:'sub', style:'margin-top:6px;color:var(--yel);font-size:11px;' },
+          '⚠ Confermando, i ' + righeOra.length + ' codici attualmente in archivio vengono sostituiti da questi.'),
+        el('button', { class:'btnp', style:'margin-top:10px;', onclick: async (e) => {
+          e.target.disabled = true; e.target.textContent = 'Importo…';
+          try {
+            const payload = daImportare.mancanti.filter(m => m.numero_op).map(m => ({
+              numero_op: m.numero_op, codice: m.codice, descrizione: m.descrizione,
+              qta_da_ordinare: m.qta_da_ordinare, qta_richiesta: m.qta_richiesta,
+              giacenza: m.giacenza, um: m.um, data_arrivo: m.data_arrivo,
+              fornitore: m.fornitore, import_data: toLocalISO(new Date()),
+            }));
+            // SOSTITUZIONE: prima si svuota, poi si inserisce. Se l'insert
+            // fallisse a metà lo si vede subito dal conteggio in archivio.
+            const { error: errDel } = await eseguiConRetry(
+              () => sb.from('mancanti').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+              { label: 'pulizia fabbisogno' });
+            if (errDel) throw new Error(errDel.message);
+            for (let i = 0; i < payload.length; i += 500) {
+              const { error } = await eseguiConRetry(
+                () => sb.from('mancanti').insert(payload.slice(i, i + 500)),
+                { label: 'import fabbisogno' });
+              if (error) throw new Error(error.message);
+            }
+            await caricaMancanti();
+            toast('Fabbisogno importato: ' + payload.length + ' codici', 'ok');
+            renderFabbisogno(root);
+          } catch (err) {
+            toast('Errore import: ' + (err.message || err), 'err');
+            e.target.disabled = false; e.target.textContent = 'Conferma e sostituisci';
+          }
+        } }, 'Conferma e sostituisci'),
+      );
+    } catch (err) {
+      stato.textContent = '';
+      anteprima.append(el('div', { class:'sub', style:'color:var(--red);' },
+        'Non riesco a leggere il file: ' + (err.message || err)));
+    }
+  };
+  root.append(el('div', { class:'field' }, el('label', {}, 'Estrazione Fabbisogno Massivo (.xlsx)'), inFile, stato));
+  root.append(anteprima);
 }
 
 function renderCodifica(root) {
@@ -6527,6 +6735,20 @@ function renderPianificazione(root) {
         ' ' + (OP_PREP[o.stato_preparazione]?.label || '—')
       ));
     }
+    // Mancanti dal fabbisogno: si vedono senza aprire la commessa. Rosso se la
+    // preparazione è dichiarata completa (contraddizione), altrimenti giallo.
+    if (typeof mancantiCommessa === 'function') {
+      const mc = mancantiCommessa(o);
+      if (mc.nCodici) {
+        prepCell.append(el('span', {
+          style: 'margin-left:6px;font-size:10px;font-family:DM Mono,monospace;font-weight:700;color:'
+            + (mc.incoerente ? 'var(--red)' : 'var(--yel)') + ';',
+          title: mc.nCodici + ' codici mancanti dal fabbisogno'
+            + (mc.dataImport ? ' del ' + fmtIT(String(mc.dataImport).slice(0, 10)) : '')
+            + (mc.incoerente ? ' — ma la preparazione è dichiarata COMPLETA' : ''),
+        }, '⚠' + mc.nCodici));
+      }
+    }
     tr.append(prepCell);
 
     // Stato — menu a tendina (cambio immediato) per gli admin, badge in sola lettura per gli utenti
@@ -7413,6 +7635,46 @@ function openOperazioneModal(o) {
   );
   selPrep.value = o.stato_preparazione || 'vuoto';
 
+  // ── MATERIALE MANCANTE (dal fabbisogno importato) ──────────────────────
+  // Elenco di sola lettura: la fonte è l'estrazione del magazzino, qui non si
+  // modifica. Compare ogni volta che ci sono mancanti su questo numero OP —
+  // anche se la tendina dice "completo": in quel caso la contraddizione viene
+  // DICHIARATA invece di restare nascosta (decisione Nico).
+  const notaMancanti = el('div', { style:'margin-top:6px;' });
+  const renderMancanti = () => {
+    notaMancanti.innerHTML = '';
+    if (typeof mancantiCommessa !== 'function') return;
+    const m = mancantiCommessa({ ...o, stato_preparazione: selPrep.value });
+    if (!m.nCodici) {
+      if (o.numero_op && (state.mancanti || []).length) {
+        notaMancanti.append(el('div', { class:'sub', style:'font-size:10px;' },
+          'Nessun codice mancante per ' + o.numero_op + ' nell\'ultimo fabbisogno importato.'));
+      }
+      return;
+    }
+    const nf = (n) => n == null ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+    const righe = m.righe.map(x => ({
+      titolo: x.codice,
+      meta: (x.descrizione ? String(x.descrizione).slice(0, 46) : '—')
+        + (x.um ? ' · ' + x.um : ''),
+      valore: 'mancano ' + nf(x.qta_da_ordinare)
+        + (Number(x.giacenza) > 0 ? ' (giac. ' + nf(x.giacenza) + ')' : ''),
+    }));
+    notaMancanti.append(entityTimeline({
+      sommario: '⚠ ' + m.nCodici + (m.nCodici === 1 ? ' codice mancante' : ' codici mancanti')
+        + (m.dataImport ? ' · fabbisogno del ' + fmtIT(String(m.dataImport).slice(0, 10)) : ''),
+      debole: true,
+      righe,
+    }));
+    if (m.incoerente) {
+      notaMancanti.append(el('div', { class:'sub',
+        style:'margin-top:4px;color:var(--red);font-size:11px;' },
+        '⚠ La preparazione è dichiarata COMPLETA ma il fabbisogno riporta '
+        + m.nCodici + (m.nCodici === 1 ? ' codice mancante' : ' codici mancanti') + '.'));
+    }
+  };
+  selPrep.addEventListener('change', renderMancanti);
+
   // ── Fasi della commessa: SOLA LETTURA dall'anagrafica articolo ──
   // (media storica viva + valori manuali per i tipi senza storico).
   // Si modificano con la matita, che apre la scheda anagrafica. Il toggle
@@ -7731,7 +7993,7 @@ function openOperazioneModal(o) {
         + 'nella scheda Consuntivo, sezione "Ore esterne".')),
     ...(fieldRealistica ? [fieldRealistica] : []),
     el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
+      el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep, notaMancanti),
       el('div', { class:'field' }),
     ),
   );
@@ -8687,6 +8949,7 @@ function openOperazioneModal(o) {
   }
   // Ore esterne: solo su commesse esistenti (una nuova non ha consuntivo).
   if (!isNew) renderOreEsterne();
+  renderMancanti();
   // Bind aggiuntivo: input minuti aggiorna anche l'indicatore di divergenza
   // e il suggerimento "da prezzo" (che sparisce quando i valori coincidono)
   const minInputEl = form.querySelector('#minuti-input');

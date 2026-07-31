@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-28.9`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-07-31.1`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -43,6 +43,37 @@
   CREATE INDEX ore_esterne_op ON ore_esterne (operazione_id);
   ```
 - Tabella `produttori` (scheda Codifica): **ESEGUITA** (28 lug, verificata via REST: lettura OK, cache PostgREST aggiornata, anagrafica ATTIVA). Tabella vuota, da popolare.
+- Tabella `mancanti` (fabbisogno materiale, 31 lug): **DA ESEGUIRE** — codice inerte senza (scheda Fabbisogno spenta, nessun badge):
+  ```sql
+  CREATE TABLE mancanti (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    numero_op text NOT NULL,
+    codice text NOT NULL,
+    descrizione text,
+    qta_da_ordinare numeric,
+    qta_richiesta numeric,
+    giacenza numeric,
+    um text,
+    data_arrivo date,
+    fornitore text,
+    import_data date,
+    created_at timestamptz DEFAULT now()
+  );
+  ALTER TABLE mancanti ENABLE ROW LEVEL SECURITY;
+  CREATE POLICY mancanti_all ON mancanti FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  CREATE INDEX mancanti_op ON mancanti (numero_op);
+  ```
+
+## Fabbisogno — materiale mancante agganciato alle commesse (31 lug, `2026-07-31.1`)
+- **Richiesta Nico**: agganciare i mancanti dell'estrazione "Fabbisogno Massivo" agli ordini, per vederli quando la preparazione materiale è parziale.
+- **La chiave è il numero OP**: colonna `OdL Prossimo Impegno` dell'estrazione (`2026OP1727`) → `numero_op` del gestionale (`2026/OP/01727`), via `odlANumeroOp` in domain. Sul file del 28 lug: 364 righe, **317 mancanti** (`Qta da ord` > 0), 42 OdL distinti, **39 agganciano** una commessa.
+- **Aggancio per CHIAVE SCRITTA, non per FK**: le righe di OdL che nel gestionale non esistono (erano 3: 2026OP1830/1458/1797) si salvano lo stesso e si agganciano **da sole** se quelle commesse verranno inserite, senza reimportare.
+- **Ogni import SOSTITUISCE il precedente** (delete + insert a blocchi da 500): un fabbisogno è una fotografia, accumularlo mostrerebbe come mancanti codici già arrivati. La data dell'estrazione resta scritta (`import_data`) e visibile ovunque.
+- **Scheda Gestione → Fabbisogno**: file picker, anteprima (quanti codici, quante commesse agganciate, quali OP orfani, quante righe si sostituiscono) e conferma esplicita. Le colonne si cercano **per NOME e non per posizione** (`FABB_COLONNE`), così se il gestionale di magazzino sposta una colonna l'import regge; il foglio giusto è quello che ha "Codice" + "Qta da ord", non si va per nome del foglio.
+- **La libreria xlsx (SheetJS) si carica da CDN SOLO all'apertura della scheda** (`caricaXLSX`, ~1 MB): non deve pesare sull'avvio del gestionale. Secondo CDN dopo quello di Supabase.
+- **Dove si vedono**: (a) modal commessa, sotto "Preparazione materiale", elenco `entityTimeline` **sempre** se ci sono mancanti; (b) badge `⚠N` nella colonna prep. della lista Ordini cliente. **Incoerenza dichiarata** (decisione Nico): se la tendina dice "completo" ma il fabbisogno riporta mancanti, la contraddizione si vede in rosso invece di restare nascosta.
+- **Dato inutile scoperto sui dati**: la colonna "Data Prossima Previsione Entrata" è compilata su **2 righe su 317** (se manca ed è da ordinare, una data d'arrivo non c'è ancora). Importata ma non ci si costruisce niente sopra.
+- 19 test in scratchpad/test_mancanti.js.
 
 ## ▶ Fili aperti (in ordine di priorità)
 

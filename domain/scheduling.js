@@ -1352,6 +1352,41 @@ function oreEsterneCommessa(operazioneId) {
   };
 }
 
+// ── MATERIALE MANCANTE (fabbisogno importato) ──────────────────────────────
+// I mancanti arrivano da un'estrazione esterna ("Fabbisogno Massivo") e sono
+// una FOTOGRAFIA: ogni import sostituisce il precedente. L'aggancio alla
+// commessa è il numero OP scritto (`numero_op`), non un collegamento rigido:
+// così le righe di OdL che nel gestionale non esistono (ancora) restano
+// registrate e si agganciano DA SOLE quando la commessa nasce, senza
+// reimportare. Coerente col resto: si tiene il dato, si deriva il legame.
+// Converte l'OdL dell'estrazione nel formato del gestionale: 2026OP1727 →
+// 2026/OP/01727. Ritorna null se il formato non è riconoscibile.
+function odlANumeroOp(odl) {
+  const m = String(odl || '').trim().toUpperCase().match(/^(\d{4})\s*OP\s*(\d+)$/);
+  return m ? m[1] + '/OP/' + m[2].padStart(5, '0') : null;
+}
+// Mancanti di una commessa + coerenza con la tendina "Preparazione materiale".
+// `incoerente` = il fabbisogno dice che manca roba ma la preparazione è
+// dichiarata completa: contraddizione da mostrare, non da nascondere.
+// Ritorna { righe, nCodici, incoerente, dataImport } — righe [] se non ce ne sono.
+function mancantiCommessa(op) {
+  const vuoto = { righe: [], nCodici: 0, incoerente: false, dataImport: null };
+  if (!op || !op.numero_op) return vuoto;
+  const righe = (state.mancanti || [])
+    .filter(m => m.numero_op === op.numero_op)
+    .slice()
+    .sort((a, b) => String(a.codice || '').localeCompare(String(b.codice || '')));
+  if (!righe.length) return vuoto;
+  const dataImport = righe.reduce((d, m) =>
+    (!d || String(m.import_data || '') > d) ? (m.import_data || d) : d, null);
+  return {
+    righe,
+    nCodici: righe.length,
+    incoerente: op.stato_preparazione === 'completo',
+    dataImport,
+  };
+}
+
 // ── CONSUNTIVO COMPLETO di una commessa ────────────────────────────────────
 // Il consuntivo conta TUTTO il lavoro fatto sul pezzo (28 lug, decisione Nico):
 // timbri dei dipendenti + timbri degli esterni in sede + ore dichiarate dai
