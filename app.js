@@ -3693,17 +3693,18 @@ function renderFabbisogno(root) {
         '⚠ ' + scadute.length + (scadute.length === 1 ? ' consegna in ritardo' : ' consegne in ritardo')),
         el('div', { class:'sub', style:'margin-bottom:6px;font-size:10px;' },
           'Erano attese prima di oggi e non risultano arrivate. Dalla più vecchia.'));
-      // TUTTE, non le prime N: se una consegna è in ritardo va vista, non
-      // contata. Lo scorrimento tiene il blocco entro un'altezza leggibile.
-      const lista = el('div', { style:'max-height:300px;overflow-y:auto;' });
-      scadute.forEach(c => lista.append(rigaCons(c, true)));
-      b.append(lista);
+      // TUTTE e per intero, senza riquadro che scorre (richiesta Nico): un
+      // ritardo va visto tutto d'un colpo, non cercato dentro una finestrella.
+      // Scorre la pagina, che è il posto giusto dove scorrere.
+      scadute.forEach(c => b.append(rigaCons(c, true)));
       root.append(b);
     }
     if (prossime.length) {
       const b = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:14px;' });
       let apertaTutte = false;
-      const listaP = el('div', { style:'max-height:300px;overflow-y:auto;' });
+      // Niente scorrimento interno neanche qui: quando apri "vedi tutte" le
+      // vuoi leggere di seguito, non dentro una finestrella.
+      const listaP = el('div');
       const disegnaP = () => {
         listaP.innerHTML = '';
         (apertaTutte ? prossime : prossime.slice(0, 5)).forEach(c => listaP.append(rigaCons(c, false)));
