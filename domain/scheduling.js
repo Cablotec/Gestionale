@@ -1352,6 +1352,34 @@ function oreEsterneCommessa(operazioneId) {
   };
 }
 
+// ── FASI ORFANE di una commessa ────────────────────────────────────────────
+// Una fase va tolta solo se non porta via NIENTE con sé:
+//   1. non è (più) fra le fasi effettive dell'articolo — quindi non è lavoro
+//      previsto che deve ancora partire, è un residuo;
+//   2. non ha ore timbrate — nessun consuntivo da perdere;
+//   3. non ha addetti assegnati — nessuna pianificazione da perdere.
+// Le tre condizioni INSIEME. Una fase prevista e non ancora iniziata ha 0 ore
+// e 0 addetti pure lei, ma è lavoro da fare: toglierla sarebbe un danno.
+// Nascono così: al kiosk qualcuno timbra un tipo fuori piano → la fase viene
+// creata al volo; poi il timbro si corregge o si cancella e resta il guscio,
+// perché il salvataggio per progetto non cancella mai una fase.
+// Ritorna l'elenco delle righe di operazioni_fasi rimovibili.
+function fasiOrfaneCommessa(op) {
+  if (!op) return [];
+  const previste = new Set(((typeof fasiEffettiveArticolo === 'function' && op.articolo_id)
+    ? fasiEffettiveArticolo(op.articolo_id) : []).map(e => e.tipo_lavorazione_id));
+  return (state.opFasi || []).filter(f => {
+    if (f.operazione_id !== op.id) return false;
+    if (previste.has(f.tipo_lavorazione_id)) return false;
+    const haOre = (state.sessioni || []).some(s => s.operazione_id === op.id
+      && (s.fase_id === f.id
+          || (!s.fase_id && s.tipo_lavorazione_id === f.tipo_lavorazione_id)));
+    if (haOre) return false;
+    const haAddetti = (state.opAddetti || []).some(a => a.operazione_id === op.id && a.fase_id === f.id);
+    return !haAddetti;
+  });
+}
+
 // ── MATERIALE MANCANTE (fabbisogno importato) ──────────────────────────────
 // I mancanti arrivano da un'estrazione esterna ("Fabbisogno Massivo") e sono
 // una FOTOGRAFIA: ogni import sostituisce il precedente. L'aggancio alla

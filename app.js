@@ -7416,11 +7416,15 @@ function openOperazioneModal(o) {
   // Fasi in sola lettura dall'anagrafica. Per le commesse esistenti si parte
   // dalla fotografia su DB (i timbri e le assegnazioni si agganciano lì) e la
   // si riallinea alle fasi EFFETTIVE correnti dell'articolo: minuti aggiornati,
-  // tipi nuovi aggiunti. Le fasi fotografate non più in anagrafica RESTANO
-  // (potrebbero avere timbri): il sync non cancella mai. Persiste al Salva.
+  // tipi nuovi aggiunti. Le fasi fotografate non più in anagrafica restano SE
+  // hanno ore o addetti; quelle VUOTE (né ore né addetti né più previste) si
+  // tolgono, altrimenti restano lì per sempre — nascono al kiosk quando si
+  // timbra un tipo fuori piano e il timbro poi viene corretto.
   let fasiComm = [];
   if (!isNew) {
-    fasiComm = (state.opFasi || []).filter(f => f.operazione_id === o.id)
+    const orfane = (typeof fasiOrfaneCommessa === 'function') ? fasiOrfaneCommessa(o) : [];
+    const idOrfane = new Set(orfane.map(f => f.id));
+    fasiComm = (state.opFasi || []).filter(f => f.operazione_id === o.id && !idOrfane.has(f.id))
       .sort((x, y) => (x.ordine || 0) - (y.ordine || 0))
       .map(f => ({ _k: f.id, id: f.id, tipo_lavorazione_id: f.tipo_lavorazione_id || null,
         minuti_unitari: Number(f.minuti_unitari) || 0, _foto: true }));
@@ -15124,7 +15128,22 @@ function openSessioneModal(s, onDone) {
     if (error) return toast(error.message, 'err');
     if (!data || data.length === 0) return toast('Eliminazione bloccata (verifica policy)', 'err');
     state.sessioni = state.sessioni.filter(x => x.id !== s.id);
-    toast('Sessione eliminata'); finalize();
+    // Tolto l'ultimo timbro, la fase può essere rimasta un guscio vuoto: se
+    // non è più prevista in anagrafica e non ha né ore né addetti, se ne va
+    // con lui. Senza questo resterebbe in Lavorazione e Consuntivo per sempre.
+    let fasiTolte = 0;
+    try {
+      const op = (state.operazioni || []).find(x => x.id === s.operazione_id);
+      const orfane = (op && typeof fasiOrfaneCommessa === 'function') ? fasiOrfaneCommessa(op) : [];
+      for (const f of orfane) {
+        const { error: eF } = await eseguiConRetry(
+          () => sb.from('operazioni_fasi').delete().eq('id', f.id), { label: 'pulizia fase vuota' });
+        if (!eF) { state.opFasi = state.opFasi.filter(x => x.id !== f.id); fasiTolte++; }
+      }
+    } catch (e) { /* best-effort: la sessione è già eliminata, questo è contorno */ }
+    toast('Sessione eliminata'
+      + (fasiTolte ? ' · tolta anche ' + fasiTolte + (fasiTolte === 1 ? ' fase rimasta vuota' : ' fasi rimaste vuote') : ''));
+    finalize();
   } }, '🗑 Elimina'));
   foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
 
