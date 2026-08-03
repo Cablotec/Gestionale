@@ -1098,6 +1098,55 @@ function pezziInMagazzino(opId) {
   return Math.max(0, quantitaConsegnata(opId) - quantitaSpedita(opId));
 }
 
+// Propaga gli addetti a TUTTE le commesse del gruppo. Un gruppo al kiosk è
+// UNA card sola: chi ci lavora è per forza lo stesso su tutte, e assegnarlo
+// una per una era lavoro a mano che il gestionale può fare da sé.
+// Due accortezze, imparate dai dati veri:
+//  - le commesse di uno stesso gruppo possono avere FASI DIVERSE (un gruppo da
+//    11 ne aveva alcune senza fasi): un'assegnazione per fase si trasferisce
+//    cercando la fase dello STESSO TIPO nell'altra commessa, e se non c'è si
+//    salta invece di inventarla;
+//  - si propaga l'insieme COMPLETO, quindi anche i tolti spariscono: la
+//    squadra del gruppo resta una sola, altrimenti dopo due modifiche le
+//    commesse divergono e nessuno sa più chi ci lavora.
+// Ritorna { toccate, saltate } per poterlo dichiarare a chi salva.
+async function propagaAddettiGruppo(op, nuovi) {
+  const esito = { toccate: 0, saltate: 0 };
+  if (!op || !op.gruppo_id) return esito;
+  const fratelli = (state.operazioni || [])
+    .filter(x => x.gruppo_id === op.gruppo_id && x.id !== op.id
+      && x.stato !== 'spedita' && x.stato !== 'completata');
+  if (!fratelli.length) return esito;
+  const tipoDiFase = (faseId) => {
+    const f = (state.opFasi || []).find(x => x.id === faseId);
+    return f ? f.tipo_lavorazione_id : null;
+  };
+  for (const fr of fratelli) {
+    const suoi = [];
+    let saltate = 0;
+    nuovi.forEach(n => {
+      if (!n.fase_id) { suoi.push({ utente_id: n.utente_id, fase_id: null }); return; }
+      const tipo = tipoDiFase(n.fase_id);
+      const faseGemella = (state.opFasi || [])
+        .find(x => x.operazione_id === fr.id && x.tipo_lavorazione_id === tipo);
+      if (faseGemella) suoi.push({ utente_id: n.utente_id, fase_id: faseGemella.id });
+      else saltate++;
+    });
+    // Doppioni via: la stessa persona sulla stessa fase una volta sola.
+    const visti = new Set();
+    const puliti = suoi.filter(s => {
+      const k = s.utente_id + '|' + (s.fase_id || '');
+      if (visti.has(k)) return false;
+      visti.add(k); return true;
+    });
+    const res = await syncOperazioneAddetti(fr.id, puliti);
+    if (res.error) return { ...esito, error: res.error };
+    esito.toccate++;
+    esito.saltate += saltate;
+  }
+  return esito;
+}
+
 // Sincronizza gli addetti previsti di un'operazione: diff tra vecchi e nuovi
 // Ritorna { error } o {} se ok.
 async function syncOperazioneAddetti(opId, nuovi) {
@@ -9676,6 +9725,19 @@ function openOperazioneModal(o) {
           btnSave.textContent = 'Salva';
           return toast('Operazione salvata, ma errore addetti: '+syncRes.error.message, 'err');
         }
+        // Commessa raggruppata: gli addetti valgono per tutto il gruppo.
+        // Best-effort dichiarato: se fallisce non blocca il salvataggio, ma
+        // lo dice, così nessuno crede che sia andata quando non è andata.
+        try {
+          const prop = await propagaAddettiGruppo(data, addettiPayload);
+          if (prop.error) {
+            toast('Addetti salvati, ma non propagati al gruppo: ' + prop.error.message, 'err');
+          } else if (prop.toccate > 0) {
+            toast('Addetti applicati anche alle altre ' + prop.toccate
+              + (prop.toccate === 1 ? ' commessa' : ' commesse') + ' del gruppo'
+              + (prop.saltate ? ' · ' + prop.saltate + ' assegnazioni per fase saltate (fase assente lì)' : ''));
+          }
+        } catch (e) { toast('Addetti salvati, ma propagazione al gruppo non riuscita', 'err'); }
         // Normalizza i numeri ordine fornitore: padding zero a 5 cifre,
         // svuotamento del "solo prefisso" precompilato, validazione formato.
         // Accetto sia AAAA/OF/NNNNN (Ordine Fornitore) sia AAAA/OL/NNNNN
