@@ -1361,8 +1361,16 @@ function oreEsterneCommessa(operazioneId) {
 // reimportare. Coerente col resto: si tiene il dato, si deriva il legame.
 // Converte l'OdL dell'estrazione nel formato del gestionale: 2026OP1727 →
 // 2026/OP/01727. Ritorna null se il formato non è riconoscibile.
+// Accetta TUTTE le forme in cui un OP si scrive nella vita reale, non solo
+// quella canonica: 2026OP1727 (come lo stampa l'ERP e come sta sui documenti),
+// 2026/OP/1727, 2026/OP/01727, 2026 OP 754, 2026-op-754. Ritorna sempre la
+// forma canonica 2026/OP/01727, o null se non è riconoscibile.
+// Serve in tre punti: import fabbisogno, inserimento ordini, ricerca al kiosk.
+// Prima ognuno aveva la sua regola e la griglia buttava via in silenzio tutto
+// ciò che non era già canonico.
 function odlANumeroOp(odl) {
-  const m = String(odl || '').trim().toUpperCase().match(/^(\d{4})\s*OP\s*(\d+)$/);
+  const m = String(odl == null ? '' : odl).trim().toUpperCase()
+    .match(/^(\d{4})\s*[\/\-\s]?\s*OP\s*[\/\-\s]?\s*(\d+)$/);
   return m ? m[1] + '/OP/' + m[2].padStart(5, '0') : null;
 }
 // Una riga è BLOCCANTE se il pezzo è ancora da ordinare: nessuno l'ha

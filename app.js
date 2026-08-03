@@ -6291,8 +6291,14 @@ function openNuovoOrdineModal() {
     // POS pre-compilata a multipli di 10 (0010, 0020, …), modificabile.
     const posAuto = String((righe.length + 1) * 10).padStart(4, '0');
     const inPos = el('input', { type:'text', class:'ord-inp', value: posAuto, placeholder:'0010' });
+    // L'OP si scrive come capita — 2026OP1727 sui documenti, 2026/OP/1727 a
+    // mano — e uscendo dal campo diventa la forma canonica, così si VEDE che è
+    // stato capito. Prima accettava solo il formato esatto e buttava via il
+    // resto in silenzio: si salvava l'ordine e l'OP semplicemente non c'era.
     const inOP = el('input', { type:'text', class:'ord-inp', placeholder:'OP (opz.)',
-      onblur:(e)=>{ const m=e.target.value.trim().match(/^(\d{4})\/OP\/(\d{1,4})$/); if(m) e.target.value=m[1]+'/OP/'+m[2].padStart(5,'0'); } });
+      title:'Numero OP. Va bene 2026OP1727 o 2026/OP/1727: viene normalizzato da solo.',
+      onblur:(e)=>{ const n=odlANumeroOp(e.target.value); if(n) e.target.value=n;
+        e.target.style.borderColor = (!e.target.value.trim() || n) ? '' : 'var(--red)'; } });
     const inRif = el('input', { type:'text', class:'ord-inp', placeholder:'rif.' });
     const inQta = el('input', { type:'number', class:'ord-inp', value:'1', min:'1', oninput:()=>aggiornaTotale() });
     const inPrezzo = prezzoAttivo ? el('input', { type:'number', class:'ord-inp', min:'0', step:'0.01', placeholder:'€',
@@ -6320,7 +6326,8 @@ function openNuovoOrdineModal() {
           articoloId: (v.mode==='existing' && v.id) ? v.id : null,
           nuovoCodice: (v.mode==='new') ? (v.text||'').trim() : null,
           pos: (inPos.value||'').trim() || null,
-          numero_op: /^\d{4}\/OP\/\d{5}$/.test(opRaw) ? opRaw : null,
+          numero_op: odlANumeroOp(opRaw),
+          opIlleggibile: !!opRaw && !odlANumeroOp(opRaw),
           riferimento_cliente: (inRif.value||'').trim() || null,
           quantita: parseInt(inQta.value)||0,
           prezzo: inPrezzo ? (parseFloat((inPrezzo.value||'').replace(',','.'))||0) : 0,
@@ -6391,6 +6398,14 @@ function openNuovoOrdineModal() {
     if (!/^\d{4}\/OC\/\d{5}$/.test(oc)) return toast('Numero ordine nel formato AAAA/OC/NNNNN', 'err');
     const dati = righe.map(r => r.getData()).filter(d => (d.articoloId || d.nuovoCodice) && d.quantita > 0);
     if (!dati.length) return toast('Aggiungi almeno una posizione con articolo e quantità', 'err');
+    // Un OP scritto e non capito si FERMA qui: prima veniva scartato in
+    // silenzio e l'ordine nasceva senza, senza che nessuno se ne accorgesse.
+    const opKo = dati.filter(d => d.opIlleggibile);
+    if (opKo.length) {
+      return toast('Numero OP non riconosciuto su ' + opKo.length
+        + (opKo.length === 1 ? ' posizione' : ' posizioni')
+        + '. Usa 2026OP1727 oppure 2026/OP/01727, o lascia vuoto.', 'err');
+    }
     btnSave.disabled = true; btnSave.textContent = 'Creazione…';
     try {
       // 1) Cliente nuovo (se serve)
@@ -9486,14 +9501,14 @@ function openOperazioneModal(o) {
       // Validazione numero OP: opzionale, ma se valorizzato deve essere AAAA/OP/NNNNN.
       // Se l'utente non ha toccato la precompilazione (solo "AAAA/OP/" senza
       // cifre dopo), trattiamo come "vuoto" e salviamo null.
+      // Stessa regola della griglia: si accetta l'OP come è scritto sui
+      // documenti (2026OP1727) e non solo la forma canonica.
       let numOp = (fd.get('numero_op')||'').trim();
-      const padOpMatch = numOp.match(/^(\d{4})\/OP\/(\d{1,4})$/);
-      if (padOpMatch) numOp = padOpMatch[1] + '/OP/' + padOpMatch[2].padStart(5, '0');
       const opSoloPrefisso = /^\d{4}\/OP\/$/.test(numOp);
-      if (numOp && !opSoloPrefisso && !/^\d{4}\/OP\/\d{5}$/.test(numOp)) {
-        return toast('Numero OP non valido. Usa il formato AAAA/OP/NNNNN o lascia vuoto.', 'err');
+      const numOpFinale = (numOp && !opSoloPrefisso) ? odlANumeroOp(numOp) : null;
+      if (numOp && !opSoloPrefisso && !numOpFinale) {
+        return toast('Numero OP non riconosciuto. Usa 2026OP1727 oppure 2026/OP/01727, o lascia vuoto.', 'err');
       }
-      const numOpFinale = (numOp && !opSoloPrefisso) ? numOp : null;
 
       btnSave.disabled = true;
       btnSave.textContent = 'Salvataggio…';
@@ -12455,7 +12470,7 @@ function kioskRenderOpList() {
   // Box ricerca
   const searchBox = el('div', { class:'kiosk-op-search-box' });
   const inp = el('input', {
-    type:'text', placeholder:'🔍 Cerca operazione (codice, ordine, cliente, note)…',
+    type:'text', placeholder:'🔍 Cerca (codice, ordine, OP, cliente, note)…',
     value: kCom.search,
     oninput: (e) => {
       kCom.search = e.target.value;
@@ -12477,11 +12492,17 @@ function kioskRenderOpList() {
   root.append(searchBox);
 
   const q = kCom.search.toLowerCase();
+  // L'OP sul foglio è scritto 2026OP1727, nel gestionale è 2026/OP/01727:
+  // se quello che si cerca è un OP lo si normalizza, così si trova digitandolo
+  // com'è stampato. Prima l'OP non era cercabile affatto.
+  const qOp = (typeof odlANumeroOp === 'function') ? odlANumeroOp(kCom.search) : null;
   const filtra = (lista) => {
     if (!q) return lista;
     return lista.filter(o => {
       const cli = state.aziende.find(c => c.id === o.cliente_id);
       const art = state.articoli.find(a => a.id === o.articolo_id);
+      if (qOp && o.numero_op === qOp) return true;
+      if ((o.numero_op||'').toLowerCase().includes(q)) return true;
       return (o.numero_ordine||'').toLowerCase().includes(q)
           || (o.pos||'').toLowerCase().includes(q)
           || (cli?.nome||'').toLowerCase().includes(q)
