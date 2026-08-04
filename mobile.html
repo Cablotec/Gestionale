@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-08-03.3"></script>
+<script src="core/db.js?v=2026-08-03.4"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -1705,7 +1705,45 @@ async function stopSessione(sess) {
   }
 }
 
+// Stesse voci del kiosk: la nota deve poter essere un tocco solo, anche qui.
+const NOTE_RAPIDE = ['Tutto regolare','Materiale mancante','Problema macchina',
+  'Disegno/dati non chiari','Pezzo da rilavorare','Continua domani'];
+// Chiede la nota prima di chiudere. null = l'operatore torna indietro.
+function chiediNota() {
+  return new Promise((risolvi) => {
+    const ov = elx('div', { style:'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;' });
+    const box = elx('div', { style:'background:var(--sur);border-radius:10px;padding:18px;max-width:420px;width:100%;' });
+    let scelta = '';
+    const inp = elx('textarea', { rows:'2', placeholder:'Aggiungi un dettaglio…',
+      style:'width:100%;font-size:15px;padding:10px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);margin-top:10px;' });
+    const ok = elx('button', { class:'att-btn fine', style:'margin-top:12px;width:100%;' }, '✅ Conferma e chiudi');
+    const agg = () => { const t=[scelta,(inp.value||'').trim()].filter(Boolean).join(' — ');
+      ok.disabled = !t; ok.style.opacity = t ? '1' : '.4'; };
+    inp.oninput = agg;
+    ok.onclick = () => { ov.remove(); risolvi([scelta,(inp.value||'').trim()].filter(Boolean).join(' — ')); };
+    const chips = elx('div', { style:'display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;' });
+    NOTE_RAPIDE.forEach(t => {
+      const b = elx('button', { style:'flex:1 1 45%;padding:12px;border-radius:6px;font-size:14px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);' }, t);
+      b.onclick = () => { scelta = (scelta===t)?'':t;
+        [...chips.children].forEach(c => { const s=c.textContent===scelta;
+          c.style.background = s?'var(--acc)':'var(--bg)'; c.style.color = s?'var(--bg)':'var(--txt)'; });
+        agg(); };
+      chips.append(b);
+    });
+    box.append(elx('div',{style:'font-size:18px;font-weight:700;'},'Com\'è andata?'),
+      elx('div',{style:'font-size:12px;opacity:.7;margin-top:2px;'},'Scegli una voce o scrivi: serve a chi guarda la commessa dopo di te.'),
+      chips, inp, ok,
+      elx('button',{style:'margin-top:8px;width:100%;padding:10px;background:none;border:none;color:var(--mut);',
+        onclick:()=>{ov.remove();risolvi(null);}},'← Torna indietro'));
+    ov.append(box); document.body.append(ov); agg();
+  });
+}
+
 async function fineFase(sess) {
+  // La nota si chiede PRIMA: se si torna indietro non deve essere successo
+  // niente a metà.
+  const nota = await chiediNota();
+  if (nota === null) return;
   const ora = new Date().toISOString();
   const uid = state.operatore?.id || sess.utente_id;
   // Risolvo la fase da completare: fase della sessione, poi (se manca) la fase
@@ -1753,9 +1791,11 @@ async function fineFase(sess) {
     }
     // (niente fase precisa → non marco nulla, chiudo e basta)
 
-    // 2) Chiudi la sessione (sempre registrata, qualunque durata).
+    // 2) Chiudi la sessione (sempre registrata, qualunque durata) portandosi
+    //    dietro la nota: una sola scrittura, non due.
     const { data, error: e2 } = await eseguiConRetry(
-      () => sb.from('sessioni_lavoro').update({ fine: ora }).eq('id', sess.id).select().single(),
+      () => sb.from('sessioni_lavoro')
+        .update(nota ? { fine: ora, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: ora }).eq('id', sess.id).select().single(),
       { label: 'chiusura timbratura' }
     );
     if (e2) throw e2;

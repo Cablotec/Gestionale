@@ -12297,7 +12297,78 @@ function cmpCommessaKiosk(a, b) {
 // Marca finita la fase DELLA SESSIONE per l'operatore + chiude la sessione.
 // Robusto: non dipende dall'aggancio rigaPerSessione. Trova la riga addetto per
 // la fase della sessione; se manca, la crea già completata.
-async function kioskFineFase(sess) {
+// Note rapide: al kiosk si lavora col dito e spesso coi guanti, quindi la nota
+// deve poter essere UN TOCCO. Scrivere resta possibile per il caso vero, ma
+// obbligare a digitare su ogni fine fase produrrebbe solo "ok" e "." — e una
+// nota che nessuno legge è peggio di nessuna nota.
+const KIOSK_NOTE_RAPIDE = [
+  'Tutto regolare',
+  'Materiale mancante',
+  'Problema macchina',
+  'Disegno/dati non chiari',
+  'Pezzo da rilavorare',
+  'Continua domani',
+];
+// Chiede la nota PRIMA di chiudere la fase. Ritorna la nota scelta, oppure
+// null se l'operatore torna indietro (allora non si chiude niente).
+function kioskChiediNota(sess) {
+  return new Promise((risolvi) => {
+    kioskHideAllSteps();
+    const step = $('#kiosk-step-done') || document.body;
+    const prec = step.style.display;
+    step.style.display = 'flex';
+    const card = $('#done-card') || step;
+    const vecchio = card.innerHTML;
+    card.innerHTML = '';
+    let scelta = '';
+    const chiudi = (val) => { card.innerHTML = vecchio; step.style.display = prec; risolvi(val); };
+    const inp = el('textarea', {
+      rows: '2', placeholder: 'Aggiungi un dettaglio (facoltativo se hai scelto sopra)…',
+      style: 'width:100%;font-size:15px;padding:10px;border-radius:6px;border:1px solid var(--brd);'
+        + 'background:var(--sur);color:var(--txt);font-family:var(--ui);margin-top:10px;',
+      oninput: () => aggiorna(),
+    });
+    const btnOk = el('button', { class:'kiosk-attiva-btn',
+      style:'background:var(--grn);color:var(--bg);margin-top:12px;' }, '✅ Conferma e chiudi la fase');
+    const aggiorna = () => {
+      const testo = [scelta, (inp.value || '').trim()].filter(Boolean).join(' — ');
+      btnOk.disabled = !testo;
+      btnOk.style.opacity = testo ? '1' : '.4';
+    };
+    btnOk.onclick = () => chiudi([scelta, (inp.value || '').trim()].filter(Boolean).join(' — '));
+    const chips = el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;justify-content:center;' });
+    KIOSK_NOTE_RAPIDE.forEach(t => {
+      const b = el('button', { class:'kiosk-attiva-btn',
+        style:'flex:0 1 auto;padding:12px 16px;font-size:15px;background:var(--sur);color:var(--txt);border:1px solid var(--brd);' },
+        t);
+      b.onclick = () => {
+        scelta = (scelta === t) ? '' : t;
+        [...chips.children].forEach(c => {
+          const sel = c.textContent === scelta;
+          c.style.background = sel ? 'var(--acc)' : 'var(--sur)';
+          c.style.color = sel ? 'var(--bg)' : 'var(--txt)';
+        });
+        aggiorna();
+      };
+      chips.append(b);
+    });
+    card.append(
+      el('div', { style:'font-size:20px;font-weight:700;margin-bottom:4px;' }, 'Com\'è andata?'),
+      el('div', { class:'sub', style:'font-size:13px;' },
+        'Scegli una voce o scrivi: serve a chi guarda la commessa dopo di te.'),
+      chips, inp, btnOk,
+      el('button', { class:'kiosk-attiva-btn pause', style:'margin-top:8px;',
+        onclick: () => chiudi(null) }, '← Torna indietro'),
+    );
+    aggiorna();
+  });
+}
+
+async function kioskFineFase(sess, notaGia) {
+  // La nota si chiede PRIMA di toccare qualsiasi cosa: se l'operatore torna
+  // indietro non deve essere successo niente a metà.
+  const nota = (notaGia !== undefined) ? notaGia : await kioskChiediNota(sess);
+  if (nota === null) { kioskGoToAttiva(); return; }
   const ora = new Date().toISOString();
   const uid = kioskState.utenteSelezionato?.id || sess.utente_id;
   // Risolvo la fase da completare: prima la fase della sessione, poi (se manca)
@@ -12350,8 +12421,9 @@ async function kioskFineFase(sess) {
       if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
     }
 
-    // 2) Chiudi la sessione (sempre registrata, qualunque durata).
-    const res = await kioskChiudiOScarta(sess);
+    // 2) Chiudi la sessione (sempre registrata, qualunque durata) portandosi
+    //    dietro la nota: una sola scrittura, non due.
+    const res = await kioskChiudiOScarta(sess, nota);
     if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
     kioskBeep(markOk ? 'ok' : 'err');
     // Mostro il tempo TOTALE lavorato (res.elapsed), non la frazione salvata
@@ -13333,7 +13405,7 @@ function kioskFormatDurataLive(inizioDate) {
 // Chiude una sessione scrivendo `fine`. Nessuno scarto per durata: ogni
 // timbratura resta registrata, qualunque sia la sua durata. Aggiorna
 // state.sessioni. Ritorna { scartata:false, elapsed, data }. Lancia in caso d'errore.
-async function kioskChiudiOScarta(sess) {
+async function kioskChiudiOScarta(sess, nota) {
   const inizio = sess.inizio;
   const fineNow = new Date().toISOString();
   const elapsed = Math.floor((Date.now() - new Date(inizio).getTime()) / 1000);
@@ -13349,7 +13421,7 @@ async function kioskChiudiOScarta(sess) {
     // 1) la sessione già aperta = quota della sua commessa (parti[0])
     const { data, error } = await eseguiConRetry(
       () => sb.from('sessioni_lavoro')
-        .update({ fine: parti[0].fine }).eq('id', sess.id).select().single(),
+        .update(nota ? { fine: parti[0].fine, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: parti[0].fine }).eq('id', sess.id).select().single(),
       { label: 'chiusura timbratura (gruppo)' }
     );
     if (error) throw error;
@@ -13378,7 +13450,7 @@ async function kioskChiudiOScarta(sess) {
 
   // Chiusura normale (nessun gruppo)
   const { data, error } = await eseguiConRetry(
-    () => sb.from('sessioni_lavoro').update({ fine: fineNow }).eq('id', sess.id).select().single(),
+    () => sb.from('sessioni_lavoro').update(nota ? { fine: fineNow, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: fineNow }).eq('id', sess.id).select().single(),
     { label: 'chiusura timbratura' }
   );
   if (error) throw error;
