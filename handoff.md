@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-05.2`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-05.3`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -232,3 +232,23 @@
 - Sintomo trovato sul campo: nella scheda Live, sulla card di chi era su un'**attività extra**, compariva `null` al posto del codice articolo — che per le extra non esiste, e infatti il codice diceva correttamente `d.codice ? el(...) : null`. Il guaio era il `.append()` attorno.
 - **Regola**: su un elemento già creato mai `x.append(cond ? el(...) : null)`, sempre `x.append(...(cond ? [el(...)] : []))`. Dentro `el(...)` invece il ternario con `null` va benissimo.
 - Sistemati tutti e 6 i punti di `app.js` (card Live, bottoni "usa" dei due suggerimenti, avviso OP orfani nell'import, descrizione attività, tipo lavorazione nel modal sessione). `mobile.html` e `prelievo.html` erano puliti. Commento di avvertimento lasciato accanto a `el()`.
+
+## ▶▶ PROSSIMI (chiesti da Nico il 5 ago, chat chiusa qui per contesto pieno)
+
+### A. Scheda Mancanti spostata in Lavoro — **FATTO** (`2026-08-05.3`)
+Era in Gestione, ora è in **Lavoro**, dopo Magazzino. Resta `adminOnly: true` come prima: **da chiedere a Nico se vuole renderla visibile a tutti** — spostarla fra le schede di lavoro suggerirebbe di sì, ma non l'ha detto e non ho voluto decidere io chi vede i mancanti.
+
+### B. Import Mancanti per trascinamento — DA FARE
+Oggi il file si sceglie col selettore. Nico lo vuole poter **trascinare su un riquadro**.
+- Il punto è `renderFabbisogno` in `app.js` (cerca `const inFile = el('input', { type:'file'`).
+- Serve una zona di rilascio: `dragover` con `preventDefault` (senza quello il browser apre il file e basta), `dragleave`, `drop` → `e.dataTransfer.files[0]`, evidenziazione mentre ci passi sopra.
+- **Non duplicare la logica**: oggi tutto sta in `inFile.onchange`. Estrarre una `analizzaFile(f)` e farla chiamare da entrambe le strade, altrimenti si sistemano i bug una volta sola su due.
+- Accettare `.csv` e `.xlsx` (il CSV non richiede la libreria, l'xlsx sì — vedi sezione Mancanti v3).
+
+### C. Calendario mezzi: avvisare se l'operatore prenotato è assente — DA FARE
+Prenotando un mezzo **per un altro operatore**, se in quel periodo lui ha ferie/permesso/malattia il gestionale deve **segnalarlo**.
+- Le assenze stanno in `state.assenze` (campi `utente_id`, `data`, `ore`, `stato` — contano solo quelle con `stato === 'valida'`), i tipi in `state.tipiAssenza`.
+- Le prenotazioni hanno un intervallo (`data_inizio`/`data_fine`) e gli operatori collegati stanno in `prenotazioni_utenti` (in `state.prenOp`).
+- Va confrontato l'intervallo della prenotazione con le assenze di OGNI operatore collegato, non solo di chi sta prenotando.
+- **Avvisare, non bloccare** (coerente col resto: il gestionale dichiara, la persona decide) — ma **chiedere conferma a Nico**: potrebbe volerlo bloccante.
+- Attenzione ai **permessi parziali**: un'assenza con `ore` < giornata non impedisce la trasferta. Distinguere "assente tutto il giorno" da "ha un permesso di N ore" e dirlo, invece di trattarli uguale.

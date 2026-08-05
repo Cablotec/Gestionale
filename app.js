@@ -1457,6 +1457,9 @@ const TAB_STRUCTURE = {
     tabs: [
       { id: 'pianificazione', label: 'Ordini cliente', adminOnly: false },
       { id: 'magazzino',      label: 'Magazzino',      adminOnly: false },
+      // Spostata qui da Gestione (5 ago, richiesta Nico): i mancanti si
+      // guardano mentre si lavora, non mentre si configura il gestionale.
+      { id: 'fabbisogno',     label: 'Mancanti',       adminOnly: true },
       { id: 'prelievi',       label: 'Prelievi',       adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
       { id: 'gantt_live',     label: 'Live',           adminOnly: false },
@@ -1468,7 +1471,6 @@ const TAB_STRUCTURE = {
     adminOnly: true,
     tabs: [
       { id: 'articoli',       label: 'Articoli',          adminOnly: true },
-      { id: 'fabbisogno',     label: 'Mancanti',          adminOnly: true },
       { id: 'codifica',       label: 'Codifica',          adminOnly: true },
       { id: 'aziende',        label: 'Aziende',           adminOnly: true },
       { id: 'analisi_clienti', label: 'Analisi clienti',  adminOnly: true },
