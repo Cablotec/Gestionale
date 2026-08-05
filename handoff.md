@@ -215,3 +215,14 @@
 - `fabbNumero` sostituisce il vecchio parser: toglie il punto **solo** quando fa da separatore di migliaia (`1.234,56`), mai quando è il decimale (l'xlsx dà `20.5`, il CSV `20,5`).
 - **Il CSV non usa SheetJS**: si legge da sé, nessun download, nessuna attesa. La libreria si scarica solo se il file è xlsx. Entrambi i formati restano accettati (`accept=".csv,.xlsx,.xls,.txt"`).
 - **Verificato col codice VERO sul CSV VERO**: 396 righe, 313 da ordinare + 83 in arrivo, 394 agganciabili, 90 consegne (82 future, 8 in ritardo), **zero numeri illeggibili, zero date malformate, zero accenti rotti**. Un articolo con 5 previsioni di entrata legge tutte e 5.
+
+## Campo note delle timbrature — ripulito (5 ago 2026)
+- **Da qui in avanti il campo `sessioni_lavoro.note` contiene SOLO note scritte dagli operatori.** Tutti i marcatori automatici o manuali sono stati tolti (decisione Nico), copie di sicurezza in scratchpad (`note_cancellate_backup.json`, `gruppo_backup.json`, `dimezzata_backup.json`, `split_backup.json`).
+- **`[gruppo]`** — l'UNICO che il codice scriveva davvero, sulle quote generate chiudendo un timbro di una commessa raggruppata. Tolto dal codice **e** dai dati (127 note). Conseguenza accettata: una quota generata dal sistema non è più distinguibile a colpo d'occhio da un timbro vero; restano riconoscibili solo perché la commessa ha `gruppo_id` e più sessioni condividono lo stesso intervallo.
+- **`[dimezzata → SZ-A09103QE_EST]`** (41) e **`[split da SZ-A09102QE_EST]`** (41) — **mai esistiti nel codice**, verificato anche con `git log -S` su tutta la storia: erano annotazioni **a mano**, le due facce della stessa operazione. Qualcuno ha spaccato 62,4 h fra due articoli gemelli: lato originale `2026/OC/00198/20` (SZ-A091**02**QE_EST), lato creato `2026/OC/00198/40` (SZ-A091**03**QE_EST), 41 sessioni e 62,4 h per lato. Tolti entrambi.
+- **Prima prova sul campo della nota obbligatoria** (5 ago, il giorno dopo il rilascio): due note vere, entrambe su attività extra — una voce rapida ("Aiuto a un collega") e una scritta a mano con contenuto reale ("CARICO DEL QE DI BARILLA D23634 CON RYAN, MAURO E RAOUL"). Il meccanismo funziona e non produce solo la prima voce dell'elenco.
+
+## ⚠ ORARI: il DB è in UTC, la UI è in ora locale
+- `sessioni_lavoro.inizio/fine` sono **UTC**. L'interfaccia li mostra in **ora locale** (Europe/Rome: **+2 in estate**, +1 in inverno).
+- **Quando si estraggono orari via REST per riferirli a Nico vanno CONVERTITI**, altrimenti si indicano timbrature a un'ora che sullo schermo non esiste. Successo due volte il 5 ago: i timbri di Fabrizio Scordo dati come `07:23→10:30` (veri: `09:23→12:30`) e la sessione di Alessio data come `11:15→13:24` (vera: `13:15→15:24`) — Nico l'ha cercata a lungo nella scheda Live convinto di un bug che non c'era.
+- Durate e totali NON sono affetti: sbaglia solo il collocamento nella giornata.
