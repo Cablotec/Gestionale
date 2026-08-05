@@ -13446,7 +13446,11 @@ async function kioskChiudiOScarta(sess, nota) {
       sede: sess.sede,
       inizio: p.inizio,
       fine: p.fine,
-      note: (sess.note ? sess.note + ' ' : '') + '[gruppo]',
+      // Niente marchio "[gruppo]" (tolto su richiesta di Nico, 5 ago): sporcava
+      // il campo note, che ora serve alle note vere degli operatori. Le quote
+      // restano riconoscibili dal fatto che la commessa ha un gruppo_id e che
+      // più sessioni condividono lo stesso intervallo.
+      note: sess.note || null,
     }));
     try {
       const { data: ins } = await eseguiConRetry(
