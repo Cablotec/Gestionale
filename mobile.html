@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-08-03.4"></script>
+<script src="core/db.js?v=2026-08-03.5"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -1687,12 +1687,21 @@ function durataFineStr(sess) {
 }
 
 async function stopSessione(sess) {
+  // ATTIVITÀ EXTRA: nota obbligatoria. Sono le ore senza commessa, quelle di
+  // cui altrimenti non resta traccia di cosa siano state. Chiesta PRIMA di
+  // toccare qualsiasi cosa: tornando indietro non è successo niente a metà.
+  let nota = null;
+  if (!sess.operazione_id) {
+    nota = await chiediNota();
+    if (nota === null) return;
+  }
   // La sessione si chiude sempre: ogni timbratura resta registrata, qualunque durata.
   try {
     const ora = new Date().toISOString();
     const { data, error } = await eseguiConRetry(
       () => sb.from('sessioni_lavoro')
-        .update({ fine: ora }).eq('id', sess.id).select().single(),
+        .update(nota ? { fine: ora, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: ora })
+        .eq('id', sess.id).select().single(),
       { label: 'chiusura timbratura' }
     );
     if (error) throw error;
@@ -1705,9 +1714,10 @@ async function stopSessione(sess) {
   }
 }
 
-// Stesse voci del kiosk: la nota deve poter essere un tocco solo, anche qui.
-const NOTE_RAPIDE = ['Tutto regolare','Materiale mancante','Problema macchina',
-  'Disegno/dati non chiari','Pezzo da rilavorare','Continua domani'];
+// Stesse voci del kiosk, e come lì servono SOLO per le attività extra: sono
+// le ore senza commessa, quelle di cui altrimenti non resta scritto niente.
+const NOTE_RAPIDE = ['Pulizia / riordino','Manutenzione','Aiuto a un collega',
+  'Riunione','Attesa materiale','Formazione'];
 // Chiede la nota prima di chiudere. null = l'operatore torna indietro.
 function chiediNota() {
   return new Promise((risolvi) => {
@@ -1730,8 +1740,8 @@ function chiediNota() {
         agg(); };
       chips.append(b);
     });
-    box.append(elx('div',{style:'font-size:18px;font-weight:700;'},'Com\'è andata?'),
-      elx('div',{style:'font-size:12px;opacity:.7;margin-top:2px;'},'Scegli una voce o scrivi: serve a chi guarda la commessa dopo di te.'),
+    box.append(elx('div',{style:'font-size:18px;font-weight:700;'},'Cos\'hai fatto?'),
+      elx('div',{style:'font-size:12px;opacity:.7;margin-top:2px;'},'Queste ore non hanno una commessa: senza una nota non resta scritto di cosa si trattava.'),
       chips, inp, ok,
       elx('button',{style:'margin-top:8px;width:100%;padding:10px;background:none;border:none;color:var(--mut);',
         onclick:()=>{ov.remove();risolvi(null);}},'← Torna indietro'));
@@ -1739,11 +1749,11 @@ function chiediNota() {
   });
 }
 
+// Chiudere una FASE non chiede nessuna nota: lì si sa già cosa è stato fatto,
+// commessa e tipo di lavorazione sono scritti. La nota serve solo sulle
+// attività extra — vedi stopSessione.
 async function fineFase(sess) {
-  // La nota si chiede PRIMA: se si torna indietro non deve essere successo
-  // niente a metà.
-  const nota = await chiediNota();
-  if (nota === null) return;
+  const nota = null;
   const ora = new Date().toISOString();
   const uid = state.operatore?.id || sess.utente_id;
   // Risolvo la fase da completare: fase della sessione, poi (se manca) la fase

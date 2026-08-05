@@ -12301,13 +12301,15 @@ function cmpCommessaKiosk(a, b) {
 // deve poter essere UN TOCCO. Scrivere resta possibile per il caso vero, ma
 // obbligare a digitare su ogni fine fase produrrebbe solo "ok" e "." — e una
 // nota che nessuno legge è peggio di nessuna nota.
+// Voci pensate per le ATTIVITÀ EXTRA: sono le ore senza commessa, quelle di
+// cui altrimenti non resta scritto niente. Servono a dire "cos'era quel tempo".
 const KIOSK_NOTE_RAPIDE = [
-  'Tutto regolare',
-  'Materiale mancante',
-  'Problema macchina',
-  'Disegno/dati non chiari',
-  'Pezzo da rilavorare',
-  'Continua domani',
+  'Pulizia / riordino',
+  'Manutenzione',
+  'Aiuto a un collega',
+  'Riunione',
+  'Attesa materiale',
+  'Formazione',
 ];
 // Chiede la nota PRIMA di chiudere la fase. Ritorna la nota scelta, oppure
 // null se l'operatore torna indietro (allora non si chiude niente).
@@ -12329,7 +12331,7 @@ function kioskChiediNota(sess) {
       oninput: () => aggiorna(),
     });
     const btnOk = el('button', { class:'kiosk-attiva-btn',
-      style:'background:var(--grn);color:var(--bg);margin-top:12px;' }, '✅ Conferma e chiudi la fase');
+      style:'background:var(--grn);color:var(--bg);margin-top:12px;' }, '✅ Conferma e chiudi');
     const aggiorna = () => {
       const testo = [scelta, (inp.value || '').trim()].filter(Boolean).join(' — ');
       btnOk.disabled = !testo;
@@ -12353,9 +12355,9 @@ function kioskChiediNota(sess) {
       chips.append(b);
     });
     card.append(
-      el('div', { style:'font-size:20px;font-weight:700;margin-bottom:4px;' }, 'Com\'è andata?'),
+      el('div', { style:'font-size:20px;font-weight:700;margin-bottom:4px;' }, 'Cos\'hai fatto?'),
       el('div', { class:'sub', style:'font-size:13px;' },
-        'Scegli una voce o scrivi: serve a chi guarda la commessa dopo di te.'),
+        'Queste ore non hanno una commessa: senza una nota non resta scritto di cosa si trattava.'),
       chips, inp, btnOk,
       el('button', { class:'kiosk-attiva-btn pause', style:'margin-top:8px;',
         onclick: () => chiudi(null) }, '← Torna indietro'),
@@ -12364,11 +12366,12 @@ function kioskChiediNota(sess) {
   });
 }
 
-async function kioskFineFase(sess, notaGia) {
-  // La nota si chiede PRIMA di toccare qualsiasi cosa: se l'operatore torna
-  // indietro non deve essere successo niente a metà.
-  const nota = (notaGia !== undefined) ? notaGia : await kioskChiediNota(sess);
-  if (nota === null) { kioskGoToAttiva(); return; }
+// NB: chiudere una FASE non chiede nessuna nota (decisione Nico): lì si sa già
+// cosa è stato fatto — commessa, articolo e tipo di lavorazione sono scritti.
+// La nota si chiede solo sulle ATTIVITÀ EXTRA, dove senza non resta traccia
+// di cosa sia stato quel tempo. Vedi kioskStopSessione.
+async function kioskFineFase(sess) {
+  const nota = null;
   const ora = new Date().toISOString();
   const uid = kioskState.utenteSelezionato?.id || sess.utente_id;
   // Risolvo la fase da completare: prima la fase della sessione, poi (se manca)
@@ -13187,8 +13190,15 @@ async function kioskSelectAttivita(a) {
   // Stesso pattern dello switch.
   const sessAperta = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
   if (sessAperta) {
+    // Se quella che si sta chiudendo è un'attività extra, la nota si chiede
+    // anche qui: altrimenti passando da un'extra all'altra si sfuggirebbe.
+    let notaPrec = null;
+    if (!sessAperta.operazione_id) {
+      notaPrec = await kioskChiediNota(sessAperta);
+      if (notaPrec === null) return;   // annullato: non si apre neanche la nuova
+    }
     try {
-      await kioskChiudiOScarta(sessAperta);
+      await kioskChiudiOScarta(sessAperta, notaPrec);
     } catch (e) {
       kioskBeep('err');
       kioskShowError('Errore chiudendo la sessione precedente: ' + (e.message || e));
@@ -13460,8 +13470,16 @@ async function kioskChiudiOScarta(sess, nota) {
 
 async function kioskStopSessione(sess, modalita) {
   // modalita: 'pause' = chiudi e torna a id, 'switch' = chiudi e vai a lista operazioni
+  // ATTIVITÀ EXTRA: qui la nota è obbligatoria (decisione Nico). Senza, di
+  // quelle ore non resta traccia di cosa siano state — non c'è né commessa né
+  // tipo di lavorazione a raccontarlo. Su una fase invece non si chiede nulla.
+  let nota = null;
+  if (!sess.operazione_id) {
+    nota = await kioskChiediNota(sess);
+    if (nota === null) { kioskGoToAttiva(); return; }
+  }
   try {
-    const res = await kioskChiudiOScarta(sess);
+    const res = await kioskChiudiOScarta(sess, nota);
     kioskBeep('ok');
     if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
 
