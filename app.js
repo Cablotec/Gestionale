@@ -177,6 +177,12 @@ const el = (tag, attrs={}, ...children) => {
   }
   return e;
 };
+// ATTENZIONE — el() scarta i figli null, ma `.append()` del DOM NO: gli passi
+// null e lui ci scrive dentro la parola "null". Quindi su un elemento già
+// creato NON si fa `x.append(cond ? el(...) : null)`, si fa
+// `x.append(...(cond ? [el(...)] : []))`. È costato una caccia al bug: sulla
+// card Live di chi era su un'attività extra compariva "null" al posto del
+// codice articolo, che per le extra non esiste.
 const z = n => String(n).padStart(2,'0');
 const toLocalISO = d => `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
 const parseISODate = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d); };
@@ -3883,11 +3889,11 @@ function renderFabbisogno(root) {
           + agganciate.size + (agganciate.size === 1 ? ' commessa agganciata' : ' commesse agganciate')
           + (orfane.size ? ' · ' + orfane.size + ' OP senza commessa nel gestionale' : '')
           + (senzaOdl.length ? ' · ' + senzaOdl.length + ' righe senza OdL (verranno scartate)' : '')),
-        orfane.size
-          ? el('div', { class:'sub', style:'margin-top:6px;color:var(--yel);font-size:11px;' },
+        ...(orfane.size
+          ? [el('div', { class:'sub', style:'margin-top:6px;color:var(--yel);font-size:11px;' },
               '⚠ OP presenti nell\'estrazione ma non nel gestionale: ' + [...orfane].join(', ')
-              + ' — le righe si salvano lo stesso e si agganceranno da sole se quelle commesse verranno inserite.')
-          : null,
+              + ' — le righe si salvano lo stesso e si agganceranno da sole se quelle commesse verranno inserite.')]
+          : []),
         el('div', { class:'sub', style:'margin-top:6px;color:var(--yel);font-size:11px;' },
           '⚠ Confermando, i ' + righeOra.length + ' codici attualmente in archivio vengono sostituiti da questi.'),
         el('button', { class:'btnp', style:'margin-top:10px;', onclick: async (e) => {
@@ -9149,11 +9155,11 @@ function openOperazioneModal(o) {
           'da prezzo: ' + propone + ' min/pz ('
           + prezzo.toLocaleString('it-IT', { minimumFractionDigits: 2 }) + ' € ÷ '
           + String(tariffa).replace('.', ',') + ' €/h)'),
-        canEdit ? el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
+        ...(canEdit ? [el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
           onclick: () => {
             minInput.value = String(propone);
             minInput.dispatchEvent(new Event('input', { bubbles: true }));
-          } }, 'usa') : null,
+          } }, 'usa')] : []),
       );
     } catch (e) {}
   };
@@ -9192,11 +9198,11 @@ function openOperazioneModal(o) {
               ? ' · ' + s.fasiSenzaStorico
                 + (s.fasiSenzaStorico === 1 ? ' fase senza consuntivo, esclusa' : ' fasi senza consuntivo, escluse')
               : '')),
-        canEdit ? el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
+        ...(canEdit ? [el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
           onclick: () => {
             prezzoInput.value = String(s.prezzo);
             prezzoInput.dispatchEvent(new Event('input', { bubbles: true }));
-          } }, 'usa') : null,
+          } }, 'usa')] : []),
       );
       if (s.debole) box.title = 'Media su UNA sola commessa chiusa: indicativa, non una base di trattativa.';
       else box.title = 'Ore realmente timbrate (ultime ' + MEDIA_ULTIME_COMMESSE
@@ -13692,7 +13698,7 @@ function buildLiveCard(u, onClick, opts = {}) {
     card.append(
       el('div', { class:'live-card-cliente' }, d.titolo),
       // Per attività extra non c'è codice articolo: nascondo quella riga
-      d.codice ? el('div', { class:'live-card-cod' }, d.codice) : null,
+      ...(d.codice ? [el('div', { class:'live-card-cod' }, d.codice)] : []),
       el('div', { class:'live-card-tipo' },
         el('div', { class:'live-card-tipo-dot', style:'background:'+d.colore+';' }),
         d.tipoLabel,
@@ -15170,9 +15176,9 @@ function openSessioneModal(s, onDone) {
       el('div', {}, el('span', { style:'color:var(--mut)' }, 'Tipo: '),
         el('span', { style:'color:var(--yel)' }, 'Attività extra')),
       el('div', {}, el('span', { style:'color:var(--mut)' }, 'Attività: '), attNome || '—'),
-      attDesc
-        ? el('div', {}, el('span', { style:'color:var(--mut)' }, 'Descrizione: '), attDesc)
-        : null,
+      ...(attDesc
+        ? [el('div', {}, el('span', { style:'color:var(--mut)' }, 'Descrizione: '), attDesc)]
+        : []),
     );
   } else {
     infoBox.append(
@@ -15203,7 +15209,7 @@ function openSessioneModal(s, onDone) {
   const inFine = el('input', { type:'datetime-local', name:'fine', step:'1', value: fineDt ? dtLocalStr(fineDt) : '' });
 
   form.append(
-    selTipo ? el('div', { class:'field' }, el('label', {}, 'Tipo lavorazione'), selTipo) : null,
+    ...(selTipo ? [el('div', { class:'field' }, el('label', {}, 'Tipo lavorazione'), selTipo)] : []),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Inizio *'), inInizio),
       el('div', { class:'field' }, el('label', {}, 'Fine (vuoto = ancora aperta)'), inFine),

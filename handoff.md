@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-05.1`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-05.2`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -226,3 +226,9 @@
 - `sessioni_lavoro.inizio/fine` sono **UTC**. L'interfaccia li mostra in **ora locale** (Europe/Rome: **+2 in estate**, +1 in inverno).
 - **Quando si estraggono orari via REST per riferirli a Nico vanno CONVERTITI**, altrimenti si indicano timbrature a un'ora che sullo schermo non esiste. Successo due volte il 5 ago: i timbri di Fabrizio Scordo dati come `07:23→10:30` (veri: `09:23→12:30`) e la sessione di Alessio data come `11:15→13:24` (vera: `13:15→15:24`) — Nico l'ha cercata a lungo nella scheda Live convinto di un bug che non c'era.
 - Durate e totali NON sono affetti: sbaglia solo il collocamento nella giornata.
+
+## Trappola: `.append()` del DOM scrive "null", `el()` no (5 ago, `2026-08-05.2`)
+- `el()` scarta i figli `null`/`false`. **`Element.append()` NO**: gli passi `null` e lui inserisce un nodo di testo con dentro la parola **"null"**.
+- Sintomo trovato sul campo: nella scheda Live, sulla card di chi era su un'**attività extra**, compariva `null` al posto del codice articolo — che per le extra non esiste, e infatti il codice diceva correttamente `d.codice ? el(...) : null`. Il guaio era il `.append()` attorno.
+- **Regola**: su un elemento già creato mai `x.append(cond ? el(...) : null)`, sempre `x.append(...(cond ? [el(...)] : []))`. Dentro `el(...)` invece il ternario con `null` va benissimo.
+- Sistemati tutti e 6 i punti di `app.js` (card Live, bottoni "usa" dei due suggerimenti, avviso OP orfani nell'import, descrizione attività, tipo lavorazione nel modal sessione). `mobile.html` e `prelievo.html` erano puliti. Commento di avvertimento lasciato accanto a `el()`.
