@@ -1560,3 +1560,63 @@ function scostamentiPrezzoCliente(clienteId) {
   });
   return out.sort((a, b) => Math.abs(b.scarto) - Math.abs(a.scarto));
 }
+
+// ── ASSENZE DENTRO UNA PRENOTAZIONE MEZZO ──────────────────────────────────
+// Chi prenota un mezzo lo fa spesso PER UN ALTRO, e non ha davanti il
+// calendario ferie: qui si guardano le assenze di OGNI operatore collegato,
+// non solo di chi sta prenotando.
+//
+// Non decide niente e non blocca (decisione Nico, 5 ago): elenca e basta —
+// stessa linea del resto dell'app, il gestionale dichiara e la persona decide.
+// Un rientro anticipato o un permesso che non tocca la trasferta sono casi
+// veri, e il gestionale non li conosce.
+//
+// GIORNATA INTERA vs PERMESSO: un permesso di 2 ore non impedisce una
+// trasferta, una ferie sì. Le due cose vanno DETTE diverse, non trattate
+// uguale. Soglia = ORE_STANDARD_GIORNO, la stessa già usata dalle card Live.
+// Più righe nello stesso giorno si sommano (mattina + pomeriggio = intera).
+//
+// Ritorna [{ utenteId, giorni: [{ data, ore, intera, tipo }], nIntere,
+//   nParziali }], un elemento per operatore che ha almeno un'assenza.
+function assenzeInPrenotazione(utentiIds, dataInizioIso, dataFineIso) {
+  const ids = [...new Set((utentiIds || []).filter(Boolean))];
+  if (!ids.length || !dataInizioIso) return [];
+  const fine = dataFineIso || dataInizioIso;
+  // utenteId → data → ore sommate (e il tipo della prima riga del giorno)
+  const perUtente = new Map();
+  (state.assenze || []).forEach(a => {
+    if (a.stato !== 'valida') return;
+    if (!ids.includes(a.utente_id)) return;
+    if (!a.data || a.data < dataInizioIso || a.data > fine) return;
+    if (!perUtente.has(a.utente_id)) perUtente.set(a.utente_id, new Map());
+    const giorni = perUtente.get(a.utente_id);
+    const prec = giorni.get(a.data);
+    const ore = (parseFloat(a.ore) || 0) + (prec ? prec.ore : 0);
+    giorni.set(a.data, { ore, tipoId: prec ? prec.tipoId : a.tipo_assenza_id });
+  });
+  const out = [];
+  // Si scorre `ids` e non la mappa: l'ordine è quello degli operatori scelti.
+  ids.forEach(uid => {
+    const giorni = perUtente.get(uid);
+    if (!giorni || !giorni.size) return;
+    const righe = [...giorni.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([data, g]) => {
+        const tipo = (state.tipiAssenza || []).find(t => t.id === g.tipoId);
+        return {
+          data, ore: g.ore,
+          // Senza ore scritte non si può dire che sia un mezzo permesso:
+          // si considera intera, che è il caso da segnalare.
+          intera: !(g.ore > 0) || g.ore >= ORE_STANDARD_GIORNO,
+          tipo: (tipo && tipo.nome) || 'Assenza',
+        };
+      });
+    out.push({
+      utenteId: uid,
+      giorni: righe,
+      nIntere: righe.filter(r => r.intera).length,
+      nParziali: righe.filter(r => !r.intera).length,
+    });
+  });
+  return out;
+}

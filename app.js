@@ -1459,7 +1459,7 @@ const TAB_STRUCTURE = {
       { id: 'magazzino',      label: 'Magazzino',      adminOnly: false },
       // Spostata qui da Gestione (5 ago, richiesta Nico): i mancanti si
       // guardano mentre si lavora, non mentre si configura il gestionale.
-      { id: 'fabbisogno',     label: 'Mancanti',       adminOnly: true },
+      { id: 'fabbisogno',     label: 'Mancanti',       adminOnly: false },
       { id: 'prelievi',       label: 'Prelievi',       adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
       { id: 'gantt_live',     label: 'Live',           adminOnly: false },
@@ -3764,6 +3764,10 @@ function renderFabbisogno(root) {
   }
 
   const righeOra = state.mancanti || [];
+  // La scheda la LEGGONO tutti (decisione Nico, 5 ago): serve in reparto per
+  // sapere se il materiale c'è. L'import invece SOSTITUISCE l'intero archivio
+  // — è l'unica azione distruttiva della scheda e resta agli admin.
+  const isAdmin = state.profile?.ruolo === 'admin';
   const nf = (n) => n == null ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
   const dataOra = righeOra.reduce((d, m) => (!d || String(m.import_data || '') > d) ? (m.import_data || d) : d, null);
 
@@ -3836,14 +3840,31 @@ function renderFabbisogno(root) {
   }
 
   const inFile = el('input', { type:'file', accept:'.csv,.xlsx,.xls,.txt', style:'max-width:340px;' });
+  // Il nome del file scelto va scritto DENTRO il quadrato: il selettore di
+  // sistema è nascosto, quindi non lo dice più nessun altro.
+  const nomeScelto = el('div', { class:'sub',
+    style:'font-size:11px;margin-top:6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' });
   const stato = el('div', { class:'sub', style:'margin-top:10px;' });
   const anteprima = el('div', { style:'margin-top:12px;' });
   let daImportare = null;
 
-  inFile.onchange = async () => {
+  // UNA sola strada per l'analisi: la chiamano sia il selettore sia il
+  // trascinamento. Se restassero due copie, i bug si correggerebbero una volta
+  // sola su due.
+  const analizzaFile = async (f) => {
     anteprima.innerHTML = ''; daImportare = null;
-    const f = inFile.files && inFile.files[0];
     if (!f) return;
+    nomeScelto.textContent = '📄 ' + f.name;
+    nomeScelto.title = f.name;
+    // Il trascinamento NON rispetta l'attributo accept del selettore: qui il
+    // formato va controllato a mano, o un .pdf finirebbe dentro il lettore xlsx
+    // e uscirebbe un errore che non dice niente.
+    if (!/\.(csv|txt|xlsx|xls)$/i.test(f.name)) {
+      stato.textContent = '';
+      anteprima.append(el('div', { class:'sub', style:'color:var(--red);' },
+        'Formato non gestito: ' + f.name + ' — serve un .csv o un .xlsx.'));
+      return;
+    }
     stato.textContent = 'Leggo il file…';
     try {
       const buf = await f.arrayBuffer();
@@ -3936,12 +3957,85 @@ function renderFabbisogno(root) {
         'Non riesco a leggere il file: ' + (err.message || err)));
     }
   };
-  root.append(el('div', { class:'field' },
-    el('label', {}, 'Estrazione Fabbisogno Massivo (.csv o .xlsx)'), inFile, stato,
-    el('div', { class:'sub', style:'margin-top:4px;font-size:11px;' },
-      'Il CSV si legge subito; l\'xlsx richiede il download di una libreria alla prima apertura. '
-      + 'Separatore, virgole decimali, date gg/mm/aaaa e accenti Windows sono gestiti da soli.')));
-  root.append(anteprima);
+  inFile.onchange = () => analizzaFile(inFile.files && inFile.files[0]);
+
+  // ── Riquadro di rilascio: un QUADRATO, non una riga ───────────────────
+  // Un bordo tratteggiato attorno a un campo file non si legge come "qui puoi
+  // trascinare": ci vuole un'area grande, vuota e riconoscibile.
+  // Senza preventDefault su dragover il browser APRE il file e la pagina se ne
+  // va: è il default, non un dettaglio.
+  const DZ_BASE = 'width:220px;height:220px;flex-shrink:0;box-sizing:border-box;'
+    + 'display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;'
+    + 'gap:6px;padding:16px;border-radius:10px;cursor:pointer;user-select:none;'
+    + 'transition:border-color .15s,background .15s;';
+  const DZ_OFF = DZ_BASE + 'border:2px dashed var(--brd);background:transparent;';
+  const DZ_ON  = DZ_BASE + 'border:2px dashed var(--acc);background:var(--sur2);';
+  const dz = el('div', { style: DZ_OFF, tabindex:'0', role:'button',
+    title:'Trascina qui il file dell\'estrazione, oppure fai clic per sceglierlo' });
+  // dragleave scatta anche solo passando da un figlio all'altro: senza contare
+  // la profondità l'evidenziazione lampeggerebbe.
+  let dzProf = 0;
+  const dzEvidenzia = (attiva) => { dz.style.cssText = attiva ? DZ_ON : DZ_OFF; };
+  dz.addEventListener('dragenter', (e) => { e.preventDefault(); dzProf++; dzEvidenzia(true); });
+  dz.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  });
+  dz.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    if (--dzProf <= 0) { dzProf = 0; dzEvidenzia(false); }
+  });
+  dz.addEventListener('drop', (e) => {
+    e.preventDefault(); dzProf = 0; dzEvidenzia(false);
+    const dt = e.dataTransfer;
+    const f = dt && dt.files && dt.files[0];
+    if (!f) return;
+    // Il file trascinato finisce anche dentro il selettore: è da lì che si
+    // rilegge se serve, ed è la stessa strada delle due.
+    try { inFile.files = dt.files; } catch (_) {}
+    analizzaFile(f);
+  });
+  // Il quadrato è anche il bottone per scegliere il file: il selettore di
+  // sistema resta nascosto dentro, così l'area è una sola cosa e non due.
+  inFile.style.display = 'none';
+  // Il click programmatico sull'input BOLLE fino al quadrato: senza questa
+  // guardia il gestore richiamerebbe se stesso all'infinito.
+  dz.addEventListener('click', (e) => { if (e.target !== inFile) inFile.click(); });
+  dz.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inFile.click(); }
+  });
+  dz.append(
+    el('div', { style:'font-size:34px;line-height:1;' }, '⬇'),
+    el('div', { style:'font-weight:700;' }, 'Trascina qui il file'),
+    el('div', { class:'sub', style:'font-size:11px;' }, '.csv o .xlsx'),
+    el('div', { class:'sub', style:'font-size:11px;margin-top:4px;text-decoration:underline dotted;' },
+      'oppure fai clic per sceglierlo'),
+    inFile, nomeScelto);
+  const dzRiga = el('div', { class:'field', style:'display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;' },
+    dz,
+    el('div', { style:'flex:1;min-width:240px;' },
+      el('label', {}, 'Estrazione Fabbisogno Massivo'),
+      el('div', { class:'sub', style:'font-size:11px;' },
+        'Il CSV si legge subito; l\'xlsx richiede il download di una libreria alla prima apertura. '
+        + 'Separatore, virgole decimali, date gg/mm/aaaa e accenti Windows sono gestiti da soli.'),
+      stato));
+  if (isAdmin) {
+    root.append(dzRiga);
+    root.append(anteprima);
+    // Rete di sicurezza: se il file cade FUORI dal riquadro, il browser lo
+    // aprirebbe buttando via la pagina. Registrata una volta sola sul documento
+    // (renderFabbisogno viene richiamata a ogni import).
+    if (!window.__dropGuard) {
+      window.__dropGuard = true;
+      document.addEventListener('dragover', (e) => { e.preventDefault(); });
+      document.addEventListener('drop', (e) => { e.preventDefault(); });
+    }
+  } else {
+    // Chi non importa deve comunque sapere chi tiene aggiornato l'elenco:
+    // la data dell'estrazione è già dichiarata nel riquadro qui sopra.
+    root.append(el('div', { class:'sub', style:'margin-bottom:14px;font-size:11px;' },
+      'L\'elenco lo aggiorna un amministratore importando l\'estrazione del magazzino.'));
+  }
 
   // ── Elenco completo, filtrabile ──────────────────────────────────────
   if (!righeOra.length) return;
@@ -10797,6 +10891,9 @@ async function openPrenotazioneModal(p, opts = {}) {
 
   const renderSelected = () => {
     selectedWrap.innerHTML = '';
+    // utentiSel è già aggiornato quando si arriva qui: l'avviso assenze segue
+    // ogni aggiunta o rimozione di operatore.
+    aggiornaAvvisoAssenze();
     if (utentiSel.length === 0) {
       selectedWrap.append(el('span', { class:'util-empty' }, 'Nessun utente selezionato'));
       return;
@@ -10846,6 +10943,40 @@ async function openPrenotazioneModal(p, opts = {}) {
   };
 
   searchInput.oninput = renderDropList;
+  // ── Avviso assenze ───────────────────────────────────────────────────
+  // Chi prenota lo fa spesso PER UN ALTRO e non ha davanti il calendario
+  // ferie. Avvisa e basta: non blocca (decisione Nico, 5 ago).
+  const avvisoAss = el('div');
+  // Un testo solo per il riquadro e per la conferma al salvataggio: se fossero
+  // due, alla prima modifica direbbero due cose diverse.
+  const testoAssenze = (righe) => righe.map(r => {
+    const u = state.utentiById[r.utenteId];
+    const tipi = [...new Set(r.giorni.map(x => x.tipo))].join(', ');
+    const giorni = r.giorni.map(x => fmtIT(x.data)
+      + (x.intera ? '' : ' (' + x.ore.toFixed(1).replace('.', ',') + ' h)')).join(', ');
+    return (u?.nome || 'Operatore') + ' · ' + tipi + ' — ' + giorni;
+  });
+  const aggiornaAvvisoAssenze = () => {
+    avvisoAss.innerHTML = '';
+    const inizio = form.querySelector('[name=data_inizio]');
+    const fine = form.querySelector('[name=data_fine]');
+    // Alla prima passata i campi data non esistono ancora: si ridisegna dopo.
+    if (!inizio || !inizio.value) return;
+    const righe = assenzeInPrenotazione(utentiSel, inizio.value, fine?.value || inizio.value);
+    if (!righe.length) return;
+    const parziali = righe.some(r => r.nParziali > 0);
+    avvisoAss.append(
+      el('div', { style:'margin-top:8px;background:var(--sur2);border:1px solid var(--yel);border-radius:6px;padding:8px 10px;' },
+        el('div', { style:'font-weight:700;color:var(--yel);margin-bottom:4px;' },
+          '⚠ ' + (righe.length === 1 ? 'Un operatore è assente' : righe.length + ' operatori sono assenti')
+          + ' in questo periodo'),
+        ...testoAssenze(righe).map(t => el('div', { class:'sub', style:'font-size:11px;' }, t)),
+        ...(parziali ? [el('div', { class:'sub', style:'font-size:11px;margin-top:4px;' },
+          'Dove sono indicate le ore è un permesso parziale: non impedisce per forza la trasferta.')] : []),
+        el('div', { class:'sub', style:'font-size:11px;margin-top:4px;' },
+          'La prenotazione si salva lo stesso: decidi tu.')));
+  };
+
   renderSelected();
   // Non chiamare renderDropList() qui: la lista appare solo al focus
 
@@ -10856,15 +10987,16 @@ async function openPrenotazioneModal(p, opts = {}) {
       dropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Almeno 1 obbligatorio. Clicca sul campo qui sopra per aprire la lista.'),
+      avvisoAss,
     ),
   );
 
+  const inDataInizio = el('input', { type:'date', name:'data_inizio', required:'true', value:p.data_inizio||today, onchange: () => aggiornaAvvisoAssenze() });
+  const inDataFine = el('input', { type:'date', name:'data_fine', required:'true', value:p.data_fine||p.data_inizio||today, onchange: () => aggiornaAvvisoAssenze() });
   form.append(
     el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Data inizio'),
-        el('input', { type:'date', name:'data_inizio', required:'true', value:p.data_inizio||today })),
-      el('div', { class:'field' }, el('label', {}, 'Data fine'),
-        el('input', { type:'date', name:'data_fine', required:'true', value:p.data_fine||p.data_inizio||today })),
+      el('div', { class:'field' }, el('label', {}, 'Data inizio'), inDataInizio),
+      el('div', { class:'field' }, el('label', {}, 'Data fine'), inDataFine),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Ora inizio *'),
@@ -10875,6 +11007,8 @@ async function openPrenotazioneModal(p, opts = {}) {
     el('div', { class:'field' }, el('label', {}, 'Note (opz.)'),
       el('textarea', { name:'note', rows:'2' }, p.note||'')),
   );
+  // Ora i campi data esistono: alla prima passata l'avviso era uscito a vuoto.
+  aggiornaAvvisoAssenze();
 
   const listaWrap = el('div', { class:'consegne-list' });
   const renderConsegne = () => {
@@ -11114,6 +11248,20 @@ async function openPrenotazioneModal(p, opts = {}) {
       }).join('\n');
       alert(`⚠ Operatore già impegnato su un altro mezzo nella stessa fascia oraria:\n\n${dettagli}\n\nScegli un altro periodo, oppure togli dall'elenco l'operatore in conflitto.`);
       return;
+    }
+
+    // CHECK NON BLOCCANTE: operatori in ferie/permesso nel periodo. Il riquadro
+    // giallo nel modal lo dice già, ma le date si possono cambiare all'ultimo:
+    // qui si chiede conferma, non si vieta. Annullando non si salva niente.
+    const assRighe = assenzeInPrenotazione(utentiSel, payload.data_inizio, payload.data_fine);
+    if (assRighe.length > 0) {
+      const dettagli = testoAssenze(assRighe).map(t => '• ' + t).join('\n');
+      const parziali = assRighe.some(r => r.nParziali > 0);
+      const nota = parziali
+        ? '\n\nDove sono indicate le ore è un permesso parziale: non impedisce per forza la trasferta.'
+        : '';
+      if (!confirm(`⚠ In questo periodo risultano assenze:\n\n${dettagli}${nota}\n\nSalvo lo stesso la prenotazione?`))
+        return;
     }
 
     let prenId = p.id;

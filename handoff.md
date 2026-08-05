@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-05.3`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-05.4`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -235,20 +235,30 @@
 
 ## ▶▶ PROSSIMI (chiesti da Nico il 5 ago, chat chiusa qui per contesto pieno)
 
-### A. Scheda Mancanti spostata in Lavoro — **FATTO** (`2026-08-05.3`)
-Era in Gestione, ora è in **Lavoro**, dopo Magazzino. Resta `adminOnly: true` come prima: **da chiedere a Nico se vuole renderla visibile a tutti** — spostarla fra le schede di lavoro suggerirebbe di sì, ma non l'ha detto e non ho voluto decidere io chi vede i mancanti.
+### A. Scheda Mancanti spostata in Lavoro — **FATTO** (`2026-08-05.3`, visibilità chiusa il 5 ago con `.4`)
+Era in Gestione, ora è in **Lavoro**, dopo Magazzino. **La vedono tutti** (`adminOnly: false`, decisione Nico 5 ago): serve in reparto per sapere se il materiale c'è.
+- **L'import resta agli admin.** Non è una limitazione di comodo: sostituisce l'INTERO archivio (delete + insert) ed è l'unica azione distruttiva della scheda; la policy RLS è `FOR ALL TO authenticated`, quindi il freno può stare solo nella UI. Chi non è admin vede tutto l'elenco e una riga che dice chi lo aggiorna.
+- `state.mancanti` era già caricato per tutti (`caricaMancanti` sta nel caricamento generale, senza gate admin): il badge `⚠N` in Ordini cliente e `apriMancantiFiltrati` ora funzionano anche per loro — prima il clic portava a una scheda che non potevano aprire.
 
-### B. Import Mancanti per trascinamento — DA FARE
-Oggi il file si sceglie col selettore. Nico lo vuole poter **trascinare su un riquadro**.
-- Il punto è `renderFabbisogno` in `app.js` (cerca `const inFile = el('input', { type:'file'`).
-- Serve una zona di rilascio: `dragover` con `preventDefault` (senza quello il browser apre il file e basta), `dragleave`, `drop` → `e.dataTransfer.files[0]`, evidenziazione mentre ci passi sopra.
-- **Non duplicare la logica**: oggi tutto sta in `inFile.onchange`. Estrarre una `analizzaFile(f)` e farla chiamare da entrambe le strade, altrimenti si sistemano i bug una volta sola su due.
-- Accettare `.csv` e `.xlsx` (il CSV non richiede la libreria, l'xlsx sì — vedi sezione Mancanti v3).
+### B. Import Mancanti per trascinamento — **FATTO** (`2026-08-05.4`)
+Il file si può **trascinare sul riquadro** della scheda Mancanti; il selettore resta dentro lo stesso riquadro (le due strade convivono, nessuna è stata tolta).
+- **Una sola strada per l'analisi**: `inFile.onchange` è stata svuotata in una `analizzaFile(f)` chiamata da entrambe. Era il punto su cui si sarebbero sdoppiati i bug.
+- **Il formato si controlla a mano**: l'attributo `accept` del selettore **non vale per il trascinamento** — un `.pdf` sarebbe finito dentro il lettore xlsx con un errore muto. Ora è respinto per nome (`.csv/.txt/.xlsx/.xls`) con un messaggio in chiaro.
+- **`dragleave` scatta anche passando da un figlio all'altro** (il riquadro contiene label, input, note): senza contare la profondità (`dzProf`) l'evidenziazione lampeggerebbe. Verificato in browser: entrata zona → entrata figlio → uscita figlio resta acceso, uscita zona spegne.
+- **Il riquadro è un QUADRATO di 220×220** (5 ago, richiesta Nico: "più capibile che si possa trascinare"). Un bordo tratteggiato attorno a un campo file non si legge come area di rilascio: ci vuole un'area grande e vuota, con freccia grande, "Trascina qui il file", ".csv o .xlsx" e "oppure fai clic per sceglierlo". Il selettore di sistema è **nascosto dentro il quadrato** (`display:none`) e il quadrato stesso fa da bottone: una cosa sola, non due. Accanto, a destra, la nota sui formati.
+- **Trappola del click**: `inFile.click()` genera un evento che **BOLLE fino al quadrato** → il gestore richiamerebbe se stesso all'infinito. Guardia `if (e.target !== inFile)`. Misurato in browser: un clic = **una** apertura del selettore.
+- Nascondendo il selettore, il nome del file non lo direbbe più nessuno → si scrive dentro il quadrato (`nomeScelto`, `📄 nome`), impostato in `analizzaFile` così vale per entrambe le strade. Il quadrato è raggiungibile da tastiera (`tabindex`, Invio/Spazio).
+- **Il file rilasciato viene messo anche dentro l'input** (`inFile.files = dt.files`, in try/catch): è da lì che si rilegge, ed è la stessa strada delle due. Funziona sui browser attuali; se non fosse scrivibile il resto regge lo stesso.
+- **Rete di sicurezza sul documento**: `dragover`/`drop` con `preventDefault` registrati **una volta sola** (`window.__dropGuard`, perché `renderFabbisogno` viene richiamata a ogni import) — se il file cade FUORI dal riquadro il browser lo aprirebbe buttando via la pagina.
+- Effetto collaterale utile: trascinando **lo stesso file due volte di fila** l'analisi si rifà, cosa che col solo selettore non succede (`onchange` non scatta se il file non cambia).
+- Provato in browser su pagina di test (`scratchpad/test_drop.html` + `serve.js`, servita su http perché `file://` è bloccato): 9 casi, tutti passati — quadrato 220×220 misurato, un clic = una apertura, evidenziazione coi figli in mezzo, drop CSV letto giusto, `.pdf` respinto, nome mostrato, Invio da tastiera.
 
-### C. Calendario mezzi: avvisare se l'operatore prenotato è assente — DA FARE
-Prenotando un mezzo **per un altro operatore**, se in quel periodo lui ha ferie/permesso/malattia il gestionale deve **segnalarlo**.
-- Le assenze stanno in `state.assenze` (campi `utente_id`, `data`, `ore`, `stato` — contano solo quelle con `stato === 'valida'`), i tipi in `state.tipiAssenza`.
-- Le prenotazioni hanno un intervallo (`data_inizio`/`data_fine`) e gli operatori collegati stanno in `prenotazioni_utenti` (in `state.prenOp`).
-- Va confrontato l'intervallo della prenotazione con le assenze di OGNI operatore collegato, non solo di chi sta prenotando.
-- **Avvisare, non bloccare** (coerente col resto: il gestionale dichiara, la persona decide) — ma **chiedere conferma a Nico**: potrebbe volerlo bloccante.
-- Attenzione ai **permessi parziali**: un'assenza con `ore` < giornata non impedisce la trasferta. Distinguere "assente tutto il giorno" da "ha un permesso di N ore" e dirlo, invece di trattarli uguale.
+### C. Calendario mezzi: avvisare se l'operatore prenotato è assente — **FATTO** (`2026-08-05.4`)
+Prenotando un mezzo, se un operatore collegato ha ferie/permesso/malattia in quel periodo il gestionale lo **dichiara**.
+- **Avvisa, NON blocca** (decisione Nico, 5 ago, scelta fra bloccante e misto): un rientro anticipato o un permesso che non tocca la trasferta sono casi veri, e il gestionale non li conosce. Coerente col resto: dichiara e la persona decide. Gli altri due controlli della stessa `save()` (mezzo già prenotato, operatore su un altro mezzo) restano **bloccanti** — lì è un conflitto certo, qui no.
+- **Due punti, non uno**: riquadro giallo **live** dentro il modal (sotto l'elenco operatori, ridisegnato a ogni operatore aggiunto/tolto e a ogni cambio di data — la lezione del 28 lug sui blocchi costruiti una volta sola) + **conferma al salvataggio**, perché le date si cambiano all'ultimo. Testo prodotto da una sola `testoAssenze`: se fossero due, alla prima modifica direbbero due cose diverse.
+- `assenzeInPrenotazione(utentiIds, dataInizio, dataFine)` in `domain/scheduling.js` (pura, **29 test** in scratchpad/test_assenze_pren.js) → `[{ utenteId, giorni:[{data, ore, intera, tipo}], nIntere, nParziali }]`. Guarda le assenze di **OGNI** operatore collegato, non solo di chi prenota.
+- **Giornata intera vs permesso parziale**, come chiesto: soglia `ORE_STANDARD_GIORNO` (la stessa delle card Live). Più righe nello stesso giorno **si sommano** (mattina 4 + pomeriggio 4 = intera, non due permessi). Dove compaiono le ore la scheda dice che è parziale e che non impedisce per forza la trasferta.
+- **Assenza senza ore scritte = intera**: non si può dedurre che sia un mezzo permesso, e il caso da segnalare è quello. Tipo cancellato dall'anagrafica → etichetta "Assenza", mai vuoto.
+- Solo `stato === 'valida'`: una richiesta non approvata non è un'assenza.
+- NB: il modal è **solo admin-side** (`openPrenotazioneModal` non è mai chiamato dal kiosk, verificato) — lì `state.assenze` è caricato per intero; `kioskLoadAll` ne carica solo il giorno corrente e non c'entra.
