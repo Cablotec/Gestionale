@@ -364,6 +364,14 @@ input.search:focus{border-color:var(--acc);}
 .util-dropwrap{position:relative;margin-top:6px;}
 .util-search{background:var(--sur);border:1px solid var(--brd);color:var(--txt);padding:7px 10px;font-family:'JetBrains Mono',monospace;font-size:11px;outline:none;width:100%;border-radius:4px;}
 .util-search:focus{border-color:var(--acc);}
+/* Campo UNICO: pillole e casella di ricerca dentro lo stesso riquadro, invece
+   di due box impilati (richiesta Nico, 5 ago). La casella perde il proprio
+   bordo: il bordo e' quello del campo, che si accende col focus dentro. */
+.util-field{position:relative;display:flex;flex-wrap:wrap;gap:6px;padding:6px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;min-height:42px;align-items:center;cursor:text;}
+.util-field:focus-within{border-color:var(--acc);}
+.util-field .util-search{flex:1;min-width:150px;width:auto;background:transparent;border:none;padding:4px 2px;}
+.util-field .util-search:focus{border-color:transparent;}
+.util-field .util-droplist{top:calc(100% + 2px);border-top:1px solid var(--acc);border-radius:4px;}
 .util-droplist{position:absolute;top:100%;left:0;right:0;background:var(--sur2);border:1px solid var(--acc);border-top:none;border-radius:0 0 4px 4px;max-height:240px;overflow-y:auto;z-index:1000;display:none;}
 .util-droplist.open{display:block;}
 .util-row{display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;font-family:'Syne',sans-serif;font-size:12px;border-bottom:1px solid var(--brd);user-select:none;transition:background .12s;}

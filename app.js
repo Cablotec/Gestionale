@@ -10877,31 +10877,39 @@ async function openPrenotazioneModal(p, opts = {}) {
   // Multi-select operatori (obbligatorio) — dropdown searchable
   const utentiAttivi = state.utenti.filter(u => u.attivo && !isKioskRecord(u));
 
-  const selectedWrap = el('div', { class:'util-selected' });
+  // UN SOLO campo (richiesta Nico, 5 ago): le pillole degli operatori scelti e
+  // la casella di ricerca stanno nello STESSO riquadro, non in due box impilati.
+  // La lista scende sotto tutto il campo.
   const searchInput = el('input', {
-    type:'text', class:'util-search', placeholder:'Aggiungi utente (clicca o cerca per nome)…',
-    autocomplete:'off',
+    type:'text', class:'util-search', autocomplete:'off',
   });
   const dropList = el('div', { class:'util-droplist' });
-  const dropWrap = el('div', { class:'util-dropwrap' }, searchInput, dropList);
+  const campoUtenti = el('div', { class:'util-field' }, searchInput, dropList);
+  // Cliccando lo spazio vuoto del riquadro si scrive nella casella: il campo si
+  // comporta come un campo solo, che è il punto di averlo unito.
+  campoUtenti.addEventListener('mousedown', (e) => {
+    if (e.target === campoUtenti) { e.preventDefault(); searchInput.focus(); }
+  });
 
   // Focus apre la lista, blur la chiude (con piccolo delay per gestire click sulla lista)
   searchInput.onfocus = () => { dropList.classList.add('open'); renderDropList(); };
   searchInput.onblur = () => { setTimeout(() => dropList.classList.remove('open'), 180); };
 
   const renderSelected = () => {
-    selectedWrap.innerHTML = '';
+    // Si tolgono solo le pillole: la casella e la lista vivono nello stesso
+    // riquadro e devono restare dove sono (svuotarlo le distruggerebbe).
+    campoUtenti.querySelectorAll('.util-pill').forEach(x => x.remove());
     // utentiSel è già aggiornato quando si arriva qui: l'avviso assenze segue
     // ogni aggiunta o rimozione di operatore.
     aggiornaAvvisoAssenze();
-    if (utentiSel.length === 0) {
-      selectedWrap.append(el('span', { class:'util-empty' }, 'Nessun utente selezionato'));
-      return;
-    }
+    // Il posto vuoto lo dichiara il placeholder, non una scritta in più.
+    searchInput.placeholder = utentiSel.length === 0
+      ? 'Clicca qui e scegli chi userà il mezzo…'
+      : 'aggiungi…';
     utentiSel.forEach(uid => {
       const u = state.utentiById[uid];
       if (!u) return;
-      selectedWrap.append(el('span', { class:'util-pill' },
+      campoUtenti.insertBefore(el('span', { class:'util-pill' },
         el('span', {}, u.nome),
         canEdit ? el('button', {
           type:'button', class:'util-pill-x',
@@ -10910,7 +10918,7 @@ async function openPrenotazioneModal(p, opts = {}) {
             renderSelected(); renderDropList();
           },
         }, '✕') : null,
-      ));
+      ), searchInput);
     });
   };
 
@@ -10983,10 +10991,8 @@ async function openPrenotazioneModal(p, opts = {}) {
   form.append(
     el('div', { class:'field' },
       el('label', {}, 'Chi userà il mezzo *'),
-      selectedWrap,
-      dropWrap,
-      el('div', { class:'sub', style:'margin-top:4px;' },
-        'Almeno 1 obbligatorio. Clicca sul campo qui sopra per aprire la lista.'),
+      campoUtenti,
+      el('div', { class:'sub', style:'margin-top:4px;' }, 'Almeno un operatore.'),
       avvisoAss,
     ),
   );

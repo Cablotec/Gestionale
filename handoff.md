@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-05.4`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-05.5`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -262,3 +262,11 @@ Prenotando un mezzo, se un operatore collegato ha ferie/permesso/malattia in que
 - **Assenza senza ore scritte = intera**: non si può dedurre che sia un mezzo permesso, e il caso da segnalare è quello. Tipo cancellato dall'anagrafica → etichetta "Assenza", mai vuoto.
 - Solo `stato === 'valida'`: una richiesta non approvata non è un'assenza.
 - NB: il modal è **solo admin-side** (`openPrenotazioneModal` non è mai chiamato dal kiosk, verificato) — lì `state.assenze` è caricato per intero; `kioskLoadAll` ne carica solo il giorno corrente e non c'entra.
+
+### D. Prenotazione mezzo: UN SOLO campo "chi userà il mezzo" — **FATTO** (`2026-08-05.5`)
+- Erano **due riquadri impilati** sotto la stessa etichetta: le pillole degli operatori scelti (`.util-selected`) e sotto la casella di ricerca (`.util-search`). Richiesta Nico: un campo solo. Ora pillole e casella stanno **dentro lo stesso riquadro** (`.util-field`), con la lista che scende sotto tutto il campo.
+- Il bordo è **uno solo**, quello del campo, e si accende col focus **dentro** (`:focus-within`); la casella perde il proprio. Cliccando lo spazio vuoto del riquadro si scrive nella casella (`mousedown` con `e.target === campoUtenti`), altrimenti "un campo solo" resterebbe un'illusione.
+- **`renderSelected` non può più svuotare il contenitore**: casella e lista ci vivono dentro e `innerHTML = ''` le distruggerebbe. Toglie solo le `.util-pill` e reinserisce le nuove **prima** della casella.
+- La scritta "Nessun utente selezionato" è sparita: lo dice il **placeholder**, che diventa "aggiungi…" quando c'è già qualcuno. Una cosa in meno che ripete quello che si vede.
+- **Toccato SOLO il modal prenotazione.** Lo stesso schema a due box è anche nel modal commessa (addetti e fornitori, `addSelectedWrap`/`forSelectedWrap`): lì è invariato, e le classi vecchie restano perché servono a quelli. Se piace, si allineano dopo.
+- Misurato in browser sul CSS **vero** (pagina di test che carica `app.css` dal repo, `scratchpad/test_campo.html`): un bordo solo (campo 1px, casella 0), casella dentro il riquadro e sulla riga delle pillole, lista 1px sotto il campo e larga quanto lui, il fuoco entra cliccando lo spazio vuoto, e togliendo una pillola casella e lista restano al loro posto.
