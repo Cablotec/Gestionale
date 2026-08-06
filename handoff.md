@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-05.5`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-06.1`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -89,7 +89,55 @@
 - Nel modal commessa il sommario dice per primo quanti **fermano** la commessa; ⛔ bloccante, 📦 in arrivo con la data (in rosso se scaduta).
 - **Verificato facendo girare il codice di import VERO sull'Excel vero**: 364 righe, 317+47, 361 agganciabili, 51 consegne, 35 future / 16 in ritardo. 25 test in scratchpad/test_mancanti2.js.
 
+## Attività extra — struttura, ripresa dopo la pausa, ricerca (6 ago, `2026-08-06.1`)
+
+### Cosa dicevano i dati (misurato via REST prima di toccare qualsiasi cosa)
+- **143 timbri, 228 h dal 27 mag** = il **6,3%** di tutto il timbrato (commesse: 2005 timbri, 3404 h). Non è una voce marginale: circa una giornata di reparto a settimana.
+- **In anagrafica c'era UNA sola voce**, chiamata "Attività extra": tutto finiva lì. L'unica cosa che diceva *cosa* fosse stato fatto era la nota, e **137 timbri su 143 non l'avevano** (la nota obbligatoria è del 4 ago).
+- **14 timbri (34,4 h) chiusi dalla pausa delle 12:30, tutti e 14 senza nota**: il 15% delle ore extra, troncato e senza spiegazione. Il punto sollevato da Nico, misurato.
+- Rumore trovato: **8 timbri sotto i 3 minuti** (clic per sbaglio) e **1 timbro da 64,6 h** (Raoul, 26→29 giu) che da solo è il 28% delle ore extra. Quest'ultimo è sfuggito perché **la pausa chiude solo le sessioni iniziate PRIMA delle 12:30**: quella era partita alle 15:40 e non l'ha toccata nessuno. **Non esiste una chiusura di fine giornata** — buco aperto, vedi fili.
+
+### 1. Struttura: le note rapide diventano attività (decisione Nico)
+Le 6 chip di `KIOSK_NOTE_RAPIDE` erano **già una tassonomia** che non era mai diventata dato: restavano testo dentro la nota. Ora sono voci vere in `attivita_extra` → il "cosa" si sceglie con un bottone grande, diventa contabile e ricercabile, e la nota resta per il dettaglio (che funziona bene quando c'è: "PERFOREX", "carico QE Barilla D23634").
+- **DA ESEGUIRE DAL PANNELLO** (l'account kiosk è bloccato da RLS sull'anagrafica: `42501 new row violates row-level security policy`):
+  ```sql
+  INSERT INTO attivita_extra (nome, descrizione, ordine, colore, attivo) VALUES
+    ('Pulizia e riordino','Pulizia del reparto, riordino postazioni e attrezzatura.',10,'#92D050',true),
+    ('Manutenzione','Manutenzione di macchine e attrezzature (scrivi quale nella nota).',20,'#00B0F0',true),
+    ('Aiuto a un collega','Lavoro dato a un collega su una sua commessa.',30,'#FFC000',true),
+    ('Riunione','Riunioni e allineamenti.',40,'#7030A0',true),
+    ('Formazione','Formazione, affiancamento, addestramento.',50,'#FF6600',true),
+    ('Attesa materiale','Fermo: manca il materiale per andare avanti.',60,'#FF7575',true);
+  -- La voce generica NON si cancella: 143 timbri la usano. Si rinomina per
+  -- quello che è sempre stata e si toglie dal kiosk (attivo=false), così
+  -- resta leggibile nello storico ma non compare più fra le scelte.
+  UPDATE attivita_extra
+     SET nome = 'Non classificata', attivo = false, ordine = 99
+   WHERE id = 'cbd0535c-fbbd-464a-aee4-f15c8dcbc1fb';
+  ```
+- Il codice **non dipende** da questa SQL: senza, il kiosk mostra quello che trova in anagrafica come prima.
+- **Aperto**: con le 6 attività, le chip della schermata nota **ripetono** il nome dell'attività appena scelta. Da rivedere quando saranno in uso: le chip servono ancora sulla schermata di ripresa, meno sulla chiusura.
+
+### 2. Ripresa dopo la pausa (decisione Nico: chiedi la nota e offri la ripresa)
+- All'identificazione, se l'operatore ha un'**attività extra troncata dalla pausa oggi e rimasta senza nota**, prima del menu compare una schermata sola: *"Prima della pausa stavi facendo: X — dalle HH:MM alle 12:30 il timbro si è chiuso da solo"*, chip + testo libero, e i bottoni **▶ Riprendi — X** / **✔ Ho finito** / **← Lo scrivo dopo**.
+- La nota finisce **sulla riga della mattina**, che è quella che la mancava. "Riprendi" apre una sessione nuova sulla stessa attività (via `kioskSelectAttivita`, la stessa strada di sempre): i due spezzoni restano due fatti distinti, non si fondono.
+- **Riconoscimento senza marcatori**: lo spezzone si riconosce dall'ora esatta di chiusura (12:30:00 spaccate, quello che scrive la pausa). **Nessun marcatore nelle note** — quel campo è solo degli operatori (decisione 5 ago). Una chiusura a mano allo stesso secondo è improbabile; alle 12:30:14 non scatta.
+- **"Lo scrivo dopo" esiste apposta**: senza via d'uscita un operatore senza parole resterebbe piantato davanti al kiosk, e piantare il terminale di reparto è peggio del buco che stiamo chiudendo. Chi salta finisce nella scheda di ricerca col filtro "solo senza nota".
+- **Niente assillo**: `kioskState.spezzoniSaltati` evita di richiederlo a ogni identificazione. Si azzera al ricaricamento della pagina (il kiosk si ricarica da solo), quindi un buco resta comunque recuperabile il giorno stesso.
+- `kioskChiediNota` è stata riscritta come sottile involucro di **`kioskNotaSchermata`** (titolo, sottotitolo, chip, testo, N bottoni con `richiedeNota`): una schermata sola per chiusura e ripresa, o le due direbbero la stessa cosa in due modi diversi. 13 test in scratchpad/test_spezzone_pausa.js.
+
+### 3. Scheda "Attività extra" in Lavoro (visibile a tutti, decisione Nico)
+- Nuova scheda dopo Storico: ricerca su nota/attività/operatore, filtri per attività, operatore e mese, interruttore **"solo senza nota"**, totali **per attività** (ore, timbri, quanti senza nota) e elenco. Clic sulla riga → `openSessioneModal` per correggere orari o nota (**solo admin**, la modal se ne occupa già da sé).
+- L'anagrafica resta in Gestione: **qui si guarda cosa è stato fatto, lì si decide cosa si può fare**.
+- I timbri troncati dalla pausa sono marcati **⏸** e, se senza nota, la cella lo dice: *"— troncato dalla pausa, mai scritto —"*. Le sessioni aperte contano fino ad adesso (stessa convenzione del resto dell'app).
+- Tetto a 500 righe mostrate (oggi sono 143): la tabella cresce da sola e una scheda che si pianta non la sistema nessuno.
+- 24 test in scratchpad/test_timbri_extra.js (la funzione vera estratta da app.js e fatta girare su un DOM finto).
+
 ## ▶ Fili aperti (in ordine di priorità)
+
+### 0. Timbri extra: due buchi trovati sui dati, NON toccati (6 ago)
+- **Nessuna chiusura di fine giornata**: la pausa chiude solo ciò che è iniziato prima delle 12:30. Un timbro aperto alle 15:40 resta aperto per giorni (successo: 64,6 h sul weekend, il 28% delle ore extra di sempre). Serve una decisione: chiusura automatica a fine turno, o solo un avviso? Il kiosk già avvisa a 12 h, ma solo se qualcuno riapre quella schermata.
+- **Timbri da pochi secondi** (8 sotto i 3 minuti): clic per sbaglio che sporcano i conteggi. Scartarli all'apertura? Non mostrarli sotto una soglia? Decisione di Nico.
 
 ### 1. Nuovo ordine — grana estetica residua (NON cancellare la feature)
 - "+ Nuovo ordine" è l'UNICA porta d'inserimento (griglia: intestazione cliente+OC, 5 righe pos/articolo/OP/rif/qtà/€pz/scadenza, POS auto 0010/0020…, aggiungi-N, autocomplete con creazione al volo, prezzo dal listino, fasi auto). **Funziona.** Il vecchio modal resta per MODIFICARE (click sulla riga).

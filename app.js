@@ -1462,6 +1462,9 @@ const TAB_STRUCTURE = {
       { id: 'fabbisogno',     label: 'Mancanti',       adminOnly: false },
       { id: 'prelievi',       label: 'Prelievi',       adminOnly: false },
       { id: 'storico',        label: 'Storico',        adminOnly: false },
+      // Ricerca sui timbri NON legati a commessa (6 ago). L'anagrafica delle
+      // attività resta in Gestione: qui si guarda cosa è stato fatto.
+      { id: 'timbri_extra',   label: 'Attività extra', adminOnly: false },
       { id: 'gantt_live',     label: 'Live',           adminOnly: false },
       { id: 'gantt_commesse', label: 'Gantt',          adminOnly: false },
     ],
@@ -1578,6 +1581,7 @@ function renderTab(name) {
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
     else if (name === 'attivita_extra') renderAttivitaExtra(root);
+    else if (name === 'timbri_extra') renderTimbriExtra(root);
     else if (name === 'imp_calendari') renderImpostazioni(root);
   } catch (e) {
     console.error('Errore rendering tab '+name+':', e);
@@ -11353,6 +11357,7 @@ const kioskState = {
   mezzoInUscita: null,         // mezzo in fase di check-out (in attesa rientro previsto)
   opIniziate: new Set(),       // id operazioni con almeno una sessione chiusa
   opOreCons: {},               // operazione_id → ore consuntivate (sessioni chiuse)
+  spezzoniSaltati: new Set(),  // spezzoni della pausa già annotati o saltati (non richiederli a ogni identificazione)
   inactivityTimer: null,
   doneTimer: null,
 };
@@ -11784,11 +11789,12 @@ function kioskSelectUtente(u) {
   kioskBeep('ok');
   // Se ha una sessione lavoro aperta, va direttamente lì
   const sess = state.sessioni.find(s => s.utente_id === u.id && !s.fine);
-  if (sess) {
-    kioskGoToAttiva();
-  } else {
-    kioskGoToMenu();
-  }
+  if (sess) { kioskGoToAttiva(); return; }
+  // Attività extra troncata dalla pausa e rimasta senza nota: prima del menu
+  // si chiede cos'era e si offre di riprenderla.
+  const spezzone = kioskSpezzoneDaPausa(u.id);
+  if (spezzone) { kioskChiediRipresa(spezzone); return; }
+  kioskGoToMenu();
 }
 
 // ─── SCHERMATA MENU (Mezzi / Commesse) ───
@@ -12473,9 +12479,13 @@ const KIOSK_NOTE_RAPIDE = [
   'Attesa materiale',
   'Formazione',
 ];
-// Chiede la nota PRIMA di chiudere la fase. Ritorna la nota scelta, oppure
-// null se l'operatore torna indietro (allora non si chiude niente).
-function kioskChiediNota(sess) {
+// Schermata "nota" del kiosk: titolo, note rapide, testo libero e uno o più
+// bottoni di uscita. La usano sia la chiusura di un'attività extra sia la
+// ripresa dopo la pausa pranzo — una schermata sola, o le due direbbero la
+// stessa cosa in due modi diversi.
+// azioni: [{ label, stile, classe, valore, richiedeNota }]
+// Ritorna { azione, nota } — `nota` è sempre il testo composto (chip + libero).
+function kioskNotaSchermata({ titolo, sottotitolo, azioni }) {
   return new Promise((risolvi) => {
     kioskHideAllSteps();
     const step = $('#kiosk-step-done') || document.body;
@@ -12485,21 +12495,32 @@ function kioskChiediNota(sess) {
     const vecchio = card.innerHTML;
     card.innerHTML = '';
     let scelta = '';
-    const chiudi = (val) => { card.innerHTML = vecchio; step.style.display = prec; risolvi(val); };
+    const testoOra = () => [scelta, (inp.value || '').trim()].filter(Boolean).join(' — ');
+    const chiudi = (azione) => {
+      const nota = testoOra();
+      card.innerHTML = vecchio; step.style.display = prec;
+      risolvi({ azione, nota });
+    };
     const inp = el('textarea', {
       rows: '2', placeholder: 'Aggiungi un dettaglio (facoltativo se hai scelto sopra)…',
       style: 'width:100%;font-size:15px;padding:10px;border-radius:6px;border:1px solid var(--brd);'
         + 'background:var(--sur);color:var(--txt);font-family:var(--ui);margin-top:10px;',
       oninput: () => aggiorna(),
     });
-    const btnOk = el('button', { class:'kiosk-attiva-btn',
-      style:'background:var(--grn);color:var(--bg);margin-top:12px;' }, '✅ Conferma e chiudi');
+    const bottoni = azioni.map(a => {
+      const b = el('button', { class: 'kiosk-attiva-btn' + (a.classe ? ' ' + a.classe : ''),
+        style: (a.stile || '') + 'margin-top:8px;' }, a.label);
+      b.onclick = () => chiudi(a.valore);
+      return { def: a, nodo: b };
+    });
     const aggiorna = () => {
-      const testo = [scelta, (inp.value || '').trim()].filter(Boolean).join(' — ');
-      btnOk.disabled = !testo;
-      btnOk.style.opacity = testo ? '1' : '.4';
+      const pieno = !!testoOra();
+      bottoni.forEach(({ def, nodo }) => {
+        if (!def.richiedeNota) return;
+        nodo.disabled = !pieno;
+        nodo.style.opacity = pieno ? '1' : '.4';
+      });
     };
-    btnOk.onclick = () => chiudi([scelta, (inp.value || '').trim()].filter(Boolean).join(' — '));
     const chips = el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;justify-content:center;' });
     KIOSK_NOTE_RAPIDE.forEach(t => {
       const b = el('button', { class:'kiosk-attiva-btn',
@@ -12517,15 +12538,92 @@ function kioskChiediNota(sess) {
       chips.append(b);
     });
     card.append(
-      el('div', { style:'font-size:20px;font-weight:700;margin-bottom:4px;' }, 'Cos\'hai fatto?'),
-      el('div', { class:'sub', style:'font-size:13px;' },
-        'Queste ore non hanno una commessa: senza una nota non resta scritto di cosa si trattava.'),
-      chips, inp, btnOk,
-      el('button', { class:'kiosk-attiva-btn pause', style:'margin-top:8px;',
-        onclick: () => chiudi(null) }, '← Torna indietro'),
+      el('div', { style:'font-size:20px;font-weight:700;margin-bottom:4px;' }, titolo),
+      el('div', { class:'sub', style:'font-size:13px;' }, sottotitolo),
+      chips, inp, ...bottoni.map(b => b.nodo),
     );
     aggiorna();
   });
+}
+
+// Chiede la nota PRIMA di chiudere la fase. Ritorna la nota scelta, oppure
+// null se l'operatore torna indietro (allora non si chiude niente).
+async function kioskChiediNota(sess) {
+  const r = await kioskNotaSchermata({
+    titolo: 'Cos\'hai fatto?',
+    sottotitolo: 'Queste ore non hanno una commessa: senza una nota non resta scritto di cosa si trattava.',
+    azioni: [
+      { label:'✅ Conferma e chiudi', valore:'ok', richiedeNota:true,
+        stile:'background:var(--grn);color:var(--bg);margin-top:12px;' },
+      { label:'← Torna indietro', valore:null, classe:'pause', richiedeNota:false },
+    ],
+  });
+  return r.azione === 'ok' ? r.nota : null;
+}
+
+// ── Ripresa dopo la pausa pranzo ──────────────────────────────────────
+// La chiusura automatica delle 12:30 tronca il timbro senza poter chiedere la
+// nota: sui dati veri erano 14 spezzoni per 34 h, TUTTI senza nota. Rientrando,
+// il kiosk chiede cos'era quel tempo e offre di riprendere la STESSA attività.
+// Solo per le attività extra: su una commessa il "cosa" è già scritto.
+function kioskSpezzoneDaPausa(uid) {
+  const oggi = toLocalISO(new Date());
+  return (state.sessioni || [])
+    .filter(s => s.utente_id === uid && s.attivita_id && s.fine
+      && !String(s.note || '').trim()
+      && !kioskState.spezzoniSaltati.has(s.id)
+      && toLocalISO(new Date(s.fine)) === oggi
+      && (() => {
+        // Riconoscibile dall'ora esatta di chiusura: la pausa scrive 12:30:00
+        // spaccate. Nessun marcatore nelle note — quel campo è solo degli
+        // operatori (decisione Nico, 5 ago).
+        const f = new Date(s.fine);
+        return f.getHours() === PAUSA_PRANZO_ORA
+          && f.getMinutes() === PAUSA_PRANZO_MIN && f.getSeconds() === 0;
+      })())
+    .sort((a, b) => String(b.inizio).localeCompare(String(a.inizio)))[0] || null;
+}
+
+async function kioskChiediRipresa(sess) {
+  const att = (state.attivitaExtra || []).find(x => x.id === sess.attivita_id);
+  const nome = att && att.nome ? att.nome : 'attività extra';
+  const azioni = [];
+  // Se l'attività è stata disattivata o cancellata non si può riprendere:
+  // resta la nota, che è il motivo principale della schermata.
+  if (att && att.attivo !== false) {
+    azioni.push({ label:'▶ Riprendi — ' + nome, valore:'riprendi', richiedeNota:true,
+      stile:'background:var(--acc);color:var(--bg);margin-top:12px;' });
+  }
+  azioni.push({ label:'✔ Ho finito', valore:'fine', richiedeNota:true,
+    stile:'background:var(--grn);color:var(--bg);' });
+  azioni.push({ label:'← Lo scrivo dopo', valore:null, classe:'pause', richiedeNota:false });
+
+  const inizio = new Date(sess.inizio);
+  const r = await kioskNotaSchermata({
+    titolo: 'Prima della pausa stavi facendo: ' + nome,
+    sottotitolo: 'Dalle ' + fmtT(inizio) + ' alle 12:30 il timbro si è chiuso da solo per la pausa. '
+      + 'Cos\'hai fatto in quelle ore? Senza nota non resta scritto.',
+    azioni,
+  });
+
+  if (r.nota) {
+    const { error } = await eseguiConRetry(
+      () => sb.from('sessioni_lavoro').update({ note: r.nota }).eq('id', sess.id),
+      { label: 'nota spezzone pausa' });
+    if (error) {
+      kioskBeep('err');
+      kioskShowError('Errore salvando la nota: ' + error.message);
+      return;
+    }
+    const riga = state.sessioni.find(s => s.id === sess.id);
+    if (riga) riga.note = r.nota;
+  }
+  // Saltato o già annotato: non lo si richiede a ogni identificazione, sarebbe
+  // un assillo. Torna alla prossima ricarica della pagina se resta senza nota.
+  kioskState.spezzoniSaltati.add(sess.id);
+
+  if (r.azione === 'riprendi' && att) return kioskSelectAttivita(att);
+  kioskGoToMenu();
 }
 
 // NB: chiudere una FASE non chiede nessuna nota (decisione Nico): lì si sa già
@@ -16644,6 +16742,196 @@ async function deleteTipoAssenza(t) {
   if (!data || !data.length) return toast('Eliminazione bloccata', 'err');
   state.tipiAssenza = state.tipiAssenza.filter(x => x.id !== t.id);
   toast('Tipo eliminato'); renderTab('tipi_assenza');
+}
+
+// ═══════════════════════════════════════════════════════════
+// TIMBRI SU ATTIVITÀ EXTRA — scheda di ricerca (Lavoro)
+// L'anagrafica delle attività resta in Gestione: qui si guarda COSA è stato
+// fatto. Nasce da un conto: 228 h in dieci settimane, il 6,3% del timbrato,
+// e nessun posto dove cercarle. I timbri sono `sessioni_lavoro` con
+// attivita_id valorizzato e operazione_id nullo.
+// ═══════════════════════════════════════════════════════════
+
+function renderTimbriExtra(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const q = (state.txSearch || '').trim().toLowerCase();
+  const fAtt = state.txAttivita || '';
+  const fUte = state.txUtente || '';
+  const fMese = state.txMese || '';
+  const soloSenzaNota = !!state.txSenzaNota;
+
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Attività extra')));
+  root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
+    'Le ore timbrate fuori dalle commesse: pulizia, manutenzione, riunioni, fermi. '
+    + 'Il "cosa" sta nell\'attività scelta al kiosk; la nota aggiunge il dettaglio.'));
+
+  const tutti = (state.sessioni || []).filter(s => s.attivita_id);
+  if (!tutti.length) {
+    root.append(el('div', { class:'empty' },
+      'Nessun timbro su attività extra. Le attività si creano in Gestione → Attività extra.'));
+    return;
+  }
+
+  const attById = Object.fromEntries((state.attivitaExtra || []).map(a => [a.id, a]));
+  const nomeAtt = (id) => (attById[id] && attById[id].nome) || '— attività cancellata —';
+  const nomeUte = (id) => (state.utentiById[id] && state.utentiById[id].nome) || '—';
+  // Sessione aperta = ore che stanno ancora salendo: si contano fino ad adesso,
+  // stessa convenzione del resto dell'app.
+  const ore = (s) => ((s.fine ? new Date(s.fine) : new Date()) - new Date(s.inizio)) / 3600000;
+
+  let list = tutti.slice();
+  if (fAtt) list = list.filter(s => s.attivita_id === fAtt);
+  if (fUte) list = list.filter(s => s.utente_id === fUte);
+  if (fMese) list = list.filter(s => toLocalISO(new Date(s.inizio)).startsWith(fMese));
+  if (soloSenzaNota) list = list.filter(s => !String(s.note || '').trim());
+  if (q) {
+    list = list.filter(s =>
+      String(s.note || '').toLowerCase().includes(q)
+      || nomeAtt(s.attivita_id).toLowerCase().includes(q)
+      || nomeUte(s.utente_id).toLowerCase().includes(q));
+  }
+  list.sort((a, b) => String(b.inizio).localeCompare(String(a.inizio)));
+
+  // ── Filtri ──────────────────────────────────────────────────────────
+  const mesi = [...new Set(tutti.map(s => toLocalISO(new Date(s.inizio)).slice(0, 7)))].sort().reverse();
+  const selAtt = el('select', { style:'max-width:220px;',
+    onchange: (e) => { state.txAttivita = e.target.value; renderTab('timbri_extra'); } },
+    el('option', { value:'' }, 'Tutte le attività'),
+    ...[...new Set(tutti.map(s => s.attivita_id))]
+      .sort((a, b) => nomeAtt(a).localeCompare(nomeAtt(b)))
+      .map(id => el('option', { value:id }, nomeAtt(id))));
+  selAtt.value = fAtt;
+  const selUte = el('select', { style:'max-width:200px;',
+    onchange: (e) => { state.txUtente = e.target.value; renderTab('timbri_extra'); } },
+    el('option', { value:'' }, 'Tutti gli operatori'),
+    ...[...new Set(tutti.map(s => s.utente_id))]
+      .sort((a, b) => nomeUte(a).localeCompare(nomeUte(b)))
+      .map(id => el('option', { value:id }, nomeUte(id))));
+  selUte.value = fUte;
+  const selMese = el('select', { style:'max-width:150px;',
+    onchange: (e) => { state.txMese = e.target.value; renderTab('timbri_extra'); } },
+    el('option', { value:'' }, 'Tutti i mesi'),
+    ...mesi.map(m => el('option', { value:m },
+      MESI_ESTESI[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4))));
+  selMese.value = fMese;
+
+  root.append(el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;' },
+    el('input', {
+      type:'text', class:'search', id:'tx-search', style:'max-width:300px;',
+      placeholder:'Cerca nella nota, nell\'attività, nel nome…',
+      value: state.txSearch || '',
+      oninput: (e) => { state.txSearch = e.target.value; state._focusSearch = 'tx-search'; renderTab('timbri_extra'); },
+    }),
+    selAtt, selUte, selMese,
+    el('button', {
+      class: soloSenzaNota ? 'btnp' : 'btnsm',
+      onclick: () => { state.txSenzaNota = !soloSenzaNota; renderTab('timbri_extra'); },
+      title:'Ore di cui non resta scritto cosa fossero',
+    }, 'Solo senza nota'),
+    ...(fAtt || fUte || fMese || q || soloSenzaNota
+      ? [el('button', { class:'btnsm', onclick: () => {
+          state.txSearch = ''; state.txAttivita = ''; state.txUtente = '';
+          state.txMese = ''; state.txSenzaNota = false; renderTab('timbri_extra');
+        } }, '✕ Azzera filtri')]
+      : []),
+  ));
+
+  // ── Totali per attività (su quello che i filtri hanno lasciato) ──────
+  const perAtt = new Map();
+  list.forEach(s => {
+    const k = s.attivita_id;
+    if (!perAtt.has(k)) perAtt.set(k, { n:0, h:0, senzaNota:0 });
+    const v = perAtt.get(k);
+    v.n++; v.h += ore(s);
+    if (!String(s.note || '').trim()) v.senzaNota++;
+  });
+  const oreTot = list.reduce((a, s) => a + ore(s), 0);
+  const senzaNotaTot = list.filter(s => !String(s.note || '').trim()).length;
+  const box = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:14px;' });
+  box.append(
+    el('div', { style:'font-weight:700;margin-bottom:4px;' },
+      list.length + (list.length === 1 ? ' timbro' : ' timbri') + ' · '
+      + oreTot.toFixed(1).replace('.', ',') + ' h'),
+    el('div', { class:'sub', style:'margin-bottom:8px;font-size:11px;' },
+      senzaNotaTot
+        ? '⚠ ' + senzaNotaTot + (senzaNotaTot === 1 ? ' timbro non dice' : ' timbri non dicono')
+          + ' cosa sia stato fatto: nessuna nota.'
+        : 'Tutti i timbri hanno una nota.'),
+  );
+  [...perAtt.entries()].sort((a, b) => b[1].h - a[1].h).forEach(([id, v]) => {
+    const a = attById[id];
+    box.append(el('div', { style:'display:flex;align-items:center;gap:10px;font-size:11px;padding:3px 0;border-bottom:1px solid var(--brd);' },
+      el('span', { style:'width:12px;height:12px;border-radius:2px;flex-shrink:0;background:'
+        + ((a && a.colore) || '#6b6b64') + ';' }),
+      el('span', { style:'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+        nomeAtt(id) + (a && a.attivo === false ? ' (disattivata)' : '')),
+      el('span', { style:'width:70px;text-align:right;font-family:JetBrains Mono,monospace;' },
+        v.h.toFixed(1).replace('.', ',') + ' h'),
+      el('span', { style:'width:96px;text-align:right;color:var(--mut);font-family:JetBrains Mono,monospace;' },
+        v.n + (v.n === 1 ? ' timbro' : ' timbri')),
+      el('span', { style:'width:110px;text-align:right;font-family:JetBrains Mono,monospace;color:'
+        + (v.senzaNota ? 'var(--yel)' : 'var(--mut)') + ';' },
+        v.senzaNota ? v.senzaNota + ' senza nota' : '—'),
+    ));
+  });
+  root.append(box);
+
+  if (!list.length) {
+    root.append(el('div', { class:'empty' }, 'Nessun timbro con questi filtri.'));
+    return;
+  }
+
+  // ── Elenco ──────────────────────────────────────────────────────────
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Giorno'),
+    el('th', {}, 'Orario'),
+    el('th', { class:'tc' }, 'Durata'),
+    el('th', {}, 'Operatore'),
+    el('th', {}, 'Attività'),
+    el('th', {}, 'Nota'),
+  )));
+  const tb = el('tbody');
+  // Tetto alla lista: con 143 righe oggi non serve, ma la tabella cresce da
+  // sola e una scheda che si pianta non la sistema nessuno.
+  const MAX = 500;
+  list.slice(0, MAX).forEach(s => {
+    const a = attById[s.attivita_id];
+    const ini = new Date(s.inizio);
+    const fin = s.fine ? new Date(s.fine) : null;
+    const nota = String(s.note || '').trim();
+    // La pausa scrive 12:30:00 spaccate: quel timbro non è finito, è stato
+    // troncato — e va detto, perché la nota lì manca quasi sempre.
+    const daPausa = !!fin && fin.getHours() === PAUSA_PRANZO_ORA
+      && fin.getMinutes() === PAUSA_PRANZO_MIN && fin.getSeconds() === 0;
+    tb.append(el('tr', {
+      style: isAdmin ? 'cursor:pointer;' : '',
+      title: isAdmin ? 'Apri per correggere orari o nota' : '',
+      onclick: isAdmin ? () => openSessioneModal(s, () => renderTab('timbri_extra')) : undefined,
+    },
+      el('td', { class:'mono' }, fmtIT(toLocalISO(ini))),
+      el('td', { class:'mono' }, fmtT(ini) + ' → ' + (fin ? fmtT(fin) : '● in corso')
+        + (daPausa ? ' ⏸' : '')),
+      el('td', { class:'tc mono' }, ore(s).toFixed(1).replace('.', ',') + ' h'),
+      el('td', {}, nomeUte(s.utente_id)),
+      el('td', {},
+        el('span', { style:'display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;background:'
+          + ((a && a.colore) || '#6b6b64') + ';' }),
+        nomeAtt(s.attivita_id)),
+      el('td', { class: nota ? '' : 'sub',
+        style: nota ? '' : 'color:var(--yel);' },
+        nota || (daPausa ? '— troncato dalla pausa, mai scritto —' : '— nessuna nota —')),
+    ));
+  });
+  tbl.append(tb);
+  tw.append(tbl);
+  root.append(tw);
+  if (list.length > MAX) {
+    root.append(el('div', { class:'sub', style:'margin-top:8px;font-size:11px;' },
+      'Mostrati i ' + MAX + ' più recenti su ' + list.length + '. Restringi coi filtri per vedere gli altri.'));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
