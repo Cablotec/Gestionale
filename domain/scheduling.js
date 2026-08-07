@@ -1620,3 +1620,109 @@ function assenzeInPrenotazione(utentiIds, dataInizioIso, dataFineIso) {
   });
   return out;
 }
+
+// ── TIMBRATURE SOSPETTE ────────────────────────────────────────────────────
+// Riepilogo delle timbrature che meritano un'occhiata. Puro: legge state e
+// ritorna righe, non decide e non tocca niente.
+//
+// LA PARTE DIFFICILE NON È TROVARLE, È NON GRIDARE AL LUPO. Sui dati veri
+// (2.208 sessioni) le coppie con lo STESSO identico intervallo erano 65, e
+// sembravano ore contate due volte. Non lo erano:
+//   · 41 sono lo SPLIT a mano di 2026/OC/00198 fra i due articoli gemelli
+//     (posizione /20 e /40, 62,4 h per lato) — voluto da una persona;
+//   · 24 sono le QUOTE dell'accorpamento, cioè un timbro spalmato sul gruppo —
+//     il funzionamento previsto.
+// Elencarle tutte avrebbe prodotto 65 righe di rumore e, in una settimana, un
+// riquadro che nessuno guarda più. Per questo qui si segnala il doppione solo
+// quando è sulla STESSA commessa: quello non ha nessuna spiegazione buona.
+//
+// Ritorna { righe, n, perTipo } — righe: { tipo, sessione, utenteId, quando,
+// testo }. Tipi: 'zero', 'sovrapposta', 'doppione', 'aperta'.
+const SOSPETTE_ORE_APERTA = 7;
+function timbratureSospette(soloOggiIso) {
+  const ms = (s) => new Date(s.inizio).getTime();
+  const fineMs = (s) => s.fine ? new Date(s.fine).getTime() : Date.now();
+  const righe = [];
+  const sessioni = (state.sessioni || []).filter(s => s && s.inizio);
+  const nomeUt = (id) => {
+    const u = (state.utenti || []).find(x => x.id === id);
+    return (u && u.nome) || 'operatore';
+  };
+  const opDi = (s) => (state.operazioni || []).find(o => o.id === s.operazione_id);
+  const dove = (s) => {
+    const o = opDi(s);
+    if (o) return (o.numero_ordine || '—') + '/' + (o.pos || '');
+    if (s.attivita_id) {
+      const a = (state.attivitaExtra || []).find(x => x.id === s.attivita_id);
+      return (a && a.nome) || 'attività extra';
+    }
+    return '—';
+  };
+  const aggiungi = (tipo, s, testo) => righe.push({
+    tipo, sessione: s, utenteId: s.utente_id,
+    quando: toLocalISO(new Date(s.inizio)), testo,
+  });
+
+  // 1) Durata zero. NON si elencano una per una: sui dati veri i 17 casi erano
+  // DUE tocchi sbagliati, non diciassette. Toccando per un secondo una commessa
+  // RAGGRUPPATA, lo split genera una quota per ogni commessa del gruppo: nove
+  // righe a zero nello stesso istante. Elencarle tutte farebbe sembrare un
+  // problema diffuso quello che è un dito storto amplificato dal gruppo.
+  // Si raggruppano quindi per persona e istante.
+  const zeroPer = new Map();
+  sessioni.forEach(s => {
+    if (!s.fine || fineMs(s) > ms(s)) return;
+    const k = s.utente_id + '@' + Math.floor(ms(s) / 1000);
+    if (!zeroPer.has(k)) zeroPer.set(k, []);
+    zeroPer.get(k).push(s);
+  });
+  zeroPer.forEach(gruppo => {
+    const s = gruppo[0];
+    aggiungi('zero', s, gruppo.length === 1
+      ? nomeUt(s.utente_id) + ' · ' + dove(s) + ' · durata zero'
+      : nomeUt(s.utente_id) + ' · ' + gruppo.length + ' timbri a durata zero nello stesso secondo'
+        + ' · quote di un tocco su un gruppo');
+  });
+
+  sessioni.forEach(s => {
+    // 2) Aperta da troppo: l'unica che chiede un intervento ADESSO.
+    if (!s.fine && (Date.now() - ms(s)) / 3600000 >= SOSPETTE_ORE_APERTA) {
+      const h = ((Date.now() - ms(s)) / 3600000).toFixed(1).replace('.', ',');
+      aggiungi('aperta', s, nomeUt(s.utente_id) + ' · ' + dove(s) + ' · aperta da ' + h + ' h');
+    }
+  });
+
+  // 3) e 4): confronti a coppie, per persona e in ordine di inizio.
+  const perUtente = new Map();
+  sessioni.forEach(s => {
+    if (!perUtente.has(s.utente_id)) perUtente.set(s.utente_id, []);
+    perUtente.get(s.utente_id).push(s);
+  });
+  perUtente.forEach((lista, uid) => {
+    lista.sort((a, b) => ms(a) - ms(b));
+    for (let i = 1; i < lista.length; i++) {
+      const p = lista[i - 1], c = lista[i];
+      if (ms(c) >= fineMs(p) - 1000) continue;         // non si toccano
+      const identico = Math.abs(ms(c) - ms(p)) < 2000
+        && Math.abs(fineMs(c) - fineMs(p)) < 2000;
+      if (identico) {
+        // Stesso intervallo su commesse diverse = split o quote di gruppo:
+        // spiegato, non si segnala (vedi commento in testa).
+        if ((p.operazione_id || null) !== (c.operazione_id || null)) continue;
+        aggiungi('doppione', c, nomeUt(uid) + ' · ' + dove(c)
+          + ' · due timbri identici sulla stessa commessa');
+        continue;
+      }
+      // Accavallamento parziale: una delle due ha un orario sbagliato.
+      const oraP = fmtT(new Date(p.inizio)) + '→' + (p.fine ? fmtT(new Date(p.fine)) : 'aperta');
+      const oraC = fmtT(new Date(c.inizio)) + '→' + (c.fine ? fmtT(new Date(c.fine)) : 'aperta');
+      aggiungi('sovrapposta', c, nomeUt(uid) + ' · ' + oraP + ' si accavalla con ' + oraC);
+    }
+  });
+
+  const filtrate = soloOggiIso ? righe.filter(r => r.quando === soloOggiIso) : righe;
+  filtrate.sort((a, b) => String(b.quando).localeCompare(String(a.quando)));
+  const perTipo = {};
+  filtrate.forEach(r => { perTipo[r.tipo] = (perTipo[r.tipo] || 0) + 1; });
+  return { righe: filtrate, n: filtrate.length, perTipo };
+}

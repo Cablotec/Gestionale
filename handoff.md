@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.3`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.4`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -164,6 +164,17 @@ Il codice comunque regge anche senza la migrazione: `attivitaRifAttivo()` / `ses
 - **Ripresa dopo la pausa**: se lo spezzone aveva un riferimento, "Riprendi" torna sullo **stesso lavoro** senza rifare il giro della schermata.
 - **Scheda Attività extra**: nuova sezione **"Per lavoro"** (ore sommate su tutti gli spezzoni, su quali attività, ultima volta, clic → filtra), colonna Lavoro nell'elenco, ricerca anche sul riferimento.
 - 45 test (32 scheda + 13 spezzone pausa).
+
+## Striscia "timbrature sospette" sopra tutte le schede (7 ago, `2026-08-07.4`)
+- **Richiesta di Nico**: si aspettava che esistesse già un riepilogo delle timbrature sospette **sopra tutto**, non dentro una scheda. Esisteva solo il banner della scheda Live, e copriva una cosa sola (aperte oltre 7 h). Ora c'è `#sospette-bar` fra le tab e il contenuto, riempita da `renderSospette()` a ogni cambio scheda.
+- **Compare SOLO quando c'è qualcosa**, e si può chiudere per la giornata (`localStorage 'sospette-chiuse'`). Motivo dichiarato a Nico: una striscia che c'è sempre diventa carta da parati in una settimana, e allora tanto vale non averla.
+- `timbratureSospette(soloOggiIso?)` in `domain/scheduling.js` (pura, **25 test** in scratchpad/test_sospette.js) → `{ righe, n, perTipo }`, tipi `aperta` / `doppione` / `sovrapposta` / `zero`. Ordine: le **aperte per prime**, sono le uniche su cui si può ancora intervenire adesso. Clic sulla riga → `openSessioneModal` (admin).
+- **LA PARTE DIFFICILE NON È TROVARLE, È NON GRIDARE AL LUPO.** Sui dati veri (2.208 sessioni) le coppie con lo **stesso identico intervallo** erano **65** e sembravano ore contate doppie. Non lo erano:
+  - **41 sono lo split a mano di `2026/OC/00198`** fra i due articoli gemelli (/20 e /40, 62,4 h per lato) — quello annotato a mano trovato il 5 ago. Voluto da una persona.
+  - **24 sono le quote dell'accorpamento** (un timbro spalmato sul gruppo): funzionamento previsto.
+  Elencarle tutte avrebbe prodotto 65 righe di rumore. Per questo il **doppione si segnala solo sulla STESSA commessa**: quello non ha nessuna spiegazione buona (ed è 1).
+- **Scoperta sui "durata zero"**: erano **17 righe da DUE tocchi sbagliati**. Toccando per un secondo una commessa **raggruppata**, lo split genera una quota a zero per **ogni** commessa del gruppo → 8 e 9 righe nello stesso istante (Contoli 05:56, Fabbri 07:26 del 4 ago). Ora si raggruppano per persona+secondo e la riga lo dice: *"9 timbri a durata zero nello stesso secondo · quote di un tocco su un gruppo"*. **Sui dati veri la striscia è passata da 23 righe a 8.**
+- **Aperto, conseguenza della scoperta**: lo split del gruppo **non ha una soglia minima**, quindi un tocco da 1 secondo si moltiplica per la dimensione del gruppo. Coi timbri sotto i 3 minuti al 9,7% capiterà ancora. Basterebbe non generare le quote sotto N secondi — da decidere con Nico (è diverso dal "cancellare i timbri corti", che ha già scartato).
 
 ## ⚠ Cancellare un'attività extra: la trappola (7 ago, successa davvero)
 - Nico ha cancellato per sbaglio la voce "Attività extra" dalla scheda. **Nessun dato perso**: la FK `sessioni_lavoro.attivita_id` è **ON DELETE SET NULL**, quindi i timbri sono rimasti — ma **scollegati**, cioè ore di nessuno, invisibili in ogni conteggio. **144 sessioni, 238 h.**

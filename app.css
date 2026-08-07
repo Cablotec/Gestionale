@@ -631,6 +631,13 @@ input.search:focus{border-color:var(--acc);}
 .live-card.sess-lunga{border-color:var(--yel);box-shadow:inset 3px 0 0 var(--yel);}
 .live-card-warn{font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.35;color:var(--yel);background:rgba(255,204,78,.10);border:1px solid var(--yel);border-radius:4px;padding:5px 8px;margin-top:4px;}
 .live-card-vuoto{font-size:11px;color:var(--mut);font-style:italic;}
+/* Striscia globale delle timbrature sospette, sopra tutte le schede. */
+.sospette-bar{background:var(--sur2);border:1px solid var(--yel);border-left:4px solid var(--yel);border-radius:6px;padding:9px 12px;margin:0 0 14px;}
+.sospette-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--yel);font-weight:700;}
+.sospette-hd .sub{color:var(--mut);font-weight:400;}
+.sospette-riga{display:flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 0;border-bottom:1px solid var(--brd);}
+.sospette-riga:last-child{border-bottom:none;}
+.sospette-tag{flex-shrink:0;width:104px;color:var(--yel);}
 .live-warn-banner{font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.45;color:var(--yel);background:rgba(255,204,78,.10);border:1px solid var(--yel);border-radius:6px;padding:10px 14px;margin-bottom:14px;}
 
 /* Gantt storico */

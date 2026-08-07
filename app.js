@@ -1560,6 +1560,7 @@ function renderTab(name) {
   state.currentTab = name;
   const root = $('#tab-content');
   if (!state.loaded) { root.innerHTML = '<div class="empty">Caricamento…</div>'; return; }
+  renderSospette();
   try {
     if (name === 'generale')          renderGenerale(root);
     else if (name === 'cal_mezzi')    renderCalMezzi(root);
@@ -16790,6 +16791,91 @@ async function deleteTipoAssenza(t) {
   if (!data || !data.length) return toast('Eliminazione bloccata', 'err');
   state.tipiAssenza = state.tipiAssenza.filter(x => x.id !== t.id);
   toast('Tipo eliminato'); renderTab('tipi_assenza');
+}
+
+// ── STRISCIA "TIMBRATURE SOSPETTE" (sopra tutte le schede) ─────────────────
+// Richiesta di Nico: un riepilogo che stia sotto gli occhi ovunque, non dentro
+// una scheda. Compare SOLO quando c'è qualcosa: una striscia che c'è sempre
+// diventa carta da parati in una settimana, e allora tanto vale non averla.
+// Le anomalie le trova `timbratureSospette()` nel domain (puro, 20 test); qui
+// c'è solo il disegno. Chiusa a mano, resta chiusa per la giornata.
+function sospetteChiuseOggi() {
+  try { return localStorage.getItem('sospette-chiuse') === toLocalISO(new Date()); }
+  catch (_) { return false; }
+}
+function renderSospette() {
+  const bar = document.getElementById('sospette-bar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  if (typeof timbratureSospette !== 'function' || sospetteChiuseOggi()) {
+    bar.style.display = 'none';
+    return;
+  }
+  const r = timbratureSospette();
+  if (!r.n) { bar.style.display = 'none'; return; }
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const ETICHETTE = {
+    aperta: 'aperta da troppo',
+    zero: 'durata zero',
+    doppione: 'doppione',
+    sovrapposta: 'accavallate',
+  };
+  // Le aperte per prime: sono le uniche su cui si può ancora intervenire adesso.
+  const ordine = ['aperta', 'doppione', 'sovrapposta', 'zero'];
+  const righe = r.righe.slice().sort((a, b) =>
+    (ordine.indexOf(a.tipo) - ordine.indexOf(b.tipo))
+    || String(b.quando).localeCompare(String(a.quando)));
+
+  const sommario = ordine.filter(t => r.perTipo[t])
+    .map(t => r.perTipo[t] + ' ' + ETICHETTE[t]).join(' · ');
+  const lista = el('div', { style:'display:none;margin-top:8px;' });
+  let aperto = false;
+  const btnVedi = el('button', { class:'btnsm', onclick: () => {
+    aperto = !aperto;
+    lista.style.display = aperto ? '' : 'none';
+    btnVedi.textContent = aperto ? 'Nascondi elenco' : 'Vedi quali';
+  } }, 'Vedi quali');
+
+  bar.className = 'sospette-bar';
+  bar.style.display = '';
+  bar.append(
+    el('div', { class:'sospette-hd' },
+      el('span', {}, '⚠ ' + r.n + (r.n === 1 ? ' timbratura da controllare' : ' timbrature da controllare')),
+      el('span', { class:'sub' }, sommario),
+      el('span', { style:'flex:1;' }),
+      btnVedi,
+      el('button', { class:'btnsm', title:'Torna domani, o al prossimo caricamento della pagina',
+        onclick: () => {
+          try { localStorage.setItem('sospette-chiuse', toLocalISO(new Date())); } catch (_) {}
+          bar.style.display = 'none';
+        } }, '✕ Per oggi basta'),
+    ),
+    lista);
+
+  // Tetto a 30 righe: l'elenco serve a essere guardato, non a fare volume.
+  righe.slice(0, 30).forEach(x => {
+    lista.append(el('div', {
+      class:'sospette-riga',
+      style: isAdmin ? 'cursor:pointer;' : '',
+      title: isAdmin ? 'Apri la timbratura per correggerla' : '',
+      onclick: isAdmin ? () => openSessioneModal(x.sessione, () => {
+        renderSospette(); renderTab(state.currentTab);
+      }) : undefined,
+    },
+      el('span', { class:'sospette-tag' }, ETICHETTE[x.tipo] || x.tipo),
+      el('span', { style:'width:78px;flex-shrink:0;color:var(--mut);' }, fmtIT(x.quando)),
+      el('span', { style:'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+        x.testo),
+    ));
+  });
+  if (righe.length > 30) {
+    lista.append(el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
+      'Mostrate le 30 più recenti su ' + righe.length + '.'));
+  }
+  if (!isAdmin) {
+    lista.append(el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
+      'Le correzioni le fa un amministratore.'));
+  }
 }
 
 // ── RIFERIMENTO delle attività extra ───────────────────────────────────────
