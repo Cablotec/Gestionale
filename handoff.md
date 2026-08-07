@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.8`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.9`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -200,6 +200,12 @@ Fatta insieme a Nico, caso per caso, con la giornata intera dell'operatore davan
 - Riconosciute e separate con certezza grazie al backup letto via REST il giorno prima (`scratchpad/sess.json`, 143 righe): **3 sessioni erano già orfane da prima** (12/06, 15/06, 25/06) e non vanno riagganciate; 1 era nata dopo il backup ed era ancora aperta.
 - SQL di ripristino in `scratchpad/sql_ripristino.sql`: ricrea la voce **con lo stesso id** e riaggancia tutto ciò che è senza commessa e senza attività, **tranne** quei 3 id.
 - **Porta chiusa**: `deleteAttivitaExtra` ora conta i timbri attaccati. Se ce ne sono, la cancellazione **non si offre più** — propone di **disattivare** (sparisce dal kiosk, lo storico resta leggibile). L'avviso vecchio lo diceva a parole ("resteranno senza riferimento") ma senza numeri, che è come non dirlo.
+
+## Export dello Storico — colonne (7 ago, , chiesto da Cocco)
+- **Aggiunte le ore**, che a schermo ci sono e nell'Excel mancavano: , ,  e . A schermo stanno in una cella sola (12,3/10,0) perché è una colonna; **in Excel vanno divise e come NUMERI veri**, o non ci si può sommare né filtrare sopra.
+-  traduce il  della tabella: quando ci sono fasi a terzisti il pagato scende alla sola parte interna, e senza dirlo uno legge un numero più basso senza sapere perché.
+- **Tolte**  e : non servono a nessuno nel foglio.
+- **Aperto**: l'export prende SEMPRE tutte le spedizioni, ignorando i filtri della scheda (mese, cliente, addetto, puntualità, ricerca). Chi filtra e poi esporta si ritrova tutto. Da decidere con Nico.
 
 ## ▶ Fili aperti (in ordine di priorità)
 

@@ -10701,6 +10701,16 @@ function storicoExportExcel() {
     const ritardo = (op && op.scadenza && s.data)
       ? Math.round((parseISODate(s.data) - parseISODate(op.scadenza)) / 86400000)
       : null;
+    // Ore: le stesse della colonna "Ore (cons/pag.)" a schermo, ma in colonne
+    // SEPARATE e come numeri veri (7 ago, chieste da Cocco). A schermo stanno
+    // insieme perché è una cella sola; in Excel servono divise, o non ci si può
+    // sommare né filtrare sopra.
+    const pagatoOre = op ? pagatoOreInterne(op) : 0;
+    const cons = op ? opCalcOreReali(op) : 0;
+    const haOre = !!op && pagatoOre > 0;
+    // Il pagato scende alla sola parte interna quando ci sono fasi a terzisti:
+    // senza dirlo, uno legge un pagato più basso e non sa perché.
+    const soloInterno = !!op && (state.opFornitori || []).some(r => r.operazione_id === op.id);
     return {
       'Data spedizione': s.data || '',
       'Ordine':          op?.numero_ordine || '',
@@ -10711,11 +10721,13 @@ function storicoExportExcel() {
       'Descrizione':     art?.descrizione || '',
       'Quantità':        s.quantita || 0,
       'DDT':             s.ddt || '',
-      'Destinatario':    s.destinatario || '',
-      'Note spedizione': s.note || '',
       'Scadenza':        op?.scadenza || '',
       'Ritardo (gg)':    ritardo,
       'Esito':           ritardo === null ? '—' : (ritardo <= 0 ? 'In tempo' : 'In ritardo'),
+      'Ore consuntivate': haOre ? +cons.toFixed(2) : '',
+      'Ore pagate':       haOre ? +pagatoOre.toFixed(2) : '',
+      'Sforo (h)':        haOre ? +(cons - pagatoOre).toFixed(2) : '',
+      'Pagato solo interno': (haOre && soloInterno) ? 'sì' : '',
       'Addetti':         addettiNomi.join(', '),
       'Riferimento cliente': op?.riferimento_cliente || '',
     };
@@ -10725,7 +10737,9 @@ function storicoExportExcel() {
   const ws = XLSX.utils.json_to_sheet(rows);
   ws['!cols'] = [
     {wch:14},{wch:16},{wch:16},{wch:8},{wch:24},{wch:18},{wch:30},{wch:8},
-    {wch:14},{wch:24},{wch:30},{wch:12},{wch:10},{wch:12},{wch:24},{wch:20},
+    {wch:14},{wch:12},{wch:10},{wch:12},
+    {wch:16},{wch:12},{wch:10},{wch:18},
+    {wch:24},{wch:20},
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Spedizioni');
