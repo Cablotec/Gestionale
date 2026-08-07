@@ -1,0 +1,9 @@
+# Il repo è PUBBLICO: qui dentro non deve finire niente di riservato.
+# I backup dei dati stanno FUORI dal repo (vedi strumenti/backup.js), ma se
+# qualcuno un domani li scaricasse qui, questa è la seconda rete.
+backup-gestionale/
+backup/
+*.backup.json
+segreti*
+*.env
+.env*
