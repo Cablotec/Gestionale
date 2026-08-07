@@ -6,11 +6,11 @@
 <meta name="theme-color" content="#0f0f0e">
 <title>Cablotec — Sistema Gestionale</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-08-07.5"></script>
-<script src="domain/scheduling.js?v=2026-08-07.5"></script>
-<script src="domain/codifica.js?v=2026-08-07.5"></script>
+<script src="core/db.js?v=2026-08-07.6"></script>
+<script src="domain/scheduling.js?v=2026-08-07.6"></script>
+<script src="domain/codifica.js?v=2026-08-07.6"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="app.css?v=2026-08-07.5">
+<link rel="stylesheet" href="app.css?v=2026-08-07.6">
 </head>
 <body>
 
@@ -40,10 +40,6 @@
     <button class="navtab" data-area="impostazioni" id="area-impostazioni" style="display:none">Impostazioni</button>
   </nav>
   <nav class="nav nav-sub" id="tabs"></nav>
-
-  <!-- Riepilogo timbrature sospette: sta sopra TUTTE le schede (richiesta
-       Nico) e compare solo quando c'è qualcosa. Riempita da renderSospette(). -->
-  <div id="sospette-bar" style="display:none;"></div>
 
   <div id="tab-content"></div>
 </div>
@@ -155,6 +151,6 @@
   </div>
 </div>
 
-<script src="app.js?v=2026-08-07.5"></script>
+<script src="app.js?v=2026-08-07.6"></script>
 </body>
 </html>

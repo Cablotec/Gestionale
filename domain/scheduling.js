@@ -1738,3 +1738,28 @@ function timbratureSospette(soloOggiIso) {
   filtrate.forEach(r => { perTipo[r.tipo] = (perTipo[r.tipo] || 0) + 1; });
   return { righe: filtrate, n: filtrate.length, perTipo };
 }
+
+// ── ACCAVALLAMENTI: si impediscono, non si rincorrono ──────────────────────
+// Una persona non può lavorare in due posti nello stesso momento: se due suoi
+// timbri si sovrappongono, uno dei due ha un orario sbagliato e le ore sono
+// contate due volte. Sui dati veri erano 5 casi (giugno-agosto).
+// Ritorna la PRIMA sessione in conflitto, o null. `escludiId` serve quando si
+// sta modificando una sessione esistente (non deve accavallarsi con sé stessa).
+// Estremi che si toccano NON sono conflitto: chiudo alle 10:00 e riparto alle
+// 10:00 è la cosa normale che succede tutto il giorno.
+function sessioneInConflitto(utenteId, inizioIso, fineIso, escludiId) {
+  if (!utenteId || !inizioIso) return null;
+  const a1 = new Date(inizioIso).getTime();
+  // Una sessione aperta occupa da qui in avanti: per il confronto vale "adesso"
+  // se è già passata, altrimenti il suo stesso inizio.
+  const a2 = fineIso ? new Date(fineIso).getTime() : Math.max(Date.now(), a1);
+  if (!(a2 > a1)) return null;
+  const trovata = (state.sessioni || []).find(s => {
+    if (!s || s.utente_id !== utenteId || s.id === escludiId || !s.inizio) return null;
+    const b1 = new Date(s.inizio).getTime();
+    const b2 = s.fine ? new Date(s.fine).getTime() : Math.max(Date.now(), b1);
+    if (!(b2 > b1)) return false;          // durata zero: non occupa niente
+    return a1 < b2 && b1 < a2;             // si intersecano davvero
+  });
+  return trovata || null;
+}

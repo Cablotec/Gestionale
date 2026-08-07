@@ -1560,7 +1560,6 @@ function renderTab(name) {
   state.currentTab = name;
   const root = $('#tab-content');
   if (!state.loaded) { root.innerHTML = '<div class="empty">Caricamento…</div>'; return; }
-  renderSospette();
   try {
     if (name === 'generale')          renderGenerale(root);
     else if (name === 'cal_mezzi')    renderCalMezzi(root);
@@ -13278,6 +13277,37 @@ function kioskSelectFase(fase) {
   kioskAvviaSessione(fase.tipo_lavorazione_id, fase.id);
 }
 
+// ── Guardia anti-accavallamento (7 ago) ───────────────────────────────────
+// Chiude sul SERVER le sessioni rimaste aperte di questo operatore, prima di
+// aprirne una nuova. Non guarda `state.sessioni`: è proprio quello il punto.
+//
+// I 5 accavallamenti trovati nei dati erano TUTTI nati al kiosk, e il motivo è
+// che ogni postazione si fida della propria copia locale. Con due postazioni,
+// la seconda non sa che sulla prima c'è un timbro aperto: crede l'operatore
+// libero, ne apre un altro, e le ore si contano due volte finché qualcuno
+// chiude il primo. Una lettura al server prima di ogni avvio toglie il caso
+// alla radice, e costa un giro di rete su un'operazione che ne fa già diversi.
+// Ritorna quante ne ha chiuse.
+async function kioskChiudiAperteRimaste(uid) {
+  if (!uid) return 0;
+  const ora = new Date().toISOString();
+  const { data, error } = await eseguiConRetry(
+    () => sb.from('sessioni_lavoro').select('id').eq('utente_id', uid).is('fine', null),
+    { label: 'controllo timbri aperti' });
+  if (error || !data || !data.length) return 0;
+  let chiuse = 0;
+  for (const riga of data) {
+    const { error: e2 } = await eseguiConRetry(
+      () => sb.from('sessioni_lavoro').update({ fine: ora }).eq('id', riga.id).is('fine', null),
+      { label: 'chiusura timbro rimasto aperto' });
+    if (e2) continue;
+    chiuse++;
+    const locale = state.sessioni.find(s => s.id === riga.id);
+    if (locale) locale.fine = ora;
+  }
+  return chiuse;
+}
+
 // Crea la sessione di lavoro al kiosk. faseId opzionale: la chiave fase_id
 // viene inclusa SOLO se valorizzata, così se la colonna non esiste ancora il
 // flusso classico (tipo libero) continua a funzionare.
@@ -13306,6 +13336,9 @@ async function kioskAvviaSessione(tipoId, faseId) {
       if (!ok) { kioskGoToTipo(); return; }
     }
   }
+
+  // Prima di aprire: chiudo sul server quello che fosse rimasto aperto altrove.
+  await kioskChiudiAperteRimaste(u.id);
 
   const payload = {
     operazione_id: o.id,
@@ -13507,6 +13540,10 @@ async function kioskSelectAttivita(a, rifGiaScelto) {
       return;
     }
   }
+
+  // Prima di aprire: chiudo sul server quello che fosse rimasto aperto altrove
+  // (un'altra postazione non la vede la copia locale — vedi kioskChiudiAperteRimaste).
+  await kioskChiudiAperteRimaste(u.id);
 
   // Apro nuova sessione su attività extra (operazione_id resta null)
   try {
@@ -14086,9 +14123,10 @@ function renderGanttLive(root) {
         '⬇ Esporta ore (Excel)')));
   }
 
-  // Banner avviso "sessioni oltre 7h" — in cima, visibile a colpo d'occhio.
-  // Riempito da aggiornaLiveWarnBanner() (al render e dal timer live).
-  root.append(el('div', { id:'live-warn-banner', class:'live-warn-banner', style:'display:none;' }));
+  // Riepilogo timbrature sospette — in cima, visibile a colpo d'occhio.
+  // Sta SOLO qui (decisione Nico, 7 ago): era stata provata sopra tutte le
+  // schede e si è rivelata di troppo. Riempito da renderSospette().
+  root.append(el('div', { id:'sospette-bar', style:'display:none;' }));
 
   root.append(el('div', { class:'kpis' },
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Operatori al lavoro'),
@@ -14124,13 +14162,16 @@ function renderGanttLive(root) {
     root.append(grid);
   }
 
-  // Calcolo iniziale dell'avviso sessioni lunghe
-  aggiornaLiveWarnBanner();
+  // Calcolo iniziale del riepilogo sospette
+  renderSospette();
 
-  // Timer aggiornamento durate live (+ avviso sessione > 7h)
+  // Timer durate live. Il riepilogo si ridisegna una volta al minuto e non a
+  // ogni secondo: ricostruirlo 60 volte al minuto sarebbe sprecato, e le sue
+  // righe cambiano di rado (l'unica che si muove è "aperta da N h").
+  let tick = 0;
   ganttLiveTimer = setInterval(() => {
     document.querySelectorAll('.live-card-durata[data-inizio]').forEach(refreshLiveDurationEl);
-    aggiornaLiveWarnBanner();
+    if (++tick % 60 === 0) renderSospette();
   }, 1000);
 }
 
@@ -14617,52 +14658,12 @@ function sessioneTroppoLunga(s) {
   return durataSessioneSec(s) >= LIVE_WARN_SESSIONE_SEC;
 }
 
-// Banner riepilogativo in cima alla scheda Live: elenca le sessioni ATTIVE
-// aperte da oltre 7 ore continuative (le stesse che ingialliscono le card),
-// così l'avviso è visibile a colpo d'occhio senza aprire i singoli operatori.
-// Aggiornato sia al render sia dal timer live, per restare coerente con le card.
-function aggiornaLiveWarnBanner() {
-  const banner = document.getElementById('live-warn-banner');
-  if (!banner) return;
-  const oggiIso = toLocalISO(new Date());
-  // Raccolgo le sessioni problematiche:
-  //  - APERTE oltre 7h (anche iniziate ieri = caso "dimenticata aperta")
-  //  - CHIUSE oggi oltre 7h (le più vecchie restano nello storico)
-  const entries = [];
-  (state.sessioni || []).forEach(s => {
-    if (durataSessioneSec(s) < LIVE_WARN_SESSIONE_SEC) return;
-    const aperta = !s.fine;
-    // La data va presa in ora LOCALE, non tagliando la stringa: `inizio` è in
-    // UTC, e d'estate un timbro fatto prima delle 02:00 porta ancora la data
-    // del giorno prima. Confrontare la stringa con oggi lo escluderebbe dal
-    // banner proprio il giorno in cui è stato fatto.
-    const iniziataOggi = !!s.inizio && toLocalISO(new Date(s.inizio)) === oggiIso;
-    if (!aperta && !iniziataOggi) return;
-    const u = (state.utenti || []).find(x => x.id === s.utente_id);
-    entries.push({
-      nome: u?.nome || '—',
-      aperta,
-      durata: aperta
-        ? formatLiveDuration(s.inizio)
-        : (formatSecondsHuman(durataSessioneSec(s)) || '').trim(),
-    });
-  });
-  if (entries.length === 0) {
-    banner.style.display = 'none';
-    banner.textContent = '';
-    return;
-  }
-  // Aperte prima (azione immediata), poi chiuse.
-  entries.sort((a, b) => (a.aperta === b.aperta) ? 0 : (a.aperta ? -1 : 1));
-  const txt = entries
-    .map(e => e.nome + ' (' + (e.aperta ? 'aperta ' : 'chiusa ') + e.durata + ')')
-    .join(', ');
-  banner.style.display = '';
-  banner.textContent = '⚠ ' + entries.length
-    + (entries.length === 1 ? ' sessione' : ' sessioni')
-    + ' oltre 7 ore continuative oggi: ' + txt
-    + '. Verificare se sono reali o timbrature dimenticate aperte.';
-}
+// NB — `aggiornaLiveWarnBanner` non esiste più (7 ago). Elencava le sessioni
+// oltre 7 ore aperte, più quelle chiuse ma iniziate OGGI: una vista del solo
+// presente, che infatti non mostrava la sessione da 64,6 h chiusa a giugno.
+// L'ha sostituita `renderSospette()`, che sta nello stesso posto ma guarda
+// tutto l'archivio e distingue cinque tipi di anomalia.
+// `sessioneTroppoLunga` resta: la usano le card e lo storico per ingiallire.
 
 // Aggiorna una cella durata live e, sulla card, l'avviso "sessione > 7h".
 // Usata da entrambi i timer (scheda Live admin + schermata kiosk), così
@@ -15562,6 +15563,21 @@ function openSessioneModal(s, onDone) {
       fine: fineStr ? new Date(fineStr).toISOString() : null,
       note: (fd.get('note')||'').trim() || null,
     };
+    // ACCAVALLAMENTI: si impediscono qui, che è da dove nascono. Una persona
+    // non può lavorare in due posti nello stesso momento, e due timbri
+    // sovrapposti contano le ore due volte. Bloccante e non un avviso: qui c'è
+    // un admin davanti allo schermo che può correggere subito, e il conflitto
+    // è certo — non un'ipotesi come le assenze sui mezzi.
+    const conflitto = (typeof sessioneInConflitto === 'function')
+      ? sessioneInConflitto(s.utente_id, payload.inizio, payload.fine, s.id) : null;
+    if (conflitto) {
+      const dc = descriviSessione(conflitto);
+      const oraC = fmtT(new Date(conflitto.inizio)) + '→'
+        + (conflitto.fine ? fmtT(new Date(conflitto.fine)) : 'aperta');
+      return toast('Si accavalla con un altro timbro di ' + (operatore?.nome || 'questo operatore')
+        + ': ' + fmtIT(toLocalISO(new Date(conflitto.inizio))) + ' ' + oraC
+        + ' · ' + dc.titolo, 'err');
+    }
     // tipo_lavorazione_id va aggiornato solo per le sessioni su commessa
     if (!d.isAttivitaExtra) {
       payload.tipo_lavorazione_id = fd.get('tipo_lavorazione_id');
@@ -16830,13 +16846,18 @@ function renderSospette() {
 
   const sommario = ordine.filter(t => r.perTipo[t])
     .map(t => r.perTipo[t] + ' ' + ETICHETTE[t]).join(' · ');
-  const lista = el('div', { style:'display:none;margin-top:8px;' });
-  let aperto = false;
+  // L'elenco può essere lungo (servono TUTTE): scorre dentro il suo riquadro
+  // invece di spingere giù le card degli operatori.
+  const lista = el('div', {
+    style:'display:none;margin-top:8px;max-height:300px;overflow-y:auto;' });
+  // Aperto/chiuso vive in state: il riquadro si ridisegna da solo ogni minuto
+  // e senza questo si richiuderebbe sotto le dita mentre lo si legge.
   const btnVedi = el('button', { class:'btnsm', onclick: () => {
-    aperto = !aperto;
-    lista.style.display = aperto ? '' : 'none';
-    btnVedi.textContent = aperto ? 'Nascondi elenco' : 'Vedi quali';
-  } }, 'Vedi quali');
+    state.sospetteAperto = !state.sospetteAperto;
+    lista.style.display = state.sospetteAperto ? '' : 'none';
+    btnVedi.textContent = state.sospetteAperto ? 'Nascondi elenco' : 'Vedi quali';
+  } }, state.sospetteAperto ? 'Nascondi elenco' : 'Vedi quali');
+  if (state.sospetteAperto) lista.style.display = '';
 
   bar.className = 'sospette-bar';
   bar.style.display = '';
@@ -16854,8 +16875,10 @@ function renderSospette() {
     ),
     lista);
 
-  // Tetto a 30 righe: l'elenco serve a essere guardato, non a fare volume.
-  righe.slice(0, 30).forEach(x => {
+  // TUTTE, nessun tetto (richiesta Nico): l'elenco esiste per sistemarle una
+  // per una, e una troncata a 30 lascerebbe le più vecchie invisibili per
+  // sempre. Se diventasse lungo, scorre dentro il suo riquadro.
+  righe.forEach(x => {
     lista.append(el('div', {
       class:'sospette-riga',
       style: isAdmin ? 'cursor:pointer;' : '',
@@ -16870,10 +16893,6 @@ function renderSospette() {
         x.testo),
     ));
   });
-  if (righe.length > 30) {
-    lista.append(el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
-      'Mostrate le 30 più recenti su ' + righe.length + '.'));
-  }
   if (!isAdmin) {
     lista.append(el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
       'Le correzioni le fa un amministratore.'));

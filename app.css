@@ -638,7 +638,6 @@ input.search:focus{border-color:var(--acc);}
 .sospette-riga{display:flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 0;border-bottom:1px solid var(--brd);}
 .sospette-riga:last-child{border-bottom:none;}
 .sospette-tag{flex-shrink:0;width:104px;color:var(--yel);}
-.live-warn-banner{font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.45;color:var(--yel);background:rgba(255,204,78,.10);border:1px solid var(--yel);border-radius:6px;padding:10px 14px;margin-bottom:14px;}
 
 /* Gantt storico */
 .gantt-wrap{background:var(--sur);border:1px solid var(--brd);border-radius:6px;overflow:auto;position:relative;}
