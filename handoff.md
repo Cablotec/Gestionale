@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.9`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.10`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -205,7 +205,11 @@ Fatta insieme a Nico, caso per caso, con la giornata intera dell'operatore davan
 - **Aggiunte le ore**, che a schermo ci sono e nell'Excel mancavano: `Ore consuntivate`, `Ore pagate`, `Sforo (h)` e `Pagato solo interno`. A schermo stanno in una cella sola (`12,3/10,0`) perché è una colonna; **in Excel vanno divise e come NUMERI veri**, o non ci si può sommare né filtrare sopra.
 - `Pagato solo interno` traduce il `·int` della tabella: quando ci sono fasi a terzisti il pagato scende alla sola parte interna, e senza dirlo uno legge un numero più basso senza sapere perché.
 - **Tolte** `Destinatario` e `Note spedizione`: non servono a nessuno nel foglio.
-- **Aperto**: l'export prende SEMPRE tutte le spedizioni, ignorando i filtri della scheda (mese, cliente, addetto, puntualità, ricerca). Chi filtra e poi esporta si ritrova tutto. Da decidere con Nico.
+- **Si esporta QUELLO CHE SI VEDE** (`2026-08-07.10`, richiesta Nico, vale per **Storico E Ordini cliente**). Prima portavano via tutto l'archivio: chi filtrava per mese o cliente se ne accorgeva solo aprendo il file.
+  - **Una strada sola per scheda**: `storicoFiltrate()` e `pianificazioneFiltrate(includiSpedite)` sono usate SIA dalla tabella SIA dall'export. Se fossero due, l'Excel direbbe una cosa diversa da quella che si vede — che è esattamente il bug di partenza.
+  - **Il toast dichiara quante righe e con quali filtri**: senza, un file corto sembra un errore.
+  - **Nel modal delle commesse sono sparite le caselle degli stati**: erano un secondo filtro accanto a quello della scheda, e i due potevano dire cose diverse. Resta una sola casella, **"includi anche le spedite"**, perché quelle la scheda le nasconde sempre (vivono nello Storico) e chi esporta può volerle. Via anche `STATI_OPERAZIONE`, che serviva solo a quelle caselle.
+  - 24 test in scratchpad/test_export_filtri.js, con le funzioni vere e una libreria Excel finta.
 
 ## ▶ Fili aperti (in ordine di priorità)
 

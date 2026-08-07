@@ -4940,75 +4940,64 @@ async function operazioniImportExcel(file) {
 // resta utile come reporting leggibile).
 // ═══════════════════════════════════════════════════════════
 
-const STATI_OPERAZIONE = [
-  { key: 'aperta',     label: 'Aperta' },
-  { key: 'sospesa',    label: 'Sospesa' },
-  { key: 'completata', label: 'Completata' },
-];
+// STATI_OPERAZIONE cancellata (7 ago): serviva alle caselle di stato del
+// modal export, sparite quando l'export ha iniziato a seguire i filtri della
+// scheda invece di averne di propri.
 
 function openOperazioniExportModal() {
-  // Stato locale (closure): set degli stati selezionati. Default: solo aperte.
-  const statiSel = new Set(['aperta']);
-
-  // Conteggi per stato (per mostrare quanti record verrebbero esportati)
-  const conteggi = {};
-  STATI_OPERAZIONE.forEach(s => {
-    conteggi[s.key] = state.operazioni.filter(o => (o.stato || 'aperta') === s.key).length;
-  });
-
+  // Si esporta QUELLO CHE SI VEDE (7 ago, richiesta Nico): la scelta degli
+  // stati è sparita perché era un secondo filtro accanto a quello della
+  // scheda, e i due potevano dire cose diverse. Ora la base è la lista
+  // filtrata della tabella; l'unica aggiunta è includere le spedite, che la
+  // scheda nasconde sempre perché vivono nello Storico.
+  let conSpedite = false;
   const modal = el('div', { class:'modal', style:'max-width:480px;' });
   modal.append(el('div', { class:'mhd' },
-    el('h2', {}, 'Esporta operazioni'),
+    el('h2', {}, 'Esporta commesse'),
     el('button', { class:'mclose', onclick: closeModal }, '✕'),
   ));
 
   const body = el('div', { class:'mbody' });
-  body.append(el('div', { class:'sub', style:'margin-bottom:12px;' },
-    'Seleziona gli stati da esportare. Le colonne corrispondono al formato di import, più alcune colonne extra (stato, ore, addetti) che l\'import ignora.'));
-
-  const checks = {};
-  const contaSel = el('span', {});
-
-  function aggiornaConteggioSel() {
-    let n = 0;
-    statiSel.forEach(k => { n += conteggi[k] || 0; });
-    contaSel.textContent = String(n);
-  }
-
-  const elenco = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;margin-bottom:14px;' });
-  STATI_OPERAZIONE.forEach(s => {
-    const cb = el('input', { type:'checkbox', style:'cursor:pointer;accent-color:var(--acc);' });
-    cb.checked = statiSel.has(s.key);
-    cb.onchange = () => {
-      if (cb.checked) statiSel.add(s.key); else statiSel.delete(s.key);
-      aggiornaConteggioSel();
-    };
-    checks[s.key] = cb;
-    const row = el('label', {
-      style:'display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;font-family:JetBrains Mono,monospace;font-size:12px;',
-    }, cb,
-      el('span', { style:'flex:1;' }, s.label),
-      el('span', { style:'color:var(--mut);font-size:11px;' },
-        conteggi[s.key] + ' ' + (conteggi[s.key] === 1 ? 'commessa' : 'commesse')),
+  const riepilogo = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;margin-bottom:12px;' });
+  const aggiorna = () => {
+    const { list, filtriAttivi } = pianificazioneFiltrate(conSpedite);
+    riepilogo.innerHTML = '';
+    riepilogo.append(
+      el('div', { style:'font-weight:700;font-size:14px;' },
+        list.length + (list.length === 1 ? ' commessa' : ' commesse')),
+      el('div', { class:'sub', style:'font-size:11px;margin-top:4px;' },
+        filtriAttivi.length
+          ? 'Quello che stai vedendo · ' + filtriAttivi.join(' · ')
+          : 'Tutte quelle in lavorazione: nessun filtro attivo nella scheda.'),
     );
-    elenco.append(row);
-  });
-  body.append(elenco);
+  };
 
-  body.append(el('div', {
-    style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);text-align:right;',
-  }, 'Totale selezionate: ', contaSel));
-  aggiornaConteggioSel();
+  const cb = el('input', { type:'checkbox', style:'cursor:pointer;accent-color:var(--acc);' });
+  cb.onchange = () => { conSpedite = cb.checked; aggiorna(); };
+  const nSped = state.operazioni.filter(o => o.stato === 'spedita').length;
+
+  body.append(
+    el('div', { class:'sub', style:'margin-bottom:12px;' },
+      'Esci con le commesse che hai davanti, filtri compresi. Le colonne seguono il formato di import, '
+      + 'più alcune extra (stato, ore, addetti) che l\'import ignora.'),
+    riepilogo,
+    el('label', {
+      style:'display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;font-size:12px;',
+    }, cb,
+      el('span', { style:'flex:1;' }, 'Includi anche le spedite'),
+      el('span', { class:'sub', style:'font-size:11px;' }, nSped + ' in archivio')),
+    el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
+      'Le spedite non si vedono in questa scheda: stanno nello Storico.'),
+  );
+  aggiorna();
 
   modal.append(body);
   modal.append(el('div', { class:'mfoot' },
     el('button', { class:'btng', onclick: closeModal }, 'Annulla'),
     el('button', { class:'btnp', onclick: () => {
-      if (statiSel.size === 0) {
-        toast('Seleziona almeno uno stato', 'err');
-        return;
-      }
-      operazioniExportExcel(Array.from(statiSel));
+      const { list, filtriAttivi } = pianificazioneFiltrate(conSpedite);
+      if (!list.length) return toast('Nessuna commessa da esportare con questi filtri', 'err');
+      operazioniExportExcel(list, filtriAttivi);
       closeModal();
     } }, '↓ Scarica'),
   ));
@@ -5025,18 +5014,16 @@ function splitNumeroOrdine(numOrdine) {
   return { eser:'', sz:'', ord: parts.join('/') };
 }
 
-function operazioniExportExcel(stati) {
+// `list`: le commesse già filtrate e ordinate come le vede la scheda (7 ago).
+// Prima riceveva un elenco di stati e rifiltrava per conto suo, ignorando
+// tutto il resto: chi aveva cercato o escluso clienti si ritrovava altro.
+function operazioniExportExcel(list, filtriAttivi) {
   if (typeof XLSX === 'undefined') {
     toast('Libreria Excel non caricata, ricarica la pagina', 'err');
     return;
   }
-  const setStati = new Set(stati);
-  const list = state.operazioni
-    .filter(o => setStati.has(o.stato || 'aperta'))
-    .sort((a, b) => (a.scadenza || '').localeCompare(b.scadenza || ''));
-
-  if (list.length === 0) {
-    toast('Nessuna operazione da esportare per gli stati selezionati', 'err');
+  if (!list || list.length === 0) {
+    toast('Nessuna commessa da esportare', 'err');
     return;
   }
 
@@ -5113,16 +5100,16 @@ function operazioniExportExcel(stati) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Operazioni');
 
-  // Nome file: data + numero record + abbreviazione stati
+  // Nome file: data e ora
   const d = new Date();
   const stamp = d.getFullYear() + z(d.getMonth()+1) + z(d.getDate())
     + '_' + z(d.getHours()) + z(d.getMinutes());
-  const abbr = stati.slice().sort().map(s => s.substring(0, 3)).join('-');
-  const fname = `commesse_${abbr}_${stamp}.xlsx`;
+  const fname = `commesse_${stamp}.xlsx`;
   XLSX.writeFile(wb, fname);
 
-  toast('Esportate ' + list.length + ' commess'
-    + (list.length === 1 ? 'a' : 'e'), 'ok');
+  // Quante e con quali filtri: senza dirlo, un file corto sembra un errore.
+  toast('Esportate ' + list.length + ' commess' + (list.length === 1 ? 'a' : 'e')
+    + ((filtriAttivi && filtriAttivi.length) ? ' · filtri: ' + filtriAttivi.join(', ') : ' · nessun filtro'), 'ok');
 }
 
 // Converte un valore data (Date, stringa, seriale Excel) in ISO yyyy-mm-dd
@@ -6810,14 +6797,18 @@ async function scioglieGruppoCommessa(o) {
   await salvaGruppoCommesse(membri.map(x => x.id), null);
 }
 
-function renderPianificazione(root) {
-  const isAdmin = state.profile?.ruolo === 'admin';
+// Le commesse che la scheda Ordini cliente sta MOSTRANDO, coi filtri attivi.
+// Come per lo Storico: una strada sola per tabella ed export (7 ago).
+// `includiSpedite` serve solo all'export: la scheda le nasconde sempre perché
+// vivono nello Storico, ma chi esporta può volerle dentro.
+// Ritorna { list, filtriAttivi }.
+function pianificazioneFiltrate(includiSpedite) {
   const search = (state.opSearch || '').toLowerCase();
   const filter = state.opFilter || 'all';
 
   let list = state.operazioni.slice();
   // Le commesse 'spedita' sono nello Storico — non si vedono nella Pianificazione
-  list = list.filter(o => o.stato !== 'spedita');
+  if (!includiSpedite) list = list.filter(o => o.stato !== 'spedita');
   if (filter === 'aperte')     list = list.filter(o => o.stato === 'aperta');
   else if (filter === 'sospese')    list = list.filter(o => o.stato === 'sospesa');
   else if (filter === 'completate') list = list.filter(o => o.stato === 'completata');
@@ -6870,6 +6861,21 @@ function renderPianificazione(root) {
     if (av > bv) return  1 * sortDir;
     return 0;
   });
+
+  const filtriAttivi = [];
+  if (filter !== 'all') filtriAttivi.push('stato: ' + filter);
+  if (state.opClientiEsclusi && state.opClientiEsclusi.size)
+    filtriAttivi.push(state.opClientiEsclusi.size + ' clienti esclusi');
+  if (search) filtriAttivi.push('ricerca "' + search + '"');
+
+  return { list, filtriAttivi };
+}
+
+function renderPianificazione(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const search = (state.opSearch || '').toLowerCase();
+  const filter = state.opFilter || 'all';
+  const { list } = pianificazioneFiltrate(false);
 
   // KPI
   const tot = state.operazioni.length;
@@ -10097,8 +10103,12 @@ function openPrelievoModal(p, refresh) {
   openModal(modal);
 }
 
-function renderStorico(root) {
-  const isAdmin = state.profile?.ruolo === 'admin';
+// Le spedizioni che la scheda Storico sta MOSTRANDO, coi filtri attivi.
+// UNA sola strada: la usano la tabella e l'export (7 ago, richiesta Nico).
+// Se fossero due, l'Excel direbbe una cosa diversa da quella che si vede — ed
+// è esattamente quello che faceva prima: esportava sempre tutto.
+// Ritorna { list, opById, ritardoSped, filtriAttivi }.
+function storicoFiltrate() {
   const search = (state.stoSearch || '').toLowerCase();
   const filtroMese = state.stoMese || null;
   const filtroAddetto = state.stoAddetto || '';
@@ -10181,6 +10191,30 @@ function renderStorico(root) {
 
   // Sort: più recente prima
   list.sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+
+  // Descrizione a parole dei filtri attivi: serve all'export per dichiarare
+  // cosa sta portando via, invece di lasciarlo indovinare.
+  const filtriAttivi = [];
+  if (filtroMese) filtriAttivi.push('mese ' + filtroMese);
+  if (state.stoClientiEsclusi && state.stoClientiEsclusi.size)
+    filtriAttivi.push(state.stoClientiEsclusi.size + ' clienti esclusi');
+  if (filtroAddetto) filtriAttivi.push('addetto ' + ((state.utenti.find(u => u.id === filtroAddetto) || {}).nome || ''));
+  if (state.stoFornitore) filtriAttivi.push('fornitore');
+  if (filtroPunt !== 'all') filtriAttivi.push(filtroPunt === 'puntuali' ? 'solo puntuali' : 'solo in ritardo');
+  if (filtroSfora) filtriAttivi.push('solo chi ha sforato');
+  if (search) filtriAttivi.push('ricerca "' + search + '"');
+
+  return { list, opById, ritardoSped, filtriAttivi };
+}
+
+function renderStorico(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  const { list, opById, ritardoSped } = storicoFiltrate();
+  const search = (state.stoSearch || '').toLowerCase();
+  const filtroMese = state.stoMese || null;
+  const filtroAddetto = state.stoAddetto || '';
+  const filtroPunt = state.stoPunt || 'all';
+  const filtroSfora = state.stoSfora || false;
 
   // KPI
   const tot = list.length;
@@ -10684,10 +10718,11 @@ function storicoExportExcel() {
     toast('Libreria Excel non caricata', 'err');
     return;
   }
-  const spedizioni = (state.spedizioni || []).slice();
-  if (spedizioni.length === 0) return toast('Nessuna spedizione da esportare', 'err');
-
-  const opById = Object.fromEntries(state.operazioni.map(o => [o.id, o]));
+  // Si esporta QUELLO CHE SI VEDE (7 ago, richiesta Nico): stessa funzione che
+  // riempie la tabella. Prima portava via sempre tutto l'archivio, e chi aveva
+  // filtrato per mese o cliente se ne accorgeva solo aprendo il file.
+  const { list: spedizioni, opById, filtriAttivi } = storicoFiltrate();
+  if (spedizioni.length === 0) return toast('Nessuna spedizione da esportare con questi filtri', 'err');
 
   const rows = spedizioni.map(s => {
     const op = opById[s.operazione_id];
@@ -10744,6 +10779,9 @@ function storicoExportExcel() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Spedizioni');
   XLSX.writeFile(wb, 'storico_spedizioni_'+new Date().toISOString().substring(0,10)+'.xlsx');
+  // Dire quante righe e con quali filtri: senza, un file corto sembra un errore.
+  toast('Esportate ' + rows.length + (rows.length === 1 ? ' spedizione' : ' spedizioni')
+    + (filtriAttivi.length ? ' · filtri: ' + filtriAttivi.join(', ') : ' · nessun filtro'), 'ok');
 }
 
 
