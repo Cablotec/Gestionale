@@ -4245,7 +4245,11 @@ function renderCodifica(root) {
     wrapNote.innerHTML = '';
     const g = gruppo();
     if (g && g.note) {
-      wrapNote.append(el('div', { class:'sub', style:'margin:4px 0 8px;color:var(--yel);' }, '⚠ ' + g.note));
+      // Erano avvisi gialli col ⚠ perché c'erano ambiguità aperte sui fogli di
+      // Matteo. Chiuse il 7 ago ("considera ok"): restano note di trascrizione
+      // — dicono cosa c'era scritto a mano e cosa è stato lasciato fuori, e
+      // servono a capire una voce, non a segnalare un problema.
+      wrapNote.append(el('div', { class:'sub', style:'margin:4px 0 8px;' }, '✎ ' + g.note));
     }
   }
 

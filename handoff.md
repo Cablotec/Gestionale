@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.7`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.8`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -250,9 +250,10 @@ Contati sui dati veri prima di decidere (backup del 7 ago, 2.208 sessioni):
   - **Non-regressione verificata**: rieseguito su **204 commesse con timbri**, su ENTRAMBI i confronti (avanzamento e barra ore): zero differenze di percentuale o di sforo. Oggi cambia solo la comparsa della riga "di cui esterne"; la correzione morde quando arriveranno i primi rapportini o un caso di fase esternalizzata con timbri esterni.
 - **Aperto**: le ore degli esterni in sede entrano ancora nelle medie effettive (`storicoMinutiPz`) come quelle dei dipendenti. Per la DURATA di un articolo è corretto (il tempo è tempo), per i numeri di **efficienza Cablotec** (reale/pagato, €/h in Analisi clienti) andrebbe deciso se separarle. Non toccato: numeri visibili, serve una decisione. Da riprendere quando gli esterni avranno timbrato qualcosa.
 
-### 3. Accorpamento commesse (gruppi) — da collaudare
+### 3. Accorpamento commesse (gruppi) — **COLLAUDATO DAI DATI** (7 ago)
 - Admin: Ordini cliente (ex Pianificazione, rinominata 14 lug — id interno resta `pianificazione`) → `⊞ Raggruppa` → selezione → Crea gruppo; badge `⊞N`, click per sciogliere. Kiosk: gruppo = UNA card (banner), split del timbro alla chiusura **proporzionale al peso = qtà × min/pz** (5+2+7 → 500/200/700, 18 test). Insert+update, mai delete (RLS: l'account kiosk NON può cancellare).
-- Manca: conferma migrazione + prova sul campo. Limiti v1: "fine fase" non propaga al gruppo; fase_id null sulle copie.
+- **Non serviva una prova: era gia' in produzione.** Verificato sul database il 7 ago: **13 gruppi attivi, 101 timbri spalmati, 501 righe di quota** generate dal 14 lug. Lo split e' **esatto anche nel caso non uniforme** (Fabrizio su OC/00329: pesi 365/1440/1440 → quote 5,2 / 20,5 / 20,5 min), zero scostamenti su tutte le catene. NB: le quote NON sono sovrapposte, sono **fette consecutive** dell'intervallo — cercarle come timbri sovrapposti non le trova.
+- Limiti v1 che restano: "fine fase" non propaga al gruppo; **fase_id null sulle copie**, quindi quelle ore non finiscono in nessuna fase del consuntivo per fase.
 
 ### 4. Gantt — restano C ed E delle proposte
 - FATTO (A+B+D): ritardi ancorati a oggi (barra rossa `⚠ RIT. Ng`), barre = QUOTA operatore coi SUOI timbri, fornitori dichiarati (etichetta `⚙ nome` sulla barra + badge nel modal), legenda nuova in alto, buchi su ferie/festivi.

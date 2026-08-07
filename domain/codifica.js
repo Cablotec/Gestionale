@@ -373,7 +373,7 @@ const PIANO_CODIFICA = [
     { cat:'61', c:'50', tabs:[], label:'Targhette (0 = libera)' },
   ] },
   { fam:'2', nome:'STRUMENTI DI MISURA, REGOLAZ. E CONTROLLO', alias:'S.REGOLA',
-    note:'✎ a mano anche: 9 = contagiri (convert. DA/DC), 10 = switch ethernet — schema da chiarire con Matteo.',
+    note:'✎ a mano anche: 9 = contagiri (convert. DA/DC), 10 = switch ethernet.',
     voci:[
       { cat:'65', c:'1', tabs:[1], label:'Amperometro' },
       { cat:'65', c:'2', tabs:[1], label:'Voltmetro' },
@@ -401,7 +401,7 @@ const PIANO_CODIFICA = [
     { cat:'70', c:'2', tabs:[1], label:'Fix retropannello (✎ /modulari)' },
   ] },
   { fam:'2', nome:'SENSORI — FINECORSA', alias:'SENSORI',
-    note:'5+0: dattiloscritto "SONDE", appunto a mano "ciabatta di distribuzione connettori M8/M12" — da chiarire con Matteo.',
+    note:'5+0: dattiloscritto "SONDE", appunto a mano "ciabatta di distribuzione connettori M8/M12".',
     voci:[
       { cat:'71', c:'1', tabs:[1], label:'Finecorsa' },
       { cat:'71', c:'2', tabs:[1], label:'Sensore ind.' },
@@ -511,7 +511,7 @@ const PIANO_CODIFICA = [
     { cat:'01', c:'AA', tabs:[], label:'Accessori' },
   ] },
   { fam:'8', nome:'PRESSACAVO PASSO METRICO', alias:'P.CAVIMT',
-    note:'✎ a mano compare anche "8.03 pressacavi passo gas" (parzialmente barrato): non trascritto, da chiarire.',
+    note:'✎ a mano compare anche "8.03 pressacavi passo gas" (parzialmente barrato): non trascritto.',
     voci:[
       { cat:'02', c:'11', tabs:[], label:'Met./bianco' },
       { cat:'02', c:'12', tabs:[], label:'Met./grigio' },
@@ -599,7 +599,7 @@ const PIANO_CODIFICA = [
     { cat:'20', c:'64', tabs:[], label:'Antideflagranti/neutro' },
   ] },
   { fam:'8', nome:'TUBI ✎', alias:'TUBI',
-    note:'Solo appunto a mano ("8.21.10 = metallo, 20 = plastica — tubi"): verificare con Matteo.',
+    note:'Solo appunto a mano sui fogli ("8.21.10 = metallo, 20 = plastica — tubi").',
     voci:[
       { cat:'21', c:'10', tabs:[], label:'Metallo ✎' },
       { cat:'21', c:'20', tabs:[], label:'Plastica ✎' },
