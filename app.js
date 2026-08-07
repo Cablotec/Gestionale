@@ -16810,20 +16810,22 @@ async function deleteTipoAssenza(t) {
 }
 
 // ── STRISCIA "TIMBRATURE SOSPETTE" (sopra tutte le schede) ─────────────────
-// Richiesta di Nico: un riepilogo che stia sotto gli occhi ovunque, non dentro
-// una scheda. Compare SOLO quando c'è qualcosa: una striscia che c'è sempre
-// diventa carta da parati in una settimana, e allora tanto vale non averla.
-// Le anomalie le trova `timbratureSospette()` nel domain (puro, 20 test); qui
-// c'è solo il disegno. Chiusa a mano, resta chiusa per la giornata.
-function sospetteChiuseOggi() {
-  try { return localStorage.getItem('sospette-chiuse') === toLocalISO(new Date()); }
-  catch (_) { return false; }
-}
+// Riepilogo in cima alla scheda Live. Compare SOLO quando c'è qualcosa, e
+// finché c'è qualcosa NON si può mettere via (7 ago, decisione Nico): c'era un
+// "per oggi basta" che la nascondeva fino al giorno dopo, ed è stato tolto
+// perché serviva l'esatto contrario — l'elenco esiste per essere svuotato, e
+// una lista che si può zittire si zittisce e basta. Sparisce da sola quando le
+// timbrature sono sistemate, che è l'unico modo giusto di farla sparire.
+// Le anomalie le trova `timbratureSospette()` nel domain (puro); qui c'è solo
+// il disegno.
 function renderSospette() {
   const bar = document.getElementById('sospette-bar');
   if (!bar) return;
   bar.innerHTML = '';
-  if (typeof timbratureSospette !== 'function' || sospetteChiuseOggi()) {
+  // Ripulisce la chiave del vecchio "per oggi basta": chi l'aveva premuta se
+  // la ritroverebbe attiva senza più un bottone per annullarla.
+  try { localStorage.removeItem('sospette-chiuse'); } catch (_) {}
+  if (typeof timbratureSospette !== 'function') {
     bar.style.display = 'none';
     return;
   }
@@ -16867,11 +16869,6 @@ function renderSospette() {
       el('span', { class:'sub' }, sommario),
       el('span', { style:'flex:1;' }),
       btnVedi,
-      el('button', { class:'btnsm', title:'Torna domani, o al prossimo caricamento della pagina',
-        onclick: () => {
-          try { localStorage.setItem('sospette-chiuse', toLocalISO(new Date())); } catch (_) {}
-          bar.style.display = 'none';
-        } }, '✕ Per oggi basta'),
     ),
     lista);
 
