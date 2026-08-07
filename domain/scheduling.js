@@ -1637,7 +1637,7 @@ function assenzeInPrenotazione(utentiIds, dataInizioIso, dataFineIso) {
 // quando è sulla STESSA commessa: quello non ha nessuna spiegazione buona.
 //
 // Ritorna { righe, n, perTipo } — righe: { tipo, sessione, utenteId, quando,
-// testo }. Tipi: 'zero', 'sovrapposta', 'doppione', 'aperta'.
+// testo }. Tipi: 'zero', 'sovrapposta', 'doppione', 'aperta', 'lunga'.
 const SOSPETTE_ORE_APERTA = 7;
 function timbratureSospette(soloOggiIso) {
   const ms = (s) => new Date(s.inizio).getTime();
@@ -1685,11 +1685,23 @@ function timbratureSospette(soloOggiIso) {
   });
 
   sessioni.forEach(s => {
+    const ore = (fineMs(s) - ms(s)) / 3600000;
+    if (ore < SOSPETTE_ORE_APERTA) return;
     // 2) Aperta da troppo: l'unica che chiede un intervento ADESSO.
-    if (!s.fine && (Date.now() - ms(s)) / 3600000 >= SOSPETTE_ORE_APERTA) {
-      const h = ((Date.now() - ms(s)) / 3600000).toFixed(1).replace('.', ',');
-      aggiungi('aperta', s, nomeUt(s.utente_id) + ' · ' + dove(s) + ' · aperta da ' + h + ' h');
+    if (!s.fine) {
+      aggiungi('aperta', s, nomeUt(s.utente_id) + ' · ' + dove(s)
+        + ' · aperta da ' + ore.toFixed(1).replace('.', ',') + ' h');
+      return;
     }
+    // 3) CHIUSA ma lunghissima: nessuno lavora 60 ore di fila, quindi da
+    // qualche parte c'è un orario sbagliato. Va segnalata anche se è vecchia:
+    // finché non la si corregge quelle ore restano dentro i conti (quella da
+    // 62,6 h vale da sola il 28% di tutte le ore delle attività extra).
+    // È il buco che aveva già il banner di Live, che guarda solo il presente.
+    aggiungi('lunga', s, nomeUt(s.utente_id) + ' · ' + dove(s) + ' · durata '
+      + ore.toFixed(1).replace('.', ',') + ' h ('
+      + fmtIT(toLocalISO(new Date(s.inizio))) + ' ' + fmtT(new Date(s.inizio))
+      + ' → ' + fmtIT(toLocalISO(new Date(s.fine))) + ' ' + fmtT(new Date(s.fine)) + ')');
   });
 
   // 3) e 4): confronti a coppie, per persona e in ordine di inizio.

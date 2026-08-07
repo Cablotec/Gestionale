@@ -16816,12 +16816,14 @@ function renderSospette() {
   const isAdmin = state.profile?.ruolo === 'admin';
   const ETICHETTE = {
     aperta: 'aperta da troppo',
+    lunga: 'durata assurda',
     zero: 'durata zero',
     doppione: 'doppione',
     sovrapposta: 'accavallate',
   };
   // Le aperte per prime: sono le uniche su cui si può ancora intervenire adesso.
-  const ordine = ['aperta', 'doppione', 'sovrapposta', 'zero'];
+  // Poi le durate assurde: finché restano, quelle ore falsano i conti.
+  const ordine = ['aperta', 'lunga', 'doppione', 'sovrapposta', 'zero'];
   const righe = r.righe.slice().sort((a, b) =>
     (ordine.indexOf(a.tipo) - ordine.indexOf(b.tipo))
     || String(b.quando).localeCompare(String(a.quando)));
