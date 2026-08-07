@@ -12586,7 +12586,10 @@ function kioskSpezzoneDaPausa(uid) {
 
 async function kioskChiediRipresa(sess) {
   const att = (state.attivitaExtra || []).find(x => x.id === sess.attivita_id);
-  const nome = att && att.nome ? att.nome : 'attività extra';
+  const rif = String(sess.riferimento || '').trim();
+  // Col riferimento il "cosa" è già scritto: riprendendo si torna sullo STESSO
+  // lavoro, senza rifare il giro della schermata "su cosa?".
+  const nome = (att && att.nome ? att.nome : 'attività extra') + (rif ? ' · ' + rif : '');
   const azioni = [];
   // Se l'attività è stata disattivata o cancellata non si può riprendere:
   // resta la nota, che è il motivo principale della schermata.
@@ -12622,7 +12625,7 @@ async function kioskChiediRipresa(sess) {
   // un assillo. Torna alla prossima ricarica della pagina se resta senza nota.
   kioskState.spezzoniSaltati.add(sess.id);
 
-  if (r.azione === 'riprendi' && att) return kioskSelectAttivita(att);
+  if (r.azione === 'riprendi' && att) return kioskSelectAttivita(att, rif || null);
   kioskGoToMenu();
 }
 
@@ -13442,9 +13445,84 @@ function kioskAttivitaCard(a) {
   );
 }
 
-async function kioskSelectAttivita(a) {
+// Schermata "su cosa stai lavorando": esce solo per le attività che lo
+// richiedono. I riferimenti già usati sono BOTTONI — è la strada normale, e
+// serve a non ribattezzare a mano lo stesso lavoro ogni volta. La tastiera è
+// per il primo battesimo.
+function kioskChiediRiferimento(a) {
+  return new Promise((risolvi) => {
+    kioskHideAllSteps();
+    const step = $('#kiosk-step-done') || document.body;
+    const prec = step.style.display;
+    step.style.display = 'flex';
+    const card = $('#done-card') || step;
+    const vecchio = card.innerHTML;
+    card.innerHTML = '';
+    const chiudi = (val) => { card.innerHTML = vecchio; step.style.display = prec; risolvi(val); };
+
+    const recenti = rifRecenti(a.id);
+    const inp = el('input', {
+      type:'text', placeholder:'…oppure scrivilo qui (es. quadro Barilla giugno)',
+      style:'width:100%;font-size:17px;padding:12px;border-radius:6px;border:1px solid var(--brd);'
+        + 'background:var(--sur);color:var(--txt);font-family:var(--ui);margin-top:12px;',
+      oninput: () => aggiorna(),
+    });
+    const btnOk = el('button', { class:'kiosk-attiva-btn',
+      style:'background:var(--grn);color:var(--bg);margin-top:12px;' }, '▶ Inizia');
+    const aggiorna = () => {
+      const v = (inp.value || '').trim();
+      btnOk.disabled = !v;
+      btnOk.style.opacity = v ? '1' : '.4';
+    };
+    // Se quello che scrive è lo stesso lavoro già battezzato (a meno di
+    // maiuscole e spazi), si riusa la forma originale: due totali separati per
+    // la stessa cosa sarebbero invisibili e sbagliati.
+    btnOk.onclick = () => {
+      const v = (inp.value || '').trim();
+      const gia = recenti.find(r => rifChiave(r.rif) === rifChiave(v));
+      chiudi(gia ? gia.rif : v);
+    };
+
+    const elenco = el('div', { style:'display:flex;flex-direction:column;gap:8px;margin-top:12px;' });
+    recenti.slice(0, 6).forEach(r => {
+      const b = el('button', { class:'kiosk-attiva-btn',
+        style:'background:var(--sur);color:var(--txt);border:1px solid var(--brd);text-align:left;' },
+        el('div', { style:'font-weight:700;' }, '▶ ' + r.rif),
+        el('div', { style:'font-size:13px;opacity:.75;margin-top:2px;' },
+          r.ore.toFixed(1).replace('.', ',') + ' h già timbrate · ultima volta '
+          + fmtIT(toLocalISO(new Date(r.ultimo)))),
+      );
+      b.onclick = () => chiudi(r.rif);
+      elenco.append(b);
+    });
+
+    card.append(
+      el('div', { style:'font-size:20px;font-weight:700;margin-bottom:4px;' },
+        a.nome + ' — su cosa?'),
+      el('div', { class:'sub', style:'font-size:13px;' },
+        recenti.length
+          ? 'Riprendi un lavoro già aperto, oppure scrivine uno nuovo. Le ore si sommano per lavoro.'
+          : 'Scrivi a cosa stai lavorando: da qui in avanti lo ritroverai in elenco e le ore si sommeranno lì.'),
+      elenco, inp, btnOk,
+      el('button', { class:'kiosk-attiva-btn pause', style:'margin-top:8px;',
+        onclick: () => chiudi(null) }, '← Torna indietro'),
+    );
+    aggiorna();
+  });
+}
+
+async function kioskSelectAttivita(a, rifGiaScelto) {
   const u = kioskState.utenteSelezionato;
   if (!u || !a) return;
+
+  // "Su cosa" si chiede PRIMA di toccare qualsiasi cosa: se l'operatore torna
+  // indietro non deve trovarsi la sessione precedente già chiusa.
+  let riferimento = rifGiaScelto || null;
+  const vuoleRif = !!a.richiede_riferimento && sessioniRifAttivo();
+  if (vuoleRif && !riferimento) {
+    riferimento = await kioskChiediRiferimento(a);
+    if (!riferimento) return kioskGoToAttivita();   // annullato: si resta a scegliere
+  }
 
   // Eventuale sessione aperta dell'utente: la chiudo prima di aprire la nuova.
   // Stesso pattern dello switch.
@@ -13469,15 +13547,18 @@ async function kioskSelectAttivita(a) {
   // Apro nuova sessione su attività extra (operazione_id resta null)
   try {
     const inizio = new Date().toISOString();
+    const riga = {
+      operazione_id: null,
+      attivita_id: a.id,
+      utente_id: u.id,
+      tipo_lavorazione_id: null,
+      sede: 'kiosk',
+      inizio,
+    };
+    // La colonna arriva da una migrazione: senza, non la si manda proprio.
+    if (riferimento && sessioniRifAttivo()) riga.riferimento = riferimento;
     const { data, error } = await eseguiConRetry(
-      () => sb.from('sessioni_lavoro').insert({
-        operazione_id: null,
-        attivita_id: a.id,
-        utente_id: u.id,
-        tipo_lavorazione_id: null,
-        sede: 'kiosk',
-        inizio,
-      }).select().single(),
+      () => sb.from('sessioni_lavoro').insert(riga).select().single(),
       { label: 'avvio attività extra' }
     );
     if (error) {
@@ -16744,6 +16825,50 @@ async function deleteTipoAssenza(t) {
   toast('Tipo eliminato'); renderTab('tipi_assenza');
 }
 
+// ── RIFERIMENTO delle attività extra ───────────────────────────────────────
+// Un'attività a monte ore (pulizia, riunione) interessa per il TOTALE del
+// periodo: gli spezzoni non hanno legame fra loro. Un lavoro con un OGGETTO
+// (riparazione, modifica) esiste solo insieme alla cosa su cui si lavora: lì
+// le ore vanno sommate PER riferimento e il lavoro si riprende nei giorni.
+// Le due colonne arrivano da migrazioni: finché non ci sono, tutto si comporta
+// come prima (stesso schema di utenti.azienda_id).
+function attivitaRifAttivo() {
+  return (state.attivitaExtra || []).some(a => a && ('richiede_riferimento' in a));
+}
+function sessioniRifAttivo() {
+  return (state.sessioni || []).some(s => s && ('riferimento' in s));
+}
+// Chiave di confronto fra riferimenti: "Quadro Barilla giugno",
+// "quadro barilla  giugno" e " QUADRO BARILLA GIUGNO " sono LA STESSA COSA.
+// Senza questo, ribattezzare a mano lo stesso lavoro creerebbe due totali
+// separati — ed è l'errore più facile da fare e più difficile da vedere.
+function rifChiave(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+// Riferimenti già usati per un'attività, dal più recente. Ritorna la forma
+// SCRITTA la prima volta (il battesimo) con le ore totali e l'ultima data.
+function rifRecenti(attivitaId, giorni = 45) {
+  const limite = Date.now() - giorni * 86400000;
+  const per = new Map();
+  (state.sessioni || []).forEach(s => {
+    if (s.attivita_id !== attivitaId) return;
+    const rif = String(s.riferimento || '').trim();
+    if (!rif) return;
+    const t = new Date(s.inizio).getTime();
+    if (!(t >= limite)) return;
+    const k = rifChiave(rif);
+    if (!per.has(k)) per.set(k, { rif, ore: 0, ultimo: 0, n: 0 });
+    const v = per.get(k);
+    // Il nome buono è quello del PRIMO uso: il battesimo non lo riscrive una
+    // digitazione distratta di tre settimane dopo.
+    if (t < (v.primo || Infinity)) { v.primo = t; v.rif = rif; }
+    v.ore += ((s.fine ? new Date(s.fine) : new Date()) - new Date(s.inizio)) / 3600000;
+    v.n++;
+    if (t > v.ultimo) v.ultimo = t;
+  });
+  return [...per.values()].sort((a, b) => b.ultimo - a.ultimo);
+}
+
 // ═══════════════════════════════════════════════════════════
 // TIMBRI SU ATTIVITÀ EXTRA — scheda di ricerca (Lavoro)
 // L'anagrafica delle attività resta in Gestione: qui si guarda COSA è stato
@@ -16788,6 +16913,7 @@ function renderTimbriExtra(root) {
   if (q) {
     list = list.filter(s =>
       String(s.note || '').toLowerCase().includes(q)
+      || String(s.riferimento || '').toLowerCase().includes(q)
       || nomeAtt(s.attivita_id).toLowerCase().includes(q)
       || nomeUte(s.utente_id).toLowerCase().includes(q));
   }
@@ -16877,6 +17003,50 @@ function renderTimbriExtra(root) {
   });
   root.append(box);
 
+  // ── Totali PER LAVORO ────────────────────────────────────────────────
+  // Per un'attività a monte ore il totale del mese basta; per un lavoro con un
+  // oggetto (riparazione, modifica) la domanda vera è "quante ore su QUELLA
+  // cosa" — e la risposta si legge solo qui. Raggruppa a meno di maiuscole e
+  // spazi: due totali per lo stesso lavoro sarebbero un errore invisibile.
+  const perRif = new Map();
+  list.forEach(s => {
+    const rif = String(s.riferimento || '').trim();
+    if (!rif) return;
+    const k = rifChiave(rif);
+    if (!perRif.has(k)) perRif.set(k, { rif, n:0, h:0, ultimo:0, attivita:new Set() });
+    const v = perRif.get(k);
+    v.n++; v.h += ore(s);
+    v.attivita.add(s.attivita_id);
+    const t = new Date(s.inizio).getTime();
+    if (t > v.ultimo) { v.ultimo = t; }
+  });
+  if (perRif.size) {
+    const bx = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:14px;' });
+    bx.append(
+      el('div', { style:'font-weight:700;margin-bottom:4px;' }, 'Per lavoro'),
+      el('div', { class:'sub', style:'margin-bottom:6px;font-size:11px;' },
+        perRif.size + (perRif.size === 1 ? ' lavoro con un riferimento' : ' lavori con un riferimento')
+        + ' · ore sommate su tutti i loro spezzoni.'));
+    [...perRif.values()].sort((a, b) => b.h - a.h).forEach(v => {
+      bx.append(el('div', {
+        style:'display:flex;align-items:center;gap:10px;font-size:11px;padding:3px 0;border-bottom:1px solid var(--brd);cursor:pointer;',
+        title:'Filtra su questo lavoro',
+        onclick: () => { state.txSearch = v.rif; renderTab('timbri_extra'); },
+      },
+        el('span', { style:'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;' }, v.rif),
+        el('span', { style:'width:150px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+          [...v.attivita].map(nomeAtt).join(', ')),
+        el('span', { style:'width:70px;text-align:right;font-family:JetBrains Mono,monospace;' },
+          v.h.toFixed(1).replace('.', ',') + ' h'),
+        el('span', { style:'width:80px;text-align:right;color:var(--mut);font-family:JetBrains Mono,monospace;' },
+          v.n + (v.n === 1 ? ' volta' : ' volte')),
+        el('span', { style:'width:80px;text-align:right;color:var(--mut);font-family:JetBrains Mono,monospace;' },
+          fmtIT(toLocalISO(new Date(v.ultimo)))),
+      ));
+    });
+    root.append(bx);
+  }
+
   if (!list.length) {
     root.append(el('div', { class:'empty' }, 'Nessun timbro con questi filtri.'));
     return;
@@ -16891,6 +17061,7 @@ function renderTimbriExtra(root) {
     el('th', { class:'tc' }, 'Durata'),
     el('th', {}, 'Operatore'),
     el('th', {}, 'Attività'),
+    ...(sessioniRifAttivo() ? [el('th', {}, 'Lavoro')] : []),
     el('th', {}, 'Nota'),
   )));
   const tb = el('tbody');
@@ -16920,6 +17091,10 @@ function renderTimbriExtra(root) {
         el('span', { style:'display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;background:'
           + ((a && a.colore) || '#6b6b64') + ';' }),
         nomeAtt(s.attivita_id)),
+      ...(sessioniRifAttivo()
+        ? [el('td', { class: String(s.riferimento || '').trim() ? '' : 'sub' },
+            String(s.riferimento || '').trim() || '—')]
+        : []),
       el('td', { class: nota ? '' : 'sub',
         style: nota ? '' : 'color:var(--yel);' },
         nota || (daPausa ? '— troncato dalla pausa, mai scritto —' : '— nessuna nota —')),
@@ -16970,6 +17145,7 @@ function renderAttivitaExtra(root) {
     el('th', {}, 'Nome'),
     el('th', {}, 'Descrizione'),
     el('th', { class:'tc' }, 'Colore'),
+    ...(attivitaRifAttivo() ? [el('th', { class:'tc' }, 'Riferimento')] : []),
     el('th', { class:'tc' }, 'Stato'),
     el('th', { class:'tc' }, 'Azioni'),
   )));
@@ -16982,6 +17158,11 @@ function renderAttivitaExtra(root) {
       el('td', { class:'tc' }, el('span', {
         style: `display:inline-block;width:24px;height:14px;border-radius:2px;background:${a.colore||'#6b6b64'};vertical-align:middle;border:1px solid var(--brd);`,
       })),
+      ...(attivitaRifAttivo()
+        ? [el('td', { class:'tc' }, a.richiede_riferimento
+            ? el('span', { class:'badge bok', title:'Al kiosk chiede su cosa si sta lavorando: senza, il timbro non parte' }, 'obbligatorio')
+            : el('span', { class:'sub' }, '—'))]
+        : []),
       el('td', { class:'tc' }, a.attivo
         ? el('span', { class:'badge bok' }, 'attiva')
         : el('span', { class:'badge bgry' }, 'disatt.')),
@@ -17049,6 +17230,15 @@ function openAttivitaExtraModal(a) {
   };
   refreshPalette();
 
+  // Riferimento obbligatorio: è la differenza STRUTTURALE fra le due bestie che
+  // vivono qui dentro. Un'attività a monte ore (pulizia, riunione) interessa
+  // per il totale del periodo e i suoi spezzoni non hanno legame fra loro; un
+  // lavoro con un OGGETTO (riparazione, modifica) esiste solo insieme alla cosa
+  // su cui si lavora: le ore vanno sommate PER riferimento, e si riprende.
+  const selRif = el('select', { name:'richiede_riferimento' },
+    el('option', { value:'false' }, 'No — si somma solo per periodo'),
+    el('option', { value:'true' }, 'Sì — al kiosk chiede su cosa (senza, non parte)'));
+  selRif.value = String(!!a.richiede_riferimento);
   form.append(
     el('div', { class:'field' }, el('label', {}, 'Nome *'), inNome),
     el('div', { class:'field' }, el('label', {}, 'Descrizione'), inDesc),
@@ -17057,6 +17247,15 @@ function openAttivitaExtraModal(a) {
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
     ),
     el('div', { class:'field' }, el('label', {}, 'Colore'), palette),
+    ...(attivitaRifAttivo()
+      ? [el('div', { class:'field' },
+          el('label', {}, 'Richiede un riferimento'),
+          selRif,
+          el('div', { class:'sub', style:'margin-top:4px;font-size:11px;' },
+            'Metti sì dove il lavoro ha un oggetto (una riparazione, una modifica): '
+            + 'le ore si sommano per riferimento e il lavoro si può riprendere nei giorni. '
+            + 'Lascia no dove conta solo il totale (pulizia, riunioni).'))]
+      : []),
   );
 
   body.append(form);
@@ -17074,6 +17273,9 @@ function openAttivitaExtraModal(a) {
       colore: coloreScelto,
       attivo: fd.get('attivo') === 'true',
     };
+    // Solo a migrazione fatta: mandare una colonna che non esiste farebbe
+    // fallire il salvataggio di tutta l'attività.
+    if (attivitaRifAttivo()) payload.richiede_riferimento = fd.get('richiede_riferimento') === 'true';
     if (!payload.nome) return toast('Nome obbligatorio', 'err');
     btnSave.disabled = true;
     btnSave.textContent = 'Salvataggio…';
@@ -17109,7 +17311,35 @@ function openAttivitaExtraModal(a) {
 }
 
 async function deleteAttivitaExtra(a) {
-  if (!confirm(`Eliminare l'attività "${a.nome}"?\nLe timbrature passate resteranno ma senza riferimento all'attività.`)) return;
+  // GUARDIA (7 ago): cancellare un'attività con timbri attaccati NON cancella
+  // quei timbri — la FK è ON DELETE SET NULL — ma li lascia senza dire a cosa
+  // si riferivano: diventano ore di nessuno, invisibili in ogni conteggio.
+  // Successo davvero: 144 sessioni e 238 h scollegate con un clic, e il
+  // vecchio avviso lo diceva senza numeri, che è come non dirlo.
+  // Con dello storico attaccato la cancellazione non si offre più: si disattiva.
+  const usi = (state.sessioni || []).filter(s => s.attivita_id === a.id);
+  if (usi.length) {
+    const ore = usi.reduce((t, s) =>
+      t + ((s.fine ? new Date(s.fine) : new Date()) - new Date(s.inizio)) / 3600000, 0);
+    if (a.attivo === false) {
+      return toast('Già disattivata. Per cancellarla davvero servirebbe prima spostare le '
+        + usi.length + ' timbrature.', 'err');
+    }
+    const ok = confirm(
+      `"${a.nome}" ha ${usi.length} timbrature per ${ore.toFixed(1).replace('.', ',')} h.\n\n`
+      + 'Cancellandola quelle ore resterebbero nel database ma senza più dire a cosa '
+      + 'si riferivano: diventerebbero ore di nessuno.\n\n'
+      + 'OK la DISATTIVA: sparisce dal kiosk e lo storico resta leggibile.');
+    if (!ok) return;
+    const { data, error } = await eseguiConRetry(
+      () => sb.from('attivita_extra').update({ attivo: false }).eq('id', a.id).select().single(),
+      { label: 'disattivazione attivita_extra' });
+    if (error) return toast(error.message, 'err');
+    state.attivitaExtra = state.attivitaExtra.map(x => x.id === a.id ? data : x);
+    toast('Attività disattivata: lo storico resta'); renderTab('attivita_extra');
+    return;
+  }
+  if (!confirm(`Eliminare l'attività "${a.nome}"?\nNon ha nessuna timbratura attaccata.`)) return;
   const { data, error } = await sb.from('attivita_extra').delete().eq('id', a.id).select();
   if (error) return toast(error.message, 'err');
   if (!data || !data.length) return toast('Eliminazione bloccata', 'err');

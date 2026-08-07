@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-06.1`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.1`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -132,6 +132,43 @@ Le 6 chip di `KIOSK_NOTE_RAPIDE` erano **già una tassonomia** che non era mai d
 - I timbri troncati dalla pausa sono marcati **⏸** e, se senza nota, la cella lo dice: *"— troncato dalla pausa, mai scritto —"*. Le sessioni aperte contano fino ad adesso (stessa convenzione del resto dell'app).
 - Tetto a 500 righe mostrate (oggi sono 143): la tabella cresce da sola e una scheda che si pianta non la sistema nessuno.
 - 24 test in scratchpad/test_timbri_extra.js (la funzione vera estratta da app.js e fatta girare su un DOM finto).
+
+## Attività extra v2 — il RIFERIMENTO (7 ago, `2026-08-07.1`)
+
+### La distinzione che regge tutto (ragionamento con Nico)
+Dentro "attività extra" vivono **due bestie diverse**, e non differiscono per nome ma per struttura:
+- **Attività a monte ore** (pulizia, riunione, formazione, fermo): interessa il **totale del periodo**, gli spezzoni non hanno legame fra loro. Non c'è niente a cui riferirsi.
+- **Lavori con un OGGETTO** (riparazione, modifica, lavoro a ore senza ordine): non esiste "un'ora di riparazione", esiste "3,5 ore **su quella cosa**". Il totale che conta è **per riferimento**, e il lavoro si riprende nei giorni perché è uno solo anche se il tempo è spezzato.
+
+Da qui discende il resto: **si può riprendere solo ciò che ha un oggetto**. La pulizia non si riprende perché non c'è niente da riprendere.
+
+### Decisioni
+- **Il riferimento NON sta nella nota** (correzione all'idea iniziale di Nico): come testo libero, "OC 329", "0329" e "ordine 329" sono tre cose diverse per il gestionale, e la somma per riferimento — che è il punto — non si potrebbe fare. Campo suo su `sessioni_lavoro`, chiesto **all'inizio**: senza, il timbro non parte.
+- **Riparazioni per ora SLEGATE dalla commessa** (decisione Nico): il riferimento è testo battezzato dall'operatore ("quadro Barilla giugno"). Il collegamento alla commessa vera e la domanda "le ore di rilavorazione entrano nel consuntivo?" restano aperte: si guarda prima cosa scrivono davvero. Stesso metodo dei mancanti — prima si raccoglie in forma strutturata, poi si stringe.
+- **Domanda di Nico: "se la battezzo 'quadro Barilla giugno' rimane quello il riferimento?"** Sì, con una condizione che è tutta nel meccanismo: i riferimenti già usati sono **BOTTONI** nella schermata del kiosk (strada normale), e se uno lo riscrive a mano in modo equivalente (`rifChiave`: minuscole, spazi compattati) **si riusa la forma del battesimo** invece di crearne un gemello. Due totali per lo stesso lavoro sarebbero un errore invisibile.
+- **Il nome buono è quello del PRIMO uso**: una digitazione distratta tre settimane dopo non ribattezza il lavoro. Nella riga dell'elenco resta però scritto quello che l'operatore ha scritto davvero — è un fatto; a normalizzare è il raggruppamento.
+- Nico ha creato da sé 4 voci: **Pulizia/Riordino, Manutenzione, Modifica, Riparazione**. Il flag "richiede riferimento" si mette dalla scheda, voce per voce (previsto: sì su Modifica e Riparazione).
+
+### Migrazione DA ESEGUIRE (pannello)
+```sql
+ALTER TABLE sessioni_lavoro ADD COLUMN riferimento text;
+ALTER TABLE attivita_extra  ADD COLUMN richiede_riferimento boolean NOT NULL DEFAULT false;
+CREATE INDEX sessioni_riferimento ON sessioni_lavoro (riferimento);
+UPDATE attivita_extra SET richiede_riferimento = true WHERE nome IN ('Riparazione','Modifica');
+```
+Finché non c'è, **tutto si comporta come prima**: `attivitaRifAttivo()` / `sessioniRifAttivo()` accendono i pezzi solo a colonna presente (stesso schema di `utenti.azienda_id`), e la colonna non viene mai mandata negli insert.
+
+### Cosa c'è nel codice
+- **Kiosk**: scelta l'attività che lo richiede, esce *"<attività> — su cosa?"* con i lavori aperti di recente come bottoni (ore già timbrate + ultima volta) e una casella per battezzarne uno nuovo. Si chiede **prima** di chiudere la sessione precedente: tornando indietro non ci si ritrova la vecchia già chiusa.
+- **Ripresa dopo la pausa**: se lo spezzone aveva un riferimento, "Riprendi" torna sullo **stesso lavoro** senza rifare il giro della schermata.
+- **Scheda Attività extra**: nuova sezione **"Per lavoro"** (ore sommate su tutti gli spezzoni, su quali attività, ultima volta, clic → filtra), colonna Lavoro nell'elenco, ricerca anche sul riferimento.
+- 45 test (32 scheda + 13 spezzone pausa).
+
+## ⚠ Cancellare un'attività extra: la trappola (7 ago, successa davvero)
+- Nico ha cancellato per sbaglio la voce "Attività extra" dalla scheda. **Nessun dato perso**: la FK `sessioni_lavoro.attivita_id` è **ON DELETE SET NULL**, quindi i timbri sono rimasti — ma **scollegati**, cioè ore di nessuno, invisibili in ogni conteggio. **144 sessioni, 238 h.**
+- Riconosciute e separate con certezza grazie al backup letto via REST il giorno prima (`scratchpad/sess.json`, 143 righe): **3 sessioni erano già orfane da prima** (12/06, 15/06, 25/06) e non vanno riagganciate; 1 era nata dopo il backup ed era ancora aperta.
+- SQL di ripristino in `scratchpad/sql_ripristino.sql`: ricrea la voce **con lo stesso id** e riaggancia tutto ciò che è senza commessa e senza attività, **tranne** quei 3 id.
+- **Porta chiusa**: `deleteAttivitaExtra` ora conta i timbri attaccati. Se ce ne sono, la cancellazione **non si offre più** — propone di **disattivare** (sparisce dal kiosk, lo storico resta leggibile). L'avviso vecchio lo diceva a parole ("resteranno senza riferimento") ma senza numeri, che è come non dirlo.
 
 ## ▶ Fili aperti (in ordine di priorità)
 
