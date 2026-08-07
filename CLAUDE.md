@@ -84,6 +84,12 @@
 - Il controllo economico è il **tempo pagato** (mai auto-aggiornato). Kiosk "Riprendi" = ultime timbrate non finite in cima.
 - **`utenti.esterno` = "esterno IN SEDE"** (ridefinito 28 lug): persona di un'altra ditta che lavora QUI e **timbra al kiosk**. Il terzista che lavora FUORI è un **fornitore sulla commessa**, non un utente — quel ramo era morto (0 utenti, 0 timbri) e non si pota, si riusa. Gli esterni compaiono al kiosk in sezioni per ditta, entrano in Gantt Live e Calendario (occupano capacità) marcati ✦/giallo, e restano **fuori dal Riepilogo assenze** (ferie = rapporto col loro datore). Fine rapporto → `attivo=false`, MAI rimettere `esterno`: i timbri restano storico. Una ditta può essere insieme fornitore e datore di esterni in sede: due rapporti veri, non un doppione.
 
+## Accesso al database e backup (7 ago 2026)
+- **Account dedicato** `claude@cablotec.local` (password in un file locale fuori dal repo — il repo è pubblico; mai in chat). Con quello: migrazioni **additive** da solo via RPC (`mig_aggiungi_colonna`, `mig_crea_indice` in `strumenti/accesso-claude.sql`) e scrittura su `attivita_extra`.
+- **DROP impossibile per costruzione**: il permesso sta sulle OPERAZIONI, non sul ruolo — non esiste una funzione che cancelli. Motivo: `ADD COLUMN` richiede l'ownership della tabella e chi ce l'ha può anche fare `DROP`, quindi "scrittura sì, DROP no" come ruolo Postgres non esiste. Restano a Nico: DROP, TRUNCATE, CREATE TABLE, RLS e permessi.
+- **Prima di qualsiasi cosa distruttiva**: dichiarare quante righe tocca, aspettare l'ok, salvare le righe su file. Non è formalità — il 7 ago un file salvato il giorno prima ha permesso di recuperare 144 timbrature.
+- **`node strumenti/backup.js`**: copia locale di tutte le tabelle, **fuori dal repo**, paginata, con errore se scarica zero righe. Da schedulare.
+
 ## Strumenti riusabili
 - **DB in lettura** via REST con account kiosk (credenziali in core/db.js) — diagnosi su dati reali; curl con `--ssl-no-revoke`; l'account NON può DELETE → cancellazioni via SQL dal pannello (Nico).
 - **Suite test Node** in scratchpad (test_livella/finestra/fasi_eff/mero/interne/quote/stima/gruppo/listino): stub + eval di domain/scheduling.js. Rilanciare dopo modifiche al domain.

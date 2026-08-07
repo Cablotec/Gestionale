@@ -149,14 +149,9 @@ Da qui discende il resto: **si può riprendere solo ciò che ha un oggetto**. La
 - **Il nome buono è quello del PRIMO uso**: una digitazione distratta tre settimane dopo non ribattezza il lavoro. Nella riga dell'elenco resta però scritto quello che l'operatore ha scritto davvero — è un fatto; a normalizzare è il raggruppamento.
 - Nico ha creato da sé 4 voci: **Pulizia/Riordino, Manutenzione, Modifica, Riparazione**. Il flag "richiede riferimento" si mette dalla scheda, voce per voce (previsto: sì su Modifica e Riparazione).
 
-### Migrazione DA ESEGUIRE (pannello)
-```sql
-ALTER TABLE sessioni_lavoro ADD COLUMN riferimento text;
-ALTER TABLE attivita_extra  ADD COLUMN richiede_riferimento boolean NOT NULL DEFAULT false;
-CREATE INDEX sessioni_riferimento ON sessioni_lavoro (riferimento);
-UPDATE attivita_extra SET richiede_riferimento = true WHERE nome IN ('Riparazione','Modifica');
-```
-Finché non c'è, **tutto si comporta come prima**: `attivitaRifAttivo()` / `sessioniRifAttivo()` accendono i pezzi solo a colonna presente (stesso schema di `utenti.azienda_id`), e la colonna non viene mai mandata negli insert.
+### Migrazione **ESEGUITA** (7 ago, prima volta col nuovo accesso — vedi sezione sotto)
+`sessioni_lavoro.riferimento text` + `attivita_extra.richiede_riferimento boolean` + indice `idx_sessioni_lavoro_riferimento`. Flag acceso su **Riparazione** e **Modifica**; Pulizia/Riordino e Manutenzione restano a monte ore. NB: la colonna è **nullable senza default** (le funzioni di migrazione fanno solo `ADD COLUMN` nudo) — il codice legge sempre `!!a.richiede_riferimento`, quindi NULL vale falso e va bene così.
+Il codice comunque regge anche senza la migrazione: `attivitaRifAttivo()` / `sessioniRifAttivo()` accendono i pezzi solo a colonna presente (stesso schema di `utenti.azienda_id`), e la colonna non viene mai mandata negli insert.
 
 ### Cosa c'è nel codice
 - **Kiosk**: scelta l'attività che lo richiede, esce *"<attività> — su cosa?"* con i lavori aperti di recente come bottoni (ore già timbrate + ultima volta) e una casella per battezzarne uno nuovo. Si chiede **prima** di chiudere la sessione precedente: tornando indietro non ci si ritrova la vecchia già chiusa.
@@ -279,6 +274,22 @@ Finché non c'è, **tutto si comporta come prima**: `attivitaRifAttivo()` / `ses
 - **Listino/storico prezzi derivati** (mai tabelle), come le fasi. Ultimo prezzo, non media.
 - Derivati live, mai materializzati. `domain/` puro. Prima di cancellare funzioni: cercare chiamanti anche in `onclick=""`.
 - Tetto 1000 righe PostgREST: tabelle a crescita libera SEMPRE via `fetchTutte` (successo: 3 timbri persi silenziosamente il 7 lug).
+
+## ACCESSO DI CLAUDE AL DATABASE (7 ago 2026)
+- **Account dedicato** `claude@cablotec.local` (password in un file **locale fuori dal repo**, percorso noto a Nico; mai in chat, mai nel repo — che è pubblico). Distinto dall'account kiosk.
+- **Migrazioni additive da solo, DROP impossibile per costruzione.** Il permesso non sta sul ruolo ma sulle OPERAZIONI: due funzioni `SECURITY DEFINER` in `strumenti/accesso-claude.sql` — `mig_aggiungi_colonna(tabella, colonna, tipo)` e `mig_crea_indice(tabella, colonna)` — chiamabili via RPC REST. Il DROP non è vietato: **non esiste una funzione che lo faccia**.
+  - **Perché così**: `ADD COLUMN` richiede di essere **proprietario** della tabella, e il proprietario può anche fare `DROP`. "Scrittura sì, DROP no" come ruolo Postgres **non esiste**. In più su questa macchina non c'è `psql`: il canale è REST, quindi un utente Postgres non sarebbe nemmeno utilizzabile.
+  - Nomi validati con regex, tipi da lista chiusa, idempotenti (rilanciarle non è un errore). Il controllo di **chi** può chiamarle sta DENTRO le funzioni (`auth.jwt() ->> 'email'`) e non sul grant, perché la chiave anon è pubblica come tutto il repo.
+  - Policy `attivita_extra_claude`: scrittura sull'anagrafica attività per il solo utente dedicato, in aggiunta alle regole esistenti.
+- **Restano a Nico, di proposito**: `DROP`, `TRUNCATE`, `CREATE TABLE`, modifiche a RLS e permessi. Le tabelle nuove capitano poche volte l'anno ed è il momento in cui un secondo paio d'occhi serve di più.
+- **Regole di condotta**: migrazioni sempre additive; su qualsiasi cosa distruttiva prima si dichiara **quante righe tocca** e si aspetta l'ok, e le righe interessate si salvano su file **prima**. Il 7 ago la differenza fra disastro e fastidio è stata esattamente un file salvato il giorno prima.
+- **Collaudato subito** sulla migrazione del riferimento: colonna + colonna + indice, e la riesecuzione risponde "esiste già" senza rompere niente.
+
+## BACKUP — `strumenti/backup.js`
+- `node strumenti/backup.js` scarica **ogni tabella** via REST in `..\backup-gestionale\AAAA-MM-GG_HHMM\`, un JSON per tabella. Provato: **6.521 righe in 24 tabelle**.
+- **Fuori dal repo apposta**: il repo è PUBBLICO, un backup dentro pubblicherebbe i dati di tutta l'azienda. C'è anche `.gitignore` come seconda rete.
+- Paginato come `fetchTutte` (oltre 1000 righe PostgREST perde il resto in silenzio, e `sessioni_lavoro` è a 2205). Esce con **errore se scarica zero righe**: un backup vuoto è peggio di nessun backup, perché sembra che ci sia.
+- **Da fare**: schedularlo (Utilità di pianificazione di Windows). Oggi va lanciato a mano.
 
 ## Strumenti della sessione (riusabili)
 - **DB in lettura via API REST** con account kiosk (`kiosk@cablotec.local` / vedi core/db.js): per diagnosi su dati reali. curl con `--ssl-no-revoke` su questa macchina. L'account NON può DELETE (RLS) — per cancellazioni: SQL dal pannello (Nico).
