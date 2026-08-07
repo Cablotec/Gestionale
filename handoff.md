@@ -201,10 +201,10 @@ Fatta insieme a Nico, caso per caso, con la giornata intera dell'operatore davan
 - SQL di ripristino in `scratchpad/sql_ripristino.sql`: ricrea la voce **con lo stesso id** e riaggancia tutto ciò che è senza commessa e senza attività, **tranne** quei 3 id.
 - **Porta chiusa**: `deleteAttivitaExtra` ora conta i timbri attaccati. Se ce ne sono, la cancellazione **non si offre più** — propone di **disattivare** (sparisce dal kiosk, lo storico resta leggibile). L'avviso vecchio lo diceva a parole ("resteranno senza riferimento") ma senza numeri, che è come non dirlo.
 
-## Export dello Storico — colonne (7 ago, , chiesto da Cocco)
-- **Aggiunte le ore**, che a schermo ci sono e nell'Excel mancavano: , ,  e . A schermo stanno in una cella sola (12,3/10,0) perché è una colonna; **in Excel vanno divise e come NUMERI veri**, o non ci si può sommare né filtrare sopra.
--  traduce il  della tabella: quando ci sono fasi a terzisti il pagato scende alla sola parte interna, e senza dirlo uno legge un numero più basso senza sapere perché.
-- **Tolte**  e : non servono a nessuno nel foglio.
+## Export dello Storico — colonne (7 ago, `2026-08-07.9`, chiesto da Cocco)
+- **Aggiunte le ore**, che a schermo ci sono e nell'Excel mancavano: `Ore consuntivate`, `Ore pagate`, `Sforo (h)` e `Pagato solo interno`. A schermo stanno in una cella sola (`12,3/10,0`) perché è una colonna; **in Excel vanno divise e come NUMERI veri**, o non ci si può sommare né filtrare sopra.
+- `Pagato solo interno` traduce il `·int` della tabella: quando ci sono fasi a terzisti il pagato scende alla sola parte interna, e senza dirlo uno legge un numero più basso senza sapere perché.
+- **Tolte** `Destinatario` e `Note spedizione`: non servono a nessuno nel foglio.
 - **Aperto**: l'export prende SEMPRE tutte le spedizioni, ignorando i filtri della scheda (mese, cliente, addetto, puntualità, ricerca). Chi filtra e poi esporta si ritrova tutto. Da decidere con Nico.
 
 ## ▶ Fili aperti (in ordine di priorità)
