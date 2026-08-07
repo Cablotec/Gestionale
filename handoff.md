@@ -289,7 +289,13 @@ Il codice comunque regge anche senza la migrazione: `attivitaRifAttivo()` / `ses
 - `node strumenti/backup.js` scarica **ogni tabella** via REST in `..\backup-gestionale\AAAA-MM-GG_HHMM\`, un JSON per tabella. Provato: **6.521 righe in 24 tabelle**.
 - **Fuori dal repo apposta**: il repo è PUBBLICO, un backup dentro pubblicherebbe i dati di tutta l'azienda. C'è anche `.gitignore` come seconda rete.
 - Paginato come `fetchTutte` (oltre 1000 righe PostgREST perde il resto in silenzio, e `sessioni_lavoro` è a 2205). Esce con **errore se scarica zero righe**: un backup vuoto è peggio di nessun backup, perché sembra che ci sia.
-- **Da fare**: schedularlo (Utilità di pianificazione di Windows). Oggi va lanciato a mano.
+- **SCHEDULATO** (7 ago): operazione pianificata **"Backup Gestionale Cablotec"**, ogni giorno alle **22:00**. Provata lanciandola davvero: `LastTaskResult 0`, riga nel log, cartella creata.
+  - **Percorsi UNC, mai `Z:`** — è la cosa da non dimenticare. `Z:` è un drive **mappato** su `\\srv02\dati` e le lettere di unità vivono nella sessione interattiva: un'operazione pianificata non le vede, e con `Z:` il backup notturno fallirebbe **in silenzio**.
+  - Gira come **utente interattivo**: senza credenziali salvate è l'unico modo di raggiungere la condivisione di rete (un task "anche se l'utente non ha eseguito l'accesso" senza password usa S4U, che non ha accesso alla rete). Conseguenza accettata: se alle 22:00 il PC è spento, il backup **non salta** — parte alla prima occasione utile (`-StartWhenAvailable`).
+  - **Rotazione**: si tengono tutte le cartelle degli ultimi **45 giorni**, e delle più vecchie solo la **prima di ogni mese**. A 2,4 MB a botta, senza rotazione sarebbero 875 MB l'anno.
+  - **Log** in coda in `backup-gestionale\backup.log`: se una notte salta, si vede da lì invece di scoprirlo il giorno in cui il backup serviva.
+  - Comando di ricreazione e comandi di controllo: in fondo a `strumenti/backup.js`.
+- **Resta aperto**: il backup sta sullo **stesso server** dei dati di lavoro (`\\srv02\dati`). Protegge dagli errori umani — che è il caso successo — non dalla perdita del server. Una copia fuori sede sarebbe il passo dopo.
 
 ## Strumenti della sessione (riusabili)
 - **DB in lettura via API REST** con account kiosk (`kiosk@cablotec.local` / vedi core/db.js): per diagnosi su dati reali. curl con `--ssl-no-revoke` su questa macchina. L'account NON può DELETE (RLS) — per cancellazioni: SQL dal pannello (Nico).

@@ -14,6 +14,9 @@
      node strumenti/backup.js
      node strumenti/backup.js "D:/altro/percorso"
 
+   Girato ogni notte da un'operazione pianificata (vedi in fondo a questo file
+   il comando che l'ha creata). Tiene un log e ruota le cartelle vecchie.
+
    DOVE FINISCONO: fuori dal repo, in ..\backup-gestionale\AAAA-MM-GG_HHMM\
    Il repo è PUBBLICO: un backup dentro il repo pubblicherebbe i dati di
    tutta l'azienda. Il percorso predefinito sta fuori apposta, e c'è anche
@@ -91,6 +94,41 @@ async function scaricaTabella(cfg, token, tabella) {
 
 const z = (n) => String(n).padStart(2, '0');
 
+// ── Rotazione ──────────────────────────────────────────────────────────
+// 2,4 MB a botta: una notte all'anno fa 875 MB e nessuno se ne accorge finché
+// il disco è pieno. Si tengono TUTTI gli ultimi GIORNI_INTERI giorni, e delle
+// cartelle più vecchie solo la PRIMA DI OGNI MESE. Così un errore scoperto
+// dopo mesi ha comunque una fotografia da cui ripartire.
+const GIORNI_INTERI = 45;
+function ruota(radice) {
+  const dirs = fs.readdirSync(radice, { withFileTypes: true })
+    .filter(d => d.isDirectory() && /^\d{4}-\d{2}-\d{2}_\d{4}$/.test(d.name))
+    .map(d => d.name).sort();
+  const limite = new Date(Date.now() - GIORNI_INTERI * 86400000);
+  const primaDelMese = new Set();
+  dirs.forEach(n => { const m = n.slice(0, 7); if (!primaDelMese.has(m)) primaDelMese.add(m); });
+  const tieniMese = new Map();
+  dirs.forEach(n => { const m = n.slice(0, 7); if (!tieniMese.has(m)) tieniMese.set(m, n); });
+  const tolte = [];
+  dirs.forEach(n => {
+    const giorno = new Date(n.slice(0, 4), Number(n.slice(5, 7)) - 1, Number(n.slice(8, 10)));
+    if (giorno >= limite) return;                    // recente: si tiene
+    if (tieniMese.get(n.slice(0, 7)) === n) return;  // prima del mese: si tiene
+    fs.rmSync(path.join(radice, n), { recursive: true, force: true });
+    tolte.push(n);
+  });
+  return tolte;
+}
+
+// Log unico, in coda: se una notte salta, lo si vede da qui invece di
+// scoprirlo il giorno in cui il backup serviva.
+function scriviLog(radice, riga) {
+  try {
+    fs.appendFileSync(path.join(radice, 'backup.log'),
+      new Date().toISOString() + '  ' + riga + '\n');
+  } catch (_) { /* il log non deve mai far fallire il backup */ }
+}
+
 async function main() {
   const cfg = leggiConfig();
   const d = new Date();
@@ -124,15 +162,62 @@ async function main() {
   fs.writeFileSync(path.join(cartella, '_riepilogo.json'), JSON.stringify(riepilogo, null, 1));
 
   const nErr = Object.keys(riepilogo.errori).length;
-  console.log('\n' + totRighe + ' righe in ' + Object.keys(riepilogo.tabelle).length + ' tabelle'
+  const nTab = Object.keys(riepilogo.tabelle).length;
+  console.log('\n' + totRighe + ' righe in ' + nTab + ' tabelle'
     + (nErr ? '  ·  ' + nErr + ' tabelle non lette' : ''));
 
   // Guardia: un backup che scarica zero righe è un backup che non c'è. Meglio
   // accorgersene subito che il giorno in cui serve.
   if (totRighe === 0) {
+    scriviLog(radice, 'FALLITO — zero righe scaricate');
     console.error('\n⚠ ZERO righe scaricate: il backup NON è valido.');
     process.exit(1);
   }
+
+  const tolte = ruota(radice);
+  if (tolte.length) console.log('rotazione: tolte ' + tolte.length + ' cartelle vecchie');
+  scriviLog(radice, 'ok  ' + stampo + '  ' + totRighe + ' righe, ' + nTab + ' tabelle'
+    + (nErr ? '  (' + nErr + ' non lette: ' + Object.keys(riepilogo.errori).join(', ') + ')' : '')
+    + (tolte.length ? '  · ruotate ' + tolte.length : ''));
 }
 
-main().catch(e => { console.error('\n⚠ backup fallito: ' + (e.message || e)); process.exit(1); });
+/* ── L'OPERAZIONE PIANIFICATA (creata il 7 ago 2026) ────────────────────
+   Nome: "Backup Gestionale Cablotec" — ogni giorno alle 22:00.
+
+   PERCORSI UNC, NON Z:  ← la cosa da non dimenticare.
+   Z: è un drive MAPPATO su \\srv02\dati, e le lettere di unità sono legate
+   alla sessione interattiva: un'operazione pianificata non le vede. Con "Z:"
+   il backup notturno fallirebbe in silenzio, che è il modo peggiore.
+
+   Gira come utente interattivo (LogonType Interactive): senza credenziali
+   salvate è l'unico modo di raggiungere la condivisione di rete — un task
+   "anche se l'utente non ha eseguito l'accesso" senza password (S4U) non ha
+   accesso alla rete. Conseguenza accettata: se alle 22:00 il PC è spento o
+   scollegato, il backup NON salta, parte alla prima occasione utile
+   (-StartWhenAvailable).
+
+   Ricrearla:
+     $script = "\\srv02\dati\SOFTWARE\MegaAPP\Gestionale\strumenti\backup.js"
+     $dest   = "\\srv02\dati\SOFTWARE\MegaAPP\backup-gestionale"
+     $azione = New-ScheduledTaskAction -Execute "C:\Program Files\nodejs\node.exe" `
+                 -Argument "`"$script`" `"$dest`"" `
+                 -WorkingDirectory "\\srv02\dati\SOFTWARE\MegaAPP\Gestionale"
+     $trigger = New-ScheduledTaskTrigger -Daily -At 22:00
+     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
+                 -LogonType Interactive -RunLevel Limited
+     $set = New-ScheduledTaskSettingsSet -StartWhenAvailable `
+                 -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
+     Register-ScheduledTask -TaskName "Backup Gestionale Cablotec" `
+                 -Action $azione -Trigger $trigger -Principal $principal -Settings $set
+
+   Controllare che stia girando:
+     Get-ScheduledTaskInfo -TaskName "Backup Gestionale Cablotec"   → LastTaskResult 0
+     Get-Content "\\srv02\dati\SOFTWARE\MegaAPP\backup-gestionale\backup.log" -Tail 5
+   ────────────────────────────────────────────────────────────────────── */
+
+main().catch(e => {
+  const radice = process.argv[2] || path.join(__dirname, '..', '..', 'backup-gestionale');
+  try { scriviLog(radice, 'FALLITO — ' + (e.message || e)); } catch (_) {}
+  console.error('\n⚠ backup fallito: ' + (e.message || e));
+  process.exit(1);
+});

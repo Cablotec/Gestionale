@@ -88,7 +88,7 @@
 - **Account dedicato** `claude@cablotec.local` (password in un file locale fuori dal repo — il repo è pubblico; mai in chat). Con quello: migrazioni **additive** da solo via RPC (`mig_aggiungi_colonna`, `mig_crea_indice` in `strumenti/accesso-claude.sql`) e scrittura su `attivita_extra`.
 - **DROP impossibile per costruzione**: il permesso sta sulle OPERAZIONI, non sul ruolo — non esiste una funzione che cancelli. Motivo: `ADD COLUMN` richiede l'ownership della tabella e chi ce l'ha può anche fare `DROP`, quindi "scrittura sì, DROP no" come ruolo Postgres non esiste. Restano a Nico: DROP, TRUNCATE, CREATE TABLE, RLS e permessi.
 - **Prima di qualsiasi cosa distruttiva**: dichiarare quante righe tocca, aspettare l'ok, salvare le righe su file. Non è formalità — il 7 ago un file salvato il giorno prima ha permesso di recuperare 144 timbrature.
-- **`node strumenti/backup.js`**: copia locale di tutte le tabelle, **fuori dal repo**, paginata, con errore se scarica zero righe. Da schedulare.
+- **`node strumenti/backup.js`**: copia di tutte le tabelle, **fuori dal repo** (è pubblico), paginata, con errore se scarica zero righe. **Schedulato ogni notte alle 22:00** ("Backup Gestionale Cablotec"), con rotazione (45 giorni interi + la prima di ogni mese) e log. **Percorsi UNC, mai `Z:`**: è un drive mappato e le operazioni pianificate non lo vedono — con `Z:` fallirebbe in silenzio. Il backup sta sullo stesso server dei dati: protegge dagli errori umani, non dalla perdita del server.
 
 ## Strumenti riusabili
 - **DB in lettura** via REST con account kiosk (credenziali in core/db.js) — diagnosi su dati reali; curl con `--ssl-no-revoke`; l'account NON può DELETE → cancellazioni via SQL dal pannello (Nico).
