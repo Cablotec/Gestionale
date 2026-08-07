@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.2`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.3`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -173,9 +173,12 @@ Il codice comunque regge anche senza la migrazione: `attivitaRifAttivo()` / `ses
 
 ## ▶ Fili aperti (in ordine di priorità)
 
-### 0. Timbri extra: due buchi trovati sui dati, NON toccati (6 ago)
-- **Nessuna chiusura di fine giornata**: la pausa chiude solo ciò che è iniziato prima delle 12:30. Un timbro aperto alle 15:40 resta aperto per giorni (successo: 64,6 h sul weekend, il 28% delle ore extra di sempre). Serve una decisione: chiusura automatica a fine turno, o solo un avviso? Il kiosk già avvisa a 12 h, ma solo se qualcuno riapre quella schermata.
-- **Timbri da pochi secondi** (8 sotto i 3 minuti): clic per sbaglio che sporcano i conteggi. Scartarli all'apertura? Non mostrarli sotto una soglia? Decisione di Nico.
+### 0. ~~Timbri extra: due buchi~~ **CHIUSI da Nico il 7 ago: si lascia stare, tutti e due**
+Contati sui dati veri prima di decidere (backup del 7 ago, 2.208 sessioni):
+- **Sessioni oltre 7 h in TUTTO lo storico: UNA.** Quella da 64,6 h. Una chiusura automatica di fine turno preverrebbe un evento ogni dieci settimane, col rischio concreto di troncare il timbro a chi lavora davvero fino a tardi. **Decisione: niente chiusura automatica.** Se ricapita più spesso, se ne riparla coi numeri in mano.
+- **Timbri sotto i 3 minuti: 215, il 9,7% di TUTTE le timbrature** (non 8: quelli erano solo gli extra). 140 durano meno di 10 secondi. **186 su 215 sono seguite entro 5 minuti da un altro timbro della stessa persona**, e solo 28 sulla stessa commessa: la firma del bottone sbagliato, chiuso subito e ripreso su quello giusto. Non è l'abitudine di uno — Fabrizio 45, Alessio 44, Massimo 30, Raoul 29. **Valgono 1,43 h in totale su ~3.600**: non spostano nessun numero economico, sporcano solo gli elenchi. **Decisione: si lasciano.**
+- Il banner della scheda **Live** (`aggiornaLiveWarnBanner`, soglia 7 h) copriva già il caso lungo **mentre succedeva**: quel timbro c'era, dal venerdì sera al lunedì mattina. Non è mancata la rilevazione, è mancato qualcuno davanti allo schermo. È una vista del PRESENTE (aperte + chiuse iniziate oggi), non dello storico: per questo oggi quella sessione non compare più.
+- **Difetto corretto lì dentro** (7 ago, `2026-08-07.3`): `iniziataOggi` confrontava `s.inizio.substring(0,10)`, cioè la data **UTC**, con la data **locale** di oggi. D'estate un timbro fatto prima delle 02:00 porta ancora la data del giorno prima e sarebbe stato escluso dal banner proprio il giorno in cui è stato fatto. Ora si confronta `toLocalISO(new Date(s.inizio))`. Da Cablotec non mordeva (primo timbro alle 5:20) ma era lì in attesa. Stessa trappola della sezione ⚠ ORARI.
 
 ### 1. Nuovo ordine — grana estetica residua (NON cancellare la feature)
 - "+ Nuovo ordine" è l'UNICA porta d'inserimento (griglia: intestazione cliente+OC, 5 righe pos/articolo/OP/rif/qtà/€pz/scadenza, POS auto 0010/0020…, aggiungi-N, autocomplete con creazione al volo, prezzo dal listino, fasi auto). **Funziona.** Il vecchio modal resta per MODIFICARE (click sulla riga).

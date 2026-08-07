@@ -14631,7 +14631,11 @@ function aggiornaLiveWarnBanner() {
   (state.sessioni || []).forEach(s => {
     if (durataSessioneSec(s) < LIVE_WARN_SESSIONE_SEC) return;
     const aperta = !s.fine;
-    const iniziataOggi = (s.inizio || '').substring(0, 10) === oggiIso;
+    // La data va presa in ora LOCALE, non tagliando la stringa: `inizio` è in
+    // UTC, e d'estate un timbro fatto prima delle 02:00 porta ancora la data
+    // del giorno prima. Confrontare la stringa con oggi lo escluderebbe dal
+    // banner proprio il giorno in cui è stato fatto.
+    const iniziataOggi = !!s.inizio && toLocalISO(new Date(s.inizio)) === oggiIso;
     if (!aperta && !iniziataOggi) return;
     const u = (state.utenti || []).find(x => x.id === s.utente_id);
     entries.push({
