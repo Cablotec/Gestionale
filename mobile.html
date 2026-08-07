@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-08-07.1"></script>
+<script src="core/db.js?v=2026-08-07.2"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -1716,36 +1716,25 @@ async function stopSessione(sess) {
 
 // Stesse voci del kiosk, e come lì servono SOLO per le attività extra: sono
 // le ore senza commessa, quelle di cui altrimenti non resta scritto niente.
-const NOTE_RAPIDE = ['Pulizia / riordino','Manutenzione','Aiuto a un collega',
-  'Riunione','Attesa materiale','Formazione'];
-// Chiede la nota prima di chiudere. null = l'operatore torna indietro.
+// Le sei note rapide sono sparite (7 ago, decisione Nico): erano chip da
+// toccare quando l'attività extra era UNA SOLA e la nota era l'unico posto
+// dove dire cos'era quel tempo. Adesso quelle voci SONO le attività, scelte
+// all'inizio: ripeterle alla fine faceva scegliere due volte la stessa cosa.
+// Resta la casella libera, FACOLTATIVA: si chiude anche vuota.
 function chiediNota() {
   return new Promise((risolvi) => {
     const ov = elx('div', { style:'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;' });
     const box = elx('div', { style:'background:var(--sur);border-radius:10px;padding:18px;max-width:420px;width:100%;' });
-    let scelta = '';
-    const inp = elx('textarea', { rows:'2', placeholder:'Aggiungi un dettaglio…',
+    const inp = elx('textarea', { rows:'2', placeholder:'Dettaglio (facoltativo): quale macchina, quale pezzo, con chi…',
       style:'width:100%;font-size:15px;padding:10px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);margin-top:10px;' });
-    const ok = elx('button', { class:'att-btn fine', style:'margin-top:12px;width:100%;' }, '✅ Conferma e chiudi');
-    const agg = () => { const t=[scelta,(inp.value||'').trim()].filter(Boolean).join(' — ');
-      ok.disabled = !t; ok.style.opacity = t ? '1' : '.4'; };
-    inp.oninput = agg;
-    ok.onclick = () => { ov.remove(); risolvi([scelta,(inp.value||'').trim()].filter(Boolean).join(' — ')); };
-    const chips = elx('div', { style:'display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;' });
-    NOTE_RAPIDE.forEach(t => {
-      const b = elx('button', { style:'flex:1 1 45%;padding:12px;border-radius:6px;font-size:14px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);' }, t);
-      b.onclick = () => { scelta = (scelta===t)?'':t;
-        [...chips.children].forEach(c => { const s=c.textContent===scelta;
-          c.style.background = s?'var(--acc)':'var(--bg)'; c.style.color = s?'var(--bg)':'var(--txt)'; });
-        agg(); };
-      chips.append(b);
-    });
-    box.append(elx('div',{style:'font-size:18px;font-weight:700;'},'Cos\'hai fatto?'),
-      elx('div',{style:'font-size:12px;opacity:.7;margin-top:2px;'},'Queste ore non hanno una commessa: senza una nota non resta scritto di cosa si trattava.'),
-      chips, inp, ok,
+    const ok = elx('button', { class:'att-btn fine', style:'margin-top:12px;width:100%;' }, '✅ Chiudi');
+    ok.onclick = () => { ov.remove(); risolvi((inp.value||'').trim()); };
+    box.append(elx('div',{style:'font-size:18px;font-weight:700;'},'Hai finito?'),
+      elx('div',{style:'font-size:12px;opacity:.7;margin-top:2px;'},'Se c\'è un dettaglio che vale la pena ricordare, scrivilo. Altrimenti chiudi e basta.'),
+      inp, ok,
       elx('button',{style:'margin-top:8px;width:100%;padding:10px;background:none;border:none;color:var(--mut);',
         onclick:()=>{ov.remove();risolvi(null);}},'← Torna indietro'));
-    ov.append(box); document.body.append(ov); agg();
+    ov.append(box); document.body.append(ov);
   });
 }
 

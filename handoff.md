@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.1`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.2`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -124,7 +124,13 @@ Le 6 chip di `KIOSK_NOTE_RAPIDE` erano **già una tassonomia** che non era mai d
 - **Riconoscimento senza marcatori**: lo spezzone si riconosce dall'ora esatta di chiusura (12:30:00 spaccate, quello che scrive la pausa). **Nessun marcatore nelle note** — quel campo è solo degli operatori (decisione 5 ago). Una chiusura a mano allo stesso secondo è improbabile; alle 12:30:14 non scatta.
 - **"Lo scrivo dopo" esiste apposta**: senza via d'uscita un operatore senza parole resterebbe piantato davanti al kiosk, e piantare il terminale di reparto è peggio del buco che stiamo chiudendo. Chi salta finisce nella scheda di ricerca col filtro "solo senza nota".
 - **Niente assillo**: `kioskState.spezzoniSaltati` evita di richiederlo a ogni identificazione. Si azzera al ricaricamento della pagina (il kiosk si ricarica da solo), quindi un buco resta comunque recuperabile il giorno stesso.
-- `kioskChiediNota` è stata riscritta come sottile involucro di **`kioskNotaSchermata`** (titolo, sottotitolo, chip, testo, N bottoni con `richiedeNota`): una schermata sola per chiusura e ripresa, o le due direbbero la stessa cosa in due modi diversi. 13 test in scratchpad/test_spezzone_pausa.js.
+- `kioskChiediNota` è stata riscritta come sottile involucro di **`kioskNotaSchermata`** (titolo, sottotitolo, casella facoltativa, N bottoni): una schermata sola per chiusura e ripresa, o le due direbbero la stessa cosa in due modi diversi. 12 test in scratchpad/test_spezzone_pausa.js.
+
+### 4. Note rapide TOLTE, nota facoltativa (7 ago, `2026-08-07.2`, decisione Nico)
+- **Le sei chip non ci sono più** (`KIOSK_NOTE_RAPIDE` cancellata, in app.js **e** in mobile.html che ne aveva una copia sua). Erano nate quando l'attività extra era UNA SOLA e la nota era l'unico posto dove dire cos'era quel tempo. Adesso quelle sei voci **sono** le attività, scelte all'inizio con un bottone grande: ripeterle alla fine faceva scegliere due volte la stessa cosa.
+- **La nota è FACOLTATIVA**: la schermata di chiusura diventa "Hai finito?" con la casella per il dettaglio e il bottone sempre attivo. Nessun bottone si disabilita più — un bottone spento su un kiosk di reparto è un operatore fermo che non sa cosa fare.
+- Resta la casella perché le uniche due note utili di tutto lo storico erano dettagli che l'attività non dice ("PERFOREX", "carico del QE di Barilla con Ryan, Mauro e Raoul").
+- **La schermata di ripresa non chiede più niente**: solo *"Prima della pausa stavi facendo X — vuoi riprendere da lì?"* con Riprendi / No, ho finito. Di conseguenza `kioskSpezzoneDaPausa` **non filtra più sulle note**: un lavoro interrotto va ripreso anche se una nota c'era già.
 
 ### 3. Scheda "Attività extra" in Lavoro (visibile a tutti, decisione Nico)
 - Nuova scheda dopo Storico: ricerca su nota/attività/operatore, filtri per attività, operatore e mese, interruttore **"solo senza nota"**, totali **per attività** (ore, timbri, quanti senza nota) e elenco. Clic sulla riga → `openSessioneModal` per correggere orari o nota (**solo admin**, la modal se ne occupa già da sé).

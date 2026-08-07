@@ -12465,27 +12465,23 @@ function cmpCommessaKiosk(a, b) {
 // Marca finita la fase DELLA SESSIONE per l'operatore + chiude la sessione.
 // Robusto: non dipende dall'aggancio rigaPerSessione. Trova la riga addetto per
 // la fase della sessione; se manca, la crea già completata.
-// Note rapide: al kiosk si lavora col dito e spesso coi guanti, quindi la nota
-// deve poter essere UN TOCCO. Scrivere resta possibile per il caso vero, ma
-// obbligare a digitare su ogni fine fase produrrebbe solo "ok" e "." — e una
-// nota che nessuno legge è peggio di nessuna nota.
-// Voci pensate per le ATTIVITÀ EXTRA: sono le ore senza commessa, quelle di
-// cui altrimenti non resta scritto niente. Servono a dire "cos'era quel tempo".
-const KIOSK_NOTE_RAPIDE = [
-  'Pulizia / riordino',
-  'Manutenzione',
-  'Aiuto a un collega',
-  'Riunione',
-  'Attesa materiale',
-  'Formazione',
-];
-// Schermata "nota" del kiosk: titolo, note rapide, testo libero e uno o più
-// bottoni di uscita. La usano sia la chiusura di un'attività extra sia la
-// ripresa dopo la pausa pranzo — una schermata sola, o le due direbbero la
-// stessa cosa in due modi diversi.
-// azioni: [{ label, stile, classe, valore, richiedeNota }]
-// Ritorna { azione, nota } — `nota` è sempre il testo composto (chip + libero).
-function kioskNotaSchermata({ titolo, sottotitolo, azioni }) {
+// NB — le note rapide NON esistono più (7 ago, decisione Nico). Erano sei chip
+// da toccare (Pulizia, Manutenzione, Aiuto a un collega, Riunione, Attesa
+// materiale, Formazione) e servivano a dire "cos'era quel tempo" quando
+// l'attività extra era UNA SOLA e la nota era l'unico posto dove scriverlo.
+// Adesso quelle sei voci SONO le attività: si scelgono all'inizio con un
+// bottone grande, e dove il lavoro ha un oggetto c'è pure il riferimento.
+// Ripeterle alla fine faceva scegliere due volte la stessa cosa.
+// Resta la casella libera, FACOLTATIVA, per il dettaglio che l'attività non
+// dice ("PERFOREX", "carico del QE di Barilla con Ryan e Mauro"): sono le
+// uniche note che in tutto lo storico siano servite a qualcosa.
+// Schermata del kiosk con titolo, uno o più bottoni di uscita e — se serve —
+// una casella di testo facoltativa. La usano la chiusura di un'attività extra
+// e la ripresa dopo la pausa: una schermata sola, o le due direbbero la stessa
+// cosa in due modi diversi.
+// azioni: [{ label, stile, classe, valore }]
+// Ritorna { azione, nota } — `nota` è '' se la casella non c'è o resta vuota.
+function kioskNotaSchermata({ titolo, sottotitolo, azioni, conNota = true, placeholder }) {
   return new Promise((risolvi) => {
     kioskHideAllSteps();
     const step = $('#kiosk-step-done') || document.body;
@@ -12494,83 +12490,63 @@ function kioskNotaSchermata({ titolo, sottotitolo, azioni }) {
     const card = $('#done-card') || step;
     const vecchio = card.innerHTML;
     card.innerHTML = '';
-    let scelta = '';
-    const testoOra = () => [scelta, (inp.value || '').trim()].filter(Boolean).join(' — ');
+    const inp = conNota ? el('textarea', {
+      rows: '2',
+      placeholder: placeholder || 'Vuoi aggiungere un dettaglio? (facoltativo)',
+      style: 'width:100%;font-size:15px;padding:10px;border-radius:6px;border:1px solid var(--brd);'
+        + 'background:var(--sur);color:var(--txt);font-family:var(--ui);margin-top:10px;',
+    }) : null;
     const chiudi = (azione) => {
-      const nota = testoOra();
+      const nota = inp ? (inp.value || '').trim() : '';
       card.innerHTML = vecchio; step.style.display = prec;
       risolvi({ azione, nota });
     };
-    const inp = el('textarea', {
-      rows: '2', placeholder: 'Aggiungi un dettaglio (facoltativo se hai scelto sopra)…',
-      style: 'width:100%;font-size:15px;padding:10px;border-radius:6px;border:1px solid var(--brd);'
-        + 'background:var(--sur);color:var(--txt);font-family:var(--ui);margin-top:10px;',
-      oninput: () => aggiorna(),
-    });
+    // Nessun bottone si disabilita: la nota è facoltativa, e un bottone spento
+    // su un kiosk di reparto è un operatore fermo che non sa cosa fare.
     const bottoni = azioni.map(a => {
       const b = el('button', { class: 'kiosk-attiva-btn' + (a.classe ? ' ' + a.classe : ''),
         style: (a.stile || '') + 'margin-top:8px;' }, a.label);
       b.onclick = () => chiudi(a.valore);
-      return { def: a, nodo: b };
-    });
-    const aggiorna = () => {
-      const pieno = !!testoOra();
-      bottoni.forEach(({ def, nodo }) => {
-        if (!def.richiedeNota) return;
-        nodo.disabled = !pieno;
-        nodo.style.opacity = pieno ? '1' : '.4';
-      });
-    };
-    const chips = el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;justify-content:center;' });
-    KIOSK_NOTE_RAPIDE.forEach(t => {
-      const b = el('button', { class:'kiosk-attiva-btn',
-        style:'flex:0 1 auto;padding:12px 16px;font-size:15px;background:var(--sur);color:var(--txt);border:1px solid var(--brd);' },
-        t);
-      b.onclick = () => {
-        scelta = (scelta === t) ? '' : t;
-        [...chips.children].forEach(c => {
-          const sel = c.textContent === scelta;
-          c.style.background = sel ? 'var(--acc)' : 'var(--sur)';
-          c.style.color = sel ? 'var(--bg)' : 'var(--txt)';
-        });
-        aggiorna();
-      };
-      chips.append(b);
+      return b;
     });
     card.append(
       el('div', { style:'font-size:20px;font-weight:700;margin-bottom:4px;' }, titolo),
       el('div', { class:'sub', style:'font-size:13px;' }, sottotitolo),
-      chips, inp, ...bottoni.map(b => b.nodo),
+      ...(inp ? [inp] : []),
+      ...bottoni,
     );
-    aggiorna();
   });
 }
 
-// Chiede la nota PRIMA di chiudere la fase. Ritorna la nota scelta, oppure
-// null se l'operatore torna indietro (allora non si chiude niente).
+// Chiude un'attività extra. La nota è FACOLTATIVA (7 ago): il "cosa" lo dice
+// già l'attività scelta all'inizio, e dove serve il riferimento. Ritorna la
+// nota (anche vuota) oppure null se l'operatore torna indietro — e allora non
+// si chiude niente.
 async function kioskChiediNota(sess) {
   const r = await kioskNotaSchermata({
-    titolo: 'Cos\'hai fatto?',
-    sottotitolo: 'Queste ore non hanno una commessa: senza una nota non resta scritto di cosa si trattava.',
+    titolo: 'Hai finito?',
+    sottotitolo: 'Se c\'è un dettaglio che vale la pena ricordare, scrivilo. Altrimenti chiudi e basta.',
+    placeholder: 'Dettaglio (facoltativo): quale macchina, quale pezzo, con chi…',
     azioni: [
-      { label:'✅ Conferma e chiudi', valore:'ok', richiedeNota:true,
+      { label:'✅ Chiudi', valore:'ok',
         stile:'background:var(--grn);color:var(--bg);margin-top:12px;' },
-      { label:'← Torna indietro', valore:null, classe:'pause', richiedeNota:false },
+      { label:'← Torna indietro', valore:null, classe:'pause' },
     ],
   });
   return r.azione === 'ok' ? r.nota : null;
 }
 
 // ── Ripresa dopo la pausa pranzo ──────────────────────────────────────
-// La chiusura automatica delle 12:30 tronca il timbro senza poter chiedere la
-// nota: sui dati veri erano 14 spezzoni per 34 h, TUTTI senza nota. Rientrando,
-// il kiosk chiede cos'era quel tempo e offre di riprendere la STESSA attività.
-// Solo per le attività extra: su una commessa il "cosa" è già scritto.
+// La chiusura automatica delle 12:30 tronca il timbro a metà lavoro: rientrando
+// si dovrebbe rifare tutto il giro dei menu per tornare dov'eri. Il kiosk
+// invece ti dice cosa stavi facendo e te lo fa riprendere in un clic.
+// Solo per le attività extra: una commessa si ritrova già dal suo elenco.
+// NB (7 ago): non si chiede più la nota qui. Serviva quando l'attività extra
+// era una sola e quel tempo non aveva altro nome; adesso ce l'ha.
 function kioskSpezzoneDaPausa(uid) {
   const oggi = toLocalISO(new Date());
   return (state.sessioni || [])
     .filter(s => s.utente_id === uid && s.attivita_id && s.fine
-      && !String(s.note || '').trim()
       && !kioskState.spezzoniSaltati.has(s.id)
       && toLocalISO(new Date(s.fine)) === oggi
       && (() => {
@@ -12591,38 +12567,25 @@ async function kioskChiediRipresa(sess) {
   // lavoro, senza rifare il giro della schermata "su cosa?".
   const nome = (att && att.nome ? att.nome : 'attività extra') + (rif ? ' · ' + rif : '');
   const azioni = [];
-  // Se l'attività è stata disattivata o cancellata non si può riprendere:
-  // resta la nota, che è il motivo principale della schermata.
+  // Se l'attività è stata disattivata o cancellata non c'è niente da riprendere:
+  // resta solo la via d'uscita.
   if (att && att.attivo !== false) {
-    azioni.push({ label:'▶ Riprendi — ' + nome, valore:'riprendi', richiedeNota:true,
+    azioni.push({ label:'▶ Riprendi — ' + nome, valore:'riprendi',
       stile:'background:var(--acc);color:var(--bg);margin-top:12px;' });
   }
-  azioni.push({ label:'✔ Ho finito', valore:'fine', richiedeNota:true,
-    stile:'background:var(--grn);color:var(--bg);' });
-  azioni.push({ label:'← Lo scrivo dopo', valore:null, classe:'pause', richiedeNota:false });
+  azioni.push({ label:'✔ No, ho finito', valore:null, classe:'pause' });
 
   const inizio = new Date(sess.inizio);
   const r = await kioskNotaSchermata({
     titolo: 'Prima della pausa stavi facendo: ' + nome,
-    sottotitolo: 'Dalle ' + fmtT(inizio) + ' alle 12:30 il timbro si è chiuso da solo per la pausa. '
-      + 'Cos\'hai fatto in quelle ore? Senza nota non resta scritto.',
+    sottotitolo: 'Dalle ' + fmtT(inizio) + ' alle 12:30, poi il timbro si è chiuso da solo. '
+      + 'Vuoi riprendere da lì?',
+    conNota: false,
     azioni,
   });
 
-  if (r.nota) {
-    const { error } = await eseguiConRetry(
-      () => sb.from('sessioni_lavoro').update({ note: r.nota }).eq('id', sess.id),
-      { label: 'nota spezzone pausa' });
-    if (error) {
-      kioskBeep('err');
-      kioskShowError('Errore salvando la nota: ' + error.message);
-      return;
-    }
-    const riga = state.sessioni.find(s => s.id === sess.id);
-    if (riga) riga.note = r.nota;
-  }
-  // Saltato o già annotato: non lo si richiede a ogni identificazione, sarebbe
-  // un assillo. Torna alla prossima ricarica della pagina se resta senza nota.
+  // Chiesto una volta e basta: riproporlo a ogni identificazione sarebbe un
+  // assillo. Torna alla prossima ricarica della pagina.
   kioskState.spezzoniSaltati.add(sess.id);
 
   if (r.azione === 'riprendi' && att) return kioskSelectAttivita(att, rif || null);
