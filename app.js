@@ -6876,6 +6876,10 @@ function renderPianificazione(root) {
   const search = (state.opSearch || '').toLowerCase();
   const filter = state.opFilter || 'all';
   const { list } = pianificazioneFiltrate(false);
+  // L'ordinamento lo applica pianificazioneFiltrate; qui servono solo per
+  // disegnare la freccia sulla colonna attiva.
+  const sortKey = state.opSortKey || 'scadenza';
+  const sortDir = state.opSortDir === 'desc' ? -1 : 1;
 
   // KPI
   const tot = state.operazioni.length;
