@@ -229,6 +229,30 @@ Fatta insieme a Nico, caso per caso, con la giornata intera dell'operatore davan
 - **Da eseguire**: `strumenti/cancella-doppioni-chiusura.sql` toglie le 90 righe della seconda serie (la DELETE resta agli admin).
 - Lezione: **un retry senza guardia di idempotenza non è una rete, è un moltiplicatore.** Vale per tutte le scritture che creano righe, non solo per queste.
 
+## ⚠ DA FARE A FINE TURNO (preparato il 24 ago, non ancora eseguito)
+Due sistemazioni pronte, tutte e due nate da **errori miei** della stessa giornata. Niente scritture in orario di lavoro: si eseguono a reparto fermo.
+
+**1. Annullare la parte retroattiva della ridistribuzione** — ordine: prima le durate, poi la DELETE.
+- Ridistribuendo i timbri chiusi dalla pausa ho diviso anche **25 timbri fatti PRIMA che il loro gruppo esistesse**: 28,9 h spostate applicando all'indietro un raggruppamento che a quella data non c'era. È il contrario del principio detto a Cocco — *le ore timbrate prima del raggruppamento sono fatti e restano dove sono*.
+- `scratchpad/ripristina_durate.json` ha gli orari originali dei 25 (69,7 h che tornano intere); `strumenti/annulla-retroattivi.sql` cancella le 62 quote.
+- **Prima le durate, poi la DELETE**: così nella finestra fra le due le ore risultano in più (si vede) e non in meno (non si vede).
+- Effetto su OC/00209: pos 40 **+13,1 h**, pos 20 **−13,1**, pos 10 **+8,0**, pos 30 **−8,0**.
+
+**2. Ridistribuire le 9 timbrature di agosto** che la prima passata non aveva visto — 39,3 h, 54 righe nuove.
+- **Perché mancavano**: la query aveva letto **1000 righe su 1620**, il tetto di PostgREST. È la trappola scritta in questo stesso handoff (*"tabelle a crescita libera SEMPRE via `fetchTutte`"*), e il numero tondo 1000 nel primo conteggio avrebbe dovuto insospettirmi. `scratchpad/piano9.js` ora pagina.
+- Nessuna delle 9 è pre-gruppo, quindi non ricade nel problema del punto 1.
+- Spostamento netto quasi tutto su OC/00209: pos 20 **−9,2 h**, pos 40 **+9,2**.
+
+**Stato di SP-GD2587807 (OC/00209 pos 20 e 40), la segnalazione di Cocco**
+- Le due sono gemelle: stessa qtà, stesso min/pz, **100,8 h pagate ciascuna**. Adesso 75,4 e 80,6 h.
+- **Più si corregge, più si allontanano**: fatte tutte e due le sistemazioni qui sopra diventano ~53 e ~103 h. Il 5,3 h di scarto di oggi è basso *per caso*, perché i due errori si compensavano.
+- Lo squilibrio vero c'è ed è storico: la pos 40 è stata lavorata da sola dal 29 giu al 10 lug, e ad agosto quattro mattinate intere sono finite sulla sola pos 20.
+- **Decisione di Nico**: non si pareggia adesso. Le due sono ancora aperte; **il pareggio si fa alla fine**, quando il gruppo ha chiuso e i consuntivi non si muovono più — prima non ha senso, perché ogni timbro nuovo lo sbilancia di nuovo.
+- Sul gruppo nel suo insieme il numero è solido comunque: **156,0 h consuntivate su 201,7 pagate = 77%**. Confrontare le due metà significa confrontare quando è nato il gruppo e quale card è stata toccata.
+
+**Da valutare più avanti (Nico: "li analizziamo più avanti")**: un'azione "pareggia il gruppo" disponibile solo a gruppo chiuso, che mostri come starebbero le ore prima di toccarle. NON fatta.
+
+**Lo split in sé NON ha problemi** (verificato): 101 timbri spalmati, 501 righe, proporzioni esatte anche coi pesi non uniformi. Erano rotte le due cose *attorno* — la pausa che non lo chiamava e la chiusura che poteva partire due volte — entrambe corrette il 24 ago.
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0. ~~Timbri extra: due buchi~~ **CHIUSI da Nico il 7 ago: si lascia stare, tutti e due**
