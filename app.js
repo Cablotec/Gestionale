@@ -13840,14 +13840,26 @@ async function chiudiConSplitGruppo(sess, fineIso, nota) {
 
   if (gruppo.length > 1) {
     const parti = ripartisciTimbroGruppo(inizio, fineIso, gruppo);
-    // 1) la sessione già aperta = quota della sua commessa (parti[0])
-    const { data, error } = await eseguiConRetry(
+    // 1) la sessione già aperta = quota della sua commessa (parti[0]).
+    // CHIUDE SOLO SE È ANCORA APERTA (`is('fine', null)`): se qualcuno l'ha già
+    // chiusa, l'update non tocca niente e le quote NON si creano una seconda
+    // volta. Senza questa guardia una chiusura partita due volte raddoppia le
+    // ore — successo davvero, 9 volte: un doppio tocco (3 secondi) e sette
+    // ritentativi di `eseguiConRetry` dopo il timeout di 10 secondi, cioè il
+    // rischio dichiarato nel handoff ("insert riuscita ma risposta persa").
+    const { data: righe, error } = await eseguiConRetry(
       () => sb.from('sessioni_lavoro')
         .update(nota ? { fine: parti[0].fine, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: parti[0].fine })
-        .eq('id', sess.id).select().single(),
+        .eq('id', sess.id).is('fine', null).select(),
       { label: 'chiusura timbratura (gruppo)' }
     );
     if (error) throw error;
+    if (!righe || !righe.length) {
+      // Già chiusa da un'altra strada: niente quote, niente ore doppie.
+      const gia = (state.sessioni || []).find(s => s.id === sess.id);
+      return { data: gia || sess, gruppoN: 1, giaChiusa: true };
+    }
+    const data = righe[0];
     state.sessioni = state.sessioni.map(s => s.id === sess.id ? data : s);
     // 2) una sessione per ciascuna delle ALTRE commesse del gruppo
     const nuove = parti.slice(1).map(p => ({
@@ -13875,14 +13887,19 @@ async function chiudiConSplitGruppo(sess, fineIso, nota) {
     return { data, gruppoN: gruppo.length };
   }
 
-  // Chiusura normale (nessun gruppo)
-  const { data, error } = await eseguiConRetry(
+  // Chiusura normale (nessun gruppo). Stessa guardia: chiude solo se aperta.
+  const { data: righe, error } = await eseguiConRetry(
     () => sb.from('sessioni_lavoro')
       .update(nota ? { fine: fineIso, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: fineIso })
-      .eq('id', sess.id).select().single(),
+      .eq('id', sess.id).is('fine', null).select(),
     { label: 'chiusura timbratura' }
   );
   if (error) throw error;
+  if (!righe || !righe.length) {
+    const gia = (state.sessioni || []).find(s => s.id === sess.id);
+    return { data: gia || sess, gruppoN: 1, giaChiusa: true };
+  }
+  const data = righe[0];
   state.sessioni = state.sessioni.map(s => s.id === sess.id ? data : s);
   return { data, gruppoN: 1 };
 }

@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-24.1`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-24.2`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -220,7 +220,15 @@ Fatta insieme a Nico, caso per caso, con la giornata intera dell'operatore davan
   - Effetto su OC/00209: pos 20 da 65,6 a **75,4 h**, pos 40 da 90,4 a **80,6 h** — lo scarto scende da 24,7 a 5,2 h.
   - Le sospette restano **46 prima e 46 dopo**: la ridistribuzione non ha creato accavallamenti, le fette sono contigue.
   - Costo dichiarato e accettato: sui gruppi da 11 commesse (Senzani) 390 righe su 444 spostano **meno di sei minuti a commessa**, perché i pesi sono identici e i timbri erano già sparsi. Il movimento vero è tutto nei gruppi da 2-3.
-- **Arretrato da guardare**: 46 timbrature sospette accumulate dal 7 al 24 ago (24 a durata zero, 17 accavallate, 4 lunghe, 1 doppione). **I 17 accavallamenti sono TUTTI del 13 agosto**, tutti kiosk: non è una perdita continua, è una giornata storta da capire. Negli altri 17 giorni dopo la guardia: zero.
+- **Arretrato da guardare**: 46 timbrature sospette accumulate dal 7 al 24 ago (24 a durata zero, 17 accavallate, 4 lunghe, 1 doppione). **I 17 accavallamenti erano UNO SOLO** — vedi la sezione qui sotto: una chiusura partita due volte. Negli altri giorni: zero.
+## I 17 accavallamenti del 13 agosto: erano UNO (24 ago, `2026-08-24.2`)
+- Non erano 17 fatti, era **una chiusura partita due volte**. Giacomo Biagi, 13 ago: due lotti di 10 quote creati a **3 secondi** di distanza, sfalsati di 2 secondi. Ogni riga del primo lotto si accavalla con la gemella del secondo → 17 coppie segnalate, **un solo evento**.
+- Cercando lo stesso schema in tutto lo storico: **9 chiusure partite due volte**. Una da doppio tocco (3 s) e **sette di Fabrizio Scordo il 21 ago a 10-12 secondi** — che è **esattamente il timeout di `eseguiConRetry`**: insert riuscita, risposta persa, secondo tentativo che rifà tutto. È il rischio dichiarato nel handoff dal 28 lug, e per la prima volta si vede nei dati.
+- **Ore contate due volte: 1,82 h** (solo il caso di Giacomo; gli altri otto lotti erano quote a durata zero da micro-tocchi).
+- **CAUSA CHIUSA**: `chiudiConSplitGruppo` ora aggiorna **solo se la sessione è ancora aperta** (`.is('fine', null)`), e se non tocca nessuna riga **non crea le quote**. Una chiusura può partire dieci volte: le quote restano una serie sola. 8 test in scratchpad/test_chiusura_idempotente.js, con un finto Supabase che rispetta il filtro.
+- **Da eseguire**: `strumenti/cancella-doppioni-chiusura.sql` toglie le 90 righe della seconda serie (la DELETE resta agli admin).
+- Lezione: **un retry senza guardia di idempotenza non è una rete, è un moltiplicatore.** Vale per tutte le scritture che creano righe, non solo per queste.
+
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0. ~~Timbri extra: due buchi~~ **CHIUSI da Nico il 7 ago: si lascia stare, tutti e due**
