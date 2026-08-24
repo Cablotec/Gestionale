@@ -11741,6 +11741,44 @@ async function kioskLoadAll() {
   }
 }
 
+// Applica al kiosk una sessione cambiata da un'altra postazione SENZA
+// riscaricare tutto. Oltre alla riga tiene aggiornate le due cose che
+// kioskLoadAll ricalcolava per la barra preventivo/consuntivo delle card.
+function kioskApplySessione(p) {
+  const oreDi = s => (s && s.fine && s.durata_secondi) ? s.durata_secondi / 3600 : 0;
+  const id = (p.new && p.new.id) || (p.old && p.old.id);
+  // La copia PRIMA della modifica va letta da state, non da p.old: senza
+  // REPLICA IDENTITY FULL, p.old contiene solo la chiave primaria.
+  const prima = state.sessioni.find(x => x.id === id);
+  applyChange('sessioni_lavoro', p);
+  const dopo = p.eventType === 'DELETE' ? null : state.sessioni.find(x => x.id === id);
+  const opId = (dopo && dopo.operazione_id) || (prima && prima.operazione_id);
+  if (!opId) return null;
+  const delta = oreDi(dopo) - oreDi(prima);
+  if (delta) kioskState.opOreCons[opId] = Math.max(0, (kioskState.opOreCons[opId] || 0) + delta);
+  if (dopo && dopo.fine) kioskState.opIniziate.add(opId);
+  return opId;
+}
+
+// operazioni_addetti non ha un canale realtime suo: finora si aggiornava di
+// rimbalzo, perché ogni timbro faceva ricaricare tutto. Senza quella ricarica
+// una postazione resterebbe con la cache vecchia e la chiusura fase, non
+// trovando la riga, ne inserirebbe una doppia. Rileggiamo le righe della sola
+// commessa toccata: qualche centinaio di byte invece di 215 KB.
+async function kioskSyncAddetti(opId) {
+  if (!opId) return;
+  const { data, error } = await sb.from('operazioni_addetti').select('*').eq('operazione_id', opId);
+  if (error || !data) return;
+  state.opAddetti = state.opAddetti.filter(r => r.operazione_id !== opId).concat(data);
+}
+
+// Il kiosk tiene in cache solo le commesse ancora da fare: se una viene
+// spedita o completata deve sparire, come faceva il ricaricamento.
+function kioskApplyOperazione(p) {
+  applyChange('operazioni', p);
+  state.operazioni = state.operazioni.filter(o => o.stato !== 'spedita' && o.stato !== 'completata');
+}
+
 function kioskStartRealtime() {
   if (kioskChannel) return;
   if (!_rtLivenessTimer) _rtLivenessTimer = setInterval(_rtLivenessCheck, 45000);
@@ -11754,11 +11792,22 @@ function kioskStartRealtime() {
     .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni' }, () => {
       kioskLoadAll().then(kioskRefreshActive);
     })
-    .on('postgres_changes', { event:'*', schema:'public', table:'operazioni' }, () => {
-      kioskLoadAll().then(kioskRefreshActive);
+    // ── Le due tabelle che cambiano di continuo NON fanno riscaricare tutto ──
+    // (24 ago) Ogni timbro produce due eventi, insert e chiusura, e le quote di
+    // un gruppo ne producono uno per commessa. Con kioskLoadAll() ogni evento
+    // costava 215 KB di rete PER POSTAZIONE: 293 eventi al giorno facevano
+    // 3,6 GB al mese con due postazioni e 7,2 con quattro — ed è quello che ha
+    // sforato la quota Supabase.
+    // La riga cambiata arriva DENTRO il messaggio realtime: applicarla costa
+    // zero. È già quello che fa il gestionale admin con applyChange().
+    .on('postgres_changes', { event:'*', schema:'public', table:'operazioni' }, (p) => {
+      kioskApplyOperazione(p);
+      kioskRefreshActive();
     })
-    .on('postgres_changes', { event:'*', schema:'public', table:'sessioni_lavoro' }, () => {
-      kioskLoadAll().then(kioskRefreshActive);
+    .on('postgres_changes', { event:'*', schema:'public', table:'sessioni_lavoro' }, (p) => {
+      const opId = kioskApplySessione(p);
+      kioskRefreshActive();
+      if (opId) kioskSyncAddetti(opId).then(kioskRefreshActive);
     })
     .on('postgres_changes', { event:'*', schema:'public', table:'aziende' }, () => {
       kioskLoadAll().then(kioskRefreshActive);

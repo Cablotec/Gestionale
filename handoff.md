@@ -265,6 +265,26 @@ Guardate una per una con Nico. **Diciannove righe, quattro cause, due problemi v
   - **Rudin, 7 ago**: 13:01 → 06:47 del mattino dopo, 17,75 h su Manutenzione. A chiuderlo è stata la guardia anti-accavallamento quando è tornato a timbrare: ha fatto il suo mestiere ma ha scritto "adesso".
   - **Mirko, 18 ago**: 08:00→16:01, 8,02 h col pranzo dentro. **La pausa non ha saltato niente**: la riga è stata `created_at` alle **14:01** (alle 12:30 non esisteva) e `updated_at` **il giorno dopo alle 14:29**. Gli 08:00→16:01 li ha messi a mano un admin, pranzo compreso. Quando si corregge un timbro a mano, la pausa non c'è a togliere il pranzo.
 - 38 test in scratchpad/test_sospette.js.
+
+## Quota egress Supabase sforata: la causa era il kiosk (24 ago, `2026-08-24.6`)
+Mail di Supabase: **6,26 GB usati su 5 GB** inclusi, restrizione dal 22 set 2026 se non si rientra.
+
+**Come si è trovata.** Il primo modello (peso di un'apertura × aperture al giorno) dava ~5 GB e non spiegava il divario. Due scoperte l'hanno ribaltato:
+1. **Le risposte di Supabase viaggiano gzippate** (misurato: 508 KB → 107 KB, `Content-Encoding: gzip`, ~4,8×). Tutte le misure fatte "a occhio" sul peso dei dati sono quindi ~5 volte più grandi del traffico vero: il volume di richieste doveva per forza essere molto più alto del previsto.
+2. **`kioskStartRealtime` chiamava `kioskLoadAll()` su OGNI evento**, di tutte e 8 le tabelle sottoscritte. Ogni timbro genera **due** eventi (inserimento + chiusura), e la chiusura di una commessa raggruppata ne genera uno **per ogni commessa del gruppo**.
+
+**Il conto, sui dati veri** (ultimi 7 giorni): 939 sessioni create + 1015 modificate + 99 commesse = **293 eventi al giorno**. Ogni evento = 215 KB di rete **per ogni postazione accesa**. Con 2 postazioni fa 3,6 GB al mese, con 4 fa 7,2. Il grafico giornaliero del dashboard conferma: barre solo nei giorni lavorativi, **zero il 9-10 e il 15-17 agosto**, giornata tipo ~200 MB, quasi tutto **Database egress** (non Realtime), Cached Egress **0,00 GB**.
+
+**La correzione.** La riga cambiata arriva **dentro** il messaggio realtime: applicarla costa zero traffico. È già quello che fa il gestionale admin con `applyChange`. Ora il kiosk fa lo stesso per le due tabelle che cambiano di continuo:
+- `kioskApplySessione(p)` — applica la riga e tiene aggiornati **`kioskState.opOreCons` e `opIniziate`** (che `kioskLoadAll` ricalcolava con una query a parte) lavorando **per delta**: ore dopo − ore prima. Lo stesso evento due volte non raddoppia niente, una durata corretta a mano non si somma.
+- ⚠ **`p.old` contiene SOLO la chiave primaria** senza `REPLICA IDENTITY FULL`: lo stato precedente va letto da `state.sessioni` *prima* di applicare il cambio, mai da `p.old`.
+- `kioskApplyOperazione(p)` — riapplica il filtro del kiosk: una commessa che diventa spedita/completata deve **sparire**, come faceva la ricarica.
+- ⚠ **`operazioni_addetti` non ha un canale suo**: finora si aggiornava *di rimbalzo*, perché ogni timbro faceva ricaricare tutto. Senza quella ricarica una postazione resterebbe indietro e la chiusura fase, non trovando la riga in cache, **ne inserirebbe una doppia**. Perciò `kioskSyncAddetti(opId)` rilegge le righe della **sola commessa toccata**: qualche centinaio di byte invece di 215 KB.
+- Le altre 6 tabelle (mezzi, utenti, prenotazioni, aziende, articoli, tipi_lavorazione) cambiano raramente: ricaricano ancora tutto, e va bene così.
+- 16 test in `scratchpad/test_kiosk_realtime.js`.
+
+**Nota di metodo**: la barra più alta del mese è il 24 ago, 647 MB — erano le mie scritture massive (500 righe = 500 ricariche per postazione). Una correzione dati in blocco, finché quel meccanismo esisteva, costava più di una settimana di lavoro vero.
+
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0. ~~Timbri extra: due buchi~~ **CHIUSI da Nico il 7 ago: si lascia stare, tutti e due**
