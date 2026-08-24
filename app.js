@@ -11464,7 +11464,7 @@ async function chiudiSessioniPausaPranzo() {
     // Leggo TUTTE le sessioni aperte (potrebbero essercene di giorni passati)
     const { data: sessioniAperte, error: errLoad } = await sb
       .from('sessioni_lavoro')
-      .select('id, inizio, utente_id, operazione_id')
+      .select('*')   // servono tutti i campi: la spalmatura sul gruppo li ricopia
       .is('fine', null);
     if (errLoad) throw errLoad;
     if (!sessioniAperte || sessioniAperte.length === 0) return 0;
@@ -11483,7 +11483,7 @@ async function chiudiSessioniPausaPranzo() {
       // 1. La sessione è iniziata PRIMA delle 12:30 di quel giorno
       // 2. Le 12:30 di quel giorno sono già passate (rispetto ad adesso)
       if (inizio < pausaQuelGiorno && pausaQuelGiorno <= adesso) {
-        updates.push({ id: s.id, fine: pausaQuelGiorno.toISOString() });
+        updates.push({ id: s.id, fine: pausaQuelGiorno.toISOString(), sess: s });
       }
     }
 
@@ -11492,12 +11492,23 @@ async function chiudiSessioniPausaPranzo() {
     // Eseguo gli update uno per uno (sono pochi, non vale la pena un batch raffinato)
     let chiuse = 0;
     for (const u of updates) {
-      const { error } = await sb
-        .from('sessioni_lavoro')
-        .update({ fine: u.fine })
-        .eq('id', u.id)
-        .is('fine', null);  // doppia sicurezza: non sovrascrive se già chiusa
-      if (!error) chiuse++;
+      // Passa dalla STESSA strada della chiusura normale, così una commessa
+      // raggruppata si spalma anche qui (7 ago). Prima era un update secco e
+      // non spalmava: chi lavorava a mezzogiorno su un gruppo si vedeva tutte
+      // le ore su una sola posizione — 87 timbri e 305 h attribuite male.
+      const sess = (state.sessioni || []).find(s => s.id === u.id) || u.sess;
+      try {
+        if (sess && sess.inizio) {
+          await chiudiConSplitGruppo(sess, u.fine, null);
+        } else {
+          // Non ce l'abbiamo in memoria (altra postazione, altro giorno):
+          // si chiude e basta, com'era prima. Meglio chiusa che aperta.
+          const { error } = await sb.from('sessioni_lavoro')
+            .update({ fine: u.fine }).eq('id', u.id).is('fine', null);
+          if (error) continue;
+        }
+        chiuse++;
+      } catch (e) { /* la prossima passata riproverà: è idempotente */ }
     }
 
     if (chiuse > 0) {
@@ -13352,18 +13363,16 @@ async function kioskChiudiAperteRimaste(uid) {
   if (!uid) return 0;
   const ora = new Date().toISOString();
   const { data, error } = await eseguiConRetry(
-    () => sb.from('sessioni_lavoro').select('id').eq('utente_id', uid).is('fine', null),
+    () => sb.from('sessioni_lavoro').select('*').eq('utente_id', uid).is('fine', null),
     { label: 'controllo timbri aperti' });
   if (error || !data || !data.length) return 0;
   let chiuse = 0;
   for (const riga of data) {
-    const { error: e2 } = await eseguiConRetry(
-      () => sb.from('sessioni_lavoro').update({ fine: ora }).eq('id', riga.id).is('fine', null),
-      { label: 'chiusura timbro rimasto aperto' });
-    if (e2) continue;
-    chiuse++;
-    const locale = state.sessioni.find(s => s.id === riga.id);
-    if (locale) locale.fine = ora;
+    // Stessa strada delle altre chiusure: se la commessa è raggruppata il
+    // tempo si spalma. Nella prima versione di stamattina questo update era
+    // secco e aveva lo stesso buco della pausa pranzo.
+    try { await chiudiConSplitGruppo(riga, ora, null); chiuse++; }
+    catch (e) { /* il prossimo avvio riproverà */ }
   }
   return chiuse;
 }
@@ -13814,26 +13823,28 @@ function kioskFormatDurataLive(inizioDate) {
   return s+'s';
 }
 
-// Chiude una sessione scrivendo `fine`. Nessuno scarto per durata: ogni
-// timbratura resta registrata, qualunque sia la sua durata. Aggiorna
-// state.sessioni. Ritorna { scartata:false, elapsed, data }. Lancia in caso d'errore.
-async function kioskChiudiOScarta(sess, nota) {
+// Chiude una sessione scrivendo la fine passata, spalmando sul gruppo se la commessa
+// ne fa parte. UNA sola strada per tutte le chiusure automatiche (7 ago): la
+// pausa pranzo faceva un update secco e NON spalmava, quindi chi lavorava a
+// mezzogiorno su una commessa raggruppata si vedeva tutte le ore su una sola
+// posizione. Sui dati veri erano 87 timbri per 305 ore. Due strade per chiudere
+// la stessa cosa, e una sola sapeva del gruppo.
+// Ritorna { data, gruppoN }.
+async function chiudiConSplitGruppo(sess, fineIso, nota) {
   const inizio = sess.inizio;
-  const fineNow = new Date().toISOString();
-  const elapsed = Math.floor((Date.now() - new Date(inizio).getTime()) / 1000);
-
-  // Commessa raggruppata: il tempo si spalma in parti uguali sulle N commesse
-  // del gruppo (spedite/completate escluse). La sessione aperta prende la sua
-  // quota; le altre nascono come sessioni nuove (insert), senza cancellazioni.
   const op = (state.operazioni || []).find(o => o.id === sess.operazione_id);
-  const gruppo = op ? commesseGruppoLavorabili(op) : [{ operazione_id: sess.operazione_id, peso: 1 }];
+  // Le attività extra non si spalmano: non hanno commessa, quindi niente gruppo.
+  const gruppo = (op && !sess.attivita_id)
+    ? commesseGruppoLavorabili(op)
+    : [{ operazione_id: sess.operazione_id, peso: 1 }];
 
   if (gruppo.length > 1) {
-    const parti = ripartisciTimbroGruppo(inizio, fineNow, gruppo);
+    const parti = ripartisciTimbroGruppo(inizio, fineIso, gruppo);
     // 1) la sessione già aperta = quota della sua commessa (parti[0])
     const { data, error } = await eseguiConRetry(
       () => sb.from('sessioni_lavoro')
-        .update(nota ? { fine: parti[0].fine, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: parti[0].fine }).eq('id', sess.id).select().single(),
+        .update(nota ? { fine: parti[0].fine, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: parti[0].fine })
+        .eq('id', sess.id).select().single(),
       { label: 'chiusura timbratura (gruppo)' }
     );
     if (error) throw error;
@@ -13851,7 +13862,7 @@ async function kioskChiudiOScarta(sess, nota) {
       // Niente marchio "[gruppo]" (tolto su richiesta di Nico, 5 ago): sporcava
       // il campo note, che ora serve alle note vere degli operatori. Le quote
       // restano riconoscibili dal fatto che la commessa ha un gruppo_id e che
-      // più sessioni condividono lo stesso intervallo.
+      // le sessioni sono fette contigue dello stesso intervallo.
       note: sess.note || null,
     }));
     try {
@@ -13861,17 +13872,29 @@ async function kioskChiudiOScarta(sess, nota) {
       );
       if (ins) ins.forEach(r => { if (!state.sessioni.find(x => x.id === r.id)) state.sessioni.push(r); });
     } catch (e) { /* best-effort: il timbro principale è già salvo, mai perso */ }
-    return { scartata: false, elapsed, data, gruppoN: gruppo.length };
+    return { data, gruppoN: gruppo.length };
   }
 
   // Chiusura normale (nessun gruppo)
   const { data, error } = await eseguiConRetry(
-    () => sb.from('sessioni_lavoro').update(nota ? { fine: fineNow, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: fineNow }).eq('id', sess.id).select().single(),
+    () => sb.from('sessioni_lavoro')
+      .update(nota ? { fine: fineIso, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: fineIso })
+      .eq('id', sess.id).select().single(),
     { label: 'chiusura timbratura' }
   );
   if (error) throw error;
   state.sessioni = state.sessioni.map(s => s.id === sess.id ? data : s);
-  return { scartata: false, elapsed, data, gruppoN: 1 };
+  return { data, gruppoN: 1 };
+}
+
+// Chiusura "adesso" dal kiosk. Nessuno scarto per durata: ogni timbratura resta
+// registrata, qualunque sia la sua durata. Ritorna { scartata:false, elapsed,
+// data, gruppoN }. Lancia in caso d errore.
+async function kioskChiudiOScarta(sess, nota) {
+  const fineNow = new Date().toISOString();
+  const elapsed = Math.floor((Date.now() - new Date(sess.inizio).getTime()) / 1000);
+  const r = await chiudiConSplitGruppo(sess, fineNow, nota);
+  return { scartata: false, elapsed, data: r.data, gruppoN: r.gruppoN };
 }
 
 async function kioskStopSessione(sess, modalita) {
