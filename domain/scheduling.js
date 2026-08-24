@@ -1639,6 +1639,10 @@ function assenzeInPrenotazione(utentiIds, dataInizioIso, dataFineIso) {
 // Ritorna { righe, n, perTipo } — righe: { tipo, sessione, utenteId, quando,
 // testo }. Tipi: 'zero', 'sovrapposta', 'doppione', 'aperta', 'lunga'.
 const SOSPETTE_ORE_APERTA = 7;
+// L'ora della pausa pranzo, ripetuta qui perché il domain è PURO e non vede le
+// costanti del kiosk. Se un giorno la pausa si sposta, va cambiata anche qui.
+const PAUSA_ORA_SOSPETTE = 12;
+const PAUSA_MIN_SOSPETTE = 30;
 function timbratureSospette(soloOggiIso) {
   const ms = (s) => new Date(s.inizio).getTime();
   const fineMs = (s) => s.fine ? new Date(s.fine).getTime() : Date.now();
@@ -1698,6 +1702,14 @@ function timbratureSospette(soloOggiIso) {
     // finché non la si corregge quelle ore restano dentro i conti (quella da
     // 62,6 h vale da sola il 28% di tutte le ore delle attività extra).
     // È il buco che aveva già il banner di Live, che guarda solo il presente.
+    //
+    // ECCEZIONE: se l'ha chiusa la PAUSA (fine alle 12:30 spaccate) non è
+    // sfuggita a nessuno — l'ha chiusa il gestionale, e più di così non poteva
+    // durare. Segnalarla vorrebbe dire gridare al lupo su una mattinata lunga:
+    // chi attacca alle 5 arriva a 7,5 h prima di pranzo, ed è normale qui.
+    const f = new Date(s.fine);
+    if (f.getHours() === PAUSA_ORA_SOSPETTE && f.getMinutes() === PAUSA_MIN_SOSPETTE
+        && f.getSeconds() === 0) return;
     aggiungi('lunga', s, nomeUt(s.utente_id) + ' · ' + dove(s) + ' · durata '
       + ore.toFixed(1).replace('.', ',') + ' h ('
       + fmtIT(toLocalISO(new Date(s.inizio))) + ' ' + fmtT(new Date(s.inizio))
