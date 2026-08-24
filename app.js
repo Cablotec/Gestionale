@@ -11431,7 +11431,10 @@ const KIOSK_DONE_MS = 2000;             // schermata conferma resta 2s
 // Il check viene fatto all'avvio del kiosk e ogni PAUSA_CHECK_MS.
 const PAUSA_PRANZO_ORA = 12;
 const PAUSA_PRANZO_MIN = 30;
-const PAUSA_CHECK_MS = 60 * 1000;  // controllo ogni minuto
+// Ogni 5 minuti, non ogni minuto: la pausa scrive sempre `fine = 12:30`
+// qualunque sia il momento in cui gira, quindi controllare più spesso non
+// cambia un dato — cambia solo il traffico.
+const PAUSA_CHECK_MS = 5 * 60 * 1000;
 
 function setupKioskExitButton() {
   const btn = document.getElementById('kiosk-exit-btn');
@@ -11461,11 +11464,28 @@ function setupKioskExitButton() {
 // È idempotente: se già chiuse, non trova nulla da fare.
 async function chiudiSessioniPausaPranzo() {
   try {
-    // Leggo TUTTE le sessioni aperte (potrebbero essercene di giorni passati)
+    // Il filtro si fa fare al SERVER, non a valle (24 ago). Prima si scaricavano
+    // TUTTE le sessioni aperte ogni minuto su ogni postazione per poi scartarle
+    // quasi tutte: 4,8 KB a botta, che con quattro kiosk accesi fanno quasi
+    // 1 GB al mese di traffico per un lavoro che il 99% delle volte è nessuno.
+    //
+    // Una sessione va chiusa solo se è iniziata prima delle 12:30 del suo
+    // giorno E quelle 12:30 sono passate. Quindi:
+    //   dopo le 12:30 → possono servire quelle iniziate prima delle 12:30 di oggi
+    //   prima delle 12:30 → solo quelle dei giorni scorsi
+    // Nel caso normale la risposta è una lista vuota.
+    const adessoPerFiltro = new Date();
+    const pausaOggi = new Date(adessoPerFiltro.getFullYear(), adessoPerFiltro.getMonth(),
+      adessoPerFiltro.getDate(), PAUSA_PRANZO_ORA, PAUSA_PRANZO_MIN, 0, 0);
+    const soglia = adessoPerFiltro >= pausaOggi
+      ? pausaOggi
+      : new Date(adessoPerFiltro.getFullYear(), adessoPerFiltro.getMonth(), adessoPerFiltro.getDate(), 0, 0, 0, 0);
+    // Colonne: solo quelle che servono alla spalmatura sul gruppo, non tutte.
     const { data: sessioniAperte, error: errLoad } = await sb
       .from('sessioni_lavoro')
-      .select('*')   // servono tutti i campi: la spalmatura sul gruppo li ricopia
-      .is('fine', null);
+      .select('id, inizio, utente_id, operazione_id, tipo_lavorazione_id, sede, note, attivita_id')
+      .is('fine', null)
+      .lt('inizio', soglia.toISOString());
     if (errLoad) throw errLoad;
     if (!sessioniAperte || sessioniAperte.length === 0) return 0;
 
