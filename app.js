@@ -16935,13 +16935,12 @@ function renderSospette() {
   const ETICHETTE = {
     aperta: 'aperta da troppo',
     lunga: 'durata assurda',
-    zero: 'durata zero',
     doppione: 'doppione',
     sovrapposta: 'accavallate',
   };
   // Le aperte per prime: sono le uniche su cui si può ancora intervenire adesso.
   // Poi le durate assurde: finché restano, quelle ore falsano i conti.
-  const ordine = ['aperta', 'lunga', 'doppione', 'sovrapposta', 'zero'];
+  const ordine = ['aperta', 'lunga', 'doppione', 'sovrapposta'];
   const righe = r.righe.slice().sort((a, b) =>
     (ordine.indexOf(a.tipo) - ordine.indexOf(b.tipo))
     || String(b.quando).localeCompare(String(a.quando)));

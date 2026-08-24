@@ -1637,7 +1637,7 @@ function assenzeInPrenotazione(utentiIds, dataInizioIso, dataFineIso) {
 // quando è sulla STESSA commessa: quello non ha nessuna spiegazione buona.
 //
 // Ritorna { righe, n, perTipo } — righe: { tipo, sessione, utenteId, quando,
-// testo }. Tipi: 'zero', 'sovrapposta', 'doppione', 'aperta', 'lunga'.
+// testo }. Tipi: 'aperta', 'lunga', 'doppione', 'sovrapposta'.
 const SOSPETTE_ORE_APERTA = 7;
 // L'ora della pausa pranzo, ripetuta qui perché il domain è PURO e non vede le
 // costanti del kiosk. Se un giorno la pausa si sposta, va cambiata anche qui.
@@ -1667,26 +1667,18 @@ function timbratureSospette(soloOggiIso) {
     quando: toLocalISO(new Date(s.inizio)), testo,
   });
 
-  // 1) Durata zero. NON si elencano una per una: sui dati veri i 17 casi erano
-  // DUE tocchi sbagliati, non diciassette. Toccando per un secondo una commessa
-  // RAGGRUPPATA, lo split genera una quota per ogni commessa del gruppo: nove
-  // righe a zero nello stesso istante. Elencarle tutte farebbe sembrare un
-  // problema diffuso quello che è un dito storto amplificato dal gruppo.
-  // Si raggruppano quindi per persona e istante.
-  const zeroPer = new Map();
-  sessioni.forEach(s => {
-    if (!s.fine || fineMs(s) > ms(s)) return;
-    const k = s.utente_id + '@' + Math.floor(ms(s) / 1000);
-    if (!zeroPer.has(k)) zeroPer.set(k, []);
-    zeroPer.get(k).push(s);
-  });
-  zeroPer.forEach(gruppo => {
-    const s = gruppo[0];
-    aggiungi('zero', s, gruppo.length === 1
-      ? nomeUt(s.utente_id) + ' · ' + dove(s) + ' · durata zero'
-      : nomeUt(s.utente_id) + ' · ' + gruppo.length + ' timbri a durata zero nello stesso secondo'
-        + ' · quote di un tocco su un gruppo');
-  });
+  // 1) DURATA ZERO: NON si segnala più (24 ago, decisione Nico).
+  // Entrare pochi secondi in una commessa per chiuderla è un gesto VOLUTO e
+  // frequente — lo stesso che il collega di Nico aveva raccontato per le fasi,
+  // e che i dati confermano: dei 215 timbri sotto i 3 minuti, 112 sono su
+  // commesse dove quell'operatore ha una fase completata, 86 entro 5 minuti,
+  // mediana 6 secondi.
+  // Se la commessa è raggruppata, lo split di quel tocco genera una quota a
+  // zero per ogni membro: 15 righe su 19 dell'elenco venivano da lì. Erano il
+  // sottoprodotto normale di un gesto normale, e riempivano la lista fino a
+  // renderla inutile — che è il modo più rapido per far smettere di guardarla.
+  // Lo split resta com'è (nessuna soglia minima): è il segnale a essere
+  // sbagliato, non il meccanismo.
 
   sessioni.forEach(s => {
     const ore = (fineMs(s) - ms(s)) / 3600000;

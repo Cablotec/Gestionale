@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-24.3`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-24.4`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -253,6 +253,14 @@ Due sistemazioni pronte, tutte e due nate da **errori miei** della stessa giorna
 **Da valutare più avanti (Nico: "li analizziamo più avanti")**: un'azione "pareggia il gruppo" disponibile solo a gruppo chiuso, che mostri come starebbero le ore prima di toccarle. NON fatta.
 
 **Lo split in sé NON ha problemi** (verificato): 101 timbri spalmati, 501 righe, proporzioni esatte anche coi pesi non uniformi. Erano rotte le due cose *attorno* — la pausa che non lo chiamava e la chiusura che poteva partire due volte — entrambe corrette il 24 ago.
+## Le 19 timbrature sospette: erano 2 (24 ago, `2026-08-24.4`)
+Guardate una per una con Nico. **Diciannove righe, quattro cause, due problemi veri.**
+- **15 a durata zero → NON si segnalano più** (decisione Nico). Entrare pochi secondi in una commessa per chiuderla è un **gesto voluto** — lo stesso raccontato dal collega per le fasi. Se la commessa è raggruppata, lo split di quel tocco genera una quota a zero **per ogni membro**: erano il sottoprodotto normale di un gesto normale, e riempivano la lista fino a renderla inutile. **Lo split resta com'è, nessuna soglia minima**: era il segnale a essere sbagliato, non il meccanismo.
+- **2 "lunghe" di Vasile → non erano anomalie**: 05:02→12:30 e 05:05→12:30, **chiuse dalla pausa**. Chi attacca alle 5 arriva a 7,5 h prima di pranzo. Ora la categoria `lunga` **salta i timbri chiusi alle 12:30 spaccate**: li ha chiusi il gestionale, per definizione non sono sfuggiti a nessuno. Restano segnalati quelli chiusi a mano alla stessa ora (anche 12:30:14).
+- **Restano 2, e Nico le vuole segnalate**: che gli admin indaghino, non le corregge il gestionale.
+  - **Rudin, 7 ago**: 13:01 → 06:47 del mattino dopo, 17,75 h su Manutenzione. A chiuderlo è stata la guardia anti-accavallamento quando è tornato a timbrare: ha fatto il suo mestiere ma ha scritto "adesso".
+  - **Mirko, 18 ago**: 08:00→16:01, 8,02 h col pranzo dentro. **La pausa non ha saltato niente**: la riga è stata `created_at` alle **14:01** (alle 12:30 non esisteva) e `updated_at` **il giorno dopo alle 14:29**. Gli 08:00→16:01 li ha messi a mano un admin, pranzo compreso. Quando si corregge un timbro a mano, la pausa non c'è a togliere il pranzo.
+- 38 test in scratchpad/test_sospette.js.
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0. ~~Timbri extra: due buchi~~ **CHIUSI da Nico il 7 ago: si lascia stare, tutti e due**
