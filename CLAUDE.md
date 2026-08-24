@@ -68,6 +68,8 @@
 
 - **La chiusura di un timbro è IDEMPOTENTE** (24 ago): aggiorna solo se `fine` è ancora null e, se non tocca nulla, non crea le quote del gruppo. Senza, una chiusura partita due volte raddoppia le ore — successo 9 volte: un doppio tocco e sette ritentativi dopo il timeout di 10 s di `eseguiConRetry`. **Un retry senza guardia di idempotenza è un moltiplicatore, non una rete.**
 
+- **Segnalare non è chiedere di intervenire** (24 ago): la soglia delle 7 h vive in due posti con due mestieri. Sulle **card Live e nello storico** è un marcatore informativo — le mattinate lunghe di chi attacca alle 5 ci restano, e va bene. Nella **striscia delle sospette** è un elenco di cose da sistemare, e lì una giornata regolare non ci deve stare (i timbri chiusi dalla pausa sono esclusi: li ha chiusi il gestionale). Stesso numero, domanda diversa: **non unificarle**.
+
 ## Leggibilità: temi e testo (31 lug, `2026-07-31.8`)
 - **Tre ruoli, tre font**: **Syne** solo titoli e bottoni (è un font da display: illeggibile in frasi piccole); **`var(--ui)`** = stack di sistema per la PROSA (note, hint, didascalie — `.sub`), il font meglio ottimizzato che ogni macchina abbia per il testo piccolo, zero download; **JetBrains Mono** (era DM Mono) solo dove serve incolonnare — codici, quantità, date, ore — perché ha lettere più alte a parità di px.
 - **Pavimento a 11px**: prima 61 regole a 11px, 48 a 10 e 12 a 9 — cioè quasi tutta l’app sotto la soglia comoda, e per giunta monospaziata. Ora niente sotto gli 11. Se qualche cella stretta del Gantt si stringe troppo, ritoccare LOCALMENTE quelle e non il pavimento.

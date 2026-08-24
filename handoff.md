@@ -256,6 +256,10 @@ Due sistemazioni pronte, tutte e due nate da **errori miei** della stessa giorna
 ## Le 19 timbrature sospette: erano 2 (24 ago, `2026-08-24.4`)
 Guardate una per una con Nico. **Diciannove righe, quattro cause, due problemi veri.**
 - **15 a durata zero → NON si segnalano più** (decisione Nico). Entrare pochi secondi in una commessa per chiuderla è un **gesto voluto** — lo stesso raccontato dal collega per le fasi. Se la commessa è raggruppata, lo split di quel tocco genera una quota a zero **per ogni membro**: erano il sottoprodotto normale di un gesto normale, e riempivano la lista fino a renderla inutile. **Lo split resta com'è, nessuna soglia minima**: era il segnale a essere sbagliato, non il meccanismo.
+- **PRINCIPIO (deciso qui, vale in generale): segnalare NON è chiedere di intervenire.** La stessa soglia di 7 h vive in due posti con due mestieri diversi, e devono restare diversi:
+  - **card in Live e ⚠ nello storico** = *marcatore informativo*, "questa è stata una giornata fuori dall'ordinario". Le mattinate di Vasile ci restano, **e va bene così** (Nico: *"orari così eccezionali è bene che vengano segnalati"*).
+  - **striscia delle timbrature sospette** = *elenco di cose da sistemare*. Lì una giornata regolare non ci deve stare, o l'elenco smette di essere una lista di lavoro.
+  - Non unificarle: hanno lo stesso numero ma non la stessa domanda.
 - **2 "lunghe" di Vasile → non erano anomalie**: 05:02→12:30 e 05:05→12:30, **chiuse dalla pausa**. Chi attacca alle 5 arriva a 7,5 h prima di pranzo. Ora la categoria `lunga` **salta i timbri chiusi alle 12:30 spaccate**: li ha chiusi il gestionale, per definizione non sono sfuggiti a nessuno. Restano segnalati quelli chiusi a mano alla stessa ora (anche 12:30:14).
 - **Restano 2, e Nico le vuole segnalate**: che gli admin indaghino, non le corregge il gestionale.
   - **Rudin, 7 ago**: 13:01 → 06:47 del mattino dopo, 17,75 h su Manutenzione. A chiuderlo è stata la guardia anti-accavallamento quando è tornato a timbrare: ha fatto il suo mestiere ma ha scritto "adesso".
