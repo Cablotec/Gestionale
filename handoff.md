@@ -287,6 +287,13 @@ Mail di Supabase: **6,26 GB usati su 5 GB** inclusi, restrizione dal 22 set 2026
 
 ## ▶ Fili aperti (in ordine di priorità)
 
+### 0-bis. DA VERIFICARE il 25 ago: la correzione egress ha morso davvero?
+Due controlli, cinque minuti, **da fare prima di dichiarare chiusa la faccenda quota**:
+1. **Dashboard Supabase → org Cablotec SRL → Usage → Egress → grafico "Egress per day"**. La barra del 25 ago deve essere **una frazione** di quelle del 18-24 (giornata tipo ~200 MB, attesa ~10 MB). Se è ancora sui 200 MB la diagnosi era incompleta: **il divario è altrove e va ripreso a scavare**, non è il caso di aggiungere altre ottimizzazioni a caso.
+2. **Prova sul campo con due postazioni kiosk** (tocca il pezzo che non deve rompersi): A avvia un lavoro → B lo deve vedere comparire; A chiude una fase → B la deve vedere chiusa. Se B resta indietro, il sospetto n.1 è `kioskSyncAddetti`.
+
+Numeri di riferimento per il confronto: ciclo 27 lug-27 ago chiuso a **6,26 GB su 5 inclusi** (1,26 di sforo), restrizione annunciata dal **22 set 2026** se l'organizzazione resta sopra. Il ciclo che conta è quello che parte il **27 ago**: atteso **1-1,5 GB**. Se il numero regge, **Pro non serve**.
+
 ### 0. ~~Timbri extra: due buchi~~ **CHIUSI da Nico il 7 ago: si lascia stare, tutti e due**
 Contati sui dati veri prima di decidere (backup del 7 ago, 2.208 sessioni):
 - **Sessioni oltre 7 h in TUTTO lo storico: UNA.** Quella da 64,6 h. Una chiusura automatica di fine turno preverrebbe un evento ogni dieci settimane, col rischio concreto di troncare il timbro a chi lavora davvero fino a tardi. **Decisione: niente chiusura automatica.** Se ricapita più spesso, se ne riparla coi numeri in mano.
