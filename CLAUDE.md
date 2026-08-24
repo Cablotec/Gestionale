@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.12`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-24.1`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -63,6 +63,8 @@
 - **Un solo campo "chi userà il mezzo"** (5 ago, `.5`): pillole + casella di ricerca dentro lo stesso riquadro (`.util-field`), non due box impilati; un bordo solo, acceso da `:focus-within`; clic sullo spazio vuoto → fuoco nella casella. `renderSelected` **non può svuotare il contenitore** (casella e lista ci vivono dentro): toglie solo le `.util-pill` e le reinserisce prima della casella. Il modal commessa (addetti/fornitori) usa ancora lo schema vecchio a due box: invariato di proposito.
 
 - **Gli export portano via QUELLO CHE SI VEDE** (7 ago): Storico e Ordini cliente esportano la lista filtrata della scheda, non tutto l archivio. Una strada sola per scheda (`storicoFiltrate()`, `pianificazioneFiltrate()`) usata da tabella ED export: se fossero due, l Excel direbbe una cosa diversa da quella a schermo. Il toast dichiara righe e filtri. Nell export Storico ci sono le ore (`Ore consuntivate`, `Ore pagate`, `Sforo (h)`) come NUMERI in colonne separate — a schermo stanno in una cella sola, ma su una stringa non ci si somma sopra.
+
+- **Tutte le chiusure passano da `chiudiConSplitGruppo`** (24 ago): kiosk, pausa pranzo e guardia anti-accavallamento. La pausa faceva un update secco e NON spalmava sul gruppo — 87 timbri e 305 h finite su una commessa sola. Regola: **se esistono due strade per chiudere un timbro, una si dimenticherà del gruppo.** Il passato è stato ridistribuito (444 righe, 305,2 h prima e dopo, sospette invariate a 46).
 
 ## Leggibilità: temi e testo (31 lug, `2026-07-31.8`)
 - **Tre ruoli, tre font**: **Syne** solo titoli e bottoni (è un font da display: illeggibile in frasi piccole); **`var(--ui)`** = stack di sistema per la PROSA (note, hint, didascalie — `.sub`), il font meglio ottimizzato che ogni macchina abbia per il testo piccolo, zero download; **JetBrains Mono** (era DM Mono) solo dove serve incolonnare — codici, quantità, date, ore — perché ha lettere più alte a parità di px.

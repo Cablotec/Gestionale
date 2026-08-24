@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-07.12`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-24.1`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -211,6 +211,16 @@ Fatta insieme a Nico, caso per caso, con la giornata intera dell'operatore davan
   - **Nel modal delle commesse sono sparite le caselle degli stati**: erano un secondo filtro accanto a quello della scheda, e i due potevano dire cose diverse. Resta una sola casella, **"includi anche le spedite"**, perché quelle la scheda le nasconde sempre (vivono nello Storico) e chi esporta può volerle. Via anche `STATI_OPERAZIONE`, che serviva solo a quelle caselle.
   - 24 test in scratchpad/test_export_filtri.js, con le funzioni vere e una libreria Excel finta.
 
+## Segnalazione di Cocco: due commesse raggruppate con consuntivi diversi (24 ago)
+- **La sua ipotesi era giusta a metà**: il gruppo di `2026/OC/00209` pos 20+40 è nato il **10 luglio**, e fino a lì la pos 40 aveva già 60,5 h contro 11,1. Quello sbilancio non si divide all'indietro: le ore timbrate sono fatti, il raggruppamento non le riscrive.
+- **L'altra metà era un difetto nostro.** La chiusura automatica delle 12:30 faceva un update secco del campo `fine`, mentre la chiusura normale del kiosk passa da `kioskChiudiOScarta`, che contiene lo split. **Due strade per chiudere la stessa cosa, e una sola sapeva del gruppo.** Su tutte le commesse raggruppate: **87 timbri, 305 h** finite su una sola commessa.
+- Scomposizione su pos 20 / pos 40: prima del gruppo 11,1 / 60,5 — spalmato 24,7 / 25,2 (**lo split funziona**) — chiuso dalla pausa e non spalmato 29,9 / 4,7.
+- **Estratta `chiudiConSplitGruppo(sess, fineIso, nota)`**: una strada sola, tre chiamanti — kiosk, pausa pranzo e `kioskChiudiAperteRimaste` (la guardia anti-accavallamento, che aveva **lo stesso identico buco**). Perché la pausa possa spalmare le serve la riga intera: la sua `select` passa da quattro campi a `*`.
+- **RIDISTRIBUITO IL PASSATO** (decisione Nico): 87 timbri, 444 righe nuove, **305,2 h prima e 305,2 h dopo** — nessuna ora persa né inventata. Ordine voluto: **prima l'INSERT, poi l'UPDATE** che accorcia; se si interrompe le ore risultano doppie (visibile e riparabile) invece di sparire (silenzioso e no). Registro di avanzamento per poter rilanciare senza rifare.
+  - Effetto su OC/00209: pos 20 da 65,6 a **75,4 h**, pos 40 da 90,4 a **80,6 h** — lo scarto scende da 24,7 a 5,2 h.
+  - Le sospette restano **46 prima e 46 dopo**: la ridistribuzione non ha creato accavallamenti, le fette sono contigue.
+  - Costo dichiarato e accettato: sui gruppi da 11 commesse (Senzani) 390 righe su 444 spostano **meno di sei minuti a commessa**, perché i pesi sono identici e i timbri erano già sparsi. Il movimento vero è tutto nei gruppi da 2-3.
+- **Arretrato da guardare**: 46 timbrature sospette accumulate dal 7 al 24 ago (24 a durata zero, 17 accavallate, 4 lunghe, 1 doppione). **I 17 accavallamenti sono TUTTI del 13 agosto**, tutti kiosk: non è una perdita continua, è una giornata storta da capire. Negli altri 17 giorni dopo la guardia: zero.
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0. ~~Timbri extra: due buchi~~ **CHIUSI da Nico il 7 ago: si lascia stare, tutti e due**
