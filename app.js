@@ -5137,6 +5137,7 @@ function openOperazioniImportPreviewModal(rows) {
     articoli:   state.articoli,
     aziende:    state.aziende,
     operazioni: state.operazioni,
+    spedizioni: state.spedizioni,
   });
 
   const modal = el('div', { class:'modal', style:'max-width:820px' });
@@ -5278,6 +5279,39 @@ function openOperazioniImportPreviewModal(rows) {
     + (senzaMinuti.length === 1 ? 'a nasce' : 'e nascono') + ' senza tempo pagato '
     + '(l\'articolo non ha un min/pz e il cliente non ha tariffa): avanzamento e '
     + '€/ora resteranno vuoti finché non lo imposti.', 'var(--ylw)'));
+
+  // ── Spedizioni: i due sistemi non concordano ──
+  // Non è una riga da importare, è una discordanza da guardare: la quantità
+  // residua qui si ricalcola da ordinato − spedito, e dove non torna con
+  // quella di Alnus vuol dire che una spedizione manca da una delle due parti.
+  // L'import non tocca niente di tutto questo: lo dichiara e basta.
+  if (piano.residuiDiscordanti.length) {
+    const nAlnus = piano.residuiDiscordanti.filter(r => r.chiIndietro === 'alnus').length;
+    body.append(sezione('Spedizioni: ' + piano.residuiDiscordanti.length
+      + (piano.residuiDiscordanti.length === 1 ? ' riga su cui i due sistemi non concordano'
+                                               : ' righe su cui i due sistemi non concordano')));
+    const rd = riquadro('var(--ylw)');
+    piano.residuiDiscordanti.slice(0, 40).forEach(r => rd.append(el('div', {},
+      r.numeroOrdine + '/' + r.pos
+      + '  ordinate ' + r.ordinato
+      + ' · qui spedite ' + r.spedito + ' → ne restano ' + r.residuoQui
+      + ' · Alnus dice ' + r.residuaFile
+      + (r.basiDiverse
+          // Senza questo si confrontano due residue calcolate su ordinati
+          // diversi, e la riga dice una cosa che non sta in piedi.
+          ? '   ⚠ ma per Alnus le ordinate sono ' + r.ordinatoFile
+            + ': i due numeri non partono dalla stessa base'
+          : '   → ' + (r.chiIndietro === 'alnus'
+              ? 'Alnus non sa di una spedizione fatta'
+              : 'qui manca una spedizione che Alnus ha registrato')))));
+    if (piano.residuiDiscordanti.length > 40) rd.append(el('div', { style:'color:var(--mut);' },
+      '... e altre ' + (piano.residuiDiscordanti.length - 40)));
+    body.append(rd);
+    body.append(nota('Niente di tutto questo viene importato: la quantità residua il '
+      + 'gestionale la calcola da sé (ordinato − spedito) e si vede già in tabella. '
+      + 'Qui si segnala soltanto dove i due archivi divergono — ' + nAlnus + ' da sistemare '
+      + 'in Alnus, ' + (piano.residuiDiscordanti.length - nAlnus) + ' qui.', 'var(--ylw)'));
+  }
 
   // ── Righe che restano fuori ──
   if (piano.scartate.length) {

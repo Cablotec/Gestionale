@@ -1813,6 +1813,7 @@ const IMPORT_ORDINI_COLONNE = {
   qta:        ['quantita umi ordine/offerta', 'quantita umi ordine/offerta',
                'quantita', 'qta'],
   cliente:    ['ragione sociale', 'cliente', 'nome cliente'],
+  residua:    ['quantita residua', 'qta residua', 'residua'],
   rif:        ['riferimento cliente', 'rifer. cliente', 'riferimento'],
   prezzo:     ['prezzo netto riga', 'prezzo'],
   imponibile: ['impon. totale riga', 'imponibile'],
@@ -1865,6 +1866,12 @@ function importOrdiniData(v) {
 // (SRL / S.r.l. / S.R.L., snc / S.n.c.), mai nel nome.
 // Provata su tutte e 32 le aziende in anagrafica: 32 chiavi distinte,
 // nessuna coppia di ditte diverse finisce sulla stessa chiave.
+// Toglie gli accenti: serve sia alle intestazioni (l'ERP mescola "Quantita"
+// e "Quantità" nello stesso foglio) sia ai nomi delle ditte.
+function senzaAccenti(s) {
+  return String(s === null || s === undefined ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
 function importOrdiniChiaveNome(nome) {
   return String(nome === null || nome === undefined ? '' : nome).toLowerCase()
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -1886,13 +1893,14 @@ function analizzaImportOrdini(righe, ctx) {
   const articoli   = ctx.articoli   || [];
   const aziende    = ctx.aziende    || [];
   const operazioni = ctx.operazioni || [];
+  const spedizioni = ctx.spedizioni || [];
 
   const out = {
     righeLette: righe.length, mappa: {}, colonneMancanti: [],
     scartate: [], scartatePerMotivo: {},
     box: [], nuove: [], aggiornamenti: [], bloccate: [], invariate: 0,
     clientiDaCreare: [], articoliDaCreare: [], clientiRiconosciuti: [],
-    clientiDaRinominare: [], rinomineImpossibili: [],
+    clientiDaRinominare: [], rinomineImpossibili: [], residuiDiscordanti: [],
   };
   if (!righe.length) return out;
 
@@ -1911,7 +1919,13 @@ function analizzaImportOrdini(righe, ctx) {
       // intestazioni dell'ERP finiscono con uno spazio, quindi la seconda
       // omonima diventa "Riferimento Cliente _1" e senza questo trim
       // resterebbe "riferimento cliente " — che non combacia con niente.
-      const match = headers.filter(h => norm(h) === c || norm(h).replace(/_\d+$/, '').trim() === c);
+      // Gli ACCENTI si tolgono da tutte e due le parti: l'ERP scrive
+      // "Quantita UMI Ordine/Offerta" senza accento e "Quantità Residua" con,
+      // nello stesso foglio. Inseguire le varianti a mano nella lista dei
+      // candidati non finirebbe mai — e la colonna residua era gia' sfuggita
+      // proprio cosi'.
+      const match = headers.filter(h => senzaAccenti(norm(h)) === c
+        || senzaAccenti(norm(h).replace(/_\d+$/, '').trim()) === c);
       if (match.length) return match.slice().sort((a, b) => quantiPieni(b) - quantiPieni(a))[0];
     }
     return null;
@@ -2000,6 +2014,11 @@ function analizzaImportOrdini(righe, ctx) {
     const base = {
       nRiga, numeroOrdine, pos, clienteNome, scadenza, qta, prezzo, imponibile,
       riferimento: rif || null,
+      // La residua NON si importa: il gestionale la sa gia' calcolare da solo
+      // (ordinato meno spedito) ed e' un derivato — regola di casa, derivati
+      // live e mai materializzati. Si tiene solo per CONFRONTARLA: dove i due
+      // numeri non tornano, uno dei due sistemi e' indietro sulle spedizioni.
+      residuaFile: val(r, 'residua') === '' ? null : Number(val(r, 'residua')),
       codArt: val(r, 'codArt'), descrArt: val(r, 'descrArt'),
     };
 
@@ -2095,6 +2114,40 @@ function analizzaImportOrdini(righe, ctx) {
   });
 
   out.clientiDaCreare  = Object.keys(clientiNuovi).sort();
+  // ── Controllo incrociato sulla quantita' residua ──
+  // Alnus dice quanto resta da evadere; qui lo si ricalcola da ordinato meno
+  // spedito. Se i due non tornano, non c'e' un numero da correggere: c'e' una
+  // spedizione che uno dei due sistemi non ha registrato. Si dichiara e basta,
+  // non si tocca niente — quale dei due sia indietro lo sa solo chi guarda.
+  // I BOX restano fuori: la loro quantita' e' 1 kit, non confrontabile con le
+  // residue delle righe che ci sono state fuse dentro.
+  const spedPerOp = {};
+  spedizioni.forEach(s => {
+    spedPerOp[s.operazione_id] = (spedPerOp[s.operazione_id] || 0) + Number(s.quantita || 0);
+  });
+  voci.forEach(v => {
+    if (v.origine === 'box' || !v.esistente) return;
+    if (v.residuaFile === null || !Number.isFinite(v.residuaFile)) return;
+    const spedito = spedPerOp[v.esistente.id] || 0;
+    const residuoQui = Number(v.esistente.quantita || 0) - spedito;
+    if (residuoQui === v.residuaFile) return;
+    out.residuiDiscordanti.push({
+      numeroOrdine: v.numeroOrdine, pos: v.pos, stato: v.esistente.stato,
+      ordinato: Number(v.esistente.quantita || 0), spedito, residuoQui,
+      residuaFile: v.residuaFile,
+      // Se anche l'ORDINATO e' diverso, le due residue non sono nemmeno
+      // calcolate sulla stessa base e dirlo cambia la lettura della riga.
+      // Succede sulle commesse chiuse, che l'import non aggiorna mai.
+      ordinatoFile: v.qta,
+      basiDiverse: Number(v.esistente.quantita || 0) !== Number(v.qta),
+      // Chi dei due e' indietro, per come si legge il numero:
+      // se qui risulta spedito piu' che la', e' Alnus a non saperlo.
+      chiIndietro: residuoQui < v.residuaFile ? 'alnus' : 'gestionale',
+    });
+  });
+  out.residuiDiscordanti.sort((a, b) =>
+    String(a.numeroOrdine).localeCompare(String(b.numeroOrdine)) || Number(a.pos) - Number(b.pos));
+
   out.clientiRiconosciuti = Object.keys(riconosciuti).sort()
     .map(daFile => ({ daFile, inAnagrafica: riconosciuti[daFile] }));
 
