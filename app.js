@@ -97,6 +97,11 @@ const state = {
   ganttZoom: 'mese',       // 'giorno' | 'settimana' | 'mese'
   ganttCursor: new Date(), // data centrale visualizzazione
   ganttStatiVisibili: null, // Set di stati commessa visibili nel Gantt (null = tutti, inizializzato al primo render)
+  // Striscia timbrature sospette (scheda Live): APERTA di default (25 ago).
+  // L'elenco esiste per essere svuotato, non per essere annunciato: col primo
+  // stato chiuso il numero in intestazione si legge come un'insegna e nessuno
+  // preme "Vedi quali". Il bottone resta, per metterla via mentre si lavora.
+  sospetteAperto: true,
   // Stato kiosk runtime
   kioskOp: null,           // operazione selezionata nel flusso commesse
   kioskMode: null,         // 'menu' | 'mezzi' | 'commesse-list' | 'commesse-tipo' | 'commesse-attiva'
@@ -17019,7 +17024,7 @@ function renderSospette() {
   // L'elenco può essere lungo (servono TUTTE): scorre dentro il suo riquadro
   // invece di spingere giù le card degli operatori.
   const lista = el('div', {
-    style:'display:none;margin-top:8px;max-height:300px;overflow-y:auto;' });
+    style:(state.sospetteAperto ? '' : 'display:none;') + 'margin-top:8px;max-height:300px;overflow-y:auto;' });
   // Aperto/chiuso vive in state: il riquadro si ridisegna da solo ogni minuto
   // e senza questo si richiuderebbe sotto le dita mentre lo si legge.
   const btnVedi = el('button', { class:'btnsm', onclick: () => {
@@ -17027,7 +17032,6 @@ function renderSospette() {
     lista.style.display = state.sospetteAperto ? '' : 'none';
     btnVedi.textContent = state.sospetteAperto ? 'Nascondi elenco' : 'Vedi quali';
   } }, state.sospetteAperto ? 'Nascondi elenco' : 'Vedi quali');
-  if (state.sospetteAperto) lista.style.display = '';
 
   bar.className = 'sospette-bar';
   bar.style.display = '';
