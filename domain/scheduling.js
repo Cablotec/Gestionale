@@ -1767,3 +1767,275 @@ function sessioneInConflitto(utenteId, inizioIso, fineIso, escludiId) {
   });
   return trovata || null;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   IMPORT ORDINI DALL'ESTRAZIONE ERP (25 ago 2026)
+
+   Funzione PURA: riceve le righe già lette dall'xlsx (array di oggetti
+   intestazione→valore, come li dà SheetJS) più le anagrafiche, e ritorna
+   il PIANO di import. Non scrive niente: decide e dichiara.
+   Le regole stanno qui e non nella UI perché sono la parte che va
+   verificata sui dati veri prima di toccare il database.
+
+   Decisioni prese con Nico il 25 ago, tutte visibili nel codice sotto:
+   · SOLO sezionale OC. Le righe OD si scartano dichiarandole.
+   · Senzani + riferimento che inizia per EL → le righe si FONDONO in una
+     sola commessa per ordine: articolo `BOX_<riferimento>`, descrizione
+     `SBNE`, pos 0010, quantità 1, prezzo = somma degli imponibili.
+     Riproduce esattamente le 11 commesse BOX già a sistema.
+     ⚠ Fusione di righe DEL FILE, da non confondere con la funzione
+     "⊞ Raggruppa" dell'app (`gruppo_id`), che è un'altra cosa: là si
+     spalmano le ore fra commesse distinte, qui le righe dell'estrazione
+     non diventano mai commesse. L'import non tocca nessun gruppo.
+   · quantità = "Quantita UMI Ordine/Offerta" (l'ordinato, non la residua).
+   · scadenza  = "Data Rich. Evasione". 2958465 = 9999-12-31 è la
+     sentinella "nessuna data" dell'ERP, non una scadenza tra 8000 anni.
+   · Il file è una FOTOGRAFIA: una commessa già presente si AGGIORNA
+     (solo quantità, scadenza, prezzo), non si duplica. Tutto il resto —
+     stato, fasi, addetti, note, gruppi — è lavoro fatto dentro il
+     gestionale e l'import non lo tocca.
+   · Una commessa completata o spedita NON si tocca mai, nemmeno per
+     aggiornarla: si conta e si dichiara. Una fotografia dell'ERP non deve
+     poter riaprire un lavoro finito.
+   ═══════════════════════════════════════════════════════════════════ */
+
+// Intestazioni cercate, in ordine di preferenza: prima i nomi veri
+// dell'estrazione ERP, poi quelli dell'export del gestionale (così il giro
+// esporta→reimporta continua a funzionare come prima).
+const IMPORT_ORDINI_COLONNE = {
+  eser:       ['eser', 'esercizio', 'anno'],
+  sz:         ['sz cl', 'sz', 'sigla'],
+  ord:        ['ord/off cliente', 'ord', 'ordine', 'numero'],
+  riga:       ['riga', 'pos', 'posizione'],
+  codArt:     ['codice articolo', 'codice', 'articolo'],
+  descrArt:   ['descrizione articolo', 'descrizione'],
+  scadenza:   ['data rich. evasione', 'data richiesta evasione', 'scadenza'],
+  qta:        ['quantita umi ordine/offerta', 'quantita umi ordine/offerta',
+               'quantita', 'qta'],
+  cliente:    ['ragione sociale', 'cliente', 'nome cliente'],
+  rif:        ['riferimento cliente', 'rifer. cliente', 'riferimento'],
+  prezzo:     ['prezzo netto riga', 'prezzo'],
+  imponibile: ['impon. totale riga', 'imponibile'],
+};
+
+// Senza queste il file non è un'estrazione ordini e non si va avanti.
+const IMPORT_ORDINI_OBBLIGATORIE = ['ord', 'riga', 'codArt', 'scadenza', 'qta', 'cliente'];
+
+// Data da cella Excel: Date (SheetJS con cellDates), seriale, o testo.
+// Il seriale si converte in UTC e si affetta a 10 caratteri: costruirlo in
+// ora locale e riformattarlo poi è la trappola della sezione ORARI —
+// una data a mezzanotte torna indietro di un giorno.
+function importOrdiniData(v) {
+  if (v === null || v === undefined || v === '') return null;
+  // La sentinella va riconosciuta su OGNI strada, non solo sul seriale:
+  // l'app legge con cellDates:true, quindi 2958465 arriva come Date e il
+  // controllo numerico qui sotto non la vedrebbe mai. Senza questo, una
+  // commessa entrerebbe con scadenza 31/12/9999 invece di essere scartata.
+  const fuoriScala = iso => (iso && Number(iso.slice(0, 4)) >= 9999) ? null : iso;
+  // Riconosciuta dai metodi e non con `instanceof Date`: fra contesti diversi
+  // (il banco di prova ne usa uno) `instanceof` e' falso su una Date perfetta,
+  // e la data finirebbe nel ramo numerico senza che niente lo segnali.
+  if (v && typeof v.getFullYear === 'function' && !isNaN(v.getTime())) {
+    // SheetJS costruisce le date a mezzanotte LOCALE: si leggono in locale.
+    // (Il seriale 45541 diventa 2024-09-05T22:00Z, cioe' il 6 settembre qui:
+    // leggerlo in UTC lo farebbe arretrare di un giorno.)
+    return fuoriScala(v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0')
+      + '-' + String(v.getDate()).padStart(2, '0'));
+  }
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 0) {
+    // 2958465 = 9999-12-31: l'ERP la usa per dire "nessuna data".
+    if (n >= 2958465) return null;
+    return new Date(Date.UTC(1899, 11, 30) + n * 86400000).toISOString().slice(0, 10);
+  }
+  const s = String(v).trim();
+  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (m) return fuoriScala(m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0'));
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return fuoriScala(m[1] + '-' + m[2] + '-' + m[3]);
+  return null;
+}
+
+// La fusione BOX vale per Senzani e per nessun altro: sui dati veri il
+// prefisso EL è esclusivamente suo (177 righe su 177), ma il vincolo sul
+// cliente resta esplicito perché un domani un altro cliente potrebbe usare
+// la stessa sigla per cose sue.
+function importOrdiniEBox(nomeCliente, riferimento) {
+  return /senzani/i.test(String(nomeCliente || ''))
+    && /^EL/i.test(String(riferimento || '').trim());
+}
+
+function analizzaImportOrdini(righe, ctx) {
+  righe = righe || [];
+  ctx = ctx || {};
+  const articoli   = ctx.articoli   || [];
+  const aziende    = ctx.aziende    || [];
+  const operazioni = ctx.operazioni || [];
+
+  const out = {
+    righeLette: righe.length, mappa: {}, colonneMancanti: [],
+    scartate: [], scartatePerMotivo: {},
+    box: [], nuove: [], aggiornamenti: [], bloccate: [], invariate: 0,
+    clientiDaCreare: [], articoliDaCreare: [],
+  };
+  if (!righe.length) return out;
+
+  const norm = s => String(s === null || s === undefined ? '' : s).toLowerCase().trim();
+  const headers = Object.keys(righe[0]);
+  const quantiPieni = h => righe.reduce((n, r) =>
+    n + ((r[h] !== '' && r[h] !== null && r[h] !== undefined) ? 1 : 0), 0);
+  const trova = (cands) => {
+    for (const c of cands) {
+      // SheetJS rinomina le intestazioni doppie con un suffisso _1: l'estrazione
+      // ERP ne ha due chiamate "Riferimento Cliente", e quella con i dati è la
+      // seconda. Fra omonime vince quella che ha davvero qualcosa dentro,
+      // altrimenti il riferimento — la chiave di tutta la regola Senzani —
+      // arriverebbe vuoto senza che nessuno se ne accorga.
+      // Il .trim() DOPO aver tolto il suffisso non e' pignoleria: le
+      // intestazioni dell'ERP finiscono con uno spazio, quindi la seconda
+      // omonima diventa "Riferimento Cliente _1" e senza questo trim
+      // resterebbe "riferimento cliente " — che non combacia con niente.
+      const match = headers.filter(h => norm(h) === c || norm(h).replace(/_\d+$/, '').trim() === c);
+      if (match.length) return match.slice().sort((a, b) => quantiPieni(b) - quantiPieni(a))[0];
+    }
+    return null;
+  };
+  Object.keys(IMPORT_ORDINI_COLONNE).forEach(k => { out.mappa[k] = trova(IMPORT_ORDINI_COLONNE[k]); });
+  out.colonneMancanti = IMPORT_ORDINI_OBBLIGATORIE.filter(k => !out.mappa[k]);
+  if (out.colonneMancanti.length) return out;
+
+  // Indici sulle anagrafiche
+  const artByCod = {};
+  articoli.forEach(a => { if (a.codice) artByCod[norm(a.codice)] = a; });
+  const cliByNome = {};
+  aziende.forEach(a => { if (a.nome) cliByNome[norm(a.nome)] = a; });
+  const opByChiave = {};
+  operazioni.forEach(o => { opByChiave[(o.numero_ordine || '') + '|' + (o.pos || '')] = o; });
+
+  const val = (r, k) => {
+    const col = out.mappa[k];
+    if (!col) return '';
+    const v = r[col];
+    return (v === null || v === undefined) ? '' : String(v).trim();
+  };
+  const scarta = (nRiga, motivo) => {
+    out.scartate.push({ riga: nRiga, motivo });
+    out.scartatePerMotivo[motivo] = (out.scartatePerMotivo[motivo] || 0) + 1;
+  };
+
+  // Passata 1: normalizzazione riga per riga
+  const singole = [];
+  const daFondere = {};   // "numeroOrdine::riferimento" -> righe del box
+  righe.forEach((r, i) => {
+    const nRiga = i + 2;                     // +2: la riga 1 sono le intestazioni
+    const sz = (val(r, 'sz') || 'OC').toUpperCase();
+    if (sz !== 'OC') return scarta(nRiga, 'sezionale ' + sz + ' (per ora si importa solo OC)');
+
+    const ord = val(r, 'ord');
+    if (!ord) return scarta(nRiga, 'numero ordine mancante');
+    const eser = val(r, 'eser');
+    const numeroOrdine = (eser ? eser + '/' : '') + sz + '/' + String(ord).padStart(5, '0');
+    const pos = String(val(r, 'riga') || '').padStart(4, '0');
+
+    const clienteNome = val(r, 'cliente');
+    if (!clienteNome) return scarta(nRiga, 'cliente mancante');
+
+    const scadenza = importOrdiniData(r[out.mappa.scadenza]);
+    if (!scadenza) return scarta(nRiga, 'scadenza mancante o sentinella 9999');
+
+    const qta = Math.round(Number(val(r, 'qta')));
+    if (!Number.isFinite(qta) || qta <= 0) return scarta(nRiga, 'quantita mancante o non valida');
+
+    const prezzo     = Number(val(r, 'prezzo')) || 0;
+    const imponibile = Number(val(r, 'imponibile')) || (prezzo * qta);
+    const rif        = val(r, 'rif');
+
+    const base = {
+      nRiga, numeroOrdine, pos, clienteNome, scadenza, qta, prezzo, imponibile,
+      riferimento: rif || null,
+      codArt: val(r, 'codArt'), descrArt: val(r, 'descrArt'),
+    };
+
+    if (importOrdiniEBox(clienteNome, rif)) {
+      const k = numeroOrdine + '::' + rif.toUpperCase();
+      (daFondere[k] = daFondere[k] || []).push(base);
+      return;
+    }
+    if (!base.codArt) return scarta(nRiga, 'codice articolo mancante');
+    singole.push(base);
+  });
+
+  // Passata 2: ogni insieme di righe Senzani diventa UNA commessa BOX.
+  // La scadenza del box e' la PIU' VICINA del gruppo di righe: il kit e'
+  // pronto quando e' pronto tutto, quindi comanda la data piu' stringente.
+  // Sui dati di oggi le righe fuse hanno tutte la stessa data, ma non e'
+  // garantito e un domani la differenza deve saltare fuori, non sparire.
+  const voci = singole.map(v => Object.assign({ origine: 'riga', righeOrigine: [v.nRiga] }, v));
+  Object.keys(daFondere).sort().forEach(k => {
+    const arr = daFondere[k];
+    const rif = k.split('::')[1];
+    const scadenze = arr.map(x => x.scadenza).sort();
+    const voce = {
+      origine: 'box',
+      nRiga: arr[0].nRiga,
+      righeOrigine: arr.map(x => x.nRiga),
+      numeroOrdine: arr[0].numeroOrdine,
+      pos: '0010',
+      clienteNome: arr[0].clienteNome,
+      scadenza: scadenze[0],
+      scadenzeDiverse: new Set(scadenze).size > 1,
+      qta: 1,
+      prezzo: Math.round(arr.reduce((s, x) => s + x.imponibile, 0) * 100) / 100,
+      riferimento: rif,
+      codArt: 'BOX_' + rif,
+      descrArt: 'SBNE',
+      nRigheFuse: arr.length,
+    };
+    voci.push(voce);
+    out.box.push(voce);
+  });
+
+  // Passata 3: confronto con quello che c'e' gia'
+  const clientiNuovi = {}, articoliNuovi = {};
+  voci.forEach(v => {
+    const cli = cliByNome[norm(v.clienteNome)] || null;
+    const art = artByCod[norm(v.codArt)] || null;
+    v.cliente = cli;
+    v.articolo = art;
+    if (!cli) clientiNuovi[v.clienteNome] = true;
+    if (!art) articoliNuovi[v.codArt] = v.descrArt || null;
+
+    // Minuti pagati, stessa scala di priorita' di "+ Nuovo ordine": la regola
+    // tariffa cliente (prezzo / euro-ora x 60) prima del default articolo.
+    // `operazioni.minuti_unitari` e' INTEGER: sempre al minuto intero.
+    const tariffa = Number(cli && cli.tariffa_cliente) || 0;
+    v.minutiDaTariffa = (tariffa > 0 && v.prezzo > 0);
+    v.minutiUnitari = v.minutiDaTariffa
+      ? Math.round(v.prezzo / tariffa * 60)
+      : ((art && art.minuti_unitari != null) ? Math.round(Number(art.minuti_unitari)) : 0);
+
+    const op = opByChiave[v.numeroOrdine + '|' + v.pos] || null;
+    v.esistente = op;
+    if (!op) { out.nuove.push(v); return; }
+    if (op.stato === 'completata' || op.stato === 'spedita') { out.bloccate.push(v); return; }
+
+    // Solo i tre campi che vengono davvero dall'ERP.
+    const campi = [];
+    if (Number(op.quantita) !== v.qta) campi.push({ campo: 'quantita', da: op.quantita, a: v.qta });
+    if ((op.scadenza || null) !== v.scadenza) campi.push({ campo: 'scadenza', da: op.scadenza, a: v.scadenza });
+    const prezzoNuovo   = v.prezzo > 0 ? v.prezzo : null;
+    const prezzoVecchio = (op.prezzo_unitario === null || op.prezzo_unitario === undefined)
+      ? null : Number(op.prezzo_unitario);
+    const prezzoCambia = (prezzoVecchio === null) !== (prezzoNuovo === null)
+      || (prezzoVecchio !== null && prezzoNuovo !== null && Math.abs(prezzoVecchio - prezzoNuovo) > 0.005);
+    if (prezzoCambia) campi.push({ campo: 'prezzo', da: prezzoVecchio, a: prezzoNuovo });
+
+    if (!campi.length) { out.invariate++; return; }
+    out.aggiornamenti.push({ voce: v, op, campi });
+  });
+
+  out.clientiDaCreare  = Object.keys(clientiNuovi).sort();
+  out.articoliDaCreare = Object.keys(articoliNuovi).sort()
+    .map(c => ({ codice: c, descrizione: articoliNuovi[c] }));
+  return out;
+}

@@ -286,6 +286,43 @@ Mail di Supabase: **6,26 GB usati su 5 GB** inclusi, restrizione dal 22 set 2026
 
 **Nota di metodo**: la barra più alta del mese è il 24 ago, 647 MB — erano le mie scritture massive (500 righe = 500 ricariche per postazione). Una correzione dati in blocco, finché quel meccanismo esisteva, costava più di una settimana di lavoro vero.
 
+## Import ordini dall'estrazione ERP (25 ago, `2026-08-25.2`)
+Nico voleva "caricare in automatico gli ordini" da `Cartel1.xlsx`, l'estrazione del portafoglio ordini dell'ERP (420 righe, 117 ordini, 16 clienti, esercizi 2024→2026).
+
+**Un import c'era già, e su quel file avrebbe importato ZERO righe.** `operazioniImportExcel` esisteva dal principio, col pulsante in Pianificazione, ma cercava le colonne per **uguaglianza esatta** del nome ed era tarato sull'export *del gestionale stesso* (`Scadenza`, `Quantità`, `Cliente`). L'ERP le chiama `Data Rich. Evasione`, `Quantita UMI Ordine/Offerta`, `Ragione Sociale`: tre campi obbligatori senza colonna → 420 lette, 0 pronte. Il commento diceva "coerenti con l'import ERP" ma nessuno aveva mai avuto il file vero davanti. **Lezione: un mapping scritto su un formato immaginato è codice non provato, anche se il codice è giusto.**
+
+**Le regole stanno in `analizzaImportOrdini(righe, ctx)` in `domain/scheduling.js`** — pura, nessun DOM, nessun Supabase, **62 test in `scratchpad/test_import_ordini.js`**. Ritorna il PIANO (nuove / aggiornamenti / bloccate / scartate / anagrafiche da creare) e non scrive niente: la UI disegna soltanto.
+
+**Decisioni prese con Nico, tutte nel codice:**
+- **Solo sezionale OC.** Le 89 righe OD si scartano *dichiarandole*. Il formato numero ordine dell'app è ancora `AAAA/OC/NNNNN` fisso ([app.js:6549], [app.js:9676]): se un domani gli OD devono entrare, va allargata quella validazione.
+- **Senzani + riferimento che inizia per `EL` → le righe si FONDONO in una commessa sola**: articolo `BOX_<riferimento>`, descrizione `SBNE`, pos `0010`, quantità `1`, prezzo = **somma degli imponibili**. ⚠ Fusione di righe DEL FILE: **non c'entra la funzione "⊞ Raggruppa"** (`gruppo_id`), che spalma le ore fra commesse diverse. L'import non tocca nessun gruppo.
+  - La regola **non è stata inventata: è stata verificata**. Gli 11 gruppi EL del file corrispondono uno a uno alle 11 commesse BOX già a sistema (`BOX_EL000506`→`2026/OC/00282`, …), stessi codice/descrizione/pos/qtà, articoli già in anagrafica con 775 o 990 min/pz. Il codice riproduce esattamente quello che c'era.
+  - Il vincolo sul **cliente** resta esplicito anche se sui dati veri `EL` è esclusivo di Senzani (177 righe su 177): un altro cliente potrebbe usare la stessa sigla per cose sue.
+- **quantità = `Quantita UMI Ordine/Offerta`** (l'ordinato). La `Quantità Residua` per ora non entra.
+- **scadenza = `Data Rich. Evasione`**.
+- **Prezzo importato in `prezzo_unitario`**, e **si applica la regola tariffa cliente** (prezzo ÷ €/h × 60 → minuti pagati), stessa scala di priorità di "+ Nuovo ordine". Oggi tocca solo Elcotec (unica con `tariffa_cliente`, 27,3): 13 voci.
+- **Il file è una FOTOGRAFIA**: una commessa già presente si **aggiorna**, non si duplica. Chiave = `numero_ordine` + `pos`, unica su tutte e 420 le righe. Si toccano **solo quantità, scadenza e prezzo** — i campi che vengono davvero dall'ERP. Stato, fasi, addetti, note, gruppi e ore restano.
+- **Una commessa `completata` o `spedita` non si tocca mai**, nemmeno per aggiornarla: si conta e si dichiara. Una fotografia dell'ERP non deve poter riaprire un lavoro finito. Sul file di oggi sono 19, fra cui **tutti e 11 i BOX**.
+- **Clienti e articoli mancanti si creano al volo, elencati nome per nome nell'anteprima** prima di premere Importa: un refuso dell'ERP diventerebbe un'anagrafica nuova.
+
+**Esito sul file vero** (provato con la libreria SheetJS vera, non con un parser mio): 420 lette → 93 scartate (89 OD + 4 senza codice articolo) → 327 righe utili → **150 singole + 11 BOX = 161 commesse**: 72 nuove, 64 da aggiornare, 6 già uguali, 19 chiuse e intoccate. 3 clienti e 8 articoli da creare.
+
+**Tre difetti trovati provando sui dati veri, non ragionando:**
+1. **`Riferimento Cliente` è DOPPIA nel file** (una vuota su 420, una piena su 393). SheetJS rinomina la seconda `Riferimento Cliente _1` — e le intestazioni dell'ERP **finiscono con uno spazio**, quindi togliendo il suffisso restava `"riferimento cliente "` che non combaciava con niente. Il riferimento arrivava vuoto e **nessuna riga Senzani veniva fusa**: la regola centrale non scattava, in silenzio. Ora fra colonne omonime vince **quella che ha davvero i dati dentro**.
+2. **La sentinella 9999 non veniva riconosciuta sulla strada vera.** L'app legge con `cellDates:true`, quindi `2958465` arriva come **Date**, e il controllo sulla sentinella stava solo nel ramo numerico: una commessa sarebbe entrata con scadenza **31/12/9999**. Ora il filtro è su tutte e tre le strade (Date, seriale, testo). Trovato solo perché ho confrontato le due letture riga per riga — i **conteggi erano identici**, quindi non si vedeva da nessuna parte.
+3. `instanceof Date` è falso fra contesti diversi: la data si riconosce dai metodi, non dal costruttore.
+
+**Verificato anche il verso opposto**: il giro **esporta → reimporta** con l'export del gestionale continua a funzionare (le intestazioni dell'app restano fra i candidati, dopo quelle dell'ERP).
+
+**`valoreAData` cancellata** da app.js: era la conversione date del vecchio import, rimasta senza chiamanti. Passava per l'ora locale e d'estate poteva arretrare di un giorno. La sostituisce `importOrdiniData` in domain.
+
+**Cosa NON c'è ancora / da chiarire con Nico:**
+- **`numero_op` non è nel file** e resta vuoto: è l'unico campo che l'estrazione non porta.
+- Le **4 righe senza codice articolo** (Capirossi, una è `MANODOPERA`) restano fuori: non si indovina un codice.
+- La **`Quantità Residua`** non entra da nessuna parte — Nico ha detto che dovrebbe allinearsi a quanto resta da spedire, ma non abbiamo deciso se e dove mostrarla.
+- Un **BOX nuovo nasce senza min/pz** (l'articolo `BOX_...` non esiste ancora): l'anteprima lo dichiara in giallo. Le 11 esistenti hanno 775/990 messi a mano.
+- **Non è "automatico" nel senso di "parte da solo"**: GitHub Pages è statico. Si trascina il file, si guarda l'anteprima, si conferma. Il passo successivo (una cartella guardata da uno script) sarebbe infrastruttura nuova.
+
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0-bis. DA VERIFICARE il 25 ago: la correzione egress ha morso davvero?

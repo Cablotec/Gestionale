@@ -5117,204 +5117,268 @@ function operazioniExportExcel(list, filtriAttivi) {
     + ((filtriAttivi && filtriAttivi.length) ? ' · filtri: ' + filtriAttivi.join(', ') : ' · nessun filtro'), 'ok');
 }
 
-// Converte un valore data (Date, stringa, seriale Excel) in ISO yyyy-mm-dd
-function valoreAData(v) {
-  if (!v && v !== 0) return null;
-  if (v instanceof Date && !isNaN(v)) return toLocalISO(v);
-  if (typeof v === 'number') {
-    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
-    return isNaN(d) ? null : toLocalISO(d);
-  }
-  const s = String(v).trim();
-  if (!s) return null;
-  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
-  if (m) return m[3] + '-' + z(+m[2]) + '-' + z(+m[1]);
-  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) return m[1] + '-' + z(+m[2]) + '-' + z(+m[3]);
-  return null;
-}
+// `valoreAData` viveva qui: convertiva le date delle celle Excel per il vecchio
+// import ordini. L'ha sostituita `importOrdiniData` in domain/scheduling.js, che
+// costruisce il seriale in UTC (l'altra passava per l'ora locale e d'estate
+// poteva arretrare di un giorno) e conosce la sentinella 9999 dell'ERP.
 
+// ═══════════════════════════════════════════════════════════
+// ANTEPRIMA IMPORT ORDINI (25 ago) — il piano lo costruisce
+// `analizzaImportOrdini` in domain, pura e sotto test. Qui si disegna
+// soltanto: nessuna regola vive in questa funzione.
+//
+// L'anteprima dichiara SEMPRE anche quello che NON farà (righe scartate,
+// commesse chiuse lasciate stare, anagrafiche che nascono): un import che
+// mostra solo i numeri belli è il modo migliore per far entrare 400 righe
+// sbagliate senza che nessuno se ne accorga.
+// ═══════════════════════════════════════════════════════════
 function openOperazioniImportPreviewModal(rows) {
-  const headers = Object.keys(rows[0]);
-  const findCol = (...candidati) => {
-    for (const c of candidati) {
-      const found = headers.find(h => h.toLowerCase().trim() === c.toLowerCase());
-      if (found) return found;
-    }
-    return null;
-  };
-  const colEser = findCol('eser','esercizio','anno');
-  const colSz   = findCol('sz cl','sz','sigla');
-  const colOrd  = findCol('ord/off cliente','ord','ordine','numero');
-  const colRiga = findCol('riga','pos','posizione');
-  const colCod  = findCol('codice articolo','codice','articolo','art');
-  const colScad = findCol('scadenza','data','consegna');
-  const colQta  = findCol('quantità','quantita','qta','qty');
-  const colRif1 = findCol('rifer. cliente','rifer cliente','rifer.cliente');
-  const colCli  = findCol('cliente','nome cliente');
-  const colRif2 = findCol('riferimento cliente','riferimento');
-
-  const artByCod = {};
-  state.articoli.forEach(a => { if (a.codice) artByCod[String(a.codice).toLowerCase().trim()] = a; });
-  const cliByNome = {};
-  state.aziende.forEach(c => { if (c.nome) cliByNome[String(c.nome).toLowerCase().trim()] = c; });
-
-  const parsed = rows.map((r, idx) => {
-    const eser = colEser ? String(r[colEser]||'').trim() : '';
-    const sz   = colSz   ? String(r[colSz]||'').trim()   : '';
-    const ord  = colOrd  ? String(r[colOrd]||'').trim()  : '';
-    const numeroOrdine = [eser, sz, ord].filter(Boolean).join('/');
-    const codArt = colCod ? String(r[colCod]||'').trim() : '';
-    const nomeCli = colCli ? String(r[colCli]||'').trim() : '';
-    const rif1 = colRif1 ? String(r[colRif1]||'').trim() : '';
-    const rif2 = colRif2 ? String(r[colRif2]||'').trim() : '';
-    // I due riferimenti cliente vengono concatenati con " / " se entrambi
-    // presenti, e finiscono nel campo dedicato `riferimento_cliente`.
-    // Prima venivano infilati dentro `note` come righe prefissate, scelta
-    // abbandonata col passaggio al campo dedicato.
-    const riferimentoCliente = [rif1, rif2].filter(Boolean).join(' / ') || null;
-    const qta = parseInt(colQta ? r[colQta] : '', 10);
-    return {
-      _row: idx + 2,
-      numeroOrdine,
-      pos: colRiga ? String(r[colRiga]||'').trim() : '',
-      codArt,
-      art: artByCod[codArt.toLowerCase()] || null,
-      nomeCli,
-      cli: cliByNome[nomeCli.toLowerCase()] || null,
-      scadenza: valoreAData(colScad ? r[colScad] : null),
-      quantita: (Number.isFinite(qta) && qta > 0) ? qta : null,
-      riferimentoCliente,
-      note: null,
-    };
+  const piano = analizzaImportOrdini(rows, {
+    articoli:   state.articoli,
+    aziende:    state.aziende,
+    operazioni: state.operazioni,
   });
 
-  const errors = [];
-  parsed.forEach(p => {
-    const probl = [];
-    if (!p.numeroOrdine) probl.push('numero ordine mancante (Eser/Sz Cl/Ord tutti vuoti)');
-    if (!p.codArt) probl.push('codice articolo mancante');
-    else if (!p.art) probl.push('articolo "' + p.codArt + '" non in anagrafica');
-    if (!p.nomeCli) probl.push('cliente mancante');
-    else if (!p.cli) probl.push('cliente "' + p.nomeCli + '" non in anagrafica');
-    if (!p.scadenza) probl.push('scadenza mancante o non valida');
-    if (!p.quantita) probl.push('quantità mancante o non valida');
-    p._ok = probl.length === 0;
-    if (!p._ok) errors.push('Riga ' + p._row + ': ' + probl.join(', '));
-  });
-  const validi = parsed.filter(p => p._ok);
-
-  const modal = el('div', { class:'modal', style:'max-width:720px' });
+  const modal = el('div', { class:'modal', style:'max-width:820px' });
   modal.append(el('div', { class:'mhd' },
-    el('h2', {}, 'Anteprima import commesse'),
+    el('h2', {}, 'Anteprima import ordini'),
     el('button', { class:'mclose', onclick:closeModal }, '✕'),
   ));
   const body = el('div', { class:'mbody' });
 
+  // File che non è un'estrazione ordini: si dice quale colonna manca e si
+  // esce. Meglio di un'anteprima con tutti zeri, che sembra un file vuoto.
+  if (piano.colonneMancanti.length) {
+    const NOMI = { ord:'numero ordine', riga:'riga/pos', codArt:'codice articolo',
+                   scadenza:'data di scadenza', qta:'quantità', cliente:'cliente' };
+    body.append(
+      el('div', { class:'sub', style:'color:var(--red);font-weight:700;margin-bottom:8px;' },
+        'Questo file non sembra un\'estrazione ordini.'),
+      el('div', { class:'sub' }, 'Non ho trovato la colonna per: '
+        + piano.colonneMancanti.map(k => NOMI[k] || k).join(', ')
+        + '. Sono state lette ' + piano.righeLette + ' righe.'),
+    );
+    modal.append(body);
+    modal.append(el('div', { class:'mfoot' },
+      el('button', { class:'btng', onclick:closeModal }, 'Chiudi')));
+    openModal(modal);
+    return;
+  }
+
+  const nDaScrivere = piano.nuove.length + piano.aggiornamenti.length;
   body.append(el('div', { class:'kpis' },
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Righe lette'), el('div', { class:'kv' }, String(rows.length))),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Pronte'), el('div', { class:'kv kg' }, String(validi.length))),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Da correggere'), el('div', { class:'kv kr' }, String(errors.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Righe lette'),
+      el('div', { class:'kv' }, String(piano.righeLette))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Commesse nuove'),
+      el('div', { class:'kv kg' }, String(piano.nuove.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Da aggiornare'),
+      el('div', { class:'kv' }, String(piano.aggiornamenti.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Già uguali'),
+      el('div', { class:'kv' }, String(piano.invariate))),
   ));
 
-  body.append(el('div', { class:'sub', style:'margin:16px 0 8px;' }, 'Mappatura colonne riconosciute:'));
-  const mapBox = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;font-family:monospace;font-size:11px;line-height:1.8;' });
-  [
-    ['n° ordine (Eser)', colEser], ['n° ordine (Sz Cl)', colSz], ['n° ordine (Ord)', colOrd],
-    ['pos (Riga)', colRiga], ['codice articolo', colCod], ['scadenza', colScad],
-    ['quantità', colQta], ['cliente', colCli],
-    ['note (Rifer. Cliente)', colRif1], ['note (Riferimento Cliente)', colRif2],
-  ].forEach(([campo, col]) => {
-    mapBox.append(el('div', {},
-      el('span', { style:'color:var(--mut)' }, campo+': '),
-      el('span', { style: col ? 'color:var(--grn)' : 'color:var(--red)' },
-        col ? '"'+col+'"' : '— non trovata —')));
-  });
-  body.append(mapBox);
+  const nota = (testo, colore) => el('div', { class:'sub',
+    style:'margin:10px 0 0;font-size:11px;' + (colore ? 'color:' + colore + ';' : '') }, testo);
+  const sezione = (titolo) => el('div', { class:'sub',
+    style:'margin:16px 0 6px;font-weight:700;' }, titolo);
+  const riquadro = (bordo) => el('div', { style:'max-height:170px;overflow:auto;background:var(--sur2);'
+    + 'border:1px solid ' + (bordo || 'var(--brd)') + ';border-radius:4px;padding:9px 11px;'
+    + 'font-family:monospace;font-size:11px;line-height:1.7;' });
 
-  if (errors.length) {
-    body.append(el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--red);' },
-      'Righe che verranno saltate:'));
-    const errBox = el('div', { style:'max-height:140px;overflow:auto;background:rgba(255,78,107,.08);border:1px solid var(--red);border-radius:4px;padding:10px;font-family:monospace;font-size:11px;' });
-    errors.slice(0, 30).forEach(e => errBox.append(el('div', {}, e)));
-    if (errors.length > 30) errBox.append(el('div', { style:'color:var(--mut);margin-top:4px;' }, '... e altri ' + (errors.length-30)));
-    body.append(errBox);
+  // ── Le righe Senzani fuse in una commessa sola ──
+  if (piano.box.length) {
+    const nFuse = piano.box.reduce((s, b) => s + b.nRigheFuse, 0);
+    body.append(sezione('Senzani: ' + nFuse + ' righe unite in '
+      + piano.box.length + (piano.box.length === 1 ? ' commessa' : ' commesse')));
+    const box = riquadro();
+    piano.box.forEach(b => {
+      const chiusa = piano.bloccate.indexOf(b) >= 0;
+      box.append(el('div', { style: chiusa ? 'color:var(--mut);' : '' },
+        b.numeroOrdine + '/' + b.pos + '  ' + b.codArt + '  ' + b.descrArt
+        + '  ·  ' + b.nRigheFuse + ' righe  ·  € ' + b.prezzo.toFixed(2)
+        + '  ·  ' + fmtIT(b.scadenza)
+        + (b.minutiUnitari ? '  ·  ' + b.minutiUnitari + ' min/pz' : '  ·  senza tempo pagato')
+        + (chiusa ? '   → già ' + b.esistente.stato + ', non si tocca' : '')));
+      if (b.scadenzeDiverse) box.append(el('div', { style:'color:var(--ylw);' },
+        '   ⚠ le righe unite avevano scadenze diverse: tenuta la più vicina'));
+    });
+    body.append(box);
   }
 
-  if (validi.length) {
-    body.append(el('div', { class:'sub', style:'margin:14px 0 6px;' },
-      'Anteprima (prime ' + Math.min(5, validi.length) + ' righe pronte):'));
-    const tbl = el('table', { class:'rt', style:'font-size:11px;' });
-    tbl.append(el('thead', {}, el('tr', {},
-      el('th', {}, 'N° Ordine'), el('th', {}, 'Pos'), el('th', {}, 'Articolo'),
-      el('th', {}, 'Cliente'), el('th', {}, 'Scad.'), el('th', { class:'tr' }, 'Qtà'))));
-    const tb = el('tbody');
-    validi.slice(0, 5).forEach(p => tb.append(el('tr', {},
-      el('td', {}, p.numeroOrdine),
-      el('td', {}, p.pos),
-      el('td', { class:'cod-cell' }, p.codArt),
-      el('td', {}, p.nomeCli),
-      el('td', {}, fmtIT(p.scadenza)),
-      el('td', { class:'tr' }, String(p.quantita)))));
-    tbl.append(tb);
-    body.append(tbl);
+  // ── Commesse chiuse: si dichiarano e si lasciano stare ──
+  if (piano.bloccate.length) {
+    body.append(nota('⛔ ' + piano.bloccate.length + ' commess'
+      + (piano.bloccate.length === 1 ? 'a è già completata o spedita e non viene toccata'
+                                     : 'e sono già completate o spedite e non vengono toccate')
+      + ': una fotografia dell\'ERP non deve poter riaprire un lavoro finito.', 'var(--mut)'));
   }
 
-  body.append(el('div', { class:'sub', style:'margin:14px 0 0;color:var(--mut);font-size:11px;' },
-    'Le commesse saranno create con stato "aperta" e minuti unitari a 0 ' +
-    '(da impostare poi). Le righe con errori non vengono importate.'));
+  // ── Anagrafiche che nascono ──
+  if (piano.clientiDaCreare.length || piano.articoliDaCreare.length) {
+    body.append(sezione('Anagrafiche create al volo'));
+    const an = riquadro('var(--ylw)');
+    piano.clientiDaCreare.forEach(n => an.append(el('div', {}, 'cliente   ' + n)));
+    piano.articoliDaCreare.forEach(a => an.append(el('div', {},
+      'articolo  ' + a.codice + (a.descrizione ? '  ' + a.descrizione : ''))));
+    body.append(an);
+    body.append(nota('Nascono solo premendo Importa. Un refuso dell\'ERP diventa '
+      + 'un\'anagrafica nuova: se qui sopra c\'è un nome che non riconosci, annulla.', 'var(--ylw)'));
+  }
+
+  // ── Cosa cambia sulle commesse che ci sono già ──
+  if (piano.aggiornamenti.length) {
+    body.append(sezione('Cosa cambia sulle ' + piano.aggiornamenti.length + ' già presenti'));
+    const ag = riquadro();
+    const mostra = (v) => (v === null || v === undefined || v === '') ? '(vuoto)'
+      : (/^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? fmtIT(v) : String(v));
+    piano.aggiornamenti.slice(0, 40).forEach(a => ag.append(el('div', {},
+      a.voce.numeroOrdine + '/' + a.voce.pos + '  '
+      + a.campi.map(c => c.campo + ' ' + mostra(c.da) + ' → ' + mostra(c.a)).join('  ·  '))));
+    if (piano.aggiornamenti.length > 40) ag.append(el('div', { style:'color:var(--mut);' },
+      '... e altre ' + (piano.aggiornamenti.length - 40)));
+    body.append(ag);
+    body.append(nota('Si toccano solo quantità, scadenza e prezzo — i campi che vengono '
+      + 'dall\'ERP. Stato, fasi, addetti, note, gruppi e ore restano come sono.'));
+  }
+
+  // ── Tempo pagato: dove lo prende e dove non ce l'ha ──
+  const daScrivere = piano.nuove.concat(piano.aggiornamenti.map(a => a.voce));
+  const daTariffa = daScrivere.filter(v => v.minutiDaTariffa);
+  const senzaMinuti = piano.nuove.filter(v => !v.minutiUnitari);
+  if (daTariffa.length) body.append(nota('⏱ Su ' + daTariffa.length + ' commess'
+    + (daTariffa.length === 1 ? 'a il tempo pagato è ricavato' : 'e il tempo pagato è ricavato')
+    + ' dal prezzo con la tariffa del cliente, come fa "+ Nuovo ordine".'));
+  if (senzaMinuti.length) body.append(nota('⚠ ' + senzaMinuti.length + ' commess'
+    + (senzaMinuti.length === 1 ? 'a nasce' : 'e nascono') + ' senza tempo pagato '
+    + '(l\'articolo non ha un min/pz e il cliente non ha tariffa): avanzamento e '
+    + '€/ora resteranno vuoti finché non lo imposti.', 'var(--ylw)'));
+
+  // ── Righe che restano fuori ──
+  if (piano.scartate.length) {
+    body.append(sezione(piano.scartate.length + ' righe non importate'));
+    const sc = riquadro();
+    Object.keys(piano.scartatePerMotivo).sort((a, b) =>
+      piano.scartatePerMotivo[b] - piano.scartatePerMotivo[a]).forEach(m =>
+      sc.append(el('div', {}, String(piano.scartatePerMotivo[m]).padStart(4) + '  ' + m)));
+    body.append(sc);
+  }
 
   modal.append(body);
-
   const foot = el('div', { class:'mfoot' });
   foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
-  if (validi.length) {
-    foot.append(el('button', {
-      class:'btnp',
-      onclick: () => operazioniImportEsegui(validi),
-    }, 'Importa ' + validi.length + ' commess' + (validi.length === 1 ? 'a' : 'e')));
+  if (nDaScrivere) {
+    foot.append(el('button', { class:'btnp', onclick: () => operazioniImportEsegui(piano) },
+      'Importa · ' + piano.nuove.length + ' nuove, ' + piano.aggiornamenti.length + ' aggiornate'));
+  } else {
+    foot.append(el('span', { class:'sub', style:'font-size:11px;' },
+      'Niente da scrivere: il gestionale è già allineato al file.'));
   }
   modal.append(foot);
   openModal(modal);
 }
 
-async function operazioniImportEsegui(validi) {
+// Esegue il piano. L'ordine conta: prima le anagrafiche (senza le quali le
+// commesse non hanno a cosa agganciarsi), poi gli inserimenti, poi gli
+// aggiornamenti. Ogni passo che fallisce si ferma lì e lo dice: meglio un
+// import a metà dichiarato che uno "riuscito" con dentro righe orfane.
+async function operazioniImportEsegui(piano) {
   closeModal();
-  let ok = 0, err = 0;
-  const batchSize = 200;
-  for (let i = 0; i < validi.length; i += batchSize) {
-    const batch = validi.slice(i, i + batchSize).map(p => ({
-      cliente_id: p.cli.id,
-      articolo_id: p.art.id,
-      numero_ordine: p.numeroOrdine || null,
-      pos: p.pos || null,
-      quantita: p.quantita,
-      minuti_unitari: 0,
-      scadenza: p.scadenza,
-      stato: 'aperta',
-      stato_preparazione: 'vuoto',
-      riferimento_cliente: p.riferimentoCliente,
-      note: p.note,
-    }));
-    try {
+  let creatiCli = 0, creatiArt = 0, inseriti = 0, aggiornati = 0, errori = 0;
+
+  try {
+    // 1) Clienti nuovi
+    for (const nome of piano.clientiDaCreare) {
+      const gia = state.aziende.find(a => (a.nome || '').toLowerCase().trim() === nome.toLowerCase().trim());
+      if (gia) continue;
       const { data, error } = await eseguiConRetry(
-        () => sb.from('operazioni').insert(batch).select(),
-        { label: 'import commesse' }
-      );
-      if (error) { err += batch.length; toast('Errore insert: '+error.message, 'err'); }
-      else {
-        ok += data.length;
-        data.forEach(d => {
-          if (!state.operazioni.find(x => x.id === d.id)) state.operazioni.push(d);
-        });
-      }
-    } catch (e) {
-      err += batch.length;
-      toast('Errore: '+(e.message||e), 'err');
+        () => sb.from('aziende').insert({ nome, attivo:true, is_cliente:true, is_fornitore:false })
+          .select().single(), { label:'cliente ' + nome });
+      if (error) throw new Error('cliente "' + nome + '": ' + error.message);
+      state.aziende.push(data); creatiCli++;
     }
+    // 2) Articoli nuovi
+    for (const a of piano.articoliDaCreare) {
+      const gia = state.articoli.find(x => (x.codice || '').toLowerCase().trim() === a.codice.toLowerCase().trim());
+      if (gia) continue;
+      const payload = { codice: a.codice, attivo: true };
+      if (a.descrizione) payload.descrizione = a.descrizione;
+      const { data, error } = await eseguiConRetry(
+        () => sb.from('articoli').insert(payload).select().single(), { label:'articolo ' + a.codice });
+      if (error) throw new Error('articolo "' + a.codice + '": ' + error.message);
+      state.articoli.push(data); creatiArt++;
+    }
+
+    // 3) Le voci ripescano gli id appena nati
+    const cliByNome = {}; state.aziende.forEach(a => { if (a.nome) cliByNome[a.nome.toLowerCase().trim()] = a; });
+    const artByCod  = {}; state.articoli.forEach(a => { if (a.codice) artByCod[a.codice.toLowerCase().trim()] = a; });
+
+    // 4) Inserimenti, a blocchi
+    const payloads = piano.nuove.map(v => {
+      const cli = v.cliente || cliByNome[v.clienteNome.toLowerCase().trim()];
+      const art = v.articolo || artByCod[v.codArt.toLowerCase().trim()];
+      return {
+        cliente_id: cli ? cli.id : null,
+        articolo_id: art ? art.id : null,
+        numero_ordine: v.numeroOrdine,
+        pos: v.pos,
+        quantita: v.qta,
+        minuti_unitari: v.minutiUnitari || 0,
+        scadenza: v.scadenza,
+        prezzo_unitario: v.prezzo > 0 ? v.prezzo : null,
+        riferimento_cliente: v.riferimento || null,
+        stato: 'aperta',
+        stato_preparazione: 'vuoto',
+      };
+    }).filter(p => p.cliente_id && p.articolo_id);
+
+    const nate = [];
+    for (let i = 0; i < payloads.length; i += 200) {
+      const batch = payloads.slice(i, i + 200);
+      const { data, error } = await eseguiConRetry(
+        () => sb.from('operazioni').insert(batch).select(), { label:'import commesse' });
+      if (error) { errori += batch.length; toast('Errore inserimento: ' + error.message, 'err'); continue; }
+      (data || []).forEach(d => {
+        if (!state.operazioni.find(x => x.id === d.id)) state.operazioni.push(d);
+        nate.push(d);
+      });
+      inseriti += (data || []).length;
+    }
+
+    // 5) Aggiornamenti: SOLO i tre campi che vengono dall'ERP.
+    for (const a of piano.aggiornamenti) {
+      const patch = {};
+      a.campi.forEach(c => {
+        if (c.campo === 'quantita') patch.quantita = c.a;
+        if (c.campo === 'scadenza') patch.scadenza = c.a;
+        if (c.campo === 'prezzo')   patch.prezzo_unitario = c.a;
+      });
+      if (!Object.keys(patch).length) continue;
+      const { data, error } = await eseguiConRetry(
+        () => sb.from('operazioni').update(patch).eq('id', a.op.id).select().single(),
+        { label:'aggiorna ' + a.voce.numeroOrdine });
+      if (error) { errori++; continue; }
+      const idx = state.operazioni.findIndex(x => x.id === data.id);
+      if (idx >= 0) state.operazioni[idx] = data;
+      aggiornati++;
+    }
+
+    // 6) Fasi automatiche sulle nuove, come fa "+ Nuovo ordine".
+    // Best-effort: una fase mancante si aggiunge a mano, un import bloccato no.
+    for (const r of nate) { try { await autoGeneraFasiDaMedia(r); } catch (e) {} }
+
+  } catch (e) {
+    toast('Import interrotto: ' + (e.message || e), 'err');
   }
-  toast('Import completato: ' + ok + ' commesse create' + (err ? ', ' + err + ' errori' : ''),
-        err ? 'err' : 'ok');
+
+  const pezzi = [];
+  if (inseriti)   pezzi.push(inseriti + ' commesse create');
+  if (aggiornati) pezzi.push(aggiornati + ' aggiornate');
+  if (creatiCli)  pezzi.push(creatiCli + ' clienti nuovi');
+  if (creatiArt)  pezzi.push(creatiArt + ' articoli nuovi');
+  if (piano.bloccate.length) pezzi.push(piano.bloccate.length + ' chiuse lasciate stare');
+  if (errori)     pezzi.push(errori + ' errori');
+  toast(pezzi.length ? 'Import: ' + pezzi.join(' · ') : 'Import: niente da fare',
+        errori ? 'err' : 'ok');
   renderTab('pianificazione');
 }
 
