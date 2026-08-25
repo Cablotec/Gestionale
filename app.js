@@ -6555,7 +6555,10 @@ function openNuovoOrdineModal() {
     });
     // POS pre-compilata a multipli di 10 (0010, 0020, …), modificabile.
     const posAuto = String((righe.length + 1) * 10).padStart(4, '0');
-    const inPos = el('input', { type:'text', class:'ord-inp', value: posAuto, placeholder:'0010' });
+    // Come per l'OP qui sotto: uscendo dal campo la posizione prende la sua
+    // forma canonica a 4 cifre, così si VEDE che è stata capita.
+    const inPos = el('input', { type:'text', class:'ord-inp', value: posAuto, placeholder:'0010',
+      onblur:(e)=>{ e.target.value = posNormalizzata(e.target.value) || ''; } });
     // L'OP si scrive come capita — 2026OP1727 sui documenti, 2026/OP/1727 a
     // mano — e uscendo dal campo diventa la forma canonica, così si VEDE che è
     // stato capito. Prima accettava solo il formato esatto e buttava via il
@@ -6590,7 +6593,7 @@ function openNuovoOrdineModal() {
           getVal: v,
           articoloId: (v.mode==='existing' && v.id) ? v.id : null,
           nuovoCodice: (v.mode==='new') ? (v.text||'').trim() : null,
-          pos: (inPos.value||'').trim() || null,
+          pos: posNormalizzata(inPos.value),
           numero_op: odlANumeroOp(opRaw),
           opIlleggibile: !!opRaw && !odlANumeroOp(opRaw),
           riferimento_cliente: (inRif.value||'').trim() || null,
@@ -8472,7 +8475,10 @@ function openOperazioneModal(o) {
         })),
       el('div', { class:'field' }, el('label', {}, 'POS'),
         el('input', { type:'text', name:'pos', value:o.pos||'',
-          placeholder:'es. 0010' })),
+          placeholder:'es. 0010',
+          // Gli zeri si mettono subito, non solo al salvataggio: chi scrive
+          // "20" deve vedere "0020" mentre e' ancora nel campo.
+          onblur:(e)=>{ e.target.value = posNormalizzata(e.target.value) || ''; } })),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Numero OP'),
@@ -9848,7 +9854,7 @@ function openOperazioneModal(o) {
         numero_ordine: numOrd,
         numero_op: numOpFinale,
         riferimento_cliente: (fd.get('riferimento_cliente')||'').trim() || null,
-        pos: (fd.get('pos')||'').trim() || null,
+        pos: posNormalizzata(fd.get('pos')),
         quantita: parseInt(fd.get('quantita')) || 1,
         minuti_unitari: parseInt(fd.get('minuti_unitari')) || 0,
         scadenza: fd.get('scadenza') || null,

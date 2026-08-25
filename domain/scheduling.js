@@ -2128,3 +2128,17 @@ function analizzaImportOrdini(righe, ctx) {
     .map(c => ({ codice: c, descrizione: articoliNuovi[c] }));
   return out;
 }
+
+// La POSIZIONE si scrive SEMPRE a 4 cifre con gli zeri davanti (`0010`, non
+// `10`). Non e' estetica: fino al 25 ago il database aveva 191 commesse su
+// 417 con la forma corta, perche' create prima che la convenzione esistesse
+// o digitate a mano, e l'import ci ha sbattuto contro creando 51 doppioni.
+// Il confronto adesso e' numerico e regge comunque, ma tenere UNA forma sola
+// evita che la prossima cosa che confronta le pos come testo ricaschi li'.
+// Quello che non e' un numero da 1 a 4 cifre si lascia com'e': non si
+// indovina la forma di qualcosa che non si capisce.
+function posNormalizzata(v) {
+  const s = String(v === null || v === undefined ? '' : v).trim();
+  if (!s) return null;
+  return /^\d{1,4}$/.test(s) ? s.padStart(4, '0') : s;
+}

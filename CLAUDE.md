@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-25.4`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-25.5`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -72,6 +72,7 @@
 - **IL CONTROLLO DA RIFARE dopo ogni modifica all'import: importare DUE VOLTE di fila** e pretendere che la seconda passata dica `0 nuove · 0 aggiornamenti · 0 rinomine`. Oggi lo fa. È la definizione di una fotografia fatta bene, e l'unico modo di accorgersi in fretta che una chiave di confronto non combacia.
 - **LA SCADENZA: ALNUS COMANDA** (25 ago, decisione Nico: *"dovrebbe sempre essere lo specchio del nostro programma"*). Il primo reimport ha portato le commesse in ritardo **da 4 a 49**: 54 scadenze cambiate, **54 anticipate e zero posticipate**, e tutte su commesse **ripianificate a mano** nel gestionale. Non è un difetto — è Alnus che è rimasto indietro. Nessun ripristino fatto; l'elenco da sistemare in Alnus è in `strumenti/date-da-allineare-in-alnus.xlsx` (54 righe, 46 già scadute là). Marcia indietro disponibile ma non eseguita: `strumenti/ripristina-scadenze-25ago.sql`.
 - **Guardare sempre il VERSO degli scostamenti, non solo quanti sono**: "54 aggiornamenti" non dice niente, "54 su 54 nella stessa direzione" dice tutto.
+- **UNA FORMA SOLA PER LA POSIZIONE**: `posNormalizzata()` in domain (4 cifre con gli zeri) applicata in **entrambe** le porte d inserimento + `onblur`. Le 191 gia a database: `strumenti/allinea-posizioni.sql`, **dal pannello** — l account tecnico non puo scrivere sulle commesse, l RLS rifiuta in silenzio (HTTP 200, zero righe). Ne resta fuori 1 (`2026/OC/00000`, si scontrerebbe con la gemella).
 - **Non è "parte da solo"**: Pages è statico. Si trascina, si guarda l'anteprima, si conferma.
 - Aperti: `numero_op` non è nel file · `Quantità Residua` non entra da nessuna parte · un BOX nuovo nasce senza min/pz.
 
