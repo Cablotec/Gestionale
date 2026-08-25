@@ -100,6 +100,10 @@ create policy attivita_extra_claude on public.attivita_extra
   using      (coalesce(auth.jwt() ->> 'email', '') = 'claude@cablotec.local')
   with check (coalesce(auth.jwt() ->> 'email', '') = 'claude@cablotec.local');
 
+-- PARTE 2: `accesso-claude-scritture.sql` aggiunge l UPDATE su operazioni
+-- e aziende (correggere righe esistenti). INSERT e DELETE restano fuori
+-- anche la.
+--
 -- ═══ COSA RESTA FUORI, DI PROPOSITO ═══
 --  · DROP di tabelle o colonne          · TRUNCATE
 --  · CREATE TABLE                       · modifiche a RLS e permessi

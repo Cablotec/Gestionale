@@ -360,6 +360,15 @@ Subito dopo il reimport le commesse **in ritardo sono passate da 4 a 49**. Non e
 - Un **BOX nuovo nasce senza min/pz** (l'articolo `BOX_...` non esiste ancora): l'anteprima lo dichiara in giallo. Le 11 esistenti hanno 775/990 messi a mano.
 - **Non è "automatico" nel senso di "parte da solo"**: GitHub Pages è statico. Si trascina il file, si guarda l'anteprima, si conferma. Il passo successivo (una cartella guardata da uno script) sarebbe infrastruttura nuova.
 
+## Accesso di Claude alle scritture (25 ago 2026)
+Domanda di Nico: *"ma tu non avevi un account per poter far tutto sull app?"* — e la risposta era **no, non per quello**.
+- `claude@cablotec.local` esiste ed e nei profili, ma con **`ruolo = user`**, e `accesso-claude.sql` gli dava solo tre cose: aggiungi colonna, crea indice, scrivi su `attivita_extra`. **Niente su `operazioni` e `aziende`** — quindi l allineamento delle 190 posizioni sarebbe stato rifiutato uguale. Quello che avevo usato era l account **kiosk**, che e `user` anche lui.
+- **L RLS rifiuta in silenzio**: HTTP 200 e zero righe toccate. Non un errore, proprio niente. E il modo piu facile per credere che una scrittura sia andata.
+- **Decisione: si apre il solo UPDATE** su `operazioni` e `aziende` (`strumenti/accesso-claude-scritture.sql`), con policy mirate sull utente dedicato e **senza promuoverlo admin** — stessa filosofia del primo file, il permesso sta sull operazione e non sul ruolo. **INSERT e DELETE restano fuori.**
+- Onesta sul perche: la protezione attuale **non ha impedito il danno del 25 ago**, perche l import e passato dalla sessione admin di Nico nel browser. La frizione non proteggeva le scritture; sulle **cancellazioni** invece si — i 51 doppioni li ha cancellati lui dopo aver visto i numeri, e quel passaggio e il valore, non l attrito.
+- ⚠ **L UPDATE non si puo limitare a certe colonne** (Postgres non lo fa nelle policy): `stato` compreso, quindi in teoria si puo riaprire una commessa spedita. Resta la regola di sempre: dichiarare quante righe tocca, salvarle su file, aspettare l ok.
+- **La password sta in un file locale e in questa sessione la lettura e stata bloccata** — non e stata aggirata. Da rivedere quando servira davvero l accesso.
+
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0-bis. DA VERIFICARE il 25 ago: la correzione egress ha morso davvero?
