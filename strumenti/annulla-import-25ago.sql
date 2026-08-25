@@ -129,13 +129,28 @@ where id in ('264044d6-62bb-4cb6-91a4-1f55c00f349b',
 
 
 -- ── 4. DOPO LA PULIZIA ────────────────────────────────────────────────
--- Rifare l'import con la versione 2026-08-25.3: le commesse che prima
+-- Rifare l'import con la versione 2026-08-25.4: le commesse che prima
 -- venivano duplicate adesso vengono AGGIORNATE (quantita', scadenza,
 -- prezzo). Sul file di oggi l'anteprima deve dire circa:
 --   21 nuove · 103 aggiornamenti · 6 gia uguali · 31 chiuse non toccate
---   nessun cliente da creare
+--   nessun cliente da creare · 6 clienti rinominati
 -- Se dice ancora 72 nuove, la pagina sta usando la versione vecchia:
 -- guardare il numero di versione sotto il logo.
+--
+-- I 6 rinominati (Alnus detta il nome, decisione del 25 ago):
+--   Cablotech S.r.l.          -> CABLOTECH SRL
+--   Dal Pozzo Verricelli SRL  -> DAL POZZO VERRICELLI SRL
+--   Fabbri Elio snc           -> FABBRI ELIO S.n.c.
+--   Metalmeccanica Rossi SRL  -> METALMECCANICA ROSSI S.R.L.
+--   Senzani Brevetti S.p.a.   -> SENZANI BREVETTI S.p.a.
+--   Teknox S.r.l.             -> TEKNOX S.R.L.
+-- Cambia solo `nome`: l'id resta, quindi commesse, storico e tariffe non
+-- si muovono.
+--
+-- SE SI IMPORTA PRIMA DI AVER FATTO IL BLOCCO 3: non succede niente di
+-- brutto, ma tre di quelle rinomine vengono SALTATE e dichiarate, perche'
+-- il nome di arrivo e' ancora occupato dalla scheda doppia. Rifatta la
+-- pulizia, il successivo import le applica.
 
 -- ── NOTA su cosa NON tocca questo file ────────────────────────────────
 -- Restano com'erano 4 coppie ordine+posizione doppie piu' vecchie:

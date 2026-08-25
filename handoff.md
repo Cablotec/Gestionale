@@ -286,12 +286,12 @@ Mail di Supabase: **6,26 GB usati su 5 GB** inclusi, restrizione dal 22 set 2026
 
 **Nota di metodo**: la barra più alta del mese è il 24 ago, 647 MB — erano le mie scritture massive (500 righe = 500 ricariche per postazione). Una correzione dati in blocco, finché quel meccanismo esisteva, costava più di una settimana di lavoro vero.
 
-## Import ordini dall'estrazione ERP (25 ago, `2026-08-25.2`)
+## Import ordini dall'estrazione ERP (25 ago, `2026-08-25.4`)
 Nico voleva "caricare in automatico gli ordini" da `Cartel1.xlsx`, l'estrazione del portafoglio ordini dell'ERP (420 righe, 117 ordini, 16 clienti, esercizi 2024→2026).
 
 **Un import c'era già, e su quel file avrebbe importato ZERO righe.** `operazioniImportExcel` esisteva dal principio, col pulsante in Pianificazione, ma cercava le colonne per **uguaglianza esatta** del nome ed era tarato sull'export *del gestionale stesso* (`Scadenza`, `Quantità`, `Cliente`). L'ERP le chiama `Data Rich. Evasione`, `Quantita UMI Ordine/Offerta`, `Ragione Sociale`: tre campi obbligatori senza colonna → 420 lette, 0 pronte. Il commento diceva "coerenti con l'import ERP" ma nessuno aveva mai avuto il file vero davanti. **Lezione: un mapping scritto su un formato immaginato è codice non provato, anche se il codice è giusto.**
 
-**Le regole stanno in `analizzaImportOrdini(righe, ctx)` in `domain/scheduling.js`** — pura, nessun DOM, nessun Supabase, **62 test in `scratchpad/test_import_ordini.js`**. Ritorna il PIANO (nuove / aggiornamenti / bloccate / scartate / anagrafiche da creare) e non scrive niente: la UI disegna soltanto.
+**Le regole stanno in `analizzaImportOrdini(righe, ctx)` in `domain/scheduling.js`** — pura, nessun DOM, nessun Supabase, **86 test in `scratchpad/test_import_ordini.js`**. Ritorna il PIANO (nuove / aggiornamenti / bloccate / scartate / anagrafiche da creare) e non scrive niente: la UI disegna soltanto.
 
 **Decisioni prese con Nico, tutte nel codice:**
 - **Solo sezionale OC.** Le 89 righe OD si scartano *dichiarandole*. Il formato numero ordine dell'app è ancora `AAAA/OC/NNNNN` fisso ([app.js:6549], [app.js:9676]): se un domani gli OD devono entrare, va allargata quella validazione.
@@ -323,7 +323,12 @@ Nico voleva "caricare in automatico gli ordini" da `Cartel1.xlsx`, l'estrazione 
 - **Lezione**: *le chiavi di confronto vanno provate contro i dati veri del database, non contro il file*. Il file era pulito e coerente; erano le **convenzioni interne accumulate negli anni** (pos corta, diciture diverse) a non combaciare. Un import è un innesto fra due storie, e la parte fragile è sempre quella di casa.
 - **Effetto della correzione sullo stesso file**: da *72 nuove / 64 aggiornamenti / 19 bloccate* a **21 nuove / 103 aggiornamenti / 31 bloccate**, e **nessun cliente da creare**.
 - **Pulizia**: `strumenti/annulla-import-25ago.sql`, a blocchi, con le verifiche prima delle DELETE. Stato accertato a database prima di scriverlo: i 51 doppioni hanno **zero timbri e zero addetti** (nessuno ci ha lavorato), 28 hanno fasi automatiche che se ne vanno con loro; le 3 schede cliente hanno zero riferimenti ovunque. Righe intere salvate in `scratchpad/doppioni_25ago.json` **prima** di proporre qualsiasi cancellazione. Restano fuori **4 coppie doppie preesistenti** (giugno/luglio, fra cui `2026/OC/00000`): non le ha fatte l'import.
-- 81 test in `scratchpad/test_import_ordini.js`, con le due regressioni dentro.
+- **ALNUS DETTA IL NOME DEL CLIENTE** (25 ago, `2026-08-25.4`, decisione di Nico dopo la domanda *"i clienti avranno lo stesso identico nome del file?"* — la risposta era **no**, ed era il caso peggiore). Prima: gli esistenti tenevano la dicitura del gestionale, i nuovi nascevano con quella di Alnus → col tempo si accumulava un **misto**. Ora l'import **RINOMINA** la scheda esistente per allinearla al file. Cambia solo `nome`: **l'id resta**, quindi commesse, storico, tariffe e ruoli non si muovono. Sul file di oggi sono **6 rinomine** (`Cablotech S.r.l.`→`CABLOTECH SRL`, `Teknox S.r.l.`→`TEKNOX S.R.L.`, `Senzani Brevetti S.p.a.`→`SENZANI BREVETTI S.p.a.`, `Metalmeccanica Rossi SRL`, `Fabbri Elio snc`, `Dal Pozzo Verricelli SRL`).
+  - È **l'unica cosa in tutto l'import che riscrive un dato d'anagrafica**, quindi l'anteprima la mostra in giallo prima di eseguirla. Conseguenza accettata: i nomi diventano quelli di Alnus, maiuscole comprese, ovunque compaiano (Gantt, export, analisi); e un nome corretto a mano nel gestionale viene riscritto al prossimo import.
+  - **Due casi in cui NON si rinomina**, entrambi dichiarati: (a) lo stesso cliente compare con **due diciture diverse dentro lo stesso file** — non c'è un nome giusto da scegliere; (b) il nome di arrivo è **già occupato da un'altra scheda** (tipicamente un doppione non ancora ripulito) — rinominare farebbe due schede identiche. *Un nome sbagliato è peggio di un nome vecchio.*
+  - **Fra due copie della stessa ditta vince la PIÙ VECCHIA** (stessa regola delle commesse): è quella con le commesse attaccate. Serve davvero — finché i 3 doppioni del 25 ago sono lì, cercare per nome esatto aggancerebbe la scheda **vuota** nata quel giorno invece di quella vera. Per questo l'indice dei clienti è **uno solo, per chiave**, e non più "prima il nome esatto, poi la chiave".
+- **I FORNITORI l'import non li tocca mai**: crea sempre e solo clienti (`is_cliente` sì, `is_fornitore` no) e nel file non c'è nessuna colonna fornitore. Oggi nessuna azienda è cliente e fornitore insieme.
+- 86 test in `scratchpad/test_import_ordini.js`, con tutte le regressioni dentro.
 
 **Cosa NON c'è ancora / da chiarire con Nico:**
 - **`numero_op` non è nel file** e resta vuoto: è l'unico campo che l'estrazione non porta.

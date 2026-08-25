@@ -1892,6 +1892,7 @@ function analizzaImportOrdini(righe, ctx) {
     scartate: [], scartatePerMotivo: {},
     box: [], nuove: [], aggiornamenti: [], bloccate: [], invariate: 0,
     clientiDaCreare: [], articoliDaCreare: [], clientiRiconosciuti: [],
+    clientiDaRinominare: [], rinomineImpossibili: [],
   };
   if (!righe.length) return out;
 
@@ -1922,15 +1923,21 @@ function analizzaImportOrdini(righe, ctx) {
   // Indici sulle anagrafiche
   const artByCod = {};
   articoli.forEach(a => { if (a.codice) artByCod[norm(a.codice)] = a; });
-  // Due indici sui clienti: prima si cerca il nome identico, poi la stessa
-  // ditta scritta in un altro modo. Il primo arrivato vince, cosi' l'esito
-  // non dipende dall'ordine in cui il database restituisce le righe.
-  const cliByNome = {}, cliByChiave = {};
+  // Un indice solo sui clienti, per chiave (la stessa ditta comunque scritta).
+  // Se la stessa ditta compare piu' volte vince la scheda PIU' VECCHIA: e'
+  // quella con le commesse e lo storico attaccati. Non e' teoria — finche' i
+  // doppioni del 25 ago non sono ripuliti, cercare per nome esatto
+  // aggancerebbe la scheda vuota nata quel giorno invece di quella vera.
+  // A parita' di eta' vince il nome scritto identico al file.
+  const cliByChiave = {};
   aziende.forEach(a => {
-    if (!a.nome) return;
-    if (cliByNome[norm(a.nome)] === undefined) cliByNome[norm(a.nome)] = a;
     const k = importOrdiniChiaveNome(a.nome);
-    if (k && cliByChiave[k] === undefined) cliByChiave[k] = a;
+    if (!k) return;
+    const gia = cliByChiave[k];
+    if (!gia) { cliByChiave[k] = a; return; }
+    const piuVecchia = String(a.created_at || '') < String(gia.created_at || '');
+    const stessaEta  = String(a.created_at || '') === String(gia.created_at || '');
+    if (piuVecchia || (stessaEta && norm(a.nome) < norm(gia.nome))) cliByChiave[k] = a;
   });
   // La posizione si confronta come NUMERO, non come testo (25 ago, dopo il
   // danno). Le commesse piu' vecchie hanno `pos` senza zeri davanti — "40"
@@ -2036,21 +2043,25 @@ function analizzaImportOrdini(righe, ctx) {
   });
 
   // Passata 3: confronto con quello che c'e' gia'
-  const clientiNuovi = {}, articoliNuovi = {}, riconosciuti = {};
+  const clientiNuovi = {}, articoliNuovi = {}, riconosciuti = {}, rinomine = {};
   voci.forEach(v => {
     // Il cliente si cerca prima col nome esatto, poi con la chiave che ignora
-    // la forma giuridica. Si USA SEMPRE la scheda che c'e' gia', con la sua
-    // dicitura: l'anagrafica del gestionale comanda, l'ERP non la riscrive.
-    const cli = cliByNome[norm(v.clienteNome)]
-      || cliByChiave[importOrdiniChiaveNome(v.clienteNome)] || null;
+    // la forma giuridica. La SCHEDA e' sempre quella che c'e' gia' (l'id non
+    // cambia mai, quindi commesse e storico restano attaccati); quello che
+    // cambia e' il NOME, che d'ora in poi lo detta Alnus.
+    const cli = cliByChiave[importOrdiniChiaveNome(v.clienteNome)] || null;
     const art = artByCod[norm(v.codArt)] || null;
     v.cliente = cli;
     v.articolo = art;
-    // Riconosciuto ma scritto diversamente: non e' un errore e non blocca
-    // niente, pero' va DETTO — e' la differenza fra "l'ho collegato a quello
-    // che c'era" e "te ne ho creato uno nuovo senza dirtelo".
-    v.clienteDicituraDiversa = (cli && norm(cli.nome) !== norm(v.clienteNome)) ? cli.nome : null;
-    if (v.clienteDicituraDiversa) riconosciuti[v.clienteNome] = cli.nome;
+    // Scritto diversamente: la scheda va RINOMINATA per allinearla al file
+    // (decisione Nico 25 ago: Alnus e' la fonte del nome). Si raccoglie qui e
+    // si dichiara nell'anteprima — un nome che cambia si vede in Gantt, negli
+    // export e nelle analisi, quindi non puo' succedere in silenzio.
+    v.clienteDicituraDiversa = (cli && cli.nome !== v.clienteNome) ? cli.nome : null;
+    if (v.clienteDicituraDiversa) {
+      riconosciuti[v.clienteNome] = cli.nome;
+      (rinomine[cli.id] = rinomine[cli.id] || { id: cli.id, da: cli.nome, a: {} }).a[v.clienteNome] = true;
+    }
     if (!cli) clientiNuovi[v.clienteNome] = true;
     if (!art) articoliNuovi[v.codArt] = v.descrArt || null;
 
@@ -2086,6 +2097,33 @@ function analizzaImportOrdini(righe, ctx) {
   out.clientiDaCreare  = Object.keys(clientiNuovi).sort();
   out.clientiRiconosciuti = Object.keys(riconosciuti).sort()
     .map(daFile => ({ daFile, inAnagrafica: riconosciuti[daFile] }));
+
+  // Rinomine da applicare, con le due situazioni in cui NON si rinomina.
+  // Un nome sbagliato e' peggio di un nome vecchio: nel dubbio non si tocca
+  // e si dichiara perche'.
+  const nomiEsistenti = {};
+  aziende.forEach(a => { if (a.nome) (nomiEsistenti[a.nome] = nomiEsistenti[a.nome] || []).push(a.id); });
+  Object.values(rinomine).forEach(r => {
+    const scritture = Object.keys(r.a);
+    if (scritture.length > 1) {
+      // Lo stesso cliente scritto in due modi diversi DENTRO LO STESSO FILE:
+      // non c'e' un nome giusto da scegliere, si lascia com'e'.
+      out.rinomineImpossibili.push({ id: r.id, da: r.da, motivo:
+        'nel file compare con ' + scritture.length + ' diciture diverse (' + scritture.join(', ') + ')' });
+      return;
+    }
+    const nuovo = scritture[0];
+    const occupanti = (nomiEsistenti[nuovo] || []).filter(id => id !== r.id);
+    if (occupanti.length) {
+      // Un'ALTRA scheda si chiama gia' cosi' (tipicamente un doppione non
+      // ancora ripulito): rinominare creerebbe due schede con lo stesso nome.
+      out.rinomineImpossibili.push({ id: r.id, da: r.da, a: nuovo, motivo:
+        'esiste gia un\'altra scheda che si chiama "' + nuovo + '"' });
+      return;
+    }
+    out.clientiDaRinominare.push({ id: r.id, da: r.da, a: nuovo });
+  });
+  out.clientiDaRinominare.sort((x, y) => x.da.localeCompare(y.da));
   out.articoliDaCreare = Object.keys(articoliNuovi).sort()
     .map(c => ({ codice: c, descrizione: articoliNuovi[c] }));
   return out;

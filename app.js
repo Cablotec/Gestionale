@@ -5213,19 +5213,30 @@ function openOperazioniImportPreviewModal(rows) {
       + ': una fotografia dell\'ERP non deve poter riaprire un lavoro finito.', 'var(--mut)'));
   }
 
-  // ── Clienti riconosciuti sotto un'altra dicitura ──
-  // Va detto, anche se non c'è niente da decidere: il 25 ago l'import ha
-  // creato "CABLOTECH SRL" accanto a "Cablotech S.r.l." e nessuno se n'è
-  // accorto guardando l'anteprima, perché fra le anagrafiche da creare
-  // compariva un nome che Nico riconosceva benissimo.
-  if (piano.clientiRiconosciuti.length) {
-    body.append(sezione('Clienti già in anagrafica, scritti diversamente nel file'));
+  // ── Clienti che cambiano nome ──
+  // Alnus è la fonte del nome (decisione Nico 25 ago), quindi la scheda che
+  // c'è già viene ALLINEATA al file. È l'unica cosa in tutto l'import che
+  // riscrive un dato d'anagrafica: va vista prima, non scoperta dopo.
+  if (piano.clientiDaRinominare.length) {
+    body.append(sezione(piano.clientiDaRinominare.length + ' client'
+      + (piano.clientiDaRinominare.length === 1 ? 'e viene rinominato' : 'i vengono rinominati')
+      + ' per allinearsi al file'));
+    const rn = riquadro('var(--ylw)');
+    piano.clientiDaRinominare.forEach(c => rn.append(el('div', {},
+      c.da + '   →   ' + c.a)));
+    body.append(rn);
+    body.append(nota('La scheda resta la stessa — commesse, storico e tariffe non si '
+      + 'muovono — cambia solo come si legge il nome, ovunque compaia: '
+      + 'Gantt, export e analisi comprese.', 'var(--ylw)'));
+  }
+  if (piano.rinomineImpossibili.length) {
+    body.append(sezione('Nomi lasciati come sono'));
     const ri = riquadro();
-    piano.clientiRiconosciuti.forEach(c => ri.append(el('div', {},
-      c.daFile + '   →   ' + c.inAnagrafica)));
+    piano.rinomineImpossibili.forEach(c => ri.append(el('div', {},
+      c.da + '   ·   ' + c.motivo)));
     body.append(ri);
-    body.append(nota('Si usa la scheda che c\'è già, con la sua dicitura: '
-      + 'l\'anagrafica del gestionale comanda, il file non la riscrive.'));
+    body.append(nota('Un nome sbagliato è peggio di un nome vecchio: nel dubbio '
+      + 'l\'import non tocca niente e te lo dice.'));
   }
 
   // ── Anagrafiche che nascono ──
@@ -5298,9 +5309,23 @@ function openOperazioniImportPreviewModal(rows) {
 // import a metà dichiarato che uno "riuscito" con dentro righe orfane.
 async function operazioniImportEsegui(piano) {
   closeModal();
-  let creatiCli = 0, creatiArt = 0, inseriti = 0, aggiornati = 0, errori = 0;
+  let creatiCli = 0, creatiArt = 0, inseriti = 0, aggiornati = 0, errori = 0, rinominati = 0;
 
   try {
+    // 0) Rinomine: Alnus detta il nome (decisione Nico 25 ago). Cambia SOLO
+    // `nome` — l'id resta, quindi commesse, storico, tariffe e ruoli non si
+    // muovono di un millimetro. Vengono prima degli inserimenti perché dopo
+    // l'anagrafica dev'essere già nella forma definitiva.
+    for (const r of piano.clientiDaRinominare) {
+      const { data, error } = await eseguiConRetry(
+        () => sb.from('aziende').update({ nome: r.a }).eq('id', r.id).select().single(),
+        { label:'rinomina ' + r.da });
+      if (error) { errori++; toast('Rinomina "' + r.da + '": ' + error.message, 'err'); continue; }
+      const i = state.aziende.findIndex(a => a.id === data.id);
+      if (i >= 0) state.aziende[i] = data;
+      rinominati++;
+    }
+
     // 1) Clienti nuovi
     for (const nome of piano.clientiDaCreare) {
       // Ultima rete prima di creare: la stessa ditta scritta in un altro modo
@@ -5397,6 +5422,7 @@ async function operazioniImportEsegui(piano) {
   const pezzi = [];
   if (inseriti)   pezzi.push(inseriti + ' commesse create');
   if (aggiornati) pezzi.push(aggiornati + ' aggiornate');
+  if (rinominati) pezzi.push(rinominati + ' clienti rinominati');
   if (creatiCli)  pezzi.push(creatiCli + ' clienti nuovi');
   if (creatiArt)  pezzi.push(creatiArt + ' articoli nuovi');
   if (piano.bloccate.length) pezzi.push(piano.bloccate.length + ' chiuse lasciate stare');

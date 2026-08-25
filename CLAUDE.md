@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-25.3`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-25.4`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -57,8 +57,8 @@
 - **Cancellare un'attività con timbri attaccati NON si fa** (7 ago, successo davvero): la FK è `ON DELETE SET NULL`, quindi i timbri restano ma **scollegati** — 144 sessioni e 238 h diventate ore di nessuno con un clic. `deleteAttivitaExtra` ora conta gli usi e propone di **disattivare**; la cancellazione resta solo per le voci mai usate. Ripristino via `scratchpad/sql_ripristino.sql` (ricrea la voce con lo stesso id). Regola generale: **un avviso senza numeri è come non darlo**.
 
 
-## Import ordini dall'estrazione ERP (25 ago, `2026-08-25.2`)
-- **Le regole stanno in `analizzaImportOrdini(righe, ctx)`** (`domain/scheduling.js`, PURA, 62 test in scratchpad/test_import_ordini.js): ritorna il piano (nuove/aggiornamenti/bloccate/scartate/anagrafiche), la UI disegna soltanto. Ingresso: pulsante "↑ Importa da Excel" in Pianificazione.
+## Import ordini dall'estrazione ERP (25 ago, `2026-08-25.4`)
+- **Le regole stanno in `analizzaImportOrdini(righe, ctx)`** (`domain/scheduling.js`, PURA, 86 test in scratchpad/test_import_ordini.js): ritorna il piano (nuove/aggiornamenti/bloccate/scartate/anagrafiche), la UI disegna soltanto. Ingresso: pulsante "↑ Importa da Excel" in Pianificazione.
 - **Solo sezionale OC**; le righe OD si scartano dichiarandole. Il formato numero ordine dell'app è ancora `AAAA/OC/NNNNN` fisso: per far entrare gli OD va allargata quella validazione.
 - **Senzani + riferimento che inizia per `EL` → le righe si FONDONO in UNA commessa**: articolo `BOX_<rif>`, descrizione `SBNE`, pos `0010`, qtà 1, prezzo = somma degli imponibili. ⚠ **Non c'entra "⊞ Raggruppa"** (`gruppo_id`): è fusione di righe del file, l'import non tocca nessun gruppo. Regola **verificata sui dati**: riproduce esattamente le 11 commesse BOX già a sistema.
 - quantità = `Quantita UMI Ordine/Offerta` · scadenza = `Data Rich. Evasione` · prezzo in `prezzo_unitario` **con la regola tariffa cliente** (oggi tocca solo Elcotec).
@@ -66,6 +66,8 @@
 - **Trappole già pagate**: `Riferimento Cliente` è **doppia** nel file (SheetJS rinomina la seconda `_1`) e le intestazioni ERP **finiscono con uno spazio** → fra omonime vince quella con i dati dentro, o la fusione Senzani non scatta in silenzio. La **sentinella 9999** arriva come **Date** (`cellDates:true`), non come numero: il filtro va su tutte e tre le strade o entra una scadenza al 31/12/9999.
 - **⚠ IL PRIMO IMPORT VERO HA FATTO 51 COMMESSE DOPPIE** (25 ago, `.3`). La pos veniva confrontata come testo con gli zeri (`"0040"`) ma **191 commesse su 468 ce l'hanno corta** (`"40"`): non riconosciute → duplicate invece che aggiornate. Ora `chiaveOp()` confronta la pos come **numero** (le nuove nascono comunque con gli zeri). In più `importOrdiniChiaveNome()` riconosce `CABLOTECH SRL` = `Cablotech S.r.l.` (via tutto ciò che non è lettera o cifra: la differenza sta sempre nella forma giuridica), e l'anteprima **dichiara** i clienti agganciati sotto altra dicitura. Pulizia in `strumenti/annulla-import-25ago.sql`.
 - **Lezione da non ripetere**: *le chiavi di confronto si provano contro i dati veri del DATABASE, non contro il file*. Il file era coerente; erano le convenzioni interne accumulate negli anni a non combaciare. E un'anteprima che chiede "riconosci questo nome?" non intercetta un doppione: quei nomi si riconoscono benissimo.
+- **ALNUS DETTA IL NOME DEL CLIENTE** (25 ago, `.4`): l'import **rinomina** la scheda esistente per allinearla al file (6 rinomine sul file di oggi). Cambia solo `nome`, **l'id resta** → commesse, storico e tariffe non si muovono. È l'unica cosa che riscrive un dato d'anagrafica: l'anteprima la mostra in giallo prima. NON si rinomina se il file usa due diciture per lo stesso cliente, o se il nome di arrivo è già occupato da un'altra scheda — *un nome sbagliato è peggio di un nome vecchio*. **Fra due copie vince la più VECCHIA** (quella con le commesse): per questo l'indice clienti è uno solo, per chiave, e non più "prima il nome esatto".
+- **I fornitori l'import non li tocca mai**: crea solo clienti, e nel file non c'è una colonna fornitore.
 - **Non è "parte da solo"**: Pages è statico. Si trascina, si guarda l'anteprima, si conferma.
 - Aperti: `numero_op` non è nel file · `Quantità Residua` non entra da nessuna parte · un BOX nuovo nasce senza min/pz.
 
