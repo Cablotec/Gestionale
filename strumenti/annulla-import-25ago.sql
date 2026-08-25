@@ -82,6 +82,9 @@ where d.n > 1
 -- Eseguire SOLO dopo che il blocco 1 ha dato 51 e zero.
 -- Le fasi collegate si cancellano prima, a mano: se la chiave esterna non
 -- fosse in cascata resterebbero orfane.
+-- L'editor SQL di Supabase mostra solo il risultato dell'ULTIMA istruzione:
+-- per questo la cancellazione delle commesse e' l'ultima e ha un RETURNING,
+-- cosi' si vede l'elenco di quello che e' stato tolto. Devono essere 51 righe.
 begin;
 
 create temporary table _doppioni_25ago as
@@ -97,16 +100,18 @@ with doppie as (
 select id from doppie
 where n > 1 and created_at::date = date '2026-08-25';
 
--- deve dire 51
-select count(*) as in_lista from _doppioni_25ago;
-
-delete from operazioni_fasi     where operazione_id in (select id from _doppioni_25ago);
-delete from operazioni_addetti  where operazione_id in (select id from _doppioni_25ago);
+delete from operazioni_fasi      where operazione_id in (select id from _doppioni_25ago);
+delete from operazioni_addetti   where operazione_id in (select id from _doppioni_25ago);
 delete from operazioni_fornitori where operazione_id in (select id from _doppioni_25ago);
-delete from operazioni          where id in (select id from _doppioni_25ago);
 
--- Se i numeri tornano: commit. Altrimenti: rollback;
+delete from operazioni
+where id in (select id from _doppioni_25ago)
+returning numero_ordine, pos, quantita, scadenza, stato;
+
 commit;
+
+-- Se le righe tornate NON sono 51, o riconosci una commessa che non doveva
+-- sparire: NON fare commit, esegui `rollback;` e ridimmelo.
 
 
 -- ── 3. LE TRE SCHEDE CLIENTE DOPPIE ───────────────────────────────────
