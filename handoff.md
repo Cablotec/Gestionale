@@ -337,6 +337,15 @@ Nico voleva "caricare in automatico gli ordini" da `Cartel1.xlsx`, l'estrazione 
 - **LA PROVA CHE CONTA: adesso l'import è IDEMPOTENTE.** Rilanciandolo sullo stesso file non fa più niente — `0 nuove · 0 aggiornamenti · 130 già uguali · 0 rinomine`. È la definizione di una fotografia fatta bene; stamattina la stessa identica operazione produceva 51 commesse doppie. **Questo è il controllo da rifare dopo ogni modifica all'import**: importare due volte di fila e pretendere che la seconda passata non cambi niente.
 - 86 test in `scratchpad/test_import_ordini.js`, con tutte le regressioni dentro.
 
+### La scadenza: ALNUS COMANDA, e il primo import l'ha dimostrato scomodo (25 ago)
+Subito dopo il reimport le commesse **in ritardo sono passate da 4 a 49**. Non era un difetto: era la regola "il file è una fotografia, aggiorna la scadenza" che faceva il suo mestiere.
+- **54 scadenze cambiate, 54 anticipate, ZERO posticipate.** Una distribuzione tutta da un lato non è mai casuale: è il segnale che qualcosa di sistematico sta succedendo, non che i dati sono cambiati.
+- **Tutte e 67 le commesse toccate erano state modificate A MANO nel gestionale** dopo la creazione (`updated_at` ≠ `created_at`, quasi tutte luglio-agosto). E le due colonne data del file dicono la stessa cosa (differiscono su 2 righe su 420), quindi non era la colonna sbagliata. L'import stava riportando indietro la **ripianificazione fatta in reparto**.
+- **Decisione di Nico: si lascia così.** *"Alnus dovrebbe sempre essere lo specchio del nostro programma"* — quindi la fonte è quella, e il gestionale fa bene ad allinearsi. **Nessun ripristino**: le 54 date restano quelle di Alnus.
+- **Il ritardo diventa allora un SEGNALE UTILE, non un difetto**: dice che in Alnus 54 date sono rimaste indietro rispetto a quello che il reparto ha ripianificato, e 46 di quelle sono già scadute là dentro. L'elenco per allinearle è in `strumenti/date-da-allineare-in-alnus.xlsx` (31 Sacmi, 10 Elcotec, il resto sparso). I due ordini Sacmi `2025/OC/00497` e `00498` erano stati spostati di **303 giorni**.
+- `strumenti/ripristina-scadenze-25ago.sql` esiste ma **NON è stato eseguito**: resta come marcia indietro se un giorno si cambia idea. Le date pre-import stanno comunque nel backup del 24 ago.
+- **Da ricordare quando si tocca l'import**: guardare sempre il VERSO degli scostamenti, non solo quanti sono. "54 aggiornamenti" non dice niente; "54 su 54 nella stessa direzione" dice tutto.
+
 **Cosa NON c'è ancora / da chiarire con Nico:**
 - **`numero_op` non è nel file** e resta vuoto: è l'unico campo che l'estrazione non porta.
 - Le **4 righe senza codice articolo** (Capirossi, una è `MANODOPERA`) restano fuori: non si indovina un codice.

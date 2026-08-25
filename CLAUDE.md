@@ -70,6 +70,8 @@
 - **I fornitori l'import non li tocca mai**: crea solo clienti, e nel file non c'è una colonna fornitore.
 - **✅ Pulito e rifatto il 25 ago, verificato a database**: 468→417 commesse, 35→32 aziende, 6 rinomine su 6, zero orfani, zero righe vecchie perse. Restano 4 coppie doppie preesistenti (giugno/luglio) che l'import non ha fatto.
 - **IL CONTROLLO DA RIFARE dopo ogni modifica all'import: importare DUE VOLTE di fila** e pretendere che la seconda passata dica `0 nuove · 0 aggiornamenti · 0 rinomine`. Oggi lo fa. È la definizione di una fotografia fatta bene, e l'unico modo di accorgersi in fretta che una chiave di confronto non combacia.
+- **LA SCADENZA: ALNUS COMANDA** (25 ago, decisione Nico: *"dovrebbe sempre essere lo specchio del nostro programma"*). Il primo reimport ha portato le commesse in ritardo **da 4 a 49**: 54 scadenze cambiate, **54 anticipate e zero posticipate**, e tutte su commesse **ripianificate a mano** nel gestionale. Non è un difetto — è Alnus che è rimasto indietro. Nessun ripristino fatto; l'elenco da sistemare in Alnus è in `strumenti/date-da-allineare-in-alnus.xlsx` (54 righe, 46 già scadute là). Marcia indietro disponibile ma non eseguita: `strumenti/ripristina-scadenze-25ago.sql`.
+- **Guardare sempre il VERSO degli scostamenti, non solo quanti sono**: "54 aggiornamenti" non dice niente, "54 su 54 nella stessa direzione" dice tutto.
 - **Non è "parte da solo"**: Pages è statico. Si trascina, si guarda l'anteprima, si conferma.
 - Aperti: `numero_op` non è nel file · `Quantità Residua` non entra da nessuna parte · un BOX nuovo nasce senza min/pz.
 
