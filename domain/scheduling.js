@@ -1987,7 +1987,11 @@ function analizzaImportOrdini(righe, ctx) {
 
   // Passata 1: normalizzazione riga per riga
   const singole = [];
-  const daFondere = {};   // "numeroOrdine::riferimento" -> righe del box
+  const daFondere = {};            // "numeroOrdine::riferimento" -> righe del box
+  // Tutte le chiavi ordine+posizione VISTE nel file, anche quelle di righe
+  // poi scartate o fuse: servono a non far sembrare sparita da Alnus una
+  // commessa la cui riga nel file c'e', solo non importabile.
+  const chiaviViste = new Set();
   righe.forEach((r, i) => {
     const nRiga = i + 2;                     // +2: la riga 1 sono le intestazioni
     const sz = (val(r, 'sz') || 'OC').toUpperCase();
@@ -1998,6 +2002,7 @@ function analizzaImportOrdini(righe, ctx) {
     const eser = val(r, 'eser');
     const numeroOrdine = (eser ? eser + '/' : '') + sz + '/' + String(ord).padStart(5, '0');
     const pos = String(val(r, 'riga') || '').padStart(4, '0');
+    chiaviViste.add(chiaveOp(numeroOrdine, pos));
 
     const clienteNome = val(r, 'cliente');
     if (!clienteNome) return scarta(nRiga, 'cliente mancante');
@@ -2166,12 +2171,13 @@ function analizzaImportOrdini(righe, ctx) {
   // I BOX Senzani restano fuori (decisione Nico): la' la divergenza e'
   // strutturale — Alnus segue le 15-18 righe singole e le chiude quando sono
   // evase tutte, qui c'e' un kit solo — e sarebbe rumore fisso a ogni import.
-  const chiaviFile = new Set();
+  // ⚠ Le chiavi si prendono da TUTTE le righe OC lette, non dalle sole voci
+  // importabili. Una riga scartata (codice articolo mancante) o fusa in un BOX
+  // sta comunque nel file: se si guardassero solo le voci, la sua commessa
+  // risulterebbe "sparita da Alnus" quando invece e' li'. Sono le righe
+  // Senzani fuse — 177 — e quelle senza codice.
   const ordiniFile = new Set();
-  voci.forEach(v => {
-    chiaviFile.add(chiaveOp(v.numeroOrdine, v.pos));
-    ordiniFile.add(v.numeroOrdine);
-  });
+  voci.forEach(v => ordiniFile.add(v.numeroOrdine));
   const eChiusa = o => o.stato === 'completata' || o.stato === 'spedita';
   const descriviOp = o => ({
     numeroOrdine: o.numero_ordine, pos: o.pos, stato: o.stato, scadenza: o.scadenza,
@@ -2182,7 +2188,7 @@ function analizzaImportOrdini(righe, ctx) {
     .filter(v => v.origine !== 'box')
     .map(v => Object.assign(descriviOp(v.esistente), { origine: 'file' }));
   out.statiDiscordanti.viveQui = operazioni
-    .filter(o => !eChiusa(o) && !chiaviFile.has(chiaveOp(o.numero_ordine, o.pos)))
+    .filter(o => !eChiusa(o) && !chiaviViste.has(chiaveOp(o.numero_ordine, o.pos)))
     .map(o => Object.assign(descriviOp(o), {
       // Se l'ORDINE c'e' ancora nel file ma la riga no, non e' sparito
       // l'ordine: e' sparita quella posizione. Si legge diversamente.

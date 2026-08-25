@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-25.7`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-25.8`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -58,7 +58,7 @@
 
 
 ## Import ordini dall'estrazione ERP (25 ago, `2026-08-25.4`)
-- **Le regole stanno in `analizzaImportOrdini(righe, ctx)`** (`domain/scheduling.js`, PURA, 110 test in scratchpad/test_import_ordini.js): ritorna il piano (nuove/aggiornamenti/bloccate/scartate/anagrafiche), la UI disegna soltanto. Ingresso: pulsante "↑ Importa da Excel" in Pianificazione.
+- **Le regole stanno in `analizzaImportOrdini(righe, ctx)`** (`domain/scheduling.js`, PURA, 114 test in scratchpad/test_import_ordini.js): ritorna il piano (nuove/aggiornamenti/bloccate/scartate/anagrafiche), la UI disegna soltanto. Ingresso: pulsante "↑ Importa da Excel" in Pianificazione.
 - **Solo sezionale OC**; le righe OD si scartano dichiarandole. Il formato numero ordine dell'app è ancora `AAAA/OC/NNNNN` fisso: per far entrare gli OD va allargata quella validazione.
 - **Senzani + riferimento che inizia per `EL` → le righe si FONDONO in UNA commessa**: articolo `BOX_<rif>`, descrizione `SBNE`, pos `0010`, qtà 1, prezzo = somma degli imponibili. ⚠ **Non c'entra "⊞ Raggruppa"** (`gruppo_id`): è fusione di righe del file, l'import non tocca nessun gruppo. Regola **verificata sui dati**: riproduce esattamente le 11 commesse BOX già a sistema.
 - quantità = `Quantita UMI Ordine/Offerta` · scadenza = `Data Rich. Evasione` · prezzo in `prezzo_unitario` **con la regola tariffa cliente** (oggi tocca solo Elcotec).
