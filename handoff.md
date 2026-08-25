@@ -328,6 +328,13 @@ Nico voleva "caricare in automatico gli ordini" da `Cartel1.xlsx`, l'estrazione 
   - **Due casi in cui NON si rinomina**, entrambi dichiarati: (a) lo stesso cliente compare con **due diciture diverse dentro lo stesso file** — non c'è un nome giusto da scegliere; (b) il nome di arrivo è **già occupato da un'altra scheda** (tipicamente un doppione non ancora ripulito) — rinominare farebbe due schede identiche. *Un nome sbagliato è peggio di un nome vecchio.*
   - **Fra due copie della stessa ditta vince la PIÙ VECCHIA** (stessa regola delle commesse): è quella con le commesse attaccate. Serve davvero — finché i 3 doppioni del 25 ago sono lì, cercare per nome esatto aggancerebbe la scheda **vuota** nata quel giorno invece di quella vera. Per questo l'indice dei clienti è **uno solo, per chiave**, e non più "prima il nome esatto, poi la chiave".
 - **I FORNITORI l'import non li tocca mai**: crea sempre e solo clienti (`is_cliente` sì, `is_fornitore` no) e nel file non c'è nessuna colonna fornitore. Oggi nessuna azienda è cliente e fornitore insieme.
+- **✅ PULITO E RIFATTO, verificato a database il 25 ago.** Eseguito `strumenti/annulla-import-25ago.sql` (Nico, dal pannello) e poi il reimport con la `.4`. Esito controllato riga per riga contro il backup del 24 ago:
+  - commesse **468 → 417** (51 doppioni tolti), **21** create oggi legittime tutte al loro posto;
+  - aziende **35 → 32**, zero clienti doppi, **6 rinomine su 6 applicate** (`Cablotech S.r.l.`→`CABLOTECH SRL` ecc.);
+  - timbri, fasi e addetti **orfani: 0**; commesse con cliente inesistente: 0;
+  - **righe del backup del 24 ago sparite: 0** — la pulizia non ha toccato niente di vecchio;
+  - restano le **4 coppie doppie preesistenti** di giugno/luglio, che l'import non aveva fatto e non ha toccato.
+- **LA PROVA CHE CONTA: adesso l'import è IDEMPOTENTE.** Rilanciandolo sullo stesso file non fa più niente — `0 nuove · 0 aggiornamenti · 130 già uguali · 0 rinomine`. È la definizione di una fotografia fatta bene; stamattina la stessa identica operazione produceva 51 commesse doppie. **Questo è il controllo da rifare dopo ogni modifica all'import**: importare due volte di fila e pretendere che la seconda passata non cambi niente.
 - 86 test in `scratchpad/test_import_ordini.js`, con tutte le regressioni dentro.
 
 **Cosa NON c'è ancora / da chiarire con Nico:**
