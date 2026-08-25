@@ -1901,6 +1901,7 @@ function analizzaImportOrdini(righe, ctx) {
     box: [], nuove: [], aggiornamenti: [], bloccate: [], invariate: 0,
     clientiDaCreare: [], articoliDaCreare: [], clientiRiconosciuti: [],
     clientiDaRinominare: [], rinomineImpossibili: [], residuiDiscordanti: [],
+    senzaCodice: [], statiDiscordanti: { chiuseQui: [], viveQui: [] },
   };
   if (!righe.length) return out;
 
@@ -2027,7 +2028,17 @@ function analizzaImportOrdini(righe, ctx) {
       (daFondere[k] = daFondere[k] || []).push(base);
       return;
     }
-    if (!base.codArt) return scarta(nRiga, 'codice articolo mancante');
+    if (!base.codArt) {
+      // Il codice articolo DEVE esserci sempre (regola di Nico, 25 ago): se
+      // manca non e' una riga che non ci riguarda, e' un ERRORE nell'anagrafica
+      // di Alnus da correggere la'. Quindi non finisce fra gli scarti generici
+      // ma in un elenco suo, con abbastanza dettaglio per andarla a cercare.
+      out.senzaCodice.push({
+        numeroOrdine, pos, quantita: qta, prezzo,
+        cliente: clienteNome, descrizione: base.descrArt || '(nessuna descrizione)',
+      });
+      return scarta(nRiga, 'codice articolo mancante');
+    }
     singole.push(base);
   });
 
@@ -2145,6 +2156,43 @@ function analizzaImportOrdini(righe, ctx) {
       chiIndietro: residuoQui < v.residuaFile ? 'alnus' : 'gestionale',
     });
   });
+  // ── I due sistemi viaggiano in parallelo? ──
+  // L'estrazione contiene SOLO gli ordini ancora in corso su Alnus (scelta
+  // voluta). Quindi la presenza o l'ASSENZA di una riga nel file e' essa
+  // stessa un'informazione di stato, e si legge nei due versi:
+  //   · c'e' nel file ma qui e' chiusa   -> per Alnus e' ancora da fare
+  //   · qui e' viva ma nel file non c'e' -> per Alnus e' finita
+  // Non si tocca niente: nessuno dei due sistemi ha ragione per definizione.
+  // I BOX Senzani restano fuori (decisione Nico): la' la divergenza e'
+  // strutturale — Alnus segue le 15-18 righe singole e le chiude quando sono
+  // evase tutte, qui c'e' un kit solo — e sarebbe rumore fisso a ogni import.
+  const chiaviFile = new Set();
+  const ordiniFile = new Set();
+  voci.forEach(v => {
+    chiaviFile.add(chiaveOp(v.numeroOrdine, v.pos));
+    ordiniFile.add(v.numeroOrdine);
+  });
+  const eChiusa = o => o.stato === 'completata' || o.stato === 'spedita';
+  const descriviOp = o => ({
+    numeroOrdine: o.numero_ordine, pos: o.pos, stato: o.stato, scadenza: o.scadenza,
+    codice: (articoli.find(a => a.id === o.articolo_id) || {}).codice || '',
+    cliente: (aziende.find(a => a.id === o.cliente_id) || {}).nome || '',
+  });
+  out.statiDiscordanti.chiuseQui = out.bloccate
+    .filter(v => v.origine !== 'box')
+    .map(v => Object.assign(descriviOp(v.esistente), { origine: 'file' }));
+  out.statiDiscordanti.viveQui = operazioni
+    .filter(o => !eChiusa(o) && !chiaviFile.has(chiaveOp(o.numero_ordine, o.pos)))
+    .map(o => Object.assign(descriviOp(o), {
+      // Se l'ORDINE c'e' ancora nel file ma la riga no, non e' sparito
+      // l'ordine: e' sparita quella posizione. Si legge diversamente.
+      ordineNelFile: ordiniFile.has(o.numero_ordine),
+    }));
+  const perOrdinePos = (a, b) => String(a.numeroOrdine).localeCompare(String(b.numeroOrdine))
+    || Number(a.pos) - Number(b.pos);
+  out.statiDiscordanti.chiuseQui.sort(perOrdinePos);
+  out.statiDiscordanti.viveQui.sort(perOrdinePos);
+
   out.residuiDiscordanti.sort((a, b) =>
     String(a.numeroOrdine).localeCompare(String(b.numeroOrdine)) || Number(a.pos) - Number(b.pos));
 

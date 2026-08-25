@@ -5313,6 +5313,56 @@ function openOperazioniImportPreviewModal(rows) {
       + 'in Alnus, ' + (piano.residuiDiscordanti.length - nAlnus) + ' qui.', 'var(--ylw)'));
   }
 
+  // ── Codice articolo mancante: è un errore in Alnus, non uno scarto ──
+  // Regola di Nico (25 ago): il codice ci deve essere sempre. Quindi queste
+  // righe non stanno in fondo con gli scarti generici — si va a correggerle
+  // là, e per farlo serve sapere quali sono.
+  if (piano.senzaCodice.length) {
+    body.append(sezione(piano.senzaCodice.length
+      + (piano.senzaCodice.length === 1 ? ' riga senza codice articolo' : ' righe senza codice articolo')
+      + ' — da correggere in Alnus'));
+    const sc = riquadro('var(--red)');
+    piano.senzaCodice.forEach(r => sc.append(el('div', {},
+      r.numeroOrdine + '/' + r.pos + '  ' + r.cliente + '  ·  ' + r.descrizione
+      + '  ·  ' + r.quantita + ' pz')));
+    body.append(sc);
+    body.append(nota('Senza codice la commessa non può nascere: non c\'è niente a cui '
+      + 'agganciare fasi, tempi e storico. Queste righe restano fuori finché il codice '
+      + 'non c\'è nel file.', 'var(--red)'));
+  }
+
+  // ── I due sistemi viaggiano in parallelo? ──
+  const sd = piano.statiDiscordanti;
+  if (sd.chiuseQui.length || sd.viveQui.length) {
+    body.append(sezione('Stato: ' + (sd.chiuseQui.length + sd.viveQui.length)
+      + ' righe su cui i due sistemi non concordano'));
+    const box = riquadro();
+    if (sd.chiuseQui.length) {
+      box.append(el('div', { style:'color:var(--mut);' },
+        '── per Alnus da fare, qui già chiuse (' + sd.chiuseQui.length + ') ──'));
+      sd.chiuseQui.slice(0, 25).forEach(r => box.append(el('div', {},
+        '   ' + r.numeroOrdine + '/' + r.pos + '  ' + r.codice + '  ' + r.stato
+        + '  ·  ' + r.cliente)));
+      if (sd.chiuseQui.length > 25) box.append(el('div', { style:'color:var(--mut);' },
+        '   ... e altre ' + (sd.chiuseQui.length - 25)));
+    }
+    if (sd.viveQui.length) {
+      box.append(el('div', { style:'color:var(--mut);margin-top:6px;' },
+        '── per Alnus finite, qui ancora aperte (' + sd.viveQui.length + ') ──'));
+      sd.viveQui.slice(0, 25).forEach(r => box.append(el('div', {},
+        '   ' + r.numeroOrdine + '/' + r.pos + '  ' + r.codice + '  ' + r.stato
+        + '  scad ' + (r.scadenza ? fmtIT(r.scadenza) : '—') + '  ·  ' + r.cliente
+        + (r.ordineNelFile ? '   (l\'ordine c\'è ancora: è sparita la riga)' : ''))));
+      if (sd.viveQui.length > 25) box.append(el('div', { style:'color:var(--mut);' },
+        '   ... e altre ' + (sd.viveQui.length - 25)));
+    }
+    body.append(box);
+    body.append(nota('L\'estrazione contiene solo gli ordini ancora in corso su Alnus, '
+      + 'quindi anche l\'assenza di una riga dice qualcosa. Nessuno dei due sistemi ha '
+      + 'ragione per definizione: l\'import non tocca nessuno stato, si limita a dirlo. '
+      + 'I BOX Senzani restano fuori da questo conto — là la divergenza è normale.'));
+  }
+
   // ── Righe che restano fuori ──
   if (piano.scartate.length) {
     body.append(sezione(piano.scartate.length + ' righe non importate'));
