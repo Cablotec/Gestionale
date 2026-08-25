@@ -1856,6 +1856,21 @@ function importOrdiniData(v) {
   return null;
 }
 
+// Chiave per riconoscere DUE SCRITTURE DELLA STESSA DITTA (25 ago, dopo il
+// danno). L'ERP scrive `CABLOTECH SRL`, il gestionale `Cablotech S.r.l.`:
+// confrontando solo minuscole e spazi sembrano due aziende diverse, e
+// l'import ne creava una nuova accanto a quella che c'era gia'.
+// Si toglie tutto cio' che non e' lettera o cifra — punti, spazi, trattini,
+// accenti — perche' la differenza sta sempre nella forma giuridica
+// (SRL / S.r.l. / S.R.L., snc / S.n.c.), mai nel nome.
+// Provata su tutte e 32 le aziende in anagrafica: 32 chiavi distinte,
+// nessuna coppia di ditte diverse finisce sulla stessa chiave.
+function importOrdiniChiaveNome(nome) {
+  return String(nome === null || nome === undefined ? '' : nome).toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
 // La fusione BOX vale per Senzani e per nessun altro: sui dati veri il
 // prefisso EL è esclusivamente suo (177 righe su 177), ma il vincolo sul
 // cliente resta esplicito perché un domani un altro cliente potrebbe usare
@@ -1876,7 +1891,7 @@ function analizzaImportOrdini(righe, ctx) {
     righeLette: righe.length, mappa: {}, colonneMancanti: [],
     scartate: [], scartatePerMotivo: {},
     box: [], nuove: [], aggiornamenti: [], bloccate: [], invariate: 0,
-    clientiDaCreare: [], articoliDaCreare: [],
+    clientiDaCreare: [], articoliDaCreare: [], clientiRiconosciuti: [],
   };
   if (!righe.length) return out;
 
@@ -1907,10 +1922,35 @@ function analizzaImportOrdini(righe, ctx) {
   // Indici sulle anagrafiche
   const artByCod = {};
   articoli.forEach(a => { if (a.codice) artByCod[norm(a.codice)] = a; });
-  const cliByNome = {};
-  aziende.forEach(a => { if (a.nome) cliByNome[norm(a.nome)] = a; });
+  // Due indici sui clienti: prima si cerca il nome identico, poi la stessa
+  // ditta scritta in un altro modo. Il primo arrivato vince, cosi' l'esito
+  // non dipende dall'ordine in cui il database restituisce le righe.
+  const cliByNome = {}, cliByChiave = {};
+  aziende.forEach(a => {
+    if (!a.nome) return;
+    if (cliByNome[norm(a.nome)] === undefined) cliByNome[norm(a.nome)] = a;
+    const k = importOrdiniChiaveNome(a.nome);
+    if (k && cliByChiave[k] === undefined) cliByChiave[k] = a;
+  });
+  // La posizione si confronta come NUMERO, non come testo (25 ago, dopo il
+  // danno). Le commesse piu' vecchie hanno `pos` senza zeri davanti — "40"
+  // invece di "0040", 191 su 468 — e l'import, che scrive la forma con gli
+  // zeri, non le riconosceva: invece di aggiornarle ne creava una accanto.
+  // 55 commesse doppie in una passata sola.
+  // Le NUOVE continuano a nascere con gli zeri (e' la forma dell'app): qui
+  // cambia solo il modo di CERCARE quelle che ci sono gia'.
+  const chiaveOp = (numOrd, pos) => {
+    const p = (pos === null || pos === undefined || pos === '') ? '' : Number(pos);
+    return (numOrd || '') + '|' + (Number.isFinite(p) ? p : String(pos).trim());
+  };
   const opByChiave = {};
-  operazioni.forEach(o => { opByChiave[(o.numero_ordine || '') + '|' + (o.pos || '')] = o; });
+  operazioni.forEach(o => {
+    const k = chiaveOp(o.numero_ordine, o.pos);
+    // Se lo stesso ordine+posizione esiste gia' due volte (i doppioni del
+    // 25 ago), vince la piu' VECCHIA: e' quella con la storia attaccata.
+    const gia = opByChiave[k];
+    if (!gia || String(o.created_at || '') < String(gia.created_at || '')) opByChiave[k] = o;
+  });
 
   const val = (r, k) => {
     const col = out.mappa[k];
@@ -1996,12 +2036,21 @@ function analizzaImportOrdini(righe, ctx) {
   });
 
   // Passata 3: confronto con quello che c'e' gia'
-  const clientiNuovi = {}, articoliNuovi = {};
+  const clientiNuovi = {}, articoliNuovi = {}, riconosciuti = {};
   voci.forEach(v => {
-    const cli = cliByNome[norm(v.clienteNome)] || null;
+    // Il cliente si cerca prima col nome esatto, poi con la chiave che ignora
+    // la forma giuridica. Si USA SEMPRE la scheda che c'e' gia', con la sua
+    // dicitura: l'anagrafica del gestionale comanda, l'ERP non la riscrive.
+    const cli = cliByNome[norm(v.clienteNome)]
+      || cliByChiave[importOrdiniChiaveNome(v.clienteNome)] || null;
     const art = artByCod[norm(v.codArt)] || null;
     v.cliente = cli;
     v.articolo = art;
+    // Riconosciuto ma scritto diversamente: non e' un errore e non blocca
+    // niente, pero' va DETTO — e' la differenza fra "l'ho collegato a quello
+    // che c'era" e "te ne ho creato uno nuovo senza dirtelo".
+    v.clienteDicituraDiversa = (cli && norm(cli.nome) !== norm(v.clienteNome)) ? cli.nome : null;
+    if (v.clienteDicituraDiversa) riconosciuti[v.clienteNome] = cli.nome;
     if (!cli) clientiNuovi[v.clienteNome] = true;
     if (!art) articoliNuovi[v.codArt] = v.descrArt || null;
 
@@ -2014,7 +2063,7 @@ function analizzaImportOrdini(righe, ctx) {
       ? Math.round(v.prezzo / tariffa * 60)
       : ((art && art.minuti_unitari != null) ? Math.round(Number(art.minuti_unitari)) : 0);
 
-    const op = opByChiave[v.numeroOrdine + '|' + v.pos] || null;
+    const op = opByChiave[chiaveOp(v.numeroOrdine, v.pos)] || null;
     v.esistente = op;
     if (!op) { out.nuove.push(v); return; }
     if (op.stato === 'completata' || op.stato === 'spedita') { out.bloccate.push(v); return; }
@@ -2035,6 +2084,8 @@ function analizzaImportOrdini(righe, ctx) {
   });
 
   out.clientiDaCreare  = Object.keys(clientiNuovi).sort();
+  out.clientiRiconosciuti = Object.keys(riconosciuti).sort()
+    .map(daFile => ({ daFile, inAnagrafica: riconosciuti[daFile] }));
   out.articoliDaCreare = Object.keys(articoliNuovi).sort()
     .map(c => ({ codice: c, descrizione: articoliNuovi[c] }));
   return out;

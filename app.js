@@ -5213,6 +5213,21 @@ function openOperazioniImportPreviewModal(rows) {
       + ': una fotografia dell\'ERP non deve poter riaprire un lavoro finito.', 'var(--mut)'));
   }
 
+  // ── Clienti riconosciuti sotto un'altra dicitura ──
+  // Va detto, anche se non c'è niente da decidere: il 25 ago l'import ha
+  // creato "CABLOTECH SRL" accanto a "Cablotech S.r.l." e nessuno se n'è
+  // accorto guardando l'anteprima, perché fra le anagrafiche da creare
+  // compariva un nome che Nico riconosceva benissimo.
+  if (piano.clientiRiconosciuti.length) {
+    body.append(sezione('Clienti già in anagrafica, scritti diversamente nel file'));
+    const ri = riquadro();
+    piano.clientiRiconosciuti.forEach(c => ri.append(el('div', {},
+      c.daFile + '   →   ' + c.inAnagrafica)));
+    body.append(ri);
+    body.append(nota('Si usa la scheda che c\'è già, con la sua dicitura: '
+      + 'l\'anagrafica del gestionale comanda, il file non la riscrive.'));
+  }
+
   // ── Anagrafiche che nascono ──
   if (piano.clientiDaCreare.length || piano.articoliDaCreare.length) {
     body.append(sezione('Anagrafiche create al volo'));
@@ -5288,7 +5303,11 @@ async function operazioniImportEsegui(piano) {
   try {
     // 1) Clienti nuovi
     for (const nome of piano.clientiDaCreare) {
-      const gia = state.aziende.find(a => (a.nome || '').toLowerCase().trim() === nome.toLowerCase().trim());
+      // Ultima rete prima di creare: la stessa ditta scritta in un altro modo
+      // NON e' una ditta nuova. Il piano lo sa gia', ma qui si scrive davvero
+      // e un doppione d'anagrafica poi va ripulito a mano.
+      const k = importOrdiniChiaveNome(nome);
+      const gia = state.aziende.find(a => importOrdiniChiaveNome(a.nome) === k);
       if (gia) continue;
       const { data, error } = await eseguiConRetry(
         () => sb.from('aziende').insert({ nome, attivo:true, is_cliente:true, is_fornitore:false })
@@ -5309,12 +5328,17 @@ async function operazioniImportEsegui(piano) {
     }
 
     // 3) Le voci ripescano gli id appena nati
-    const cliByNome = {}; state.aziende.forEach(a => { if (a.nome) cliByNome[a.nome.toLowerCase().trim()] = a; });
+    // Stessa chiave del piano: qui il cliente si ripesca per forma giuridica
+    // normalizzata, non per nome esatto, o si ricasca nel doppione.
+    const cliByChiave = {}; state.aziende.forEach(a => {
+      const k = importOrdiniChiaveNome(a.nome);
+      if (k && cliByChiave[k] === undefined) cliByChiave[k] = a;
+    });
     const artByCod  = {}; state.articoli.forEach(a => { if (a.codice) artByCod[a.codice.toLowerCase().trim()] = a; });
 
     // 4) Inserimenti, a blocchi
     const payloads = piano.nuove.map(v => {
-      const cli = v.cliente || cliByNome[v.clienteNome.toLowerCase().trim()];
+      const cli = v.cliente || cliByChiave[importOrdiniChiaveNome(v.clienteNome)];
       const art = v.articolo || artByCod[v.codArt.toLowerCase().trim()];
       return {
         cliente_id: cli ? cli.id : null,
