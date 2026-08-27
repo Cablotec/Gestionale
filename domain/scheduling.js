@@ -2082,15 +2082,18 @@ function analizzaImportOrdini(righe, ctx) {
       return;
     }
     if (!base.codArt) {
-      // Il codice articolo DEVE esserci sempre (regola di Nico, 25 ago): se
-      // manca non e' una riga che non ci riguarda, e' un ERRORE nell'anagrafica
-      // di Alnus da correggere la'. Quindi non finisce fra gli scarti generici
-      // ma in un elenco suo, con abbastanza dettaglio per andarla a cercare.
+      // Senza codice articolo la riga NON si carica (regola di Nico, 27 ago):
+      // sono voci descrittive — manodopera, minuteria — non pezzi da produrre.
+      // ⚠ Il 25 ago la regola era l'opposta (\"il codice deve esserci sempre,
+      // segnala l'errore\") e queste righe finivano in un riquadro rosso da
+      // correggere in Alnus. Non era un errore: e' come l'ERP descrive certe
+      // voci. Restano elencate perche' sapere cosa non e' entrato serve, ma
+      // sono uno scarto normale e non una cosa da andare a sistemare.
       out.senzaCodice.push({
         numeroOrdine, pos, quantita: qta, prezzo,
         cliente: clienteNome, descrizione: base.descrArt || '(nessuna descrizione)',
       });
-      return scarta(nRiga, 'codice articolo mancante');
+      return scarta(nRiga, 'riga descrittiva senza codice articolo (es. manodopera)');
     }
     singole.push(base);
   });

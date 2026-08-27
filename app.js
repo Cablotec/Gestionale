@@ -5435,22 +5435,21 @@ function openOperazioniImportPreviewModal(rows) {
       + 'in Alnus, ' + (piano.residuiDiscordanti.length - nAlnus) + ' qui.', 'var(--ylw)'));
   }
 
-  // ── Codice articolo mancante: è un errore in Alnus, non uno scarto ──
-  // Regola di Nico (25 ago): il codice ci deve essere sempre. Quindi queste
-  // righe non stanno in fondo con gli scarti generici — si va a correggerle
-  // là, e per farlo serve sapere quali sono.
+  // ── Righe descrittive: non si caricano, ed è giusto così ──
+  // Regola di Nico (27 ago, che ha sostituito quella del 25): senza codice
+  // articolo la riga non è un pezzo da produrre ma una voce descrittiva —
+  // manodopera, minuteria. Si elencano perché sapere cosa NON è entrato serve
+  // sempre, ma non c'è niente da andare a correggere: niente rosso.
   if (piano.senzaCodice.length) {
     body.append(sezione(piano.senzaCodice.length
-      + (piano.senzaCodice.length === 1 ? ' riga senza codice articolo' : ' righe senza codice articolo')
-      + ' — da correggere in Alnus'));
-    const sc = riquadro('var(--red)');
+      + (piano.senzaCodice.length === 1 ? ' riga descrittiva non caricata' : ' righe descrittive non caricate')));
+    const sc = riquadro();
     piano.senzaCodice.forEach(r => sc.append(el('div', {},
       r.numeroOrdine + '/' + r.pos + '  ' + r.cliente + '  ·  ' + r.descrizione
       + '  ·  ' + r.quantita + ' pz')));
     body.append(sc);
-    body.append(nota('Senza codice la commessa non può nascere: non c\'è niente a cui '
-      + 'agganciare fasi, tempi e storico. Queste righe restano fuori finché il codice '
-      + 'non c\'è nel file.', 'var(--red)'));
+    body.append(nota('Righe senza codice articolo: sono voci descrittive, non pezzi da '
+      + 'produrre, e non diventano commesse.'));
   }
 
   // ── I due sistemi viaggiano in parallelo? ──
