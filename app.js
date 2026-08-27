@@ -5262,7 +5262,7 @@ function openOperazioniImportPreviewModal(rows) {
     spedizioni: state.spedizioni,
   });
 
-  const modal = el('div', { class:'modal', style:'max-width:820px' });
+  const modal = el('div', { class:'modal', style:'max-width:1100px' });
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, 'Anteprima import ordini'),
     el('button', { class:'mclose', onclick:closeModal }, '✕'),
@@ -5289,16 +5289,6 @@ function openOperazioniImportPreviewModal(rows) {
   }
 
   const nDaScrivere = piano.nuove.length + piano.aggiornamenti.length;
-  body.append(el('div', { class:'kpis' },
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Righe lette'),
-      el('div', { class:'kv' }, String(piano.righeLette))),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Commesse nuove'),
-      el('div', { class:'kv kg' }, String(piano.nuove.length))),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Da aggiornare'),
-      el('div', { class:'kv' }, String(piano.aggiornamenti.length))),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Già uguali'),
-      el('div', { class:'kv' }, String(piano.invariate))),
-  ));
 
   const nota = (testo, colore) => el('div', { class:'sub',
     style:'margin:10px 0 0;font-size:11px;' + (colore ? 'color:' + colore + ';' : '') }, testo);
@@ -5308,10 +5298,23 @@ function openOperazioniImportPreviewModal(rows) {
     + 'border:1px solid ' + (bordo || 'var(--brd)') + ';border-radius:4px;padding:9px 11px;'
     + 'font-family:monospace;font-size:11px;line-height:1.7;' });
 
+  // ── I tre blocchi dell'anteprima (27 ago, richiesta Nico: "si può ordinare
+  // in maniera che un non addetto ci capisca?"). Le sezioni erano tredici in
+  // fila, cresciute per accumulo, e messe insieme non raccontavano niente.
+  // Adesso rispondono a tre domande in quest'ordine:
+  //   1. cosa scrive nel gestionale se confermo
+  //   2. cosa resta fuori, e perché
+  //   3. cosa NON tocca ma dovrei guardare (Alnus e gestionale in disaccordo)
+  // Ogni sezione appende in `dest`, e l'ordine a schermo lo decide
+  // l'assemblaggio in fondo: così riordinare non vuol dire spostare codice.
+  const bScrive = el('div'), bFuori = el('div'), bGuarda = el('div');
+  let dest = bScrive;
+
+  dest = bScrive;
   // ── Le righe Senzani fuse in una commessa sola ──
   if (piano.box.length) {
     const nFuse = piano.box.reduce((s, b) => s + b.nRigheFuse, 0);
-    body.append(sezione('Senzani: ' + nFuse + ' righe unite in '
+    dest.append(sezione('Senzani: ' + nFuse + ' righe unite in '
       + piano.box.length + (piano.box.length === 1 ? ' commessa' : ' commesse')));
     const box = riquadro();
     piano.box.forEach(b => {
@@ -5325,58 +5328,63 @@ function openOperazioniImportPreviewModal(rows) {
       if (b.scadenzeDiverse) box.append(el('div', { style:'color:var(--ylw);' },
         '   ⚠ le righe unite avevano scadenze diverse: tenuta la più vicina'));
     });
-    body.append(box);
+    dest.append(box);
   }
 
+  dest = bFuori;
   // ── Commesse chiuse: si dichiarano e si lasciano stare ──
   if (piano.bloccate.length) {
-    body.append(nota('⛔ ' + piano.bloccate.length + ' commess'
+    dest.append(nota('⛔ ' + piano.bloccate.length + ' commess'
       + (piano.bloccate.length === 1 ? 'a è già completata o spedita e non viene toccata'
                                      : 'e sono già completate o spedite e non vengono toccate')
       + ': una fotografia dell\'ERP non deve poter riaprire un lavoro finito.', 'var(--mut)'));
   }
 
+  dest = bScrive;
   // ── Clienti che cambiano nome ──
   // Alnus è la fonte del nome (decisione Nico 25 ago), quindi la scheda che
   // c'è già viene ALLINEATA al file. È l'unica cosa in tutto l'import che
   // riscrive un dato d'anagrafica: va vista prima, non scoperta dopo.
   if (piano.clientiDaRinominare.length) {
-    body.append(sezione(piano.clientiDaRinominare.length + ' client'
+    dest.append(sezione(piano.clientiDaRinominare.length + ' client'
       + (piano.clientiDaRinominare.length === 1 ? 'e viene rinominato' : 'i vengono rinominati')
       + ' per allinearsi al file'));
     const rn = riquadro('var(--ylw)');
     piano.clientiDaRinominare.forEach(c => rn.append(el('div', {},
       c.da + '   →   ' + c.a)));
-    body.append(rn);
-    body.append(nota('La scheda resta la stessa — commesse, storico e tariffe non si '
+    dest.append(rn);
+    dest.append(nota('La scheda resta la stessa — commesse, storico e tariffe non si '
       + 'muovono — cambia solo come si legge il nome, ovunque compaia: '
       + 'Gantt, export e analisi comprese.', 'var(--ylw)'));
   }
+  dest = bFuori;
   if (piano.rinomineImpossibili.length) {
-    body.append(sezione('Nomi lasciati come sono'));
+    dest.append(sezione('Nomi lasciati come sono'));
     const ri = riquadro();
     piano.rinomineImpossibili.forEach(c => ri.append(el('div', {},
       c.da + '   ·   ' + c.motivo)));
-    body.append(ri);
-    body.append(nota('Un nome sbagliato è peggio di un nome vecchio: nel dubbio '
+    dest.append(ri);
+    dest.append(nota('Un nome sbagliato è peggio di un nome vecchio: nel dubbio '
       + 'l\'import non tocca niente e te lo dice.'));
   }
 
+  dest = bScrive;
   // ── Anagrafiche che nascono ──
   if (piano.clientiDaCreare.length || piano.articoliDaCreare.length) {
-    body.append(sezione('Anagrafiche create al volo'));
+    dest.append(sezione('Anagrafiche create al volo'));
     const an = riquadro('var(--ylw)');
     piano.clientiDaCreare.forEach(n => an.append(el('div', {}, 'cliente   ' + n)));
     piano.articoliDaCreare.forEach(a => an.append(el('div', {},
       'articolo  ' + a.codice + (a.descrizione ? '  ' + a.descrizione : ''))));
-    body.append(an);
-    body.append(nota('Nascono solo premendo Importa. Un refuso dell\'ERP diventa '
+    dest.append(an);
+    dest.append(nota('Nascono solo premendo Importa. Un refuso dell\'ERP diventa '
       + 'un\'anagrafica nuova: se qui sopra c\'è un nome che non riconosci, annulla.', 'var(--ylw)'));
   }
 
+  dest = bScrive;
   // ── Cosa cambia sulle commesse che ci sono già ──
   if (piano.aggiornamenti.length) {
-    body.append(sezione('Cosa cambia sulle ' + piano.aggiornamenti.length + ' già presenti'));
+    dest.append(sezione('Cosa cambia sulle ' + piano.aggiornamenti.length + ' già presenti'));
     const ag = riquadro();
     const mostra = (v) => (v === null || v === undefined || v === '') ? '(vuoto)'
       : (/^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? fmtIT(v) : String(v));
@@ -5385,23 +5393,25 @@ function openOperazioniImportPreviewModal(rows) {
       + a.campi.map(c => c.campo + ' ' + mostra(c.da) + ' → ' + mostra(c.a)).join('  ·  '))));
     if (piano.aggiornamenti.length > 40) ag.append(el('div', { style:'color:var(--mut);' },
       '... e altre ' + (piano.aggiornamenti.length - 40)));
-    body.append(ag);
-    body.append(nota('Si toccano solo quantità, scadenza e prezzo — i campi che vengono '
+    dest.append(ag);
+    dest.append(nota('Si toccano solo quantità, scadenza e prezzo — i campi che vengono '
       + 'dall\'ERP. Stato, fasi, addetti, note, gruppi e ore restano come sono.'));
   }
 
+  dest = bScrive;
   // ── Tempo pagato: dove lo prende e dove non ce l'ha ──
   const daScrivere = piano.nuove.concat(piano.aggiornamenti.map(a => a.voce));
   const daTariffa = daScrivere.filter(v => v.minutiDaTariffa);
   const senzaMinuti = piano.nuove.filter(v => !v.minutiUnitari);
-  if (daTariffa.length) body.append(nota('⏱ Su ' + daTariffa.length + ' commess'
+  if (daTariffa.length) dest.append(nota('⏱ Su ' + daTariffa.length + ' commess'
     + (daTariffa.length === 1 ? 'a il tempo pagato è ricavato' : 'e il tempo pagato è ricavato')
     + ' dal prezzo con la tariffa del cliente, come fa "+ Nuovo ordine".'));
-  if (senzaMinuti.length) body.append(nota('⚠ ' + senzaMinuti.length + ' commess'
+  if (senzaMinuti.length) dest.append(nota('⚠ ' + senzaMinuti.length + ' commess'
     + (senzaMinuti.length === 1 ? 'a nasce' : 'e nascono') + ' senza tempo pagato '
     + '(l\'articolo non ha un min/pz e il cliente non ha tariffa): avanzamento e '
     + '€/ora resteranno vuoti finché non lo imposti.', 'var(--ylw)'));
 
+  dest = bGuarda;
   // ── Spedizioni: i due sistemi non concordano ──
   // Non è una riga da importare, è una discordanza da guardare: la quantità
   // residua qui si ricalcola da ordinato − spedito, e dove non torna con
@@ -5409,7 +5419,7 @@ function openOperazioniImportPreviewModal(rows) {
   // L'import non tocca niente di tutto questo: lo dichiara e basta.
   if (piano.residuiDiscordanti.length) {
     const nAlnus = piano.residuiDiscordanti.filter(r => r.chiIndietro === 'alnus').length;
-    body.append(sezione('Spedizioni: ' + piano.residuiDiscordanti.length
+    dest.append(sezione('Spedizioni: ' + piano.residuiDiscordanti.length
       + (piano.residuiDiscordanti.length === 1 ? ' riga su cui i due sistemi non concordano'
                                                : ' righe su cui i due sistemi non concordano')));
     const rd = riquadro('var(--ylw)');
@@ -5428,34 +5438,36 @@ function openOperazioniImportPreviewModal(rows) {
               : 'qui manca una spedizione che Alnus ha registrato')))));
     if (piano.residuiDiscordanti.length > 40) rd.append(el('div', { style:'color:var(--mut);' },
       '... e altre ' + (piano.residuiDiscordanti.length - 40)));
-    body.append(rd);
-    body.append(nota('Niente di tutto questo viene importato: la quantità residua il '
+    dest.append(rd);
+    dest.append(nota('Niente di tutto questo viene importato: la quantità residua il '
       + 'gestionale la calcola da sé (ordinato − spedito) e si vede già in tabella. '
       + 'Qui si segnala soltanto dove i due archivi divergono — ' + nAlnus + ' da sistemare '
       + 'in Alnus, ' + (piano.residuiDiscordanti.length - nAlnus) + ' qui.', 'var(--ylw)'));
   }
 
+  dest = bFuori;
   // ── Righe descrittive: non si caricano, ed è giusto così ──
   // Regola di Nico (27 ago, che ha sostituito quella del 25): senza codice
   // articolo la riga non è un pezzo da produrre ma una voce descrittiva —
   // manodopera, minuteria. Si elencano perché sapere cosa NON è entrato serve
   // sempre, ma non c'è niente da andare a correggere: niente rosso.
   if (piano.senzaCodice.length) {
-    body.append(sezione(piano.senzaCodice.length
+    dest.append(sezione(piano.senzaCodice.length
       + (piano.senzaCodice.length === 1 ? ' riga descrittiva non caricata' : ' righe descrittive non caricate')));
     const sc = riquadro();
     piano.senzaCodice.forEach(r => sc.append(el('div', {},
       r.numeroOrdine + '/' + r.pos + '  ' + r.cliente + '  ·  ' + r.descrizione
       + '  ·  ' + r.quantita + ' pz')));
-    body.append(sc);
-    body.append(nota('Righe senza codice articolo: sono voci descrittive, non pezzi da '
+    dest.append(sc);
+    dest.append(nota('Righe senza codice articolo: sono voci descrittive, non pezzi da '
       + 'produrre, e non diventano commesse.'));
   }
 
+  dest = bGuarda;
   // ── I due sistemi viaggiano in parallelo? ──
   const sd = piano.statiDiscordanti;
   if (sd.chiuseQui.length || sd.viveQui.length) {
-    body.append(sezione('Stato: ' + (sd.chiuseQui.length + sd.viveQui.length)
+    dest.append(sezione('Stato: ' + (sd.chiuseQui.length + sd.viveQui.length)
       + ' righe su cui i due sistemi non concordano'));
     const box = riquadro();
     if (sd.chiuseQui.length) {
@@ -5477,8 +5489,8 @@ function openOperazioniImportPreviewModal(rows) {
       if (sd.viveQui.length > 25) box.append(el('div', { style:'color:var(--mut);' },
         '   ... e altre ' + (sd.viveQui.length - 25)));
     }
-    body.append(box);
-    body.append(nota('L\'estrazione contiene solo gli ordini ancora in corso su Alnus, '
+    dest.append(box);
+    dest.append(nota('L\'estrazione contiene solo gli ordini ancora in corso su Alnus, '
       + 'quindi anche l\'assenza di una riga dice qualcosa. Nessuno dei due sistemi ha '
       + 'ragione per definizione: l\'import non tocca nessuno stato, si limita a dirlo. '
       + 'I BOX Senzani restano fuori da questo conto — là la divergenza è normale.'
@@ -5489,14 +5501,51 @@ function openOperazioniImportPreviewModal(rows) {
           : '')));
   }
 
+  dest = bFuori;
   // ── Righe che restano fuori ──
   if (piano.scartate.length) {
-    body.append(sezione(piano.scartate.length + ' righe non importate'));
+    dest.append(sezione(piano.scartate.length + ' righe non importate'));
     const sc = riquadro();
     Object.keys(piano.scartatePerMotivo).sort((a, b) =>
       piano.scartatePerMotivo[b] - piano.scartatePerMotivo[a]).forEach(m =>
       sc.append(el('div', {}, String(piano.scartatePerMotivo[m]).padStart(4) + '  ' + m)));
-    body.append(sc);
+    dest.append(sc);
+  }
+
+  // ── Assemblaggio: i tre blocchi in ordine di importanza per chi legge ──
+  // Le KPI in CIMA al blocco: `prepend` perche a questo punto le sezioni
+  // hanno gia scritto dentro `bScrive`, e un append le metterebbe in fondo.
+  bScrive.prepend(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Righe lette'),
+      el('div', { class:'kv' }, String(piano.righeLette))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Commesse nuove'),
+      el('div', { class:'kv kg' }, String(piano.nuove.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Da aggiornare'),
+      el('div', { class:'kv' }, String(piano.aggiornamenti.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Già uguali'),
+      el('div', { class:'kv' }, String(piano.invariate))),
+  ));
+
+  const intestazione = (n, titolo, spiega) => el('div', {
+    style:'margin:22px 0 4px;padding-top:14px;border-top:2px solid var(--brd);' },
+    el('div', { style:'font-family:Syne,sans-serif;font-weight:700;font-size:14px;' },
+      n + '. ' + titolo),
+    el('div', { class:'sub', style:'font-size:11px;margin-top:2px;' }, spiega));
+
+  if (bScrive.childNodes.length) {
+    body.append(intestazione(1, 'Cosa entra nel gestionale',
+      'Solo questo viene scritto premendo Importa. Tutto il resto qui sotto non tocca niente.'));
+    body.append(bScrive);
+  }
+  if (bFuori.childNodes.length) {
+    body.append(intestazione(2, 'Cosa resta fuori',
+      'Righe del file che non diventano commesse, e commesse che l\'import non tocca.'));
+    body.append(bFuori);
+  }
+  if (bGuarda.childNodes.length) {
+    body.append(intestazione(3, 'Da guardare: Alnus e gestionale non concordano',
+      'Nessuna di queste righe viene modificata. Sono differenze fra i due archivi da sistemare a mano, in uno dei due.'));
+    body.append(bGuarda);
   }
 
   modal.append(body);
