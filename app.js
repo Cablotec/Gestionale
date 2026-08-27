@@ -7325,11 +7325,56 @@ function renderPianificazione(root) {
   }
 
   if (list.length === 0) {
+    // Se quello che cerchi ESISTE ma è spedito, questa scheda non te lo mostra
+    // (le spedite stanno nello Storico) e diceva soltanto "nessuna
+    // corrispondenza" — che sembra "non esiste". Sono due cose diverse, e la
+    // differenza costa dieci minuti di ricerca a vuoto.
+    const { list: conSped } = pianificazioneFiltrate(true);
+    const nascoste = conSped.filter(o => o.stato === 'spedita');
     root.append(el('div', { class:'empty' },
       state.operazioni.length === 0
         ? 'Nessuna operazione ancora. Crea la prima con "+ Nuova Operazione".'
         : 'Nessuna operazione corrisponde ai filtri.'
     ));
+    if (nascoste.length) {
+      // ⚠ Non tutte le spedite stanno nello Storico. Lo Storico elenca le
+      // SPEDIZIONI (una riga per evento), quindi una commessa marcata spedita
+      // che non ha nessuna riga in `spedizioni` non compare nemmeno lì: sono
+      // le 34 caricate a maggio col primo popolamento, già chiuse all'epoca.
+      // Quelle si trovano solo dal Gantt. Mandare tutti allo Storico avrebbe
+      // solo spostato la caccia a vuoto da una scheda all'altra.
+      const conSpedizione = nascoste.filter(o => quantitaSpedita(o.id) > 0);
+      const senzaSpedizione = nascoste.filter(o => quantitaSpedita(o.id) === 0);
+      const elenco = arr => arr.slice(0, 6)
+        .map(o => (o.numero_ordine || '—') + '/' + (o.pos || '—')).join(' · ')
+        + (arr.length > 6 ? ' · … e altre ' + (arr.length - 6) : '');
+      const box = el('div', { class:'empty', style:'margin-top:-6px;' });
+      box.append(el('div', { class:'sub' },
+        nascoste.length === 1
+          ? 'Ma una commessa corrisponde ed è SPEDITA: questa scheda non le mostra.'
+          : 'Ma ' + nascoste.length + ' commesse corrispondono e sono SPEDITE: questa scheda non le mostra.'));
+      if (conSpedizione.length) {
+        box.append(el('div', { class:'sub', style:'margin-top:6px;' },
+          conSpedizione.length + (conSpedizione.length === 1 ? ' è nello Storico:' : ' sono nello Storico:')),
+          el('div', { class:'sub', style:'font-family:JetBrains Mono,monospace;font-size:11px;' },
+            elenco(conSpedizione)),
+          el('button', { class:'btng', style:'margin-top:8px;',
+            onclick: () => { if (typeof switchToTab === 'function') switchToTab('lavoro', 'storico'); },
+          }, 'Vai allo Storico'));
+      }
+      if (senzaSpedizione.length) {
+        box.append(el('div', { class:'sub', style:'margin-top:10px;' },
+          senzaSpedizione.length + (senzaSpedizione.length === 1
+            ? ' è chiusa senza nessuna spedizione registrata, quindi non compare nemmeno nello Storico (che elenca le spedizioni). Si trova dal Gantt:'
+            : ' sono chiuse senza nessuna spedizione registrata, quindi non compaiono nemmeno nello Storico (che elenca le spedizioni). Si trovano dal Gantt:')),
+          el('div', { class:'sub', style:'font-family:JetBrains Mono,monospace;font-size:11px;' },
+            elenco(senzaSpedizione)),
+          el('button', { class:'btng', style:'margin-top:8px;',
+            onclick: () => { if (typeof switchToTab === 'function') switchToTab('lavoro', 'gantt_commesse'); },
+          }, 'Vai al Gantt'));
+      }
+      root.append(box);
+    }
     return;
   }
 
@@ -10490,8 +10535,13 @@ function storicoFiltrate() {
 
   // Vista evento-centrica: ogni riga è UNA spedizione (dalla tabella `spedizioni`).
   // Una commessa con N spedizioni parziali appare N volte (una riga per evento).
-  // NB: le commesse storiche pre-introduzione spedizioni (stato='spedita' senza
-  // righe in `spedizioni`) NON sono qui — sono visibili dalla Pianificazione.
+  // ⚠ NB: le commesse storiche pre-introduzione spedizioni (stato='spedita'
+  // senza righe in `spedizioni`) NON sono qui. La nota diceva "sono visibili
+  // dalla Pianificazione" ed era SBAGLIATA: la Pianificazione filtra via le
+  // spedite. Si vedono solo dal Gantt. Sono 34, tutte caricate il 19 mag 2026
+  // col primo popolamento, già chiuse a quell'epoca. Cercandone una per numero
+  // in Ordini cliente si otteneva "nessuna corrispondenza", che sembra "non
+  // esiste": ora quella schermata vuota dice dove sta davvero.
   let list = (state.spedizioni || []).slice();
 
   // Map operazione_id → operazione per lookup veloci

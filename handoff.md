@@ -407,6 +407,14 @@ L estrazione ha una colonna nuova, **Tipo Parte**. Nico ne annunciava due, **nel
 - ⚠ **Un tipo mai visto finisce fra i "da ordinare"** e l anteprima lo dichiara in giallo: meglio un falso allarme che una riga che sparisce.
 - **Migrazione `mancanti.tipo_parte`**: `strumenti/migrazione-tipo-parte.sql`. **Senza, l import NON si rompe**: si accorge che la colonna manca (stesso trucco di `aziende.tariffa_oraria`: `'tipo_parte' in m`), salva tutto il resto e lo dichiara. Nessuna fretta.
 - Il CSV e in **Windows-1252**, non UTF-8 (`Disponibilità` arriva rotta se letto come UTF-8). L app lo legge gia da se, la libreria xlsx non entra in gioco.
+## 34 commesse che non si vedevano da NESSUNA parte (27 ago, `2026-08-27.3`)
+Nico, due volte in mezz ora: *"2026/OC/00011 perche non lo vedo sull app?"*, poi *"2026/OC/00128 anche questo non lo vedo"*. Non era lui a cercare male.
+- **Ordini cliente filtra via le `spedita`** (`pianificazioneFiltrate`): stanno nello Storico, e fin qui e voluto.
+- **Ma lo Storico e EVENTO-centrico**: ogni riga e una SPEDIZIONE, letta da `state.spedizioni`. Una commessa marcata `spedita` **senza nessuna riga in `spedizioni`** non compare nemmeno li.
+- Il commento in `storicoFiltrate` diceva *"sono visibili dalla Pianificazione"* ed era **SBAGLIATO**: la Pianificazione le filtra via. Quindi erano invisibili in tutte e due le schede dove uno le cerca. Si vedono **solo dal Gantt** (lo stato `spedita` e fra quelli visibili di default, e la ricerca del Gantt le trova).
+- **Sono 34**, tutte create il **19 mag 2026** col primo popolamento: ordini gia chiusi prima che il gestionale esistesse, inseriti come spediti. Le spedizioni si registrano dal 28 mag, e da giugno in poi ogni spedita ne ha almeno una. **Non sono un difetto di dati**: e il caricamento iniziale.
+- **Cura**: la schermata vuota di Ordini cliente ora dice **dove sta davvero** quello che cerchi, distinguendo i due casi — con spedizioni -> bottone allo Storico; senza -> spiega che nello Storico non c e (elenca spedizioni, non commesse) e manda al Gantt. Prima diceva solo *"Nessuna operazione corrisponde ai filtri"*, che si legge come **non esiste**.
+- **Lezione**: *"non lo trovo" e "non esiste" sono due risposte diverse, e una schermata vuota le confonde.* Quando una vista nasconde qualcosa per scelta, la schermata vuota deve dire dove e finito.
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0-bis. DA VERIFICARE il 25 ago: la correzione egress ha morso davvero?
