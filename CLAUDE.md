@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-27.4`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-27.5`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -89,10 +89,12 @@
 - ⚠ **Righe importate prima del 27 ago**: nessun `tipo_parte`, si comportano **come prima**. Un dato vecchio non cambia significato per una colonna nuova.
 - **Migrazione** `strumenti/migrazione-tipo-parte.sql`. **Senza, l import non si rompe**: rileva la colonna mancante e lo dichiara.
 - Il CSV e **Windows-1252**, non UTF-8.
-## Dove finiscono le commesse spedite (27 ago, `2026-08-27.3`)
-- **Ordini cliente** filtra via le `spedita`. **Lo Storico e EVENTO-centrico**: elenca le righe di `spedizioni`, non le commesse — quindi una `spedita` **senza spedizioni registrate non compare nemmeno li**. Il commento che diceva "sono visibili dalla Pianificazione" era sbagliato. **Nemmeno il Gantt le mostra tutte**: la disegna per addetto/fornitore assegnato, quindi 21 su 34 non si vedono in NESSUNA scheda. Il buco non e del Gantt: e delle tre viste che insieme non coprono tutto — Ordini cliente nasconde le spedite, lo Storico elenca le SPEDIZIONI, il Gantt il LAVORO ASSEGNATO.
-- **Sono 34**, tutte del 19 mag 2026 (primo popolamento, ordini gia chiusi all epoca). Non e un difetto di dati.
-- La schermata vuota di Ordini cliente ora dice **dove sta** quello che cerchi, in tre casi: con spedizioni -> Storico, senza ma con addetti -> Gantt, **ne l uno ne l altro -> la mostra li**, cliccabile. **"Non lo trovo" e "non esiste" sono due risposte diverse: una schermata vuota le confonde.**
+## Ordini cliente e Storico: due schede, nessun buco (27 ago, `2026-08-27.5`)
+- **UNA regola sola, in domain**: `commessaInStorico(op, spedizioni, oggi)` (16 test). Non spedita -> Ordini cliente · spedita da <30 gg -> Ordini cliente sotto il chip **SPEDITE** · spedita da >30 gg -> Storico · **spedita senza data -> Storico** (le 34 del caricamento 19 mag). `GIORNI_SPEDITE_IN_ORDINI = 30`.
+- **Prima c era un buco**: 21 commesse non si vedevano in NESSUNA scheda — Ordini cliente nasconde le spedite, lo Storico elenca le SPEDIZIONI, il Gantt il LAVORO ASSEGNATO.
+- **Prova da rifare dopo ogni modifica a queste schede**: `scratchpad/prova_coperture.js` — le due liste devono coprire tutte le commesse, zero doppie e zero orfane. Oggi 422 = 221 + 201.
+- **Storico COMMESSA-centrico**: una riga per commessa (prima una per spedizione). Solo 9 commesse su 219 hanno piu di una spedizione; il dettaglio resta nel modal. Qta = totale spedito, `*` se le spedizioni sono piu d una, data "non registrata" dove manca.
+- **Ordini cliente: colonne ORDINATI / PRODOTTI / SPEDITI**. La **scheda Magazzino e stata tolta** (ridondante: la giacenza e prodotti meno spediti). `pezziInMagazzino()` resta, serve al controllo sulle spedizioni.
 ## Calendario mezzi: assenze degli operatori prenotati (5 ago, `2026-08-05.4`)
 - `assenzeInPrenotazione(utentiIds, dataInizio, dataFine)` in domain (pura, 29 test): assenze **valide** di OGNI operatore collegato dentro l'intervallo della prenotazione, non solo di chi prenota.
 - **Avvisa, non blocca** (decisione Nico): riquadro giallo live nel modal + conferma al salvataggio, un solo testo per entrambi. Gli altri due controlli della stessa `save()` (mezzo occupato, operatore su un altro mezzo) restano bloccanti: lì il conflitto è certo, qui no.

@@ -2310,3 +2310,54 @@ function posNormalizzata(v) {
   if (!s) return null;
   return /^\d{1,4}$/.test(s) ? s.padStart(4, '0') : s;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   DOVE STA UNA COMMESSA (27 ago 2026)
+
+   Regola unica per Ordini cliente e Storico, così le due schede non
+   possono contraddirsi. Prima non c'era, e il risultato era un buco:
+   21 commesse — spedite, senza spedizioni registrate e senza addetti —
+   non comparivano in NESSUNA scheda. Ordini cliente nascondeva le
+   spedite, lo Storico elencava le SPEDIZIONI e il Gantt il LAVORO
+   ASSEGNATO: nessuno dei tre insiemi le conteneva.
+
+   Adesso: o sei in Ordini cliente, o sei nello Storico. Sempre.
+     · non spedita                        -> Ordini cliente
+     · spedita da meno di 30 giorni       -> Ordini cliente (chip SPEDITE)
+     · spedita da più di 30              -> Storico
+     · spedita ma senza data di spedizione -> Storico
+   L'ultimo caso sono le 34 caricate il 19 mag 2026 col primo
+   popolamento: già chiuse all'epoca, nessuna spedizione da registrare.
+   Non avendo una data da cui contare il mese, la loro casa è lo Storico.
+   ═══════════════════════════════════════════════════════════════════ */
+
+// Quanto una commessa spedita resta ancora in Ordini cliente. Trenta giorni
+// scelti con Nico: tiene sott'occhio quello che è appena partito senza
+// allungare la lista di un terzo tutti i giorni.
+const GIORNI_SPEDITE_IN_ORDINI = 30;
+
+// L'ultima spedizione registrata di una commessa, o null se non ce n'è.
+// `spedizioni` si passa esplicitamente: il domain non legge lo stato globale.
+function ultimaSpedizione(opId, spedizioni) {
+  let ultima = null;
+  (spedizioni || []).forEach(s => {
+    if (!s || s.operazione_id !== opId) return;
+    const d = String(s.data || '').slice(0, 10);
+    if (d && (!ultima || d > ultima)) ultima = d;
+  });
+  return ultima;
+}
+
+// true = la commessa appartiene allo Storico. false = a Ordini cliente.
+// Non esiste un terzo posto, ed è tutto il punto.
+function commessaInStorico(op, spedizioni, oggiIso) {
+  if (!op || op.stato !== 'spedita') return false;
+  const ultima = ultimaSpedizione(op.id, spedizioni);
+  // Spedita senza sapere quando: nello Storico. Tenerla in Ordini cliente
+  // vorrebbe dire tenercela per sempre, non avendo una data che scada.
+  if (!ultima) return true;
+  const oggi = oggiIso || new Date().toISOString().slice(0, 10);
+  const limite = new Date(new Date(oggi + 'T00:00:00Z').getTime()
+    - GIORNI_SPEDITE_IN_ORDINI * 86400000).toISOString().slice(0, 10);
+  return ultima < limite;
+}

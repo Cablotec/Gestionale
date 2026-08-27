@@ -63,9 +63,6 @@ const state = {
   opClientiEsclusi: new Set(),
   opSearch: '',
   // Filtri Magazzino (clienti esclusi non persistiti: solo sessione)
-  magClientiEsclusi: new Set(),
-  magSearch: '',
-  magFilter: 'all',
   // Storico: clienti esclusi (multi, solo sessione)
   stoClientiEsclusi: new Set(),
   opSortKey: 'scadenza',
@@ -1512,7 +1509,6 @@ const TAB_STRUCTURE = {
     adminOnly: false,
     tabs: [
       { id: 'pianificazione', label: 'Ordini cliente', adminOnly: false },
-      { id: 'magazzino',      label: 'Magazzino',      adminOnly: false },
       // Spostata qui da Gestione (5 ago, richiesta Nico): i mancanti si
       // guardano mentre si lavora, non mentre si configura il gestionale.
       { id: 'fabbisogno',     label: 'Mancanti',       adminOnly: false },
@@ -1626,7 +1622,6 @@ function renderTab(name) {
     else if (name === 'tipi_lav')     renderTipiLavorazione(root);
     else if (name === 'operatori')    renderOperatori(root);
     else if (name === 'pianificazione') renderPianificazione(root);
-    else if (name === 'magazzino') renderMagazzino(root);
     else if (name === 'prelievi') renderPrelievi(root);
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt_live') renderGanttLiveTab(root);
@@ -6150,261 +6145,13 @@ const OP_PREP = {
 // [→ domain/scheduling.js] motore commesse/fasi: opFasiOf…opIsRitardo
 
 // ─── MAGAZZINO ─────────────────────────────────────────────────────
-// Vista delle commesse con pezzi fisicamente in magazzino: tutte quelle
-// che hanno almeno un lotto registrato (`consegne_commessa`) e non sono
-// ancora state spedite al cliente.
-// - Completate (100% prodotto) → badge verde, bottone "✓ Consegna" per
-//   marcare la spedizione totale al cliente
-// - Parziali (alcuni pezzi prodotti, altri ancora da fare) → badge giallo,
-//   senza bottone consegna (serve prima completare la produzione, oppure
-//   in futuro usare la sezione Spedizioni per spedire parzialmente)
-// Visibile a tutti, ma le azioni sono solo per admin.
-function renderMagazzino(root) {
-  const isAdmin = state.profile?.ruolo === 'admin';
-  root.innerHTML = '';
-
-  // Lista: tutte le commesse con pezzi attualmente in magazzino
-  // (= prodotti - già spediti > 0). Esclude le 'spedita' per definizione
-  // (anche se in teoria una commessa parzialmente spedita potrebbe avere
-  // ancora qualcosa, il filtro stato='spedita' è applicato come barriera).
-  // Ordinamento: completate prima (più urgenti da consegnare al cliente),
-  // poi per scadenza crescente; senza scadenza in fondo.
-  const search = (state.magSearch || '').toLowerCase();
-  const magFilter = state.magFilter || 'all';
-
-  // Base: commesse con pezzi in magazzino (= prodotti - spediti > 0), escluse le
-  // 'spedita'. Le KPI usano questa base (non i filtri), come in Pianificazione,
-  // così i numeri in alto restano stabili.
-  const baseList = state.operazioni
-    .filter(o => o.stato !== 'spedita' && pezziInMagazzino(o.id) > 0);
-
-  // Lista filtrata per la tabella: chip stato + filtro clienti + ricerca.
-  let list = baseList.slice();
-  if (magFilter === 'complete')      list = list.filter(o => o.stato === 'completata');
-  else if (magFilter === 'parziali') list = list.filter(o => o.stato !== 'completata');
-  if (state.magClientiEsclusi && state.magClientiEsclusi.size > 0)
-    list = list.filter(o => !state.magClientiEsclusi.has(o.cliente_id));
-  if (search) {
-    list = list.filter(o => {
-      const cli = state.aziende.find(c => c.id === o.cliente_id);
-      const art = state.articoli.find(a => a.id === o.articolo_id);
-      return (o.numero_ordine||'').toLowerCase().includes(search)
-          || (o.numero_op||'').toLowerCase().includes(search)
-          || (o.riferimento_cliente||'').toLowerCase().includes(search)
-          || (o.pos||'').toLowerCase().includes(search)
-          || (cli?.nome||'').toLowerCase().includes(search)
-          || (art?.codice||'').toLowerCase().includes(search)
-          || (art?.descrizione||'').toLowerCase().includes(search)
-          || (o.note||'').toLowerCase().includes(search);
-    });
-  }
-  // Ordinamento: completate prima (più urgenti), poi per scadenza crescente.
-  list.sort((a, b) => {
-    const aCompl = a.stato === 'completata' ? 0 : 1;
-    const bCompl = b.stato === 'completata' ? 0 : 1;
-    if (aCompl !== bCompl) return aCompl - bCompl;
-    if (!a.scadenza && !b.scadenza) return 0;
-    if (!a.scadenza) return 1;
-    if (!b.scadenza) return -1;
-    return a.scadenza < b.scadenza ? -1 : (a.scadenza > b.scadenza ? 1 : 0);
-  });
-
-  // KPI in alto
-  const oggiIso = toLocalISO(new Date());
-  const totale = baseList.length;
-  const completate = baseList.filter(o => o.stato === 'completata').length;
-  const parziali = totale - completate;
-  const scadute = baseList.filter(o => o.scadenza && o.scadenza < oggiIso).length;
-  const pezziTotali = baseList.reduce((s, o) => s + pezziInMagazzino(o.id), 0);
-
-  root.append(el('div', { class:'kpis' },
-    el('div', { class:'kpi' },
-      el('div', { class:'kl' }, 'Pezzi in magazzino'),
-      el('div', { class:'kv kg' }, String(pezziTotali))),
-    el('div', { class:'kpi' },
-      el('div', { class:'kl' }, 'Commesse complete'),
-      el('div', { class:'kv kb' }, String(completate))),
-    el('div', { class:'kpi' },
-      el('div', { class:'kl' }, 'Commesse parziali'),
-      el('div', { class:'kv ky' }, String(parziali))),
-    el('div', { class:'kpi' },
-      el('div', { class:'kl' }, 'Scadute'),
-      el('div', { class:'kv kr' }, String(scadute))),
-  ));
-
-  // Chips filtro (Tutte / Complete / Parziali)
-  const chips = el('div', { class:'chips' });
-  [
-    { id:'all',      label:'Tutte' },
-    { id:'complete', label:'Complete' },
-    { id:'parziali', label:'Parziali' },
-  ].forEach(opt => {
-    chips.append(el('div', {
-      class: 'chip' + (magFilter === opt.id ? ' act' : ''),
-      onclick: () => { state.magFilter = opt.id; renderTab('magazzino'); }
-    }, opt.label));
-  });
-  root.append(chips);
-
-  // Toolbar: titolo + ricerca + filtro clienti (come in Pianificazione)
-  const inputSearch = el('input', {
-    type:'text', class:'search', id:'mag-search',
-    placeholder:'Cerca OP, ordine, rif. cliente, cliente, codice, descrizione, note…',
-    value: state.magSearch || '',
-    oninput: (e) => {
-      state.magSearch = e.target.value;
-      state._focusSearch = 'mag-search';
-      renderTab('magazzino');
-    }
-  });
-  const nEsclusi = state.magClientiEsclusi?.size || 0;
-  const btnFiltroCli = el('button', {
-    class: nEsclusi > 0 ? 'btnp' : 'btng',
-    title: nEsclusi > 0
-      ? `Filtro attivo: ${nEsclusi} cliente${nEsclusi>1?'i':''} nascost${nEsclusi>1?'i':'o'}`
-      : 'Filtra clienti da mostrare',
-    // Sessione corrente (non persistito): set dedicato, ridisegna Magazzino.
-    onclick: (e) => openFiltroClientiPopup(e.currentTarget, {
-      set: state.magClientiEsclusi, tab: 'magazzino', onChange: () => {},
-    }),
-  }, nEsclusi > 0 ? `▼ Filtro clienti (${nEsclusi})` : '▼ Filtra clienti');
-
-  root.append(el('div', { class:'toolbar' },
-    el('h2', {}, 'Magazzino — pezzi pronti'),
-    inputSearch,
-    btnFiltroCli,
-  ));
-
-  // Stato vuoto
-  if (list.length === 0) {
-    if (baseList.length === 0) {
-      root.append(el('div', { class:'empty', style:'padding:40px;text-align:center;color:var(--mut);' },
-        el('div', { style:'font-size:32px;margin-bottom:10px;' }, '📦'),
-        el('div', {}, 'Nessun pezzo in magazzino al momento.'),
-        el('div', { style:'font-size:11px;margin-top:6px;' },
-          'Le commesse appariranno qui appena registri il primo lotto prodotto (sezione "Produzione" della scheda operazione).'),
-      ));
-    } else {
-      root.append(el('div', { class:'empty', style:'padding:30px;text-align:center;color:var(--mut);' },
-        'Nessun risultato per i filtri attivi.'));
-    }
-    return;
-  }
-
-  // Tabella
-  const tbl = el('table', { class:'rt' });
-  tbl.append(el('thead', {}, el('tr', {},
-    el('th', {}, 'Ordine'),
-    el('th', {}, 'Pos'),
-    el('th', {}, 'OP'),
-    el('th', {}, 'Rif. cliente'),
-    el('th', {}, 'Cliente'),
-    el('th', {}, 'Codice'),
-    el('th', {}, 'Descrizione'),
-    el('th', { class:'tr' }, 'Pronti / Da spedire'),
-    el('th', { class:'tc' }, 'Stato'),
-    el('th', {}, 'Scadenza'),
-    el('th', {}, 'Note'),
-    el('th', { class:'tc' }, 'Azioni'),
-  )));
-
-  const tb = el('tbody');
-  list.forEach(o => {
-    const cli = state.aziende.find(c => c.id === o.cliente_id);
-    const art = state.articoli.find(a => a.id === o.articolo_id);
-    const qtaTot = Number(o.quantita || 0);
-    const qtaProd = quantitaConsegnata(o.id);
-    const qtaSped = quantitaSpedita(o.id);
-    const pronti = Math.max(0, qtaProd - qtaSped);
-    const completa = o.stato === 'completata';
-
-    // Colore scadenza: rosso se passata, giallo se entro 3 giorni
-    let scadCls = '';
-    if (o.scadenza) {
-      if (o.scadenza < oggiIso) scadCls = 'scadenza-passata';
-      else {
-        const diff = (parseISODate(o.scadenza) - new Date()) / 86400000;
-        if (diff <= 3) scadCls = 'scadenza-vicina';
-      }
-    }
-
-    const tr = el('tr', {
-      class: 'op-row',
-      style: 'cursor:pointer;',
-      onclick: () => openOperazioneModal(o),
-      title: 'Click per aprire la scheda',
-    });
-
-    tr.append(el('td', { class:'mono' }, o.numero_ordine || '—'));
-    tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.pos || '—'));
-    tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.numero_op || '—'));
-    tr.append(el('td', {
-      style: 'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mut);',
-      title: o.riferimento_cliente || '',
-    }, o.riferimento_cliente || '—'));
-    tr.append(el('td', {}, cli?.nome || '—'));
-    tr.append(el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'));
-
-    // Descrizione articolo (troncata 1 riga)
-    const desc = art?.descrizione || '';
-    tr.append(el('td', {
-      style: 'max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
-      title: desc,
-    }, desc || '—'));
-
-    // Pronti in magazzino / Da spedire totali (= ordinati - già spediti).
-    // Il riferimento "da spedire" è coerente con l'azione del bottone:
-    // se la cella dice "6 / 6", basta un click per chiudere la commessa;
-    // se dice "6 / 8" significa che ne mancano 2 ancora da produrre.
-    const daSpedireTot = Math.max(0, qtaTot - qtaSped);
-    tr.append(el('td', {
-      class:'tr mono',
-      style: 'font-weight:700;color:' + (completa ? 'var(--grn)' : 'var(--yel)') + ';',
-      title: 'Prodotti: ' + qtaProd + ' · Spediti: ' + qtaSped + ' · Pronti in magazzino: ' + pronti + ' · Da produrre: ' + Math.max(0, qtaTot - qtaProd),
-    }, pronti + ' / ' + daSpedireTot));
-
-    // Stato: badge "Completa" o "Parziale"
-    tr.append(el('td', { class:'tc' },
-      completa
-        ? el('span', { class:'badge bok', style:'font-size:11px;' }, 'COMPLETA')
-        : el('span', { class:'badge byel', style:'font-size:11px;' }, 'PARZIALE')
-    ));
-
-    tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
-
-    // Note
-    tr.append(el('td', {
-      style: 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
-      title: o.note || '',
-    }, o.note || '—'));
-
-    // Azioni: ✓ Spedisci per tutte le commesse con qualcosa in magazzino.
-    // Per le complete spedisce tutto, per le parziali spedisce solo i pezzi
-    // prodotti finora (la modal precompila quantità = pronti in magazzino).
-    const azioniCell = el('td', { class:'tc' });
-    if (isAdmin) {
-      const labelBtn = completa ? '✓ Spedisci' : '✓ Spedisci parziale';
-      const tooltipBtn = completa
-        ? 'Registra spedizione (tutti i pezzi)'
-        : 'Registra spedizione dei pezzi pronti in magazzino';
-      azioniCell.append(el('button', {
-        class:'btnsm',
-        style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
-        title: tooltipBtn,
-        onclick: (e) => { e.stopPropagation(); quickRegistraSpedizione(o); },
-      }, labelBtn));
-    }
-    tr.append(azioniCell);
-
-    tb.append(tr);
-  });
-  tbl.append(tb);
-  root.append(tbl);
-}
-
-// Popup filtro clienti stile Excel: lista a checkbox di tutti i clienti che
-// hanno almeno una commessa, ricerca, e pulsanti "tutti/nessuno".
-// Salvataggio immediato nello state + localStorage, ridisegno della tabella.
+// La scheda MAGAZZINO viveva qui (tolta il 27 ago, richiesta Nico).
+// Elencava le commesse con pezzi in giacenza — prodotti meno spediti — ed è
+// diventata ridondante quando Ordini cliente ha guadagnato le tre colonne
+// ORDINATI / PRODOTTI / SPEDITI: la giacenza è la differenza fra le ultime
+// due e adesso si legge dove si guarda già. `pezziInMagazzino()` resta e
+// serve ancora: la usa il controllo "non puoi spedire quel che non hai
+// prodotto" nel modal commessa.
 function openFiltroClientiPopup(anchorBtn, opts) {
   // opts opzionale { set, tab, onChange }: permette di riusare il popup in altri
   // tab. Senza opts = comportamento Pianificazione invariato.
@@ -7135,16 +6882,32 @@ async function scioglieGruppoCommessa(o) {
 // `includiSpedite` serve solo all'export: la scheda le nasconde sempre perché
 // vivono nello Storico, ma chi esporta può volerle dentro.
 // Ritorna { list, filtriAttivi }.
-function pianificazioneFiltrate(includiSpedite) {
+// `includiStorico` serve solo all'export: la scheda passa sempre false.
+function pianificazioneFiltrate(includiStorico) {
   const search = (state.opSearch || '').toLowerCase();
   const filter = state.opFilter || 'all';
+  const oggi = toLocalISO(new Date());
 
   let list = state.operazioni.slice();
-  // Le commesse 'spedita' sono nello Storico — non si vedono nella Pianificazione
-  if (!includiSpedite) list = list.filter(o => o.stato !== 'spedita');
-  if (filter === 'aperte')     list = list.filter(o => o.stato === 'aperta');
+  // Confine unico con lo Storico (27 ago): qui vive tutto ciò che NON è
+  // finito nello Storico — il lavoro vivo più le spedite dell'ultimo mese.
+  // La regola sta in domain, così le due schede non possono contraddirsi e
+  // nessuna commessa resta senza casa.
+  if (!includiStorico) {
+    list = list.filter(o => !commessaInStorico(o, state.spedizioni, oggi));
+  }
+  // Le spedite recenti ci sono ma non si mostrano di default: la vista
+  // normale è il lavoro da fare, non quello appena finito. Il chip SPEDITE
+  // le tira fuori quando servono.
+  if (filter === 'spedite')         list = list.filter(o => o.stato === 'spedita');
+  else if (filter === 'aperte')     list = list.filter(o => o.stato === 'aperta');
   else if (filter === 'sospese')    list = list.filter(o => o.stato === 'sospesa');
   else if (filter === 'completate') list = list.filter(o => o.stato === 'completata');
+  // 'all' = quello che c'è da fare, senza le spedite. Ma se chi chiama ha
+  // chiesto ESPLICITAMENTE anche lo storico (l'export con la spunta), togliere
+  // le spedite qui vanificherebbe la richiesta e l'export tornerebbe identico
+  // a quello senza spunta.
+  else if (!includiStorico) list = list.filter(o => o.stato !== 'spedita');
 
   // Filtro clienti esclusi (stile Excel multi-select)
   if (state.opClientiEsclusi && state.opClientiEsclusi.size > 0) {
@@ -7214,12 +6977,17 @@ function renderPianificazione(root) {
   const sortKey = state.opSortKey || 'scadenza';
   const sortDir = state.opSortDir === 'desc' ? -1 : 1;
 
-  // KPI
-  const tot = state.operazioni.length;
-  const aperte = state.operazioni.filter(o => o.stato === 'aperta').length;
-  const inRitardo = state.operazioni.filter(opIsRitardo).length;
-  const sospese = state.operazioni.filter(o => o.stato === 'sospesa').length;
-  const completate = state.operazioni.filter(o => o.stato === 'completata').length;
+  // KPI — contate sulle commesse DI QUESTA SCHEDA, non su tutto l'archivio:
+  // altrimenti "Totale" comprenderebbe anche le 200 dello Storico e non
+  // corrisponderebbe a niente di quello che si vede sotto.
+  const oggiKpi = toLocalISO(new Date());
+  const diQui = state.operazioni.filter(o => !commessaInStorico(o, state.spedizioni, oggiKpi));
+  const tot = diQui.length;
+  const aperte = diQui.filter(o => o.stato === 'aperta').length;
+  const inRitardo = diQui.filter(opIsRitardo).length;
+  const sospese = diQui.filter(o => o.stato === 'sospesa').length;
+  const completate = diQui.filter(o => o.stato === 'completata').length;
+  const spediteRecenti = diQui.filter(o => o.stato === 'spedita').length;
 
   root.innerHTML = '';
   root.append(el('div', { class:'kpis' },
@@ -7237,6 +7005,9 @@ function renderPianificazione(root) {
     { id:'aperte',     label:'Aperte' },
     { id:'sospese',    label:'Sospese' },
     { id:'completate', label:'Completate' },
+    // "Tutte" vuol dire tutto il lavoro da fare: le spedite hanno un chip
+    // loro, col conteggio, perché sono in questa scheda solo di passaggio.
+    { id:'spedite',    label:'Spedite' + (spediteRecenti ? ' (' + spediteRecenti + ')' : '') },
   ].forEach(opt => {
     chips.append(el('div', {
       class: 'chip' + (filter === opt.id ? ' act' : ''),
@@ -7323,92 +7094,50 @@ function renderPianificazione(root) {
       el('div', { class:'sub' }, 'Vai in Anagrafiche → Clienti e Articoli per aggiungerne.')));
     return;
   }
-
   if (list.length === 0) {
-    // Se quello che cerchi ESISTE ma è spedito, questa scheda non te lo mostra
-    // (le spedite stanno nello Storico) e diceva soltanto "nessuna
-    // corrispondenza" — che sembra "non esiste". Sono due cose diverse, e la
-    // differenza costa dieci minuti di ricerca a vuoto.
-    const { list: conSped } = pianificazioneFiltrate(true);
-    const nascoste = conSped.filter(o => o.stato === 'spedita');
+    // Dal 27 ago ogni commessa sta in Ordini cliente o nello Storico, quindi
+    // qui non c'è più niente da "avvisare": basta dire in quale delle due, e
+    // portarcisi. I casi sono due, e li si distingue con la stessa regola di
+    // domain che decide dove vive una commessa — non con un'euristica locale.
+    const { list: ovunque } = pianificazioneFiltrate(true);
+    const oggiVuoto = toLocalISO(new Date());
+    const quiMaNascoste = ovunque.filter(o => o.stato === 'spedita'
+      && !commessaInStorico(o, state.spedizioni, oggiVuoto));
+    const nelloStorico = ovunque.filter(o => commessaInStorico(o, state.spedizioni, oggiVuoto));
+
     root.append(el('div', { class:'empty' },
       state.operazioni.length === 0
         ? 'Nessuna operazione ancora. Crea la prima con "+ Nuova Operazione".'
         : 'Nessuna operazione corrisponde ai filtri.'
     ));
-    if (nascoste.length) {
-      // ⚠ Non tutte le spedite stanno nello Storico. Lo Storico elenca le
-      // SPEDIZIONI (una riga per evento), quindi una commessa marcata spedita
-      // che non ha nessuna riga in `spedizioni` non compare nemmeno lì: sono
-      // le 34 caricate a maggio col primo popolamento, già chiuse all'epoca.
-      // Quelle si trovano solo dal Gantt. Mandare tutti allo Storico avrebbe
-      // solo spostato la caccia a vuoto da una scheda all'altra.
-      // ⚠ Nemmeno il Gantt le disegna tutte: là una commessa compare solo se
-      // ha un addetto o un fornitore assegnato. Una spedita senza spedizioni,
-      // senza addetti e senza fornitori non si vede in NESSUNA scheda — sono
-      // 21 sul database di oggi. Mandare lì chi la cerca sarebbe una seconda
-      // caccia a vuoto: meglio mostrargliela qui.
-      const nelGantt = o => (getOperazioneAddetti(o.id) || []).length > 0
-        || (getOperazioneFornitori(o.id) || []).length > 0;
-      const conSpedizione = nascoste.filter(o => quantitaSpedita(o.id) > 0);
-      const senzaSpedizione = nascoste.filter(o => quantitaSpedita(o.id) === 0 && nelGantt(o));
-      const invisibili = nascoste.filter(o => quantitaSpedita(o.id) === 0 && !nelGantt(o));
+
+    if (quiMaNascoste.length || nelloStorico.length) {
       const elenco = arr => arr.slice(0, 6)
         .map(o => (o.numero_ordine || '—') + '/' + (o.pos || '—')).join(' · ')
         + (arr.length > 6 ? ' · … e altre ' + (arr.length - 6) : '');
       const box = el('div', { class:'empty', style:'margin-top:-6px;' });
-      box.append(el('div', { class:'sub' },
-        nascoste.length === 1
-          ? 'Ma una commessa corrisponde ed è SPEDITA: questa scheda non le mostra.'
-          : 'Ma ' + nascoste.length + ' commesse corrispondono e sono SPEDITE: questa scheda non le mostra.'));
-      if (conSpedizione.length) {
-        box.append(el('div', { class:'sub', style:'margin-top:6px;' },
-          conSpedizione.length + (conSpedizione.length === 1 ? ' è nello Storico:' : ' sono nello Storico:')),
+      if (quiMaNascoste.length) {
+        box.append(
+          el('div', { class:'sub' }, quiMaNascoste.length === 1
+            ? 'Una commessa corrisponde ed è spedita di recente: è in questa scheda, sotto il filtro SPEDITE.'
+            : quiMaNascoste.length + ' commesse corrispondono e sono spedite di recente: sono in questa scheda, sotto il filtro SPEDITE.'),
           el('div', { class:'sub', style:'font-family:JetBrains Mono,monospace;font-size:11px;' },
-            elenco(conSpedizione)),
+            elenco(quiMaNascoste)),
+          el('button', { class:'btng', style:'margin-top:8px;',
+            onclick: () => { state.opFilter = 'spedite'; renderTab('pianificazione'); },
+          }, 'Mostra le spedite'));
+      }
+      if (nelloStorico.length) {
+        box.append(
+          el('div', { class:'sub', style: quiMaNascoste.length ? 'margin-top:10px;' : '' },
+            nelloStorico.length === 1
+              ? 'Una commessa corrisponde ed è spedita da più di un mese: è nello Storico.'
+              : nelloStorico.length + ' commesse corrispondono e sono spedite da più di un mese: sono nello Storico.'),
+          el('div', { class:'sub', style:'font-family:JetBrains Mono,monospace;font-size:11px;' },
+            elenco(nelloStorico)),
           el('button', { class:'btng', style:'margin-top:8px;',
             onclick: () => { if (typeof switchToTab === 'function') switchToTab('lavoro', 'storico'); },
           }, 'Vai allo Storico'));
-      }
-      if (senzaSpedizione.length) {
-        box.append(el('div', { class:'sub', style:'margin-top:10px;' },
-          senzaSpedizione.length + (senzaSpedizione.length === 1
-            ? ' è chiusa senza nessuna spedizione registrata, quindi non compare nemmeno nello Storico (che elenca le spedizioni). Si trova dal Gantt:'
-            : ' sono chiuse senza nessuna spedizione registrata, quindi non compaiono nemmeno nello Storico (che elenca le spedizioni). Si trovano dal Gantt:')),
-          el('div', { class:'sub', style:'font-family:JetBrains Mono,monospace;font-size:11px;' },
-            elenco(senzaSpedizione)),
-          el('button', { class:'btng', style:'margin-top:8px;',
-            onclick: () => { if (typeof switchToTab === 'function') switchToTab('lavoro', 'gantt_commesse'); },
-          }, 'Vai al Gantt'));
-      }
-      if (invisibili.length) {
-        // Queste non stanno da nessuna parte: si mostrano QUI, con quel poco
-        // che serve a riconoscerle, e cliccando si apre la commessa.
-        box.append(el('div', { class:'sub', style:'margin-top:10px;color:var(--yel);' },
-          invisibili.length + (invisibili.length === 1
-            ? ' è chiusa senza spedizioni e senza addetti: non compare in nessun\'altra scheda.'
-            : ' sono chiuse senza spedizioni e senza addetti: non compaiono in nessun\'altra scheda.')
-          + ' Sono quelle caricate all\'avvio del gestionale. Eccole:'));
-        const lista = el('div', { style:'margin-top:6px;display:flex;flex-direction:column;gap:3px;' });
-        invisibili.slice(0, 12).forEach(o => {
-          const cli = state.aziende.find(x => x.id === o.cliente_id);
-          const art = state.articoli.find(x => x.id === o.articolo_id);
-          lista.append(el('div', {
-            style:'cursor:pointer;font-size:11px;padding:4px 8px;border:1px solid var(--brd);'
-              + 'border-radius:4px;text-align:left;',
-            title:'Apri la commessa',
-            onclick: () => openOperazioneModal(o),
-          },
-            el('span', { style:'font-family:JetBrains Mono,monospace;' },
-              (o.numero_ordine || '—') + '/' + (o.pos || '—')),
-            el('span', { class:'sub' }, '  ' + (cli ? cli.nome : '—')
-              + '  ·  ' + (art ? art.codice : '—')
-              + '  ·  ' + (o.quantita != null ? o.quantita + ' pz' : '—')
-              + (o.scadenza ? '  ·  ' + fmtIT(o.scadenza) : ''))));
-        });
-        if (invisibili.length > 12) lista.append(el('div', { class:'sub', style:'font-size:11px;' },
-          '… e altre ' + (invisibili.length - 12)));
-        box.append(lista);
       }
       root.append(box);
     }
@@ -7441,7 +7170,11 @@ function renderPianificazione(root) {
     sortHead('cliente',         'Cliente'),
     sortHead('articolo',        'Codice'),
     el('th', {}, 'Descrizione'),
-    sortHead('quantita',        'Qtà', {tr:true}),
+    // Tre colonne: solo la prima è ordinabile, perché è l'unica che sta su
+    // `operazioni`. Prodotti e spediti sono somme derivate da altre tabelle.
+    sortHead('quantita',        'Ordinati', {tr:true}),
+    el('th', { class:'tr', title:'Pezzi prodotti (consegne di produzione registrate)' }, 'Prodotti'),
+    el('th', { class:'tr', title:'Pezzi spediti al cliente' }, 'Spediti'),
     sortHead('scadenza',        'Scadenza'),
     sortHead('inizio',          'Inizio'),
     el('th', {}, 'Note'),
@@ -7560,17 +7293,33 @@ function renderPianificazione(root) {
     //   N/Tot   → giallo (produzione parziale)
     //   Tot/Tot → verde (tutto prodotto, pronto in magazzino)
     // Tooltip sempre presente per leggere il dettaglio senza aprire il modal.
+    // Tre colonne invece di una (27 ago, richiesta Nico): ORDINATI, PRODOTTI,
+    // SPEDITI. La cella unica `prodotti/ordinati` non diceva quanto era
+    // uscito, e per saperlo bisognava andare nella scheda Magazzino — che
+    // proprio per questo è stata tolta: la giacenza è la differenza fra le
+    // ultime due colonne e adesso si legge qui.
     const qtaTot = Number(o.quantita || 0);
     const qtaCons = quantitaConsegnata(o.id);
+    const qtaSpd = quantitaSpedita(o.id);
     const qtaRes = Math.max(0, qtaTot - qtaCons);
-    let qtaColor = '';
-    if (qtaTot > 0 && qtaCons >= qtaTot) qtaColor = 'color:var(--grn);font-weight:700;';
-    else if (qtaCons > 0) qtaColor = 'color:var(--yel);font-weight:600;';
+    const inMagazzino = Math.max(0, qtaCons - qtaSpd);
+    const tip = `${qtaTot} ordinati · ${qtaCons} prodotti · ${qtaSpd} spediti`
+      + `\nda produrre ${qtaRes} · pronti in magazzino ${inMagazzino}`;
+    tr.append(el('td', { class:'tr mono', title: tip }, String(qtaTot)));
     tr.append(el('td', {
       class: 'tr mono',
-      style: qtaColor,
-      title: `${qtaCons} pz prodotti su ${qtaTot} — da produrre ${qtaRes} pz`,
-    }, `${qtaCons}/${qtaTot}`));
+      // Stessa scala di colori di prima, ma sulla colonna che la merita:
+      // verde quando la produzione ha finito, giallo mentre è per strada.
+      style: (qtaTot > 0 && qtaCons >= qtaTot) ? 'color:var(--grn);font-weight:700;'
+        : (qtaCons > 0 ? 'color:var(--yel);font-weight:600;' : ''),
+      title: tip,
+    }, String(qtaCons)));
+    tr.append(el('td', {
+      class: 'tr mono',
+      style: (qtaTot > 0 && qtaSpd >= qtaTot) ? 'color:var(--grn);font-weight:700;'
+        : (qtaSpd > 0 ? 'color:var(--blu);font-weight:600;' : 'color:var(--mut);'),
+      title: tip,
+    }, String(qtaSpd)));
 
     // Scadenza
     tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
@@ -10570,19 +10319,36 @@ function storicoFiltrate() {
   const filtroPunt = state.stoPunt || 'all';
   const filtroSfora = state.stoSfora || false;   // solo spedizioni di commesse che hanno sforato il pagato
 
-  // Vista evento-centrica: ogni riga è UNA spedizione (dalla tabella `spedizioni`).
-  // Una commessa con N spedizioni parziali appare N volte (una riga per evento).
-  // ⚠ NB: le commesse storiche pre-introduzione spedizioni (stato='spedita'
-  // senza righe in `spedizioni`) NON sono qui. La nota diceva "sono visibili
-  // dalla Pianificazione" ed era SBAGLIATA: la Pianificazione filtra via le
-  // spedite. Si vedono solo dal Gantt. Sono 34, tutte caricate il 19 mag 2026
-  // col primo popolamento, già chiuse a quell'epoca. Cercandone una per numero
-  // in Ordini cliente si otteneva "nessuna corrispondenza", che sembra "non
-  // esiste": ora quella schermata vuota dice dove sta davvero.
-  let list = (state.spedizioni || []).slice();
-
-  // Map operazione_id → operazione per lookup veloci
+  // Vista COMMESSA-centrica (27 ago). Prima ogni riga era UNA spedizione, e
+  // una commessa marcata spedita senza righe in `spedizioni` non compariva:
+  // erano 21 commesse invisibili in tutta l'app, perché Ordini cliente
+  // nascondeva le spedite e il Gantt disegna solo il lavoro assegnato.
+  // Adesso la base sono le COMMESSE che appartengono allo Storico secondo
+  // l'unica regola in domain, e ognuna compare una volta sola.
+  // Le spedizioni parziali (9 commesse su 219) non si perdono: si vedono
+  // aprendo la commessa, nella sezione Spedizioni con date e DDT.
   const opById = Object.fromEntries(state.operazioni.map(o => [o.id, o]));
+  const oggiSto = toLocalISO(new Date());
+  let list = state.operazioni
+    .filter(o => commessaInStorico(o, state.spedizioni, oggiSto))
+    .map(op => {
+      const sue = (state.spedizioni || [])
+        .filter(s => s.operazione_id === op.id)
+        .sort((a, b) => String(a.data || '').localeCompare(String(b.data || '')));
+      const ultima = sue[sue.length - 1];
+      const totale = sue.reduce((n, x) => n + Number(x.quantita || 0), 0);
+      // La riga porta i dati dell'ULTIMA spedizione (data, DDT, destinatario)
+      // ma la quantità è il TOTALE spedito: in una vista per commessa "Qtà"
+      // vuol dire quanto è uscito, non quanto è uscito l'ultima volta.
+      if (ultima) return Object.assign({}, ultima, { quantita: totale, _nSped: sue.length });
+      // Nessuna spedizione registrata: la commessa c'è lo stesso, con la sua
+      // quantità e senza data. È il caricamento iniziale del 19 mag 2026.
+      return {
+        id: 'nosped-' + op.id, operazione_id: op.id, data: null,
+        quantita: op.quantita, ddt: null, destinatario: null, note: null,
+        _nSped: 0, _senzaSpedizione: true,
+      };
+    });
 
   // Filtri: mese (su data spedizione)
   if (filtroMese) {
@@ -10846,7 +10612,11 @@ function renderStorico(root) {
     }
 
     tb.append(el('tr', { class:'spedita' },
-      el('td', { class:'mono' }, fmtIT(s.data)),
+      // Senza data non si inventa niente: si dichiara che non è registrata.
+      // Sono le commesse caricate all'avvio del gestionale, già chiuse allora.
+      el('td', { class:'mono', style: s._senzaSpedizione ? 'color:var(--mut);' : '',
+        title: s._senzaSpedizione ? 'Spedizione mai registrata: la commessa è stata caricata già chiusa' : '' },
+        s.data ? fmtIT(s.data) : 'non registrata'),
       el('td', { class:'mono' }, op?.numero_ordine || '—'),
       el('td', { class:'mono', style:'color:var(--mut);' }, op?.pos || '—'),
       el('td', { class:'mono', style:'color:var(--mut);' }, op?.numero_op || '—'),
@@ -10856,7 +10626,11 @@ function renderStorico(root) {
       }, op?.riferimento_cliente || '—'),
       el('td', {}, cli?.nome || '—'),
       el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
-      el('td', { class:'tr mono', style:'font-weight:600;' }, String(s.quantita || 0)),
+      // Qtà = totale spedito della commessa. Se le spedizioni sono state più
+      // d'una lo si dice, così il numero non sembra quello di un evento solo.
+      el('td', { class:'tr mono', style:'font-weight:600;',
+        title: s._nSped > 1 ? s._nSped + ' spedizioni parziali: apri la commessa per il dettaglio' : '' },
+        String(s.quantita || 0) + (s._nSped > 1 ? ' *' : '')),
       el('td', { class:'mono' }, s.ddt || '—'),
       el('td', {
         style:'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',

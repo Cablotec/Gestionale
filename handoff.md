@@ -417,6 +417,19 @@ Nico, due volte in mezz ora: *"2026/OC/00011 perche non lo vedo sull app?"*, poi
 - **Sono 34**, tutte create il **19 mag 2026** col primo popolamento: ordini gia chiusi prima che il gestionale esistesse, inseriti come spediti. Le spedizioni si registrano dal 28 mag, e da giugno in poi ogni spedita ne ha almeno una. **Non sono un difetto di dati**: e il caricamento iniziale.
 - **Cura**: la schermata vuota di Ordini cliente ora dice **dove sta davvero** quello che cerchi, in TRE casi — con spedizioni -> bottone allo Storico; senza spedizioni ma con addetti -> bottone al Gantt; **ne l uno ne l altro -> la commessa si mostra LI**, cliccabile per aprirla, perche non c e nessun posto dove mandarti. Prima diceva solo *"Nessuna operazione corrisponde ai filtri"*, che si legge come **non esiste**.
 - **Lezione**: *"non lo trovo" e "non esiste" sono due risposte diverse, e una schermata vuota le confonde.* Quando una vista nasconde qualcosa per scelta, la schermata vuota deve dire dove e finito.
+## Ordini cliente e Storico: due schede, nessun buco (27 ago, `2026-08-27.5`)
+Nato dalla domanda di Nico *"il gantt deve riprendere gli ordini, come e possibile che contenga ordini che non si vedono in ordini o storico?"*. Aveva ragione: **21 commesse non si vedevano da nessuna parte**. Ordini cliente nascondeva le spedite, lo Storico elencava le SPEDIZIONI e il Gantt il LAVORO ASSEGNATO — una commessa spedita, senza spedizioni registrate e senza addetti non stava in nessuno dei tre insiemi.
+**La regola ora e UNA SOLA e sta in domain** (`commessaInStorico`, 16 test), cosi le due schede non possono contraddirsi:
+- non spedita -> **Ordini cliente**
+- spedita da meno di **30 giorni** (`GIORNI_SPEDITE_IN_ORDINI`) -> **Ordini cliente**, sotto il chip SPEDITE
+- spedita da piu di 30 -> **Storico**
+- spedita **senza data di spedizione** -> **Storico** (sono le 34 del caricamento del 19 mag: non avendo una data da cui contare il mese, tenerle in Ordini cliente vorrebbe dire tenercele per sempre)
+**Verificato sui dati veri: 422 commesse = 221 + 201, zero in tutte e due, zero in nessuna.** E la prova da rifare dopo ogni modifica a queste due schede (`scratchpad/prova_coperture.js`).
+- **Lo Storico e diventato COMMESSA-centrico**: una riga per commessa invece che una per spedizione. Costo misurato prima di deciderlo: solo **9 commesse su 219 hanno piu di una spedizione**, e il dettaglio resta nella sezione Spedizioni del modal. La riga porta data e DDT dell ULTIMA spedizione ma la quantita e il TOTALE spedito (con un `*` quando le spedizioni sono piu d una). Le righe senza spedizione dicono **"non registrata"** invece di inventare una data.
+- **Ordini cliente: tre colonne ORDINATI / PRODOTTI / SPEDITI** al posto della cella unica `prodotti/ordinati`, che non diceva quanto era uscito.
+- **Scheda MAGAZZINO tolta**: elencava le commesse con giacenza (prodotti meno spediti), ed e diventata ridondante — la giacenza e la differenza fra le ultime due colonne nuove. `pezziInMagazzino()` resta: serve al controllo "non puoi spedire quel che non hai prodotto".
+- **La schermata vuota di Ordini cliente** non avvisa piu di buchi (non ce ne sono): dice in quale delle due schede sta quello che cerchi e ci porta, distinguendo *spedita di recente* (chip SPEDITE) da *nello Storico*.
+- ⚠ **Trappola trovata scrivendolo**: l export ha una spunta "includi anche le spedite"; con l esclusione delle spedite applicata anche al ramo `all`, la spunta non avrebbe piu fatto niente. Il filtro di stato ora si salta quando chi chiama chiede esplicitamente lo storico.
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0-bis. DA VERIFICARE il 25 ago: la correzione egress ha morso davvero?
