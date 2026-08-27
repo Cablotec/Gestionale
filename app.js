@@ -3670,6 +3670,10 @@ const FABB_COLONNE = {
   impegno:     ['Impegno'],
   odl:         ['OdL Prossimo Impegno'],
   um:          ['Um Interna', 'UM'],
+  // Dal 27 ago: ACQ lo compriamo noi, C/L arriva dal cliente, MAC e
+  // materiale di consumo. Senza questa colonna tutto finiva nello stesso
+  // rosso "da ordinare" — 222 righe su 287 a sproposito.
+  tipoParte:   ['Tipo Parte', 'Tipo parte'],
 };
 // Le 5 previsioni di entrata: la prima ha nomi suoi, le altre sono numerate.
 // Sono la METÀ UTILE del file — le uniche righe con una data (31 lug: 47 righe
@@ -3792,6 +3796,7 @@ function fabbRigaNormalizza(r, mappa) {
     giacenza: giac,
     impegno: imp,
     um: String(val('um') || '').trim() || null,
+    tipo_parte: String(val('tipoParte') || '').trim().toUpperCase() || null,
     consegne,
     prima_consegna: consegne.length ? consegne[0].data : null,
     // Retro-compatibili con le colonne già esistenti
@@ -3834,11 +3839,18 @@ function renderFabbisogno(root) {
   // ── Stato attuale ──
   const opOra = new Set(righeOra.map(m => m.numero_op).filter(Boolean));
   const nBlocc = righeOra.filter(mancanteBloccante).length;
+  const nCli = righeOra.filter(mancanteAttesaCliente).length;
+  const nCons = righeOra.filter(m => mancanteCategoria(m) === 'consumo').length;
   const box = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:6px;padding:12px 14px;margin-bottom:14px;' });
   box.append(el('div', { style:'font-weight:700;margin-bottom:4px;' }, 'In archivio adesso'),
     el('div', { class:'sub' }, righeOra.length
       ? righeOra.length + ' codici sotto scorta su ' + opOra.size + (opOra.size === 1 ? ' commessa' : ' commesse')
-        + ' · ' + nBlocc + ' da ordinare, ' + (righeOra.length - nBlocc) + ' in arrivo'
+        // Quattro numeri, non due: mescolarli faceva sembrare "da ordinare"
+        // anche il conto lavoro, che è la voce più numerosa dell'estrazione.
+        + ' · ' + nBlocc + ' da ordinare'
+        + (nCli ? ', ' + nCli + ' in attesa dal cliente' : '')
+        + ', ' + (righeOra.length - nBlocc - nCli - nCons) + ' in arrivo'
+        + (nCons ? ', ' + nCons + ' di consumo' : '')
         + (dataOra ? ' · estrazione del ' + fmtIT(String(dataOra).slice(0, 10)) : '')
       : 'Nessuna estrazione importata.'));
   root.append(box);
@@ -3963,7 +3975,21 @@ function renderFabbisogno(root) {
         if (!m.numero_op) { senzaOdl.push(m); return; }
         (opNote.has(m.numero_op) ? agganciate : orfane).add(m.numero_op);
       });
-      daImportare = { mancanti, nomeFile: f.name };
+      // La colonna `tipo_parte` esiste a database? Si riconosce dalle righe
+      // già caricate, come si fa per `aziende.tariffa_oraria`. Se manca, si
+      // importa lo stesso SENZA quel campo: un import che si rompe del tutto
+      // per una colonna nuova sarebbe molto peggio del non avere la
+      // distinzione ACQ / conto lavoro / consumo.
+      const tipoSalvabile = (state.mancanti || []).some(m => m && ('tipo_parte' in m));
+      const perTipo = {};
+      mancanti.forEach(m => {
+        const k = m.tipo_parte || '(nessuno)';
+        perTipo[k] = (perTipo[k] || 0) + 1;
+      });
+      const tipiNelFile = Object.keys(perTipo).filter(k => k !== '(nessuno)');
+      const NOTI = { 'ACQ':'da comprare', 'C/L':'dal cliente', 'MAC':'consumo' };
+      const sconosciuti = tipiNelFile.filter(k => !NOTI[k]);
+      daImportare = { mancanti, nomeFile: f.name, tipoSalvabile };
       stato.textContent = '';
       anteprima.append(
         el('div', { style:'font-weight:700;margin-bottom:6px;' }, 'Anteprima di ' + f.name),
@@ -3977,11 +4003,32 @@ function renderFabbisogno(root) {
               '⚠ OP presenti nell\'estrazione ma non nel gestionale: ' + [...orfane].join(', ')
               + ' — le righe si salvano lo stesso e si agganceranno da sole se quelle commesse verranno inserite.')]
           : []),
+        // Cosa dice la colonna "Tipo Parte", e se si riesce a salvarla.
+        ...(tipiNelFile.length
+          ? [el('div', { class:'sub', style:'margin-top:6px;font-size:11px;' },
+              'Tipo parte: ' + tipiNelFile.sort()
+                .map(k => perTipo[k] + ' ' + k + (NOTI[k] ? ' (' + NOTI[k] + ')' : ''))
+                .join(' · ')
+              + (perTipo['(nessuno)'] ? ' · ' + perTipo['(nessuno)'] + ' senza tipo' : ''))]
+          : []),
+        ...(sconosciuti.length
+          ? [el('div', { class:'sub', style:'margin-top:4px;color:var(--yel);font-size:11px;' },
+              '⚠ Tipo parte mai visto prima: ' + sconosciuti.join(', ')
+              + ' — queste righe verranno trattate come "da ordinare". Se non è giusto, dimmelo.')]
+          : []),
+        ...(tipiNelFile.length && !tipoSalvabile
+          ? [el('div', { class:'sub', style:'margin-top:4px;color:var(--yel);font-size:11px;' },
+              '⚠ La colonna `mancanti.tipo_parte` non esiste ancora a database: l\'import '
+              + 'funziona lo stesso, ma la distinzione fra da comprare, conto lavoro e consumo '
+              + 'non viene salvata e tutto resta "da ordinare" come prima. '
+              + 'Serve la migrazione dal pannello Supabase.')]
+          : []),
         el('div', { class:'sub', style:'margin-top:6px;color:var(--yel);font-size:11px;' },
           '⚠ Confermando, i ' + righeOra.length + ' codici attualmente in archivio vengono sostituiti da questi.'),
         el('button', { class:'btnp', style:'margin-top:10px;', onclick: async (e) => {
           e.target.disabled = true; e.target.textContent = 'Importo…';
           try {
+            const conTipo = daImportare.tipoSalvabile;
             const payload = daImportare.mancanti.filter(m => m.numero_op).map(m => ({
               numero_op: m.numero_op, codice: m.codice, descrizione: m.descrizione,
               qta_da_ordinare: m.qta_da_ordinare, qta_richiesta: m.qta_richiesta,
@@ -3989,6 +4036,9 @@ function renderFabbisogno(root) {
               consegne: m.consegne, prima_consegna: m.prima_consegna,
               data_arrivo: m.data_arrivo, fornitore: m.fornitore,
               import_data: toLocalISO(new Date()),
+              // Solo se la colonna c'e': altrimenti PostgREST rifiuta
+              // l'intero blocco per un campo che non conosce.
+              ...(conTipo ? { tipo_parte: m.tipo_parte } : {}),
             }));
             // SOSTITUZIONE: prima si svuota, poi si inserisce. Se l'insert
             // fallisse a metà lo si vede subito dal conteggio in archivio.
@@ -4113,18 +4163,23 @@ function renderFabbisogno(root) {
         + ' · ' + n + (n === 1 ? ' codice' : ' codici'));
     }));
   if (mancantiFiltroOp) selOp.value = mancantiFiltroOp;
-  const selTipo = el('select', { style:'max-width:200px;' },
+  const selTipo = el('select', { style:'max-width:220px;' },
     el('option', { value:'' }, 'Tutti'),
-    el('option', { value:'blocc' }, 'Solo da ordinare'),
-    el('option', { value:'arrivo' }, 'Solo in arrivo'));
+    el('option', { value:'blocc' }, 'Solo da ordinare (tocca a noi)'),
+    el('option', { value:'cliente' }, 'Solo in attesa dal cliente'),
+    el('option', { value:'arrivo' }, 'Solo in arrivo'),
+    el('option', { value:'consumo' }, 'Solo materiale di consumo'));
   const tabWrap = el('div');
 
   const renderTab2 = () => {
     tabWrap.innerHTML = '';
     let righe = righeOra.slice();
     if (selOp.value) righe = righe.filter(m => m.numero_op === selOp.value);
-    if (selTipo.value === 'blocc') righe = righe.filter(mancanteBloccante);
-    if (selTipo.value === 'arrivo') righe = righe.filter(m => !mancanteBloccante(m));
+    // Le categorie arrivano dal domain: qui non si ridecide cos'è cosa.
+    if (selTipo.value === 'blocc')   righe = righe.filter(mancanteBloccante);
+    if (selTipo.value === 'cliente') righe = righe.filter(mancanteAttesaCliente);
+    if (selTipo.value === 'arrivo')  righe = righe.filter(m => mancanteCategoria(m) === 'in_arrivo');
+    if (selTipo.value === 'consumo') righe = righe.filter(m => mancanteCategoria(m) === 'consumo');
     // Bloccanti in cima, poi per data di consegna, poi per codice.
     righe.sort((a, b) => (mancanteBloccante(b) ? 1 : 0) - (mancanteBloccante(a) ? 1 : 0)
       || String(a.prima_consegna || '9999').localeCompare(String(b.prima_consegna || '9999'))
@@ -4134,20 +4189,36 @@ function renderFabbisogno(root) {
     const oggi = toLocalISO(new Date());
     righe.forEach(m => {
       const blocc = mancanteBloccante(m);
+      const categoria = mancanteCategoria(m);
+      // Quattro categorie, quattro etichette. Prima erano due: una riga di
+      // conto lavoro finiva sotto "in arrivo", che è proprio il contrario —
+      // nessuno l'ha ordinata perché non si ordina, si aspetta il cliente.
+      const ETI = {
+        da_ordinare:    { txt:'da ordinare',   cls:'byel',
+          tip:'Nessuno l\'ha ancora ordinato: tocca a noi comprarlo' },
+        attesa_cliente: { txt:'attesa cliente', cls:'bor',
+          tip:'Conto lavoro: non si ordina, lo manda il cliente' },
+        in_arrivo:      { txt:'in arrivo',     cls:'bblu',
+          tip:'Già ordinato: manca ma è in arrivo' },
+        consumo:        { txt:'consumo',       cls:'bgry',
+          tip:'Materiale di consumo: non ferma la commessa' },
+      };
+      const eti = ETI[categoria] || ETI.da_ordinare;
       const cons = mancanteConsegne(m);
       const prima = cons[0];
       const inRitardo = prima && prima.data < oggi;
       const o = opDelGest.get(m.numero_op);
       tb.append(el('tr', {},
-        el('td', {}, el('span', {
-          class: 'badge ' + (blocc ? 'byel' : 'bblu'),
-          title: blocc ? 'Nessuno l\'ha ancora ordinato: ferma la commessa'
-                       : 'Già ordinato: manca ma è in arrivo',
-        }, blocc ? 'da ordinare' : 'in arrivo')),
+        el('td', {}, el('span', { class: 'badge ' + eti.cls, title: eti.tip }, eti.txt)),
         el('td', { style:'font-family:JetBrains Mono,monospace;font-size:11px;' }, m.codice),
         el('td', {}, m.descrizione || '—'),
         el('td', { class:'tr', style:'font-family:JetBrains Mono,monospace;' },
-          nf(blocc ? m.qta_da_ordinare : Math.abs((Number(m.giacenza) || 0) - (Number(m.impegno) || 0)))
+          // Anche per il conto lavoro la quantità che interessa è quella che
+          // manca (`qta_da_ordinare`): cambia chi la deve procurare, non il
+          // numero. Il ripiego giacenza−impegno resta per le righe già coperte.
+          nf((blocc || categoria === 'attesa_cliente')
+            ? m.qta_da_ordinare
+            : Math.abs((Number(m.giacenza) || 0) - (Number(m.impegno) || 0)))
           + (m.um ? ' ' + m.um : '')),
         el('td', { class:'tr', style:'font-family:JetBrains Mono,monospace;color:var(--mut);' }, nf(m.giacenza)),
         // Una riga per consegna, numerate: con più previsioni di entrata
@@ -7473,25 +7544,43 @@ function renderPianificazione(root) {
     if (typeof mancantiCommessa === 'function') {
       const mc = mancantiCommessa(o);
       if (mc.nCodici) {
-        // Due numeri: quanti FERMANO la commessa e quanti sono solo in arrivo.
-        // 67 tutti da ordinare è una commessa bloccata; 67 di cui 60 in arrivo
-        // domani è una commessa che parte. Rosso solo se c'è un bloccante.
-        const etichetta = mc.nInArrivo
+        // Tre mestieri diversi, tre numeri (27 ago). Prima erano due, e il
+        // conto lavoro finiva nel rosso "da ordinare": su 31 commesse, 16
+        // mostravano un rosso da 48 o 36 codici quando non c'era NIENTE da
+        // ordinare — si aspettava il cliente. Un rosso che si accende sempre
+        // smette di voler dire qualcosa.
+        //   rosso   = c'è un ordine da emettere, tocca a noi
+        //   arancio = manca ma lo manda il cliente, la mossa non è nostra
+        //   giallo  = ordinato, ha una data
+        const etichetta = mc.nBloccanti
           ? mc.nBloccanti + '/' + mc.nCodici
-          : String(mc.nBloccanti || mc.nCodici);
+          : (mc.nAttesaCliente
+              ? mc.nAttesaCliente + '/' + mc.nCodici
+              : String(mc.nCodici));
+        const colore = mc.nBloccanti ? 'var(--red)'
+          : (mc.nAttesaCliente ? 'var(--or)' : 'var(--yel)');
         // Anteprima nel tooltip: i primi codici bloccanti, poi il resto contato.
         // Con 67 righe un tooltip intero sarebbe illeggibile.
-        const primi = mc.righe.filter(mancanteBloccante).slice(0, 8)
+        // Si elencano i codici della categoria che il badge sta mostrando: su
+        // una commessa di solo conto lavoro, filtrare per "da ordinare"
+        // darebbe una lista vuota sotto un numero che dice 48.
+        const inEvidenza = mc.nBloccanti
+          ? mc.righe.filter(mancanteBloccante)
+          : mc.righe.filter(mancanteAttesaCliente);
+        const primi = inEvidenza.slice(0, 8)
           .map(x => '· ' + x.codice + (x.descrizione ? '  ' + String(x.descrizione).slice(0, 34) : ''));
-        const restanti = mc.nBloccanti - primi.length;
+        const restanti = inEvidenza.length - primi.length;
         prepCell.append(el('span', {
           style: 'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;cursor:pointer;color:'
-            + (mc.nBloccanti ? 'var(--red)' : 'var(--yel)') + ';',
+            + colore + ';',
           title: (mc.nBloccanti
-              ? mc.nBloccanti + (mc.nBloccanti === 1 ? ' codice DA ORDINARE (ferma la commessa)' : ' codici DA ORDINARE (fermano la commessa)')
+              ? mc.nBloccanti + (mc.nBloccanti === 1 ? ' codice DA ORDINARE (tocca a noi)' : ' codici DA ORDINARE (tocca a noi)')
               : 'Nessun codice da ordinare')
-            + (mc.nInArrivo ? '\n' + mc.nInArrivo + ' in arrivo'
+            + (mc.nAttesaCliente ? '\n' + mc.nAttesaCliente
+                + ' in attesa dal CLIENTE (conto lavoro: non si ordina)' : '')
+            + (mc.nInArrivoVero ? '\n' + mc.nInArrivoVero + ' in arrivo'
                 + (mc.prossima ? ', prossima consegna ' + fmtIT(mc.prossima) : '') : '')
+            + (mc.nConsumo ? '\n' + mc.nConsumo + ' di consumo (non fermano niente)' : '')
             + (mc.nRitardo ? '\n⚠ ' + mc.nRitardo + (mc.nRitardo === 1 ? ' consegna in ritardo' : ' consegne in ritardo') : '')
             + (primi.length ? '\n\n' + primi.join('\n') + (restanti > 0 ? '\n… e altri ' + restanti : '') : '')
             + (mc.incoerente ? '\n\n⚠ Ma la preparazione è dichiarata COMPLETA.' : '')
@@ -8411,25 +8500,40 @@ function openOperazioneModal(o) {
     const oggi = toLocalISO(new Date());
     const righe = m.righe.map(x => {
       const blocc = mancanteBloccante(x);
+      const cat = mancanteCategoria(x);
       const cons = mancanteConsegne(x);
       const prima = cons[0];
+      // Stessa distinzione del resto dell'app: il conto lavoro manca eccome,
+      // ma non è "da ordinare" — e non è nemmeno "già ordinato".
+      const ICONA = { da_ordinare:'⛔ ', attesa_cliente:'⏳ ', in_arrivo:'📦 ', consumo:'· ' };
+      const DETTA = {
+        da_ordinare:    ' · da ordinare',
+        attesa_cliente: ' · in attesa dal cliente',
+        consumo:        ' · materiale di consumo',
+      };
       return {
-        titolo: (blocc ? '⛔ ' : '📦 ') + x.codice,
+        titolo: (ICONA[cat] || '📦 ') + x.codice,
         meta: (x.descrizione ? String(x.descrizione).slice(0, 40) : '—')
-          + (blocc ? ' · da ordinare'
+          + (DETTA[cat] !== undefined ? DETTA[cat]
                    : (prima ? ' · in arrivo ' + fmtIT(prima.data)
                        + (prima.data < oggi ? ' ⚠ in ritardo' : '') : ' · già ordinato')),
-        valore: 'mancano ' + nf(blocc ? x.qta_da_ordinare
+        valore: 'mancano ' + nf((blocc || cat === 'attesa_cliente') ? x.qta_da_ordinare
             : Math.abs((Number(x.giacenza) || 0) - (Number(x.impegno) || 0)))
           + (x.um ? ' ' + x.um : ''),
       };
     });
-    // Il sommario dice subito la cosa che conta: quanti FERMANO la commessa.
-    const sommario = m.nBloccanti
-      ? '⛔ ' + m.nBloccanti + (m.nBloccanti === 1 ? ' codice da ordinare' : ' codici da ordinare')
-        + (m.nInArrivo ? ' · 📦 ' + m.nInArrivo + ' in arrivo' : '')
-      : '📦 ' + m.nCodici + (m.nCodici === 1 ? ' codice in arrivo' : ' codici in arrivo')
-        + (m.prossima ? ', prossima consegna ' + fmtIT(m.prossima) : '');
+    // Il sommario dice subito la cosa che conta: chi deve muoversi. Le quattro
+    // categorie restano distinte anche qui — sommare conto lavoro e "in
+    // arrivo" farebbe sembrare ordinato qualcosa che nessuno ha ordinato.
+    const pezzi = [];
+    if (m.nBloccanti) pezzi.push('⛔ ' + m.nBloccanti
+      + (m.nBloccanti === 1 ? ' codice da ordinare' : ' codici da ordinare'));
+    if (m.nAttesaCliente) pezzi.push('⏳ ' + m.nAttesaCliente + ' in attesa dal cliente');
+    if (m.nInArrivoVero) pezzi.push('📦 ' + m.nInArrivoVero + ' in arrivo'
+      + (m.prossima ? ', prossima consegna ' + fmtIT(m.prossima) : ''));
+    if (m.nConsumo) pezzi.push('· ' + m.nConsumo + ' di consumo');
+    const sommario = pezzi.join('  ·  ')
+      || ('📦 ' + m.nCodici + (m.nCodici === 1 ? ' codice' : ' codici'));
     notaMancanti.append(entityTimeline({
       sommario: sommario
         + (m.nRitardo ? ' · ⚠ ' + m.nRitardo + ' in ritardo' : '')

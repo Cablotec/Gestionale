@@ -390,6 +390,19 @@ Il grafico del 26 ago — **giornata pulita**: Nico assente, nessuno script mio 
 **Da verificare sul campo**: la giornata tipo deve scendere **sotto i 20 MB**. Se resta sopra i 100, la porta e ancora un altra e si ricomincia a misurare — il metodo che ha funzionato e stato **pesare i byte veri di ogni passata** e dividere, non ragionare su chi sembrava colpevole.
 **Nota di metodo, pagata due volte oggi**: avevo prima accusato il `visibilitychange` sui numeri sbagliati, poi l avevo scagionato perche Nico era assente — ed era vero che lui non c era, ma gli **altri sei admin** si. La stessa ipotesi era giusta per una ragione che non avevo guardato. Misurare prima, incolpare dopo.
 
+## Fabbisogno: TIPO PARTE, tre mestieri che prima erano uno solo (27 ago, `2026-08-27.1`)
+L estrazione ha una colonna nuova, **Tipo Parte**. Nico ne annunciava due, **nel file ce ne sono TRE**:
+- **ACQ** (24 righe) = lo compriamo noi -> c e un ordine da emettere
+- **C/L** (222) = conto lavoro -> arriva dal **CLIENTE**, non si ordina. Nessuna di queste ha fornitore o data prevista: coerente, non le ordina nessuno.
+- **MAC** (41) = materiale di consumo, tutte `FILO ...` -> **non ferma niente** (decisione Nico).
+**Il problema che risolve**: `mancanteBloccante` era solo `qta_da_ordinare > 0`, quindi tutte e 283 le righe finivano nel rosso "da ordinare". Su 29 commesse toccate, **20 mostravano un rosso da 48, 36, 28 codici** quando non c era niente da ordinare. **Un rosso che si accende sempre smette di voler dire qualcosa.**
+**Effetto misurato sul file vero: commesse col badge rosso da 29 a 9.**
+- `mancanteCategoria(m)` in domain (20 test) ritorna `da_ordinare` / `attesa_cliente` / `in_arrivo` / `consumo`. L ordine dei controlli e la regola: prima cosa manca davvero, poi di chi e la mossa.
+- Tre colori: **rosso** tocca a noi, **arancio** lo manda il cliente, **giallo** ordinato con data. `nBloccanti`, `nAttesaCliente`, `nConsumo`, `nInArrivoVero` in `mancantiCommessa`; `nInArrivo` resta com era (tutto cio che non blocca) per non cambiare significato sotto ai punti che lo usavano gia.
+- ⚠ **RETROCOMPATIBILITA**: le righe importate PRIMA del 27 ago non hanno `tipo_parte` e si comportano **esattamente come prima** (da ordinare se qta > 0). *Un dato vecchio non deve cambiare significato solo perche e arrivata una colonna nuova.*
+- ⚠ **Un tipo mai visto finisce fra i "da ordinare"** e l anteprima lo dichiara in giallo: meglio un falso allarme che una riga che sparisce.
+- **Migrazione `mancanti.tipo_parte`**: `strumenti/migrazione-tipo-parte.sql`. **Senza, l import NON si rompe**: si accorge che la colonna manca (stesso trucco di `aziende.tariffa_oraria`: `'tipo_parte' in m`), salva tutto il resto e lo dichiara. Nessuna fretta.
+- Il CSV e in **Windows-1252**, non UTF-8 (`Disponibilità` arriva rotta se letto come UTF-8). L app lo legge gia da se, la libreria xlsx non entra in gioco.
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0-bis. DA VERIFICARE il 25 ago: la correzione egress ha morso davvero?

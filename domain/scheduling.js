@@ -1405,7 +1405,46 @@ function odlANumeroOp(odl) {
 // comprato, quindi non c'è né data né speranza a breve. Se invece è già
 // ordinato ha una consegna prevista: manca, ma arriva. La differenza è tutta
 // qui, ed è quella che distingue una commessa ferma da una che parte.
-function mancanteBloccante(m) { return Number(m && m.qta_da_ordinare) > 0; }
+// Il TIPO PARTE dell'estrazione (27 ago) divide i mancanti in tre mestieri
+// diversi, che prima finivano tutti nello stesso rosso:
+//   ACQ  = lo compriamo noi        -> c'e' un ordine da emettere
+//   C/L  = conto lavoro            -> arriva dal CLIENTE, non si ordina
+//   MAC  = materiale di consumo    -> il filo c'e' sempre, non ferma niente
+// Sui dati del 27 ago: 24 ACQ, 222 C/L, 41 MAC. Senza questa distinzione
+// 16 commesse su 31 mostravano un rosso da 48, 36, 28 codici "da ordinare"
+// quando non c'era niente da ordinare: si aspettava il cliente.
+const MANC_ACQUISTO = 'ACQ', MANC_CONTOLAVORO = 'C/L', MANC_CONSUMO = 'MAC';
+function mancanteTipo(m) {
+  return String((m && m.tipo_parte) || '').trim().toUpperCase();
+}
+
+// Categoria di una riga. UNA riga sta in una categoria sola, e l'ordine dei
+// controlli e' la regola: prima cosa manca davvero, poi di chi e' la mossa.
+//   'consumo'       -> non ferma la commessa
+//   'in_arrivo'     -> ordinato, ha una data
+//   'attesa_cliente'-> manca e lo deve mandare il cliente (C/L)
+//   'da_ordinare'   -> manca e tocca a noi comprarlo
+// ⚠ Se `tipo_parte` non c'e' (l'archivio importato PRIMA del 27 ago) ci si
+// comporta esattamente come prima: da ordinare se la quantita' e' > 0. Un
+// dato vecchio non deve cambiare significato solo perche' e' arrivata una
+// colonna nuova.
+function mancanteCategoria(m) {
+  const tipo = mancanteTipo(m);
+  if (tipo === MANC_CONSUMO) return 'consumo';
+  if (!(Number(m && m.qta_da_ordinare) > 0)) return 'in_arrivo';
+  if (tipo === MANC_CONTOLAVORO) return 'attesa_cliente';
+  return 'da_ordinare';
+}
+
+// Una riga e' BLOCCANTE se il pezzo e' ancora da ordinare: nessuno l'ha
+// comprato, quindi non c'e' ne' data ne' speranza a breve. Se invece e' gia'
+// ordinato ha una consegna prevista: manca, ma arriva. La differenza e' tutta
+// qui, ed e' quella che distingue una commessa ferma da una che parte.
+// Dal 27 ago il conto lavoro NON e' piu' qui dentro: manca anche quello, ma
+// non c'e' nessun ordine da emettere e mescolarlo svuotava il rosso di senso.
+function mancanteBloccante(m) { return mancanteCategoria(m) === 'da_ordinare'; }
+// Manca e ferma la commessa, ma la mossa e' del cliente, non nostra.
+function mancanteAttesaCliente(m) { return mancanteCategoria(m) === 'attesa_cliente'; }
 // Consegne previste di una riga, ordinate per data. Le righe arrivano dal
 // fabbisogno con fino a 5 previsioni di entrata.
 function mancanteConsegne(m) {
@@ -1420,6 +1459,7 @@ function mancanteConsegne(m) {
 //   incoerente, dataImport }.
 function mancantiCommessa(op, oggiIso) {
   const vuoto = { righe: [], nCodici: 0, nBloccanti: 0, nInArrivo: 0,
+    nAttesaCliente: 0, nConsumo: 0, nInArrivoVero: 0,
     prossima: null, nRitardo: 0, incoerente: false, dataImport: null };
   if (!op || !op.numero_op) return vuoto;
   const righe = (state.mancanti || [])
@@ -1431,6 +1471,8 @@ function mancantiCommessa(op, oggiIso) {
   if (!righe.length) return vuoto;
   const oggi = oggiIso || new Date().toISOString().slice(0, 10);
   const bloccanti = righe.filter(mancanteBloccante);
+  const attesaCliente = righe.filter(mancanteAttesaCliente);
+  const consumo = righe.filter(m => mancanteCategoria(m) === 'consumo');
   let prossima = null, nRitardo = 0;
   righe.forEach(m => {
     mancanteConsegne(m).forEach(c => {
@@ -1442,7 +1484,13 @@ function mancantiCommessa(op, oggiIso) {
     righe,
     nCodici: righe.length,
     nBloccanti: bloccanti.length,
+    // Le tre categorie nuove sono in AGGIUNTA: `nInArrivo` continua a valere
+    // "quello che non blocca", com'era, così i punti che lo usano non cambiano
+    // significato sotto i piedi. Chi vuole il dettaglio ha i campi sotto.
     nInArrivo: righe.length - bloccanti.length,
+    nAttesaCliente: attesaCliente.length,
+    nConsumo: consumo.length,
+    nInArrivoVero: righe.length - bloccanti.length - attesaCliente.length - consumo.length,
     prossima,
     nRitardo,
     incoerente: op.stato_preparazione === 'completo',

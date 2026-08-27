@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-25.9`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-27.1`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -81,6 +81,13 @@
 - **Non è "parte da solo"**: Pages è statico. Si trascina, si guarda l'anteprima, si conferma.
 - Aperti: `numero_op` non è nel file · `Quantità Residua` non entra da nessuna parte · un BOX nuovo nasce senza min/pz.
 
+## Fabbisogno: TIPO PARTE (27 ago, `2026-08-27.1`)
+- Tre tipi nell estrazione, non due: **ACQ** lo compriamo noi, **C/L** conto lavoro (arriva dal cliente, non si ordina), **MAC** materiale di consumo (non ferma niente). Sul file del 27 ago: 24 / 222 / 41.
+- `mancanteCategoria(m)` in domain (20 test) -> `da_ordinare` / `attesa_cliente` / `in_arrivo` / `consumo`. **rosso** tocca a noi · **arancio** lo manda il cliente · **giallo** ordinato con data.
+- **Perche**: prima tutto finiva nel rosso "da ordinare" e su 29 commesse 20 avevano un rosso da 48 o 36 codici a sproposito. **Effetto: commesse rosse da 29 a 9.** Un rosso che si accende sempre non vuol dire niente.
+- ⚠ **Righe importate prima del 27 ago**: nessun `tipo_parte`, si comportano **come prima**. Un dato vecchio non cambia significato per una colonna nuova.
+- **Migrazione** `strumenti/migrazione-tipo-parte.sql`. **Senza, l import non si rompe**: rileva la colonna mancante e lo dichiara.
+- Il CSV e **Windows-1252**, non UTF-8.
 ## Calendario mezzi: assenze degli operatori prenotati (5 ago, `2026-08-05.4`)
 - `assenzeInPrenotazione(utentiIds, dataInizio, dataFine)` in domain (pura, 29 test): assenze **valide** di OGNI operatore collegato dentro l'intervallo della prenotazione, non solo di chi prenota.
 - **Avvisa, non blocca** (decisione Nico): riquadro giallo live nel modal + conferma al salvataggio, un solo testo per entrambi. Gli altri due controlli della stessa `save()` (mezzo occupato, operatore su un altro mezzo) restano bloccanti: lì il conflitto è certo, qui no.
