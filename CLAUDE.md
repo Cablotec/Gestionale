@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-27.6`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-27.7`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -89,6 +89,8 @@
 - ⚠ **Righe importate prima del 27 ago**: nessun `tipo_parte`, si comportano **come prima**. Un dato vecchio non cambia significato per una colonna nuova.
 - **Migrazione** `strumenti/migrazione-tipo-parte.sql`. **Senza, l import non si rompe**: rileva la colonna mancante e lo dichiara.
 - Il CSV e **Windows-1252**, non UTF-8.
+- **Registrare una spedizione scrive TUTTO il gesto** (27 ago, `.7`): la INSERT su `spedizioni` e, se si arriva al 100%, anche lo `stato = spedita` e `consegnato_il`. Prima lo stato era solo proposto nel form con "salva per confermare", e chi chiudeva senza salvare lasciava il lavoro a meta. **Le due meta dello stesso gesto devono avere la stessa sorte.**
+- ⚠ **34 commesse sono `spedita` con spediti < ordinati e NON e un difetto**: sono quelle del caricamento del 19 mag, mai passate dal registro spedizioni. Non uniformarle.
 ## Ordini cliente e Storico: due schede, nessun buco (27 ago, `2026-08-27.5`)
 - **UNA regola sola, in domain**: `commessaInStorico(op, spedizioni, oggi)` (16 test). Non spedita -> Ordini cliente · spedita da <30 gg -> Ordini cliente sotto il chip **SPEDITE** · spedita da >30 gg -> Storico · **spedita senza data -> Storico** (le 34 del caricamento 19 mag). `GIORNI_SPEDITE_IN_ORDINI = 30`.
 - **Prima c era un buco**: 21 commesse non si vedevano in NESSUNA scheda — Ordini cliente nasconde le spedite, lo Storico elenca le SPEDIZIONI, il Gantt il LAVORO ASSEGNATO.

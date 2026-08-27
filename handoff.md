@@ -433,6 +433,12 @@ Nato dalla domanda di Nico *"il gantt deve riprendere gli ordini, come e possibi
 - **Scheda MAGAZZINO tolta**: elencava le commesse con giacenza (prodotti meno spediti), ed e diventata ridondante — la giacenza e la differenza fra le ultime due colonne nuove. `pezziInMagazzino()` resta: serve al controllo "non puoi spedire quel che non hai prodotto".
 - **La schermata vuota di Ordini cliente** non avvisa piu di buchi (non ce ne sono): dice in quale delle due schede sta quello che cerchi e ci porta, distinguendo *spedita di recente* (chip SPEDITE) da *nello Storico*.
 - ⚠ **Trappola trovata scrivendolo**: l export ha una spunta "includi anche le spedite"; con l esclusione delle spedite applicata anche al ramo `all`, la spunta non avrebbe piu fatto niente. Il filtro di stato ora si salta quando chi chiama chiede esplicitamente lo storico.
+## Registrare una spedizione scriveva solo META del gesto (27 ago, `2026-08-27.7`)
+Nico, guardando le colonne nuove: *"non vedo lo stato Spedita per quelle che hanno i 3 campi completi"*. Ha ragione, ed era **una sola commessa** — `2026/OC/00107/0020`, 4 ordinati / 4 prodotti / 4 spediti e ancora `completata`. Ma la causa era strutturale.
+- **L asimmetria**: il bottone "Registra spedizione" faceva subito la INSERT su `spedizioni`, poi per lo stato si limitava a impostare il campo nel form con un toast *"salva per confermare"*. Chi chiudeva il modal senza salvare lasciava la spedizione scritta e lo stato indietro.
+- **Regola**: *le due meta dello stesso gesto devono avere la stessa sorte.* Se una scrive subito, l altra non puo aspettare un salvataggio che e facilissimo saltare. Ora lo stato (e `consegnato_il` se vuota) si scrive nella stessa mossa; se quella UPDATE fallisce lo dice, perche la spedizione a quel punto e gia registrata.
+- **Il contrario e molto piu diffuso e NON e un difetto**: 34 commesse sono `spedita` con spediti < ordinati, e sono tutte quelle del caricamento del 19 mag, senza nessuna spedizione registrata. Non toccarle per uniformare i numeri: non sono mai passate dal registro spedizioni perche a quell epoca non esisteva.
+- La riga anomala resta da sistemare a mano (bastano due clic dalla tendina Stato), **ma va guardata**: su quella stessa commessa Alnus dichiara ancora 2 pezzi residui, quindi marcarla spedita qui e una decisione, non un adempimento.
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0-bis. DA VERIFICARE il 25 ago: la correzione egress ha morso davvero?

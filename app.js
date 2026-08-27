@@ -9270,17 +9270,35 @@ function openOperazioneModal(o) {
           if (!state.spedizioni.find(x => x.id === nuova.id)) state.spedizioni.push(nuova);
           toast('Spedizione registrata');
 
-          // Sincronizzazione automatica stato: se ora siamo al 100%, marca 'spedita'
+          // Sincronizzazione automatica stato: se ora siamo al 100%, marca
+          // 'spedita' — e lo SCRIVE, non lo propone soltanto (27 ago).
+          // Prima cambiava solo il campo nel form dicendo "salva per
+          // confermare": chi chiudeva il modal senza salvare si ritrovava la
+          // spedizione registrata e lo stato indietro. Le due metà dello
+          // stesso gesto devono avere la stessa sorte, o restano scoperte a
+          // metà — è successo su 2026/OC/00107/0020, 4 su 4 spediti e ancora
+          // "completata".
           const nuovoTotSped = quantitaSpedita(o.id);
-          if (nuovoTotSped >= qtaOrd) {
-            const sel = form.querySelector('[name="stato"]');
-            if (sel && sel.value !== 'spedita') {
-              sel.value = 'spedita';
-              sel.dispatchEvent(new Event('change', { bubbles:true }));
-              // Anche data consegnato_il se vuota
+          if (nuovoTotSped >= qtaOrd && o.stato !== 'spedita') {
+            const patch = { stato: 'spedita' };
+            if (!o.consegnato_il) patch.consegnato_il = data;
+            const { data: agg, error: errSt } = await eseguiConRetry(
+              () => sb.from('operazioni').update(patch).eq('id', o.id).select().single(),
+              { label: 'stato spedita' });
+            if (errSt) {
+              // La spedizione c'è comunque: lo stato si può correggere a mano.
+              toast('Spedizione salvata, ma lo stato non si è aggiornato: ' + errSt.message, 'err');
+            } else {
+              Object.assign(o, agg);
+              const idx = state.operazioni.findIndex(x => x.id === agg.id);
+              if (idx >= 0) state.operazioni[idx] = agg;
+              // Il form si allinea a quello che è già scritto, così salvando
+              // dopo non si rimanda indietro lo stato appena messo.
+              const sel = form.querySelector('[name="stato"]');
+              if (sel) sel.value = 'spedita';
               const inCons = form.querySelector('[name="consegnato_il"]');
-              if (inCons && !inCons.value) inCons.value = data;
-              toast('Tutto spedito · stato impostato a "spedita" (salva per confermare)');
+              if (inCons && !inCons.value && patch.consegnato_il) inCons.value = patch.consegnato_il;
+              toast('Tutto spedito · stato impostato a "spedita"');
             }
           }
 
