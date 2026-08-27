@@ -371,6 +371,13 @@ Subito dopo il reimport le commesse **in ritardo sono passate da 4 a 49**. Non e
 - Le **4 righe senza codice articolo** (Capirossi, una è `MANODOPERA`) restano fuori: non si indovina un codice.
 - La **`Quantità Residua`** non entra da nessuna parte — Nico ha detto che dovrebbe allinearsi a quanto resta da spedire, ma non abbiamo deciso se e dove mostrarla.
 - Un **BOX nuovo nasce senza min/pz** (l'articolo `BOX_...` non esiste ancora): l'anteprima lo dichiara in giallo. Le 11 esistenti hanno 775/990 messi a mano.
+- **L ANTEPRIMA E RIORDINATA IN TRE BLOCCHI** (27 ago, `2026-08-27.11`, richiesta Nico: *"la schermata di riassunto e bella piena, si puo allargare e ordinare in maniera che un non addetto ci capisca?"*). Erano **tredici sezioni in fila**, cresciute per accumulo: ognuna aggiunta senza ripensare l insieme, e messe insieme non raccontavano niente. Ora rispondono a tre domande, in quest ordine:
+  1. **Cosa entra nel gestionale** — KPI, aggiornamenti, anagrafiche create, rinomine, BOX Senzani, note sul tempo pagato. *Solo questo viene scritto premendo Importa.*
+  2. **Cosa resta fuori** — commesse chiuse non toccate, righe descrittive, nomi lasciati come sono, righe scartate.
+  3. **Da guardare: Alnus e gestionale non concordano** — stati e spedizioni. *Nessuna di queste righe viene modificata.*
+  - Larghezza da 820 a **1100px**.
+  - **Come e fatto, che e la parte da non rompere**: ogni sezione appende in una variabile `dest`, e i tre contenitori (`bScrive`, `bFuori`, `bGuarda`) si assemblano in fondo. **Riordinare non vuol dire spostare codice**: basta cambiare la riga `dest = ...` prima della sezione — per questo la modifica non ha toccato una riga di logica. Aggiungendone una nuova, ricordarsi di assegnarle un blocco o finisce nell ultimo usato.
+  - Le KPI usano `prepend`: a quel punto le sezioni hanno gia scritto dentro `bScrive` e un append le metterebbe in fondo.
 - **Non è "automatico" nel senso di "parte da solo"**: GitHub Pages è statico. Si trascina il file, si guarda l'anteprima, si conferma. Il passo successivo (una cartella guardata da uno script) sarebbe infrastruttura nuova.
 
 ## Accesso di Claude alle scritture (25 ago 2026)
