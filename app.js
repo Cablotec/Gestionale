@@ -9982,7 +9982,32 @@ function openOperazioneModal(o) {
         return toast('Quantità deve essere > 0', 'err');
       }
 
+      // ── Seconda porta per lo stato (27 ago). La tendina nella lista passa
+      // da `quickStato` e chiede conferma; da qui si salvava e basta, quindi
+      // si poteva dichiarare SPEDITA una commessa senza che risultasse
+      // spedito niente. Stesso controllo, stesso pezzo di codice: se le due
+      // porte si comportano diverso, una delle due sbaglia.
+      // Solo su commesse esistenti e solo quando lo stato AVANZA davvero.
+      let fattiStato = { ok: true, lotto: null, spedizione: null };
+      if (!isNew && payload.stato !== o.stato
+          && (payload.stato === 'completata' || payload.stato === 'spedita')) {
+        fattiStato = fattiPerStato(o, payload.stato);
+        if (!fattiStato.ok) {
+          stopWatchdog();
+          btnSave.disabled = false; btnSave.textContent = 'Salva';
+          // Il campo torna a dire il vero: lo stato non è cambiato.
+          const sel = form.querySelector('[name="stato"]');
+          if (sel) sel.value = o.stato || 'aperta';
+          return;
+        }
+      }
+
       try {
+        // I fatti PRIMA dello stato, come nella tendina: se falliscono, la
+        // commessa non deve restare dichiarata chiusa senza le sue righe.
+        if (fattiStato.lotto || fattiStato.spedizione) {
+          await scriviFattiPerStato(o, fattiStato);
+        }
         const { data, error } = await eseguiConRetry(
           () => isNew
             ? sb.from('operazioni').insert(payload).select().single()
@@ -10694,6 +10719,91 @@ function renderStorico(root) {
 // Click secco senza conferma: la commessa non viene "distrutta", il cambio è
 // sempre annullabile cliccando di nuovo. Per la consegna definitiva resta
 // quickSpedizione() che chiede conferma e data, perché è un passaggio chiave.
+// I fatti che mancano perché uno stato sia vero (27 ago). Sta QUI e non
+// dentro `quickStato` perché lo stato si cambia da DUE porte — la tendina
+// nella lista e il modal — e finché il controllo stava su una sola, dall'altra
+// si poteva dichiarare "spedita" una commessa senza che risultasse spedito
+// niente. È la stessa trappola dei timbri chiusi da due strade diverse.
+//
+// Ritorna { ok, lotto, spedizione }. `ok:false` = l'utente ha rinunciato.
+// Non scrive niente: costruisce le righe e le lascia scrivere a chi chiama,
+// che deve farlo PRIMA di cambiare stato — se fallisce, meglio nessuno dei due.
+function fattiPerStato(op, nuovoStato) {
+  const qtaOrd = Number(op.quantita || 0);
+  const prodotto = (typeof quantitaConsegnata === 'function') ? quantitaConsegnata(op.id) : 0;
+  const spedito = (typeof quantitaSpedita === 'function') ? quantitaSpedita(op.id) : 0;
+  const residuo = Math.max(0, qtaOrd - prodotto);
+  const daSpedire = Math.max(0, qtaOrd - spedito);
+  const oggi = toLocalISO(new Date());
+  const chiOra = state.profile?.id || null;
+  const vuoto = { ok: true, lotto: null, spedizione: null };
+  if (!qtaOrd) return vuoto;
+
+  if (nuovoStato === 'completata' && residuo > 0) {
+    const ok = confirm(
+      `Questa commessa ha ancora ${residuo} pz da produrre (${prodotto}/${qtaOrd} pz).\n\n`
+      + `Completandola verrà registrato in automatico un lotto di produzione di ${residuo} pz `
+      + `(data odierna) per chiudere la commessa.\n\n`
+      + `Vuoi procedere?`);
+    if (!ok) return { ok: false };
+    return { ok: true, spedizione: null, lotto: {
+      operazione_id: op.id, data: oggi, quantita: residuo, ddt: null,
+      nota: 'Chiusura automatica commessa', creato_da: chiOra } };
+  }
+
+  if (nuovoStato === 'spedita' && daSpedire > 0) {
+    // Per spedire bisogna aver prodotto: se manca anche quello si registrano
+    // tutti e due, e si dicono tutti e due nello stesso avviso — o uno dei
+    // due succederebbe senza che nessuno l'abbia letto.
+    const ok = confirm(
+      `Di questa commessa risultano spediti ${spedito}/${qtaOrd} pz: ne mancano ${daSpedire}.\n\n`
+      + (residuo > 0
+          ? `Marcandola spedita verranno registrati in automatico, con data odierna:\n`
+            + `· un lotto di produzione di ${residuo} pz\n`
+            + `· una spedizione di ${daSpedire} pz (senza DDT)\n\n`
+          : `Marcandola spedita verrà registrata in automatico una spedizione di `
+            + `${daSpedire} pz in data odierna, senza DDT.\n\n`)
+      + `Vuoi procedere?`);
+    if (!ok) return { ok: false };
+    return { ok: true,
+      lotto: residuo > 0 ? {
+        operazione_id: op.id, data: oggi, quantita: residuo, ddt: null,
+        nota: 'Chiusura automatica commessa', creato_da: chiOra } : null,
+      spedizione: {
+        operazione_id: op.id, data: oggi, quantita: daSpedire, ddt: null,
+        destinatario: null, note: 'Spedizione registrata alla chiusura della commessa',
+        creato_da: chiOra } };
+  }
+  return vuoto;
+}
+
+// Scrive i fatti costruiti da `fattiPerStato`. Sempre PRIMA del cambio stato.
+async function scriviFattiPerStato(op, fatti) {
+  if (fatti.lotto) {
+    const residuoOra = Math.max(0, Number(op.quantita || 0) - quantitaConsegnata(op.id));
+    if (residuoOra > 0) {
+      fatti.lotto.quantita = residuoOra;   // qualcun altro può aver prodotto nel frattempo
+      const { data, error } = await eseguiConRetry(
+        () => sb.from('consegne_commessa').insert(fatti.lotto).select().single(),
+        { label: 'lotto chiusura commessa' });
+      if (error) throw error;
+      if (!state.consegneCommessa.find(x => x.id === data.id)) state.consegneCommessa.push(data);
+    } else fatti.lotto = null;
+  }
+  if (fatti.spedizione) {
+    const daSpedireOra = Math.max(0, Number(op.quantita || 0) - quantitaSpedita(op.id));
+    if (daSpedireOra > 0) {
+      fatti.spedizione.quantita = daSpedireOra;
+      const { data, error } = await eseguiConRetry(
+        () => sb.from('spedizioni').insert(fatti.spedizione).select().single(),
+        { label: 'spedizione chiusura commessa' });
+      if (error) throw error;
+      if (!state.spedizioni.find(x => x.id === data.id)) state.spedizioni.push(data);
+    } else fatti.spedizione = null;
+  }
+  return fatti;
+}
+
 async function quickStato(op, nuovoStato) {
   if (!['aperta','sospesa','completata','spedita'].includes(nuovoStato)) return;
 
@@ -10716,52 +10826,15 @@ async function quickStato(op, nuovoStato) {
     return;
   }
 
-  // ── Regola: passando a "completata" con quantità ancora da produrre, prima
-  // AVVISO, poi produco automaticamente il residuo (lotto di chiusura) così la
-  // commessa risulta coerente (tutto prodotto). ──
-  let lottoChiusura = null;
-  if (nuovoStato === 'completata' && qtaOrd > 0 && residuo > 0) {
-    const ok = confirm(
-      `Questa commessa ha ancora ${residuo} pz da produrre (${prodotto}/${qtaOrd} pz).\n\n`
-      + `Completandola verrà registrato in automatico un lotto di produzione di ${residuo} pz `
-      + `(data odierna) per chiudere la commessa.\n\n`
-      + `Vuoi procedere?`
-    );
-    if (!ok) {
-      // Annullato: ripristino la UI sullo stato corrente.
-      renderTab(state.currentTab || 'pianificazione');
-      return;
-    }
-    lottoChiusura = {
-      operazione_id: op.id,
-      data: toLocalISO(new Date()),
-      quantita: residuo,
-      ddt: null,
-      nota: 'Chiusura automatica commessa',
-      creato_da: state.profile?.id || null,
-    };
-  }
+  // ── I fatti che uno stato richiede per essere vero: chiesti e costruiti
+  // dal pezzo comune, così la tendina e il modal si comportano uguale. ──
+  const fatti = fattiPerStato(op, nuovoStato);
+  if (!fatti.ok) { renderTab(state.currentTab || 'pianificazione'); return; }
 
   try {
-    // 1) Se serve, registro il lotto di chiusura PRIMA di cambiare stato:
-    //    se fallisce, non voglio una commessa "completata" ma incompleta.
-    if (lottoChiusura) {
-      // Ricontrollo il residuo qui (race condition: lotti registrati in parallelo)
-      const residuoOra = Math.max(0, qtaOrd - quantitaConsegnata(op.id));
-      if (residuoOra <= 0) {
-        lottoChiusura = null; // nel frattempo è già stato prodotto tutto
-      } else {
-        lottoChiusura.quantita = residuoOra;
-        const { data: nuova, error: errLotto } = await eseguiConRetry(
-          () => sb.from('consegne_commessa').insert(lottoChiusura).select().single(),
-          { label: 'lotto chiusura commessa' }
-        );
-        if (errLotto) throw errLotto;
-        if (!state.consegneCommessa.find(x => x.id === nuova.id)) {
-          state.consegneCommessa.push(nuova);
-        }
-      }
-    }
+    // 1) I fatti si scrivono PRIMA dello stato: se falliscono, non voglio una
+    //    commessa dichiarata chiusa senza le righe che lo dimostrano.
+    await scriviFattiPerStato(op, fatti);
 
     // 2) Aggiorno lo stato
     const { data, error } = await eseguiConRetry(
@@ -10771,8 +10844,15 @@ async function quickStato(op, nuovoStato) {
     if (error) throw error;
     Object.assign(op, data); // aggiorno l'oggetto in state in place
 
-    if (lottoChiusura) {
-      toast(`Prodotti ${lottoChiusura.quantita} pz e commessa completata`, 'ok');
+    // Il messaggio dice cosa è stato SCRITTO, non solo che è andata: se il
+    // gestionale ha registrato una produzione o una spedizione al posto tuo,
+    // devi vederlo — altrimenti quei pezzi compaiono nei conti dal nulla.
+    const scritti = [];
+    if (fatti.lotto) scritti.push('prodotti ' + fatti.lotto.quantita + ' pz');
+    if (fatti.spedizione) scritti.push('spediti ' + fatti.spedizione.quantita + ' pz');
+    if (scritti.length) {
+      toast(scritti.join(' e ') + ' · commessa '
+        + (OP_STATI[nuovoStato]?.label || nuovoStato).toLowerCase(), 'ok');
     } else {
       toast('Stato aggiornato: ' + (OP_STATI[nuovoStato]?.label || nuovoStato), 'ok');
     }
