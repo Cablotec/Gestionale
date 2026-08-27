@@ -7455,6 +7455,13 @@ function renderPianificazione(root) {
         el('option', { value:'aperta' }, 'Aperta'),
         el('option', { value:'sospesa' }, 'Sospesa'),
         el('option', { value:'completata' }, 'Completata'),
+        // "Spedita" mancava perché prima le spedite in questa scheda non
+        // arrivavano mai. Dal 27 ago ci sono (chip SPEDITE), e senza questa
+        // opzione `sel.value = 'spedita'` non trovava niente da selezionare:
+        // il menu restava VUOTO su ogni commessa spedita. Sceglierla non
+        // cambia lo stato di colpo — apre `quickSpedizione`, che chiede data,
+        // quantità e DDT, ed è la strada giusta per un passaggio del genere.
+        el('option', { value:'spedita' }, 'Spedita'),
       );
       sel.value = o.stato; // imposto il valore corrente in modo affidabile
       statoCell.append(sel);
@@ -10738,6 +10745,15 @@ function fattiPerStato(op, nuovoStato) {
   const chiOra = state.profile?.id || null;
   const vuoto = { ok: true, lotto: null, spedizione: null };
   if (!qtaOrd) return vuoto;
+
+  // ⚠ I fatti si creano solo quando lo stato AVANZA. Tornando indietro —
+  // riaprire una spedita, riportarla a completata — non si deve inventare
+  // niente: sulle 34 caricate a maggio, che risultano spedite con zero
+  // produzione registrata, passarle a "completata" avrebbe proposto di
+  // registrare un lotto pari all'intero ordine. Sarebbe stato inventare
+  // produzione mai avvenuta per far quadrare una marcia indietro.
+  const RANGO = { aperta: 0, sospesa: 0, completata: 1, spedita: 2 };
+  if ((RANGO[nuovoStato] || 0) <= (RANGO[op.stato] || 0)) return vuoto;
 
   if (nuovoStato === 'completata' && residuo > 0) {
     const ok = confirm(
