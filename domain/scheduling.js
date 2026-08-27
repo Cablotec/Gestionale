@@ -1949,7 +1949,7 @@ function analizzaImportOrdini(righe, ctx) {
     box: [], nuove: [], aggiornamenti: [], bloccate: [], invariate: 0,
     clientiDaCreare: [], articoliDaCreare: [], clientiRiconosciuti: [],
     clientiDaRinominare: [], rinomineImpossibili: [], residuiDiscordanti: [],
-    senzaCodice: [], statiDiscordanti: { chiuseQui: [], viveQui: [] },
+    senzaCodice: [], statiDiscordanti: { chiuseQui: [], viveQui: [], prodotteNonSpedite: [] },
   };
   if (!righe.length) return out;
 
@@ -2232,8 +2232,20 @@ function analizzaImportOrdini(righe, ctx) {
     codice: (articoli.find(a => a.id === o.articolo_id) || {}).codice || '',
     cliente: (aziende.find(a => a.id === o.cliente_id) || {}).nome || '',
   });
-  out.statiDiscordanti.chiuseQui = out.bloccate
-    .filter(v => v.origine !== 'box')
+  // ⚠ `completata` NON è una divergenza (27 ago, segnalato da Nico).
+  // I due sistemi chiudono in momenti diversi: qui `completata` vuol dire
+  // "la produzione ha finito", in Alnus l'ordine si chiude solo quando è
+  // stato SPEDITO tutto. Quindi prodotta-ma-non-spedita è lo stato normale
+  // di ogni commessa finita e in attesa di partire, e segnalarla riempiva
+  // l'elenco di roba giusta: 14 righe su 18.
+  // La divergenza vera è `spedita` qui e ancora aperta là: la merce è
+  // partita e Alnus non lo sa.
+  const chiuseNonBox = out.bloccate.filter(v => v.origine !== 'box');
+  out.statiDiscordanti.chiuseQui = chiuseNonBox
+    .filter(v => v.esistente.stato === 'spedita')
+    .map(v => Object.assign(descriviOp(v.esistente), { origine: 'file' }));
+  out.statiDiscordanti.prodotteNonSpedite = chiuseNonBox
+    .filter(v => v.esistente.stato === 'completata')
     .map(v => Object.assign(descriviOp(v.esistente), { origine: 'file' }));
   out.statiDiscordanti.viveQui = operazioni
     .filter(o => !eChiusa(o) && !chiaviViste.has(chiaveOp(o.numero_ordine, o.pos)))
@@ -2245,6 +2257,7 @@ function analizzaImportOrdini(righe, ctx) {
   const perOrdinePos = (a, b) => String(a.numeroOrdine).localeCompare(String(b.numeroOrdine))
     || Number(a.pos) - Number(b.pos);
   out.statiDiscordanti.chiuseQui.sort(perOrdinePos);
+  out.statiDiscordanti.prodotteNonSpedite.sort(perOrdinePos);
   out.statiDiscordanti.viveQui.sort(perOrdinePos);
 
   out.residuiDiscordanti.sort((a, b) =>

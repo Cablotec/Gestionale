@@ -5461,7 +5461,7 @@ function openOperazioniImportPreviewModal(rows) {
     const box = riquadro();
     if (sd.chiuseQui.length) {
       box.append(el('div', { style:'color:var(--mut);' },
-        '── per Alnus da fare, qui già chiuse (' + sd.chiuseQui.length + ') ──'));
+        '── spedite qui, per Alnus ancora da fare (' + sd.chiuseQui.length + ') ──'));
       sd.chiuseQui.slice(0, 25).forEach(r => box.append(el('div', {},
         '   ' + r.numeroOrdine + '/' + r.pos + '  ' + r.codice + '  ' + r.stato
         + '  ·  ' + r.cliente)));
@@ -5482,7 +5482,12 @@ function openOperazioniImportPreviewModal(rows) {
     body.append(nota('L\'estrazione contiene solo gli ordini ancora in corso su Alnus, '
       + 'quindi anche l\'assenza di una riga dice qualcosa. Nessuno dei due sistemi ha '
       + 'ragione per definizione: l\'import non tocca nessuno stato, si limita a dirlo. '
-      + 'I BOX Senzani restano fuori da questo conto — là la divergenza è normale.'));
+      + 'I BOX Senzani restano fuori da questo conto — là la divergenza è normale.'
+      + (sd.prodotteNonSpedite.length
+          ? ' Fuori restano anche ' + sd.prodotteNonSpedite.length + ' commesse COMPLETATE '
+            + 'qui e ancora aperte in Alnus: non è una divergenza, è lo stato normale di '
+            + 'una commessa finita che non è ancora partita — Alnus chiude solo a merce spedita.'
+          : '')));
   }
 
   // ── Righe che restano fuori ──
