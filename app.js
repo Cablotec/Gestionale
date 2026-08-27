@@ -7343,8 +7343,16 @@ function renderPianificazione(root) {
       // le 34 caricate a maggio col primo popolamento, già chiuse all'epoca.
       // Quelle si trovano solo dal Gantt. Mandare tutti allo Storico avrebbe
       // solo spostato la caccia a vuoto da una scheda all'altra.
+      // ⚠ Nemmeno il Gantt le disegna tutte: là una commessa compare solo se
+      // ha un addetto o un fornitore assegnato. Una spedita senza spedizioni,
+      // senza addetti e senza fornitori non si vede in NESSUNA scheda — sono
+      // 21 sul database di oggi. Mandare lì chi la cerca sarebbe una seconda
+      // caccia a vuoto: meglio mostrargliela qui.
+      const nelGantt = o => (getOperazioneAddetti(o.id) || []).length > 0
+        || (getOperazioneFornitori(o.id) || []).length > 0;
       const conSpedizione = nascoste.filter(o => quantitaSpedita(o.id) > 0);
-      const senzaSpedizione = nascoste.filter(o => quantitaSpedita(o.id) === 0);
+      const senzaSpedizione = nascoste.filter(o => quantitaSpedita(o.id) === 0 && nelGantt(o));
+      const invisibili = nascoste.filter(o => quantitaSpedita(o.id) === 0 && !nelGantt(o));
       const elenco = arr => arr.slice(0, 6)
         .map(o => (o.numero_ordine || '—') + '/' + (o.pos || '—')).join(' · ')
         + (arr.length > 6 ? ' · … e altre ' + (arr.length - 6) : '');
@@ -7372,6 +7380,35 @@ function renderPianificazione(root) {
           el('button', { class:'btng', style:'margin-top:8px;',
             onclick: () => { if (typeof switchToTab === 'function') switchToTab('lavoro', 'gantt_commesse'); },
           }, 'Vai al Gantt'));
+      }
+      if (invisibili.length) {
+        // Queste non stanno da nessuna parte: si mostrano QUI, con quel poco
+        // che serve a riconoscerle, e cliccando si apre la commessa.
+        box.append(el('div', { class:'sub', style:'margin-top:10px;color:var(--yel);' },
+          invisibili.length + (invisibili.length === 1
+            ? ' è chiusa senza spedizioni e senza addetti: non compare in nessun\'altra scheda.'
+            : ' sono chiuse senza spedizioni e senza addetti: non compaiono in nessun\'altra scheda.')
+          + ' Sono quelle caricate all\'avvio del gestionale. Eccole:'));
+        const lista = el('div', { style:'margin-top:6px;display:flex;flex-direction:column;gap:3px;' });
+        invisibili.slice(0, 12).forEach(o => {
+          const cli = state.aziende.find(x => x.id === o.cliente_id);
+          const art = state.articoli.find(x => x.id === o.articolo_id);
+          lista.append(el('div', {
+            style:'cursor:pointer;font-size:11px;padding:4px 8px;border:1px solid var(--brd);'
+              + 'border-radius:4px;text-align:left;',
+            title:'Apri la commessa',
+            onclick: () => openOperazioneModal(o),
+          },
+            el('span', { style:'font-family:JetBrains Mono,monospace;' },
+              (o.numero_ordine || '—') + '/' + (o.pos || '—')),
+            el('span', { class:'sub' }, '  ' + (cli ? cli.nome : '—')
+              + '  ·  ' + (art ? art.codice : '—')
+              + '  ·  ' + (o.quantita != null ? o.quantita + ' pz' : '—')
+              + (o.scadenza ? '  ·  ' + fmtIT(o.scadenza) : ''))));
+        });
+        if (invisibili.length > 12) lista.append(el('div', { class:'sub', style:'font-size:11px;' },
+          '… e altre ' + (invisibili.length - 12)));
+        box.append(lista);
       }
       root.append(box);
     }
