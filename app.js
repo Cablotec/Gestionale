@@ -5096,7 +5096,11 @@ function openOperazioniExportModal() {
 
   const cb = el('input', { type:'checkbox', style:'cursor:pointer;accent-color:var(--acc);' });
   cb.onchange = () => { conSpedite = cb.checked; aggiorna(); };
-  const nSped = state.operazioni.filter(o => o.stato === 'spedita').length;
+  // Quante commesse la spunta AGGIUNGE davvero: quelle dello Storico, non
+  // tutte le spedite. Dal 27 ago le spedite dell'ultimo mese sono già in
+  // questa scheda, e contarle qui direbbe un numero che non si aggiunge.
+  const oggiExp = toLocalISO(new Date());
+  const nSped = state.operazioni.filter(o => commessaInStorico(o, state.spedizioni, oggiExp)).length;
 
   body.append(
     el('div', { class:'sub', style:'margin-bottom:12px;' },
@@ -5106,10 +5110,11 @@ function openOperazioniExportModal() {
     el('label', {
       style:'display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;font-size:12px;',
     }, cb,
-      el('span', { style:'flex:1;' }, 'Includi anche le spedite'),
-      el('span', { class:'sub', style:'font-size:11px;' }, nSped + ' in archivio')),
+      el('span', { style:'flex:1;' }, 'Includi anche lo Storico'),
+      el('span', { class:'sub', style:'font-size:11px;' }, nSped + ' commesse')),
     el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
-      'Le spedite non si vedono in questa scheda: stanno nello Storico.'),
+      'Questa scheda contiene già le spedite degli ultimi 30 giorni. '
+      + 'Le più vecchie stanno nello Storico.'),
   );
   aggiorna();
 
@@ -6903,11 +6908,10 @@ function pianificazioneFiltrate(includiStorico) {
   else if (filter === 'aperte')     list = list.filter(o => o.stato === 'aperta');
   else if (filter === 'sospese')    list = list.filter(o => o.stato === 'sospesa');
   else if (filter === 'completate') list = list.filter(o => o.stato === 'completata');
-  // 'all' = quello che c'è da fare, senza le spedite. Ma se chi chiama ha
-  // chiesto ESPLICITAMENTE anche lo storico (l'export con la spunta), togliere
-  // le spedite qui vanificherebbe la richiesta e l'export tornerebbe identico
-  // a quello senza spunta.
-  else if (!includiStorico) list = list.filter(o => o.stato !== 'spedita');
+  // 'all' NON toglie niente: un filtro che si chiama "Tutte" e nasconde le
+  // spedite dell'ultimo mese direbbe una cosa falsa, e il conteggio in alto
+  // non corrisponderebbe alla lista sotto. Quello che questa scheda non
+  // mostra è già stato deciso una riga più su, dal confine con lo Storico.
 
   // Filtro clienti esclusi (stile Excel multi-select)
   if (state.opClientiEsclusi && state.opClientiEsclusi.size > 0) {
@@ -6987,7 +6991,6 @@ function renderPianificazione(root) {
   const inRitardo = diQui.filter(opIsRitardo).length;
   const sospese = diQui.filter(o => o.stato === 'sospesa').length;
   const completate = diQui.filter(o => o.stato === 'completata').length;
-  const spediteRecenti = diQui.filter(o => o.stato === 'spedita').length;
 
   root.innerHTML = '';
   root.append(el('div', { class:'kpis' },
@@ -7005,9 +7008,10 @@ function renderPianificazione(root) {
     { id:'aperte',     label:'Aperte' },
     { id:'sospese',    label:'Sospese' },
     { id:'completate', label:'Completate' },
-    // "Tutte" vuol dire tutto il lavoro da fare: le spedite hanno un chip
-    // loro, col conteggio, perché sono in questa scheda solo di passaggio.
-    { id:'spedite',    label:'Spedite' + (spediteRecenti ? ' (' + spediteRecenti + ')' : '') },
+    // L'etichetta dice la REGOLA, non il numero: "48" non spiega perché sono
+    // quelle e non altre, "ultimi 30gg" sì — e chi apre la scheda capisce da
+    // solo dove sono finite le più vecchie.
+    { id:'spedite',    label:'Spedite (ultimi 30gg)' },
   ].forEach(opt => {
     chips.append(el('div', {
       class: 'chip' + (filter === opt.id ? ' act' : ''),
