@@ -378,6 +378,18 @@ Domanda di Nico: *"ma tu non avevi un account per poter far tutto sull app?"* �
 - ⚠ **L UPDATE non si puo limitare a certe colonne** (Postgres non lo fa nelle policy): `stato` compreso, quindi in teoria si puo riaprire una commessa spedita. Resta la regola di sempre: dichiarare quante righe tocca, salvarle su file, aspettare l ok.
 - **La password sta in un file locale e in questa sessione la lettura e stata bloccata** — non e stata aggirata. Da rivedere quando servira davvero l accesso.
 
+## Egress, secondo atto: la porta piu grossa era il GESTIONALE, non il kiosk (27 ago, `2026-08-25.9`)
+Il grafico del 26 ago — **giornata pulita**: Nico assente, nessuno script mio — dice **~125 MB** (110,5 PostgREST + 14,7 Realtime + 0,35 Auth). La correzione del kiosk ha morso, ma **a meta**: da ~200 MB a 125, non a 10. Come diceva l handoff, *se il numero non crolla la diagnosi era incompleta*.
+**Misurato, non stimato** — peso reale in rete (byte compressi) di una passata:
+- **kiosk `kioskLoadAll`: 205 KB** -> servirebbero **551 ricariche** al giorno per fare 110 MB. Non credibile.
+- **admin `loadAllData`: 604 KB** -> **187 ricariche**. Su 7 admin fanno **27 ritorni-sulla-scheda a testa**: del tutto ordinario.
+- Dentro i 604 KB, **316 sono `sessioni_lavoro`**: il gestionale riscarica **tutto lo storico timbri** (3.548 righe, 4 pagine) ogni volta.
+**Il difetto**: `visibilitychange` chiamava `loadAllData()` a OGNI ritorno sulla scheda del browser. E sopra i 30 s di assenza ne partivano **DUE**: `ricreaConnessione()` uccide il canale, la ri-sottoscrizione fa gia il suo recupero, e poi `visibilitychange` ne faceva un altro. Stessa famiglia del difetto del kiosk: **ricaricare tutto dove bastava non ricaricare niente.**
+**La cura**: il recupero del realtime e ora l UNICO padrone della ricarica. `onRiconnessione` segna `_rtNeedCatchup`, la ri-sottoscrizione ricarica **una volta sola** e ripristina la scheda con `switchToTab`. Al rientro veloce, se il canale e ancora agganciato (`realtimeVivo`) **non si scarica niente**: `applyChange` tiene gia aggiornate tutte e 20 le tabelle riga per riga. `ricreaConnessione()` NON e stata toccata: la cura del freeze dei salvataggi resta identica.
+**Rete di sicurezza** (`ricaricaSeIlRealtimeNonRisponde`, 8 s): se il realtime resta giu mentre il resto della rete va, il recupero non arriverebbe mai e i dati resterebbero fermi — prima quel caso era coperto dalla ricarica incondizionata. Ora si ricarica lo stesso, **una volta**, non a ogni rientro.
+**Da verificare sul campo**: la giornata tipo deve scendere **sotto i 20 MB**. Se resta sopra i 100, la porta e ancora un altra e si ricomincia a misurare — il metodo che ha funzionato e stato **pesare i byte veri di ogni passata** e dividere, non ragionare su chi sembrava colpevole.
+**Nota di metodo, pagata due volte oggi**: avevo prima accusato il `visibilitychange` sui numeri sbagliati, poi l avevo scagionato perche Nico era assente — ed era vero che lui non c era, ma gli **altri sei admin** si. La stessa ipotesi era giusta per una ragione che non avevo guardato. Misurare prima, incolpare dopo.
+
 ## ▶ Fili aperti (in ordine di priorità)
 
 ### 0-bis. DA VERIFICARE il 25 ago: la correzione egress ha morso davvero?

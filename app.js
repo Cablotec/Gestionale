@@ -19,7 +19,9 @@ let _rtLivenessTimer = null;
 // background e quindi non innescano il recovery legato a visibilitychange.
 function _rtLivenessCheck() {
   if (!sb) return;
-  const vivo = (ch) => ch && (ch.state === 'joined' || ch.state === 'joining');
+  // Stessa definizione di "vivo" usata al ritorno sulla scheda: una sola,
+  // o le due si allontanano e cominciano a dire cose diverse.
+  const vivo = realtimeVivo;
   if (IS_KIOSK) {
     if (!vivo(kioskChannel) && typeof kioskStartRealtime === 'function') {
       _kioskNeedCatchup = true;
@@ -222,8 +224,47 @@ let _tokenKeepAliveTimer = null;
 // con mobile/prelievo). Qui resta solo ciò che è specifico di index:
 // il Pezzo C (keep-alive + visibilitychange) e l'hook di riconnessione.
 
+// Il canale realtime è ancora agganciato? Finché lo è, `applyChange` tiene
+// aggiornata ogni tabella riga per riga e NON serve riscaricare niente.
+function realtimeVivo(ch) { return !!ch && (ch.state === 'joined' || ch.state === 'joining'); }
+
+// Rete di sicurezza. Ora la ricarica dopo un buco la fa la ri-sottoscrizione
+// del realtime, che pero' non arriva mai se il realtime resta giu' mentre il
+// resto della rete funziona: prima quel caso era coperto dalla ricarica
+// incondizionata al ritorno sulla scheda. Se dopo qualche secondo il recupero
+// e' ancora in sospeso, si ricarica lo stesso — una volta, non a ogni rientro.
+let _rtCatchupFallback = null;
+function ricaricaSeIlRealtimeNonRisponde(attesaMs) {
+  clearTimeout(_rtCatchupFallback);
+  _rtCatchupFallback = setTimeout(() => {
+    const inSospeso = IS_KIOSK ? _kioskNeedCatchup : _rtNeedCatchup;
+    if (!inSospeso || !sb || !state.profile) return;
+    if (IS_KIOSK) {
+      _kioskNeedCatchup = false;
+      if (typeof kioskLoadAll === 'function') kioskLoadAll().then(kioskRefreshActive).catch(() => {});
+      return;
+    }
+    _rtNeedCatchup = false;
+    if (!state.loaded || typeof loadAllData !== 'function') return;
+    console.warn('[recovery] il realtime non si e\' riagganciato: ricarico i dati lo stesso');
+    loadAllData().then(() => {
+      if (typeof switchToTab === 'function' && state.currentArea && state.currentTab) {
+        switchToTab(state.currentArea, state.currentTab);
+      } else if (state.currentTab && typeof renderTab === 'function') {
+        renderTab(state.currentTab);
+      }
+    }).catch(() => {});
+  }, attesaMs || 8000);
+}
+
 // Dopo ogni ricreazione del client (core), riavvia il realtime giusto.
 onRiconnessione(() => {
+  // Il client è stato buttato via: gli eventi accaduti nel frattempo sono
+  // persi e il realtime non li riproduce. Segnare il recupero QUI rende la
+  // ri-sottoscrizione l'unica responsabile della ricarica — una sola, invece
+  // delle due che partivano prima (questa e quella di `visibilitychange`).
+  _rtNeedCatchup = true;
+  _kioskNeedCatchup = true;
   realtimeChannel = null; // così startRealtime ricreerà il canale
   if (IS_KIOSK) {
     kioskChannel = null; // i canali vecchi sono stati rimossi: consenti la ri-sottoscrizione
@@ -256,20 +297,26 @@ function installaProtezioneSalvataggi() {
         // Se è stata in background più di 30 secondi, ricrea per sicurezza.
         // Sopra i 30s il rischio del deadlock di gotrue-js diventa concreto.
         if (inattivaDa > 30000) {
+          // Ricrea il client (cura del deadlock). La ricarica dei dati NON si
+          // fa qui: `onRiconnessione` segna il recupero e la ri-sottoscrizione
+          // del realtime la esegue una volta sola.
           await ricreaConnessione();
+          ricaricaSeIlRealtimeNonRisponde();
         } else {
           await assicuraSessioneValida();
-        }
-        // Ricarica dati solo se siamo loggati e in modalità normale.
-        if (sb && state.profile && !IS_KIOSK && typeof loadAllData === 'function') {
-          await loadAllData();
-          // Ripristina la scheda esatta su cui era l'utente: macro-area +
-          // sotto-tab. Usare solo renderTab ridisegnerebbe il contenuto ma
-          // lascerebbe barra di navigazione e sotto-tab disallineate.
-          if (typeof switchToTab === 'function' && state.currentArea && state.currentTab) {
-            switchToTab(state.currentArea, state.currentTab);
-          } else if (typeof renderTab === 'function' && state.currentTab) {
-            renderTab(state.currentTab);
+          // Rientro veloce: se il canale è ancora agganciato i dati sono già
+          // aggiornati da `applyChange` e non c'è NIENTE da riscaricare.
+          // Era questa la spesa più grossa dell'app: 604 KB per ogni ritorno
+          // sulla scheda, ~187 ricariche al giorno fra tutti gli admin.
+          if (sb && state.profile && !realtimeVivo(IS_KIOSK ? kioskChannel : realtimeChannel)) {
+            _rtNeedCatchup = true;
+            _kioskNeedCatchup = true;
+            if (IS_KIOSK) {
+              if (typeof kioskStartRealtime === 'function') kioskStartRealtime();
+            } else if (typeof startRealtime === 'function') {
+              startRealtime();
+            }
+            ricaricaSeIlRealtimeNonRisponde();
           }
         }
       } catch (e) {
@@ -284,17 +331,11 @@ function installaProtezioneSalvataggi() {
   // Quando la rete torna disponibile dopo una caduta
   window.addEventListener('online', async () => {
     console.log('[recovery] rete tornata online — ricreo la connessione');
+    // Anche qui la ricarica la fa la ri-sottoscrizione del realtime, una sola
+    // volta: `onRiconnessione` ha gia' segnato il recupero. Prima questa
+    // seconda `loadAllData()` raddoppiava il traffico di ogni rientro.
     await ricreaConnessione();
-    if (sb && state.profile && !IS_KIOSK && typeof loadAllData === 'function') {
-      try {
-        await loadAllData();
-        if (typeof switchToTab === 'function' && state.currentArea && state.currentTab) {
-          switchToTab(state.currentArea, state.currentTab);
-        } else if (typeof renderTab === 'function' && state.currentTab) {
-          renderTab(state.currentTab);
-        }
-      } catch (e) { console.warn('Reload online fallito:', e); }
-    }
+    ricaricaSeIlRealtimeNonRisponde();
   });
 }
 
@@ -810,7 +851,17 @@ function startRealtime() {
           // ricarico una volta per riallineare la vista alla realtà.
           if (state.loaded && !IS_KIOSK && typeof loadAllData === 'function') {
             loadAllData()
-              .then(() => { if (state.currentTab && typeof renderTab === 'function') renderTab(state.currentTab); })
+              .then(() => {
+                // Ripristina la scheda ESATTA: macro-area + sotto-tab. Con il
+                // solo renderTab il contenuto si ridisegna ma la barra di
+                // navigazione resta disallineata. Prima questo lo faceva
+                // `visibilitychange`; ora la ricarica avviene solo qui.
+                if (typeof switchToTab === 'function' && state.currentArea && state.currentTab) {
+                  switchToTab(state.currentArea, state.currentTab);
+                } else if (state.currentTab && typeof renderTab === 'function') {
+                  renderTab(state.currentTab);
+                }
+              })
               .catch(() => {});
           }
         }
