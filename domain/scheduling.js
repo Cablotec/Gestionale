@@ -2053,6 +2053,9 @@ function analizzaImportOrdini(righe, ctx) {
   // poi scartate o fuse: servono a non far sembrare sparita da Alnus una
   // commessa la cui riga nel file c'e', solo non importabile.
   const chiaviViste = new Set();
+  // Tutti i riferimenti Senzani presenti nel file, per giudicare i kit BOX
+  // (vedi il blocco degli stati discordanti in fondo).
+  const rifSenzaniFile = new Set();
   righe.forEach((r, i) => {
     const nRiga = i + 2;                     // +2: la riga 1 sono le intestazioni
     const sz = (val(r, 'sz') || 'OC').toUpperCase();
@@ -2067,6 +2070,19 @@ function analizzaImportOrdini(righe, ctx) {
 
     const clienteNome = val(r, 'cliente');
     if (!clienteNome) return scarta(nRiga, 'cliente mancante');
+
+    // Il riferimento Senzani si registra QUI, prima di sapere se la riga si
+    // importa: e' il solo legame fra le 15-18 righe di Alnus e il kit che da
+    // noi e' una commessa sola. Anche una riga scartata piu' avanti (scadenza
+    // mancante) resta la prova che quel kit in Alnus e' ancora aperto, e
+    // raccoglierlo dopo gli scarti farebbe sparire proprio quella prova.
+    // Si prendono TUTTI i riferimenti Senzani, non solo gli EL fusi in BOX:
+    // i kit piu' vecchi hanno riferimenti di altra forma (A09102, D34807) e
+    // vanno confrontati con la stessa domanda.
+    if (/senzani/i.test(clienteNome)) {
+      const rifSenz = String(val(r, 'rif') || '').trim().toUpperCase();
+      if (rifSenz) rifSenzaniFile.add(rifSenz);
+    }
 
     const scadenza = importOrdiniData(r[out.mappa.scadenza]);
     if (!scadenza) return scarta(nRiga, 'scadenza mancante o sentinella 9999');
@@ -2242,11 +2258,22 @@ function analizzaImportOrdini(righe, ctx) {
   // Senzani fuse — 177 — e quelle senza codice.
   const ordiniFile = new Set();
   voci.forEach(v => ordiniFile.add(v.numeroOrdine));
+  const codiceDi  = o => (articoli.find(a => a.id === o.articolo_id) || {}).codice || '';
+  const clienteDi = o => (aziende.find(a => a.id === o.cliente_id) || {}).nome || '';
   const descriviOp = o => ({
     numeroOrdine: o.numero_ordine, pos: o.pos, stato: o.stato, scadenza: o.scadenza,
-    codice: (articoli.find(a => a.id === o.articolo_id) || {}).codice || '',
-    cliente: (aziende.find(a => a.id === o.cliente_id) || {}).nome || '',
+    codice: codiceDi(o), cliente: clienteDi(o),
   });
+  // Il riferimento di un kit, per riagganciarlo alle righe di Alnus.
+  // ⚠ Il CODICE ARTICOLO batte la colonna `riferimento_cliente`: su
+  // BOX_EL000515 la colonna dice `EL0000515`, uno zero di troppo, e presa da
+  // sola avrebbe dichiarato finito un kit con 18 righe ancora aperte in
+  // Alnus. Il codice lo genera l'import da quello stesso riferimento, la
+  // colonna la scrive una persona.
+  const rifDiCommessa = o => {
+    const m = /^BOX_(.+)$/i.exec(String(codiceDi(o) || '').trim());
+    return (m ? m[1] : String(o.riferimento_cliente || '')).trim().toUpperCase();
+  };
   // ⚠ `completata` NON è una divergenza (27 ago, segnalato da Nico).
   // I due sistemi chiudono in momenti diversi: qui `completata` vuol dire
   // "la produzione ha finito", in Alnus l'ordine si chiude solo quando è
@@ -2271,18 +2298,41 @@ function analizzaImportOrdini(righe, ctx) {
   // mente come una `aperta`: la merce per loro e' partita, per noi no.
   // Solo `spedita` mette d'accordo i due archivi, ed e' l'unico stato che si
   // tace. Trattare `completata` come "chiusa" ne nascondeva 10.
+  // Un KIT non si giudica dalla chiave ordine+posizione (28 ago, chiesto da
+  // Nico: "con i box come si fa?"). Qui il kit e' UNA commessa, in Alnus sono
+  // le 15-18 righe da cui e' stato fuso, e le posizioni non combaciano: i kit
+  // piu' vecchi stanno in pos 0020, l'import ne crea a 0010. Confrontare le
+  // posizioni li dichiarava sempre spariti, e per questo erano stati esclusi
+  // in blocco — ma esclusi in blocco vuol dire non guardarli mai.
+  // Il legame con Alnus pero' c'e' gia' nei dati, e la domanda giusta e'
+  // un'altra: di quel riferimento e' rimasta qualche riga nel file? Nessuna
+  // riga = per Alnus il kit e' finito. Sui dati del 28 ago: 11 kit ancora
+  // aperti di la' (giusto tacerli), 3 spediti e d'accordo, 2 divergenze vere
+  // che prima non si vedevano. Zero falsi allarmi.
+  const kitFinitoPerAlnus = o => {
+    const rif = rifDiCommessa(o);
+    // Senza riferimento non c'e' legame da seguire: si torna alla regola
+    // generale invece di tacere. Tacere per mancanza di dati e' il buco che
+    // stavamo chiudendo, non la soluzione.
+    if (!rif) return !chiaviViste.has(chiaveOp(o.numero_ordine, o.pos));
+    return !rifSenzaniFile.has(rif);
+  };
   out.statiDiscordanti.viveQui = operazioni
-    .filter(o => o.stato !== 'spedita' && !chiaviViste.has(chiaveOp(o.numero_ordine, o.pos)))
+    .filter(o => {
+      if (o.stato === 'spedita') return false;
+      return importOrdiniCommessaBox(codiceDi(o), clienteDi(o))
+        ? kitFinitoPerAlnus(o)
+        : !chiaviViste.has(chiaveOp(o.numero_ordine, o.pos));
+    })
     .map(o => Object.assign(descriviOp(o), {
       // Se l'ORDINE c'e' ancora nel file ma la riga no, non e' sparito
       // l'ordine: e' sparita quella posizione. Si legge diversamente.
       ordineNelFile: ordiniFile.has(o.numero_ordine),
-    }))
-    // I BOX Senzani restano fuori di qua come restano fuori di la': la
-    // decisione era gia' presa, ma su questo verso non era mai stata
-    // applicata — `chiuseQui` filtrava `bloccate`, che i BOX li marca, mentre
-    // questo ramo parte dalle commesse a database, dove quel marchio non c'e'.
-    .filter(r => !importOrdiniCommessaBox(r.codice, r.cliente));
+      // I kit si dichiarano per quello che sono: chi legge deve sapere che
+      // quella riga e' stata giudicata sul riferimento, non sulla posizione.
+      kit: importOrdiniCommessaBox(codiceDi(o), clienteDi(o))
+        ? (rifDiCommessa(o) || null) : undefined,
+    }));
   const perOrdinePos = (a, b) => String(a.numeroOrdine).localeCompare(String(b.numeroOrdine))
     || Number(a.pos) - Number(b.pos);
   out.statiDiscordanti.chiuseQui.sort(perOrdinePos);

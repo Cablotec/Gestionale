@@ -5485,7 +5485,8 @@ function openOperazioniImportPreviewModal(rows) {
       sd.viveQui.slice(0, 25).forEach(r => box.append(el('div', {},
         '   ' + r.numeroOrdine + '/' + r.pos + '  ' + r.codice + '  ' + r.stato
         + '  scad ' + (r.scadenza ? fmtIT(r.scadenza) : '—') + '  ·  ' + r.cliente
-        + (r.ordineNelFile ? '   (l\'ordine c\'è ancora: è sparita la riga)' : ''))));
+        + (r.kit ? '   (kit ' + r.kit + ': in Alnus non resta nessuna sua riga)'
+          : (r.ordineNelFile ? '   (l\'ordine c\'è ancora: è sparita la riga)' : '')))));
       if (sd.viveQui.length > 25) box.append(el('div', { style:'color:var(--mut);' },
         '   ... e altre ' + (sd.viveQui.length - 25)));
     }
@@ -5495,7 +5496,9 @@ function openOperazioniImportPreviewModal(rows) {
       + 'ragione per definizione: l\'import non tocca nessuno stato, si limita a dirlo. '
       + 'Assente da Alnus vuol dire spedito, quindi qui finiscono anche le COMPLETATE '
       + 'senza spedizioni registrate: là la merce risulta partita, qui no. '
-      + 'I BOX Senzani restano fuori da questo conto — là la divergenza è normale.'
+      + 'I kit BOX si giudicano sul RIFERIMENTO e non sulla posizione — di là sono '
+      + 'le 15-18 righe da cui il kit è stato fuso, quindi il kit è finito per Alnus '
+      + 'solo quando di quel riferimento non resta più nessuna riga nel file.'
       + (sd.prodotteNonSpedite.length
           ? ' Fuori restano anche ' + sd.prodotteNonSpedite.length + ' commesse COMPLETATE '
             + 'qui e ancora aperte in Alnus: non è una divergenza, è lo stato normale di '
