@@ -5481,7 +5481,7 @@ function openOperazioniImportPreviewModal(rows) {
     }
     if (sd.viveQui.length) {
       box.append(el('div', { style:'color:var(--mut);margin-top:6px;' },
-        '── per Alnus finite, qui ancora aperte (' + sd.viveQui.length + ') ──'));
+        '── per Alnus finite, qui non spedite (' + sd.viveQui.length + ') ──'));
       sd.viveQui.slice(0, 25).forEach(r => box.append(el('div', {},
         '   ' + r.numeroOrdine + '/' + r.pos + '  ' + r.codice + '  ' + r.stato
         + '  scad ' + (r.scadenza ? fmtIT(r.scadenza) : '—') + '  ·  ' + r.cliente
@@ -5493,6 +5493,8 @@ function openOperazioniImportPreviewModal(rows) {
     dest.append(nota('L\'estrazione contiene solo gli ordini ancora in corso su Alnus, '
       + 'quindi anche l\'assenza di una riga dice qualcosa. Nessuno dei due sistemi ha '
       + 'ragione per definizione: l\'import non tocca nessuno stato, si limita a dirlo. '
+      + 'Assente da Alnus vuol dire spedito, quindi qui finiscono anche le COMPLETATE '
+      + 'senza spedizioni registrate: là la merce risulta partita, qui no. '
       + 'I BOX Senzani restano fuori da questo conto — là la divergenza è normale.'
       + (sd.prodotteNonSpedite.length
           ? ' Fuori restano anche ' + sd.prodotteNonSpedite.length + ' commesse COMPLETATE '

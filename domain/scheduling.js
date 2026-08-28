@@ -1935,6 +1935,19 @@ function importOrdiniEBox(nomeCliente, riferimento) {
     && /^EL/i.test(String(riferimento || '').trim());
 }
 
+// Lo stesso kit, ma visto dal lato DATABASE. `importOrdiniEBox` giudica una
+// riga del file (cliente + riferimento); qui la riga del file non c'e' per
+// niente — e' esattamente il caso in esame — quindi il kit si riconosce da
+// com'e' fatta la commessa. A sistema convivono due convenzioni: `BOX_EL000511`
+// (le crea l'import) e `SZ-D34807_BOX` (le piu' vecchie, fatte a mano).
+// `PJS-BOX_TOUCH` NON e' un kit: e' un prodotto vero, e infatti non e' di
+// Senzani — per questo il vincolo sul cliente non si puo' togliere.
+function importOrdiniCommessaBox(codiceArticolo, nomeCliente) {
+  const c = String(codiceArticolo || '').trim();
+  return /senzani/i.test(String(nomeCliente || ''))
+    && (/^BOX_/i.test(c) || /_BOX$/i.test(c));
+}
+
 function analizzaImportOrdini(righe, ctx) {
   righe = righe || [];
   ctx = ctx || {};
@@ -2229,7 +2242,6 @@ function analizzaImportOrdini(righe, ctx) {
   // Senzani fuse — 177 — e quelle senza codice.
   const ordiniFile = new Set();
   voci.forEach(v => ordiniFile.add(v.numeroOrdine));
-  const eChiusa = o => o.stato === 'completata' || o.stato === 'spedita';
   const descriviOp = o => ({
     numeroOrdine: o.numero_ordine, pos: o.pos, stato: o.stato, scadenza: o.scadenza,
     codice: (articoli.find(a => a.id === o.articolo_id) || {}).codice || '',
@@ -2250,13 +2262,27 @@ function analizzaImportOrdini(righe, ctx) {
   out.statiDiscordanti.prodotteNonSpedite = chiuseNonBox
     .filter(v => v.esistente.stato === 'completata')
     .map(v => Object.assign(descriviOp(v.esistente), { origine: 'file' }));
+  // ⚠ Qui il verso e' l'OPPOSTO, e la regola di sopra non si puo' ricopiare
+  // (28 ago, trovato da Nico su 2026/OC/00174/0030-0040). Sopra la riga C'E'
+  // nel file, e `completata` va taciuta: Alnus aspetta la spedizione, noi
+  // abbiamo finito di produrre, tutto normale. Qui la riga NON c'e', e per
+  // Alnus assente vuol dire chiuso, cioe' SPEDITO. Una commessa `completata`
+  // con zero spedizioni registrate dice quindi il contrario di Alnus, esatta-
+  // mente come una `aperta`: la merce per loro e' partita, per noi no.
+  // Solo `spedita` mette d'accordo i due archivi, ed e' l'unico stato che si
+  // tace. Trattare `completata` come "chiusa" ne nascondeva 10.
   out.statiDiscordanti.viveQui = operazioni
-    .filter(o => !eChiusa(o) && !chiaviViste.has(chiaveOp(o.numero_ordine, o.pos)))
+    .filter(o => o.stato !== 'spedita' && !chiaviViste.has(chiaveOp(o.numero_ordine, o.pos)))
     .map(o => Object.assign(descriviOp(o), {
       // Se l'ORDINE c'e' ancora nel file ma la riga no, non e' sparito
       // l'ordine: e' sparita quella posizione. Si legge diversamente.
       ordineNelFile: ordiniFile.has(o.numero_ordine),
-    }));
+    }))
+    // I BOX Senzani restano fuori di qua come restano fuori di la': la
+    // decisione era gia' presa, ma su questo verso non era mai stata
+    // applicata — `chiuseQui` filtrava `bloccate`, che i BOX li marca, mentre
+    // questo ramo parte dalle commesse a database, dove quel marchio non c'e'.
+    .filter(r => !importOrdiniCommessaBox(r.codice, r.cliente));
   const perOrdinePos = (a, b) => String(a.numeroOrdine).localeCompare(String(b.numeroOrdine))
     || Number(a.pos) - Number(b.pos);
   out.statiDiscordanti.chiuseQui.sort(perOrdinePos);
