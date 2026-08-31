@@ -295,15 +295,8 @@ input.search:focus{border-color:var(--acc);}
 .prep-dot.parziale{background:var(--yel);}
 .prep-dot.completo{background:var(--grn);}
 .prio-hint{font-size:13px;color:var(--mut);margin-bottom:14px;line-height:1.5;}
-.prio-list{display:flex;flex-direction:column;gap:6px;}
-.prio-row{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--sur);border:1px solid var(--brd);border-radius:7px;cursor:grab;user-select:none;}
-.prio-row.dragging{opacity:.45;border-color:var(--acc);}
-.prio-grip{color:var(--mut);font-size:17px;line-height:1;flex-shrink:0;}
-.prio-num{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--acc);width:28px;flex-shrink:0;text-align:right;}
-.prio-main{flex:1;min-width:0;overflow:hidden;}
-.prio-code{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.prio-sub{font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.prio-scad{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mut);flex-shrink:0;}
+/* .prio-list/.prio-row/... tolte col modale "Ordina priorità" (31 ago).
+   Resta .prio-hint: la usa la riga di istruzioni del riordino al kiosk. */
 .calc-cell{color:var(--mut);font-family:'JetBrains Mono',monospace;font-size:11px;}
 .calc-cell.over-budget{color:var(--red)!important;font-weight:700;background:rgba(255,78,107,.08);}
 .scadenza-vicina{color:var(--yel);font-weight:600;}

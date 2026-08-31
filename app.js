@@ -6417,56 +6417,6 @@ function openFiltroSingoloPopup(anchorBtn, opts) {
   }, 0);
 }
 
-// Lista riordinabile per trascinamento (drag nativo, mouse). Usata sia dal
-// gestionale sia dal kiosk, così il riordino è identico nei due posti.
-// items: array di operazioni. Ritorna { el, order } dove order() ridà gli id
-// nell'ordine corrente.
-function buildPrioList(items) {
-  let arr = items.slice();
-  const list = el('div', { class:'prio-list' });
-  function rebuild() {
-    const ids = [...list.querySelectorAll('.prio-row')].map(r => r.dataset.id);
-    arr = ids.map(id => arr.find(o => o.id === id)).filter(Boolean);
-  }
-  function render() {
-    list.innerHTML = '';
-    arr.forEach((op, i) => {
-      const cli = state.aziende.find(c => c.id === op.cliente_id);
-      const art = state.articoli.find(a => a.id === op.articolo_id);
-      const row = el('div', { class:'prio-row', draggable:'true' },
-        el('span', { class:'prio-grip' }, '⠿'),
-        el('span', { class:'prio-num' }, String(i + 1)),
-        el('div', { class:'prio-main' },
-          el('div', { class:'prio-code' }, art?.codice || op.numero_ordine || '—'),
-          el('div', { class:'prio-sub' },
-            (cli?.nome || '—') + (op.numero_ordine ? ' · ' + op.numero_ordine : '')),
-        ),
-        el('div', { class:'prio-scad' }, op.scadenza ? fmtIT(op.scadenza) : '—'),
-      );
-      row.dataset.id = op.id;
-      row.addEventListener('dragstart', () => row.classList.add('dragging'));
-      row.addEventListener('dragend', () => { row.classList.remove('dragging'); rebuild(); render(); });
-      list.append(row);
-    });
-  }
-  list.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    const dragging = list.querySelector('.dragging');
-    if (!dragging) return;
-    const others = [...list.querySelectorAll('.prio-row:not(.dragging)')];
-    let after = null, best = -Infinity;
-    others.forEach(r => {
-      const box = r.getBoundingClientRect();
-      const off = e.clientY - box.top - box.height / 2;
-      if (off < 0 && off > best) { best = off; after = r; }
-    });
-    if (after == null) list.appendChild(dragging);
-    else list.insertBefore(dragging, after);
-  });
-  render();
-  return { el: list, order: () => { rebuild(); return arr.map(o => o.id); } };
-}
-
 // Persiste solo le priorità cambiate e aggiorna la cache locale. Ritorna il
 // numero di righe cambiate. NON ridisegna (lascia decidere al chiamante).
 async function persistPriorita(coppie) {
@@ -6883,55 +6833,18 @@ function openOrdineClienteModal(clienteId, numeroOrdine) {
   openModal(modal);
 }
 
-// Modale "Ordina priorità" (gestionale): riordino di tutte le commesse aperte.
-function openPrioritaModal() {
-  const items = state.operazioni
-    .filter(o => o.stato !== 'spedita' && o.stato !== 'completata')
-    .slice()
-    .sort(cmpCommessaKiosk);
 
-  const modal = el('div', { class:'modal' });
-  modal.append(el('div', { class:'mhd' },
-    el('h2', {}, 'Ordina priorità commesse'),
-    el('button', { class:'mclose', onclick: closeModal }, '✕'),
-  ));
-  const body = el('div', { class:'mbody' });
-  body.append(el('div', { class:'prio-hint' },
-    'Trascina le righe per dare priorità: quelle in alto compaiono per prime al kiosk '
-    + '(lista commesse e "Prossime assegnate a te"). Le commesse aggiunte in seguito '
-    + 'finiscono in coda finché non riordini.'));
-
-  const rl = buildPrioList(items);
-  body.append(rl.el);
-
-  const footer = el('div', { style:'display:flex;gap:10px;justify-content:space-between;margin-top:18px;flex-wrap:wrap;' });
-  footer.append(el('button', { class:'btng', onclick: () => {
-    if (!confirm('Azzerare la priorità di tutte le commesse?\nTornano all\'ordine per scadenza.')) return;
-    salvaPriorita(items.map(o => ({ id:o.id, priorita:null })));
-  } }, 'Azzera priorità'));
-  const dx = el('div', { style:'display:flex;gap:10px;' });
-  dx.append(el('button', { class:'btng', onclick: closeModal }, 'Annulla'));
-  dx.append(el('button', { class:'btnp', onclick: () => {
-    salvaPriorita(rl.order().map((id, i) => ({ id, priorita:i + 1 })));
-  } }, 'Salva ordine'));
-  footer.append(dx);
-  body.append(footer);
-
-  modal.append(body);
-  openModal(modal);
-}
-
-// Salvataggio dal modale gestionale: persiste, chiude e ridisegna la tab.
-async function salvaPriorita(coppie) {
-  try {
-    const n = await persistPriorita(coppie);
-    if (n > 0) toast('Priorità aggiornata', 'ok');
-    closeModal();
-    if (state.currentTab && typeof renderTab === 'function') renderTab(state.currentTab);
-  } catch (e) {
-    toast('Errore salvataggio priorità: ' + (e.message || e), 'err');
-  }
-}
+// Il modale "⠿ Ordina priorità" è stato tolto da Ordini cliente (31 ago,
+// decisione Nico). Il campo `operazioni.priorita` RESTA e conta ancora: ordina
+// le card del kiosk (cmpCommessaKiosk) e la coda "prossime assegnate a te".
+// A sparire è la porta sbagliata. In Ordini cliente non si vedeva niente di
+// quello che faceva — nessuna colonna priorità, nessun ordinamento — e la
+// lista che apriva erano TUTTE le commesse aperte, senza i filtri, la ricerca
+// e i clienti esclusi che si avevano davanti: si riordinava altro da quello
+// che si stava guardando. Il riordino vive al kiosk (kioskAttachReorder), dove
+// si trascinano le schede e l'effetto si vede mentre lo si fa.
+// Con il modale se ne sono andate salvaPriorita e buildPrioList, che lo
+// servivano soltanto; `persistPriorita` resta, la usa il kiosk.
 
 // Assegna un gruppo_id a più commesse (le accorpa). gruppoId null = scioglie.
 async function salvaGruppoCommesse(ids, gruppoId) {
@@ -7123,7 +7036,6 @@ function renderPianificazione(root) {
   );
   if (isAdmin) {
     toolbar.append(el('button', { class:'btnp', onclick:()=>openNuovoOrdineModal() }, '+ Nuovo ordine'));
-    toolbar.append(el('button', { class:'btng', onclick:()=>openPrioritaModal() }, '⠿ Ordina priorità'));
     // Raggruppa: entra in modalità selezione — le commesse scelte diventano
     // un gruppo, viste come UNA al kiosk (il tempo timbrato si divide in parti
     // uguali su tutte). Ri-clic esce dalla modalità.
