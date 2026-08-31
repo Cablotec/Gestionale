@@ -5108,8 +5108,8 @@ function openOperazioniExportModal() {
 
   body.append(
     el('div', { class:'sub', style:'margin-bottom:12px;' },
-      'Esci con le commesse che hai davanti, filtri compresi. Le colonne seguono il formato di import, '
-      + 'più alcune extra (stato, ore, addetti) che l\'import ignora.'),
+      'Esci con le commesse che hai davanti, filtri compresi. Le colonne sono quelle della tabella, '
+      + 'nello stesso ordine e con gli stessi nomi, più alcune extra in coda (ore, addetti, fornitori).'),
     riepilogo,
     el('label', {
       style:'display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;font-size:12px;',
@@ -5135,15 +5135,10 @@ function openOperazioniExportModal() {
   openModal(modal);
 }
 
-// Splitta un numero_ordine "Eser/SzCl/Ord" in tre parti (best effort).
-// Se il valore non rispetta il formato a 3 parti, mette tutto in "ord".
-function splitNumeroOrdine(numOrdine) {
-  if (!numOrdine) return { eser:'', sz:'', ord:'' };
-  const parts = String(numOrdine).split('/').map(s => s.trim());
-  if (parts.length === 3) return { eser: parts[0], sz: parts[1], ord: parts[2] };
-  if (parts.length === 2) return { eser:'', sz: parts[0], ord: parts[1] };
-  return { eser:'', sz:'', ord: parts.join('/') };
-}
+// `splitNumeroOrdine` cancellata (31 ago): spezzava il numero ordine nelle tre
+// colonne dell'ERP (Eser / Sz Cl / Ord/Off cliente) per tenere l'export
+// reimportabile. Non serve più a nessuno — vedi la nota su
+// `operazioniExportExcel`.
 
 // `list`: le commesse già filtrate e ordinate come le vede la scheda (7 ago).
 // Prima riceveva un elenco di stati e rifiltrava per conto suo, ignorando
@@ -5166,13 +5161,21 @@ function operazioniExportExcel(list, filtriAttivi) {
   const uById = {};
   state.utenti.forEach(u => uById[u.id] = u);
 
-  // Costruzione righe. Header delle prime colonne coerenti con l'import ERP
-  // (Eser, Sz Cl, Ord/Off cliente, Riga, Codice articolo, Scadenza, Quantità,
-  // Cliente, Rifer. Cliente, Riferimento Cliente — quest'ultime due in input
-  // vengono concatenate nel campo `riferimento_cliente`; in export le
-  // restituiamo come unica colonna "Riferimento Cliente").
+  // ── L'EXPORT È LA TABELLA, PARI PARI (31 ago, richiesta Nico) ──
+  // Stesse colonne, stesso ordine, stessi nomi di intestazione. In coda le
+  // poche che a schermo non ci sono, dichiarate come tali.
+  //
+  // Fin qui il file ricalcava il tracciato dell'ERP — numero ordine spezzato in
+  // Eser / Sz Cl / Ord/Off cliente, intestazioni loro — per restare
+  // REIMPORTABILE. Quella cautela era già senza oggetto, e non solo inutile:
+  // dannosa. L'import legge l'estrazione di ALNUS, e la legge come una
+  // FOTOGRAFIA di cosa è ancora aperto di là: l'assenza di una riga dal file è
+  // essa stessa un'informazione di stato ("per Alnus è finita"). Dare in pasto
+  // all'import un export di qui — che per giunta esce filtrato per quello che
+  // si stava guardando — non ricaricherebbe le commesse: farebbe dichiarare
+  // finite tutte quelle che il filtro ha lasciato fuori. Un file che non deve
+  // MAI essere reimportato non ha motivo di somigliare a quello che si importa.
   const righe = list.map(o => {
-    const { eser, sz, ord } = splitNumeroOrdine(o.numero_ordine);
     const art = artById[o.articolo_id];
     const cli = cliById[o.cliente_id];
     const addetti = getOperazioneAddetti(o.id)
@@ -5193,40 +5196,31 @@ function operazioniExportExcel(list, filtriAttivi) {
     const orePrev = opCalcOre(o);
     const oreCons = opCalcOreReali(o);
     const inizio = opInizio(o);
-    // Le colonne escono NELL'ORDINE IN CUI SI VEDONO a schermo (31 ago,
-    // richiesta Nico): prima seguivano il tracciato dell'import, e chi apriva
-    // il file doveva ricostruire da sé la corrispondenza con la tabella.
-    // Le prime tre restano separate perché insieme SONO la colonna "Ordine" a
-    // schermo, e l'import ricompone il numero proprio da lì (Eser/Sz/Ord):
-    // unirle in una sola renderebbe il file non più reimportabile.
-    // Le extra (ore, addetti, fornitori) vanno in coda: a schermo non ci sono,
-    // quindi non hanno un posto da rispettare.
     return {
-      'Eser':                  eser,
-      'Sz Cl':                 sz,
-      'Ord/Off cliente':       ord,
-      'Riga':                  o.pos || '',
-      'Numero OP':             o.numero_op || '',
-      'Riferimento Cliente':   o.riferimento_cliente || '',
-      'Cliente':               cli?.nome || '',
-      'Codice articolo':       art?.codice || '',
-      'Descrizione articolo':  art?.descrizione || '',
-      'Quantità':              o.quantita ?? '',
-      // Prodotti e Spediti mancavano: a schermo sono due colonne accanto agli
-      // ordinati, e senza di loro il file non diceva a che punto è la roba.
-      'Prodotti':              quantitaConsegnata(o.id),
-      'Spediti':               quantitaSpedita(o.id),
-      'Scadenza':              o.scadenza ? fmtIT(o.scadenza) : '',
-      'Inizio':                inizio ? fmtIT(inizio) : '',
-      'Note':                  o.note || '',
-      'Stato preparazione':    o.stato_preparazione || '',
-      'Stato':                 o.stato || 'aperta',
-      // ── Colonne extra, non presenti in tabella (ignorate dall'import) ──
-      'Ore preventivo':        orePrev ? +orePrev.toFixed(2) : 0,
-      'Ore consuntivo':        oreCons ? +oreCons.toFixed(2) : 0,
-      'Avanzamento %':         orePrev > 0 ? Math.round((oreCons / orePrev) * 100) : '',
-      'Addetti assegnati':     addetti,
-      'Fornitori':             fornitoriStr,
+      // ── Le 15 colonne della tabella, nell'ordine in cui si vedono ──
+      'Ordine':            o.numero_ordine || '',
+      'Pos':               o.pos || '',
+      'OP':                o.numero_op || '',
+      'Rif. cliente':      o.riferimento_cliente || '',
+      'Cliente':           cli?.nome || '',
+      'Codice':            art?.codice || '',
+      'Descrizione':       art?.descrizione || '',
+      'Ordinati':          o.quantita ?? '',
+      'Prodotti':          quantitaConsegnata(o.id),
+      'Spediti':           quantitaSpedita(o.id),
+      'Scadenza':          o.scadenza ? fmtIT(o.scadenza) : '',
+      'Inizio':            inizio ? fmtIT(inizio) : '',
+      'Note':              o.note || '',
+      // Le due tendine escono con la parola che si legge a schermo, non con la
+      // chiave interna: chi apre il file vede "Completo", non "completo".
+      'Prep. materiale':   OP_PREP[o.stato_preparazione]?.label || 'Vuoto',
+      'Stato':             OP_STATI[o.stato]?.label || o.stato || '',
+      // ── Da qui in poi non sono in tabella: stanno in coda ──
+      'Ore preventivo':    orePrev ? +orePrev.toFixed(2) : 0,
+      'Ore consuntivo':    oreCons ? +oreCons.toFixed(2) : 0,
+      'Avanzamento %':     orePrev > 0 ? Math.round((oreCons / orePrev) * 100) : '',
+      'Addetti assegnati': addetti,
+      'Fornitori':         fornitoriStr,
     };
   });
 
@@ -5235,10 +5229,10 @@ function operazioniExportExcel(list, filtriAttivi) {
   // Larghezze colonne ragionevoli (in caratteri)
   // Larghezze nello stesso ordine delle colonne qui sopra.
   ws['!cols'] = [
-    { wch: 6 }, { wch: 6 }, { wch: 14 }, { wch: 6 }, { wch: 16 },
-    { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 36 },
+    { wch: 16 }, { wch: 7 }, { wch: 16 }, { wch: 24 }, { wch: 24 },
+    { wch: 18 }, { wch: 36 },
     { wch: 9 }, { wch: 9 }, { wch: 9 },
-    { wch: 11 }, { wch: 11 }, { wch: 30 }, { wch: 14 }, { wch: 11 },
+    { wch: 11 }, { wch: 11 }, { wch: 30 }, { wch: 15 }, { wch: 12 },
     { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 30 }, { wch: 36 },
   ];
   const wb = XLSX.utils.book_new();
@@ -11133,43 +11127,47 @@ function storicoExportExcel() {
     // Il pagato scende alla sola parte interna quando ci sono fasi a terzisti:
     // senza dirlo, uno legge un pagato più basso e non sa perché.
     const soloInterno = !!op && (state.opFornitori || []).some(r => r.operazione_id === op.id);
-    // Colonne nell'ordine della tabella (31 ago), che per quelle in comune è
-    // anche l'ordine di Ordini cliente: i due file si leggono allo stesso modo.
-    // Quelle che a schermo non ci sono stanno accanto alla colonna che
-    // spiegano (le ore dove sta la cella unica, Ritardo dopo Esito).
+    // Come l'export delle commesse: la tabella, pari pari (31 ago). Stesse
+    // colonne, stesso ordine, stesse intestazioni; in coda quelle che a
+    // schermo non ci sono.
+    // UNICA eccezione, voluta: la cella "Ore (cons/pag.)" esce come DUE numeri
+    // separati (7 ago, chieste così da Cocco). A schermo stanno insieme perché
+    // è una cella sola; in Excel divise, o non ci si può sommare né filtrare
+    // sopra. Restano al posto della colonna che sostituiscono.
     return {
-      'Data spedizione': s.data || '',
-      'Ordine':          op?.numero_ordine || '',
-      'POS':             op?.pos || '',
-      'OP':              op?.numero_op || '',
-      'Riferimento cliente': op?.riferimento_cliente || '',
-      'Cliente':         cli?.nome || '',
-      'Codice articolo': art?.codice || '',
-      'Descrizione':     art?.descrizione || '',
-      'Quantità':        s.quantita || 0,
-      'Scadenza':        op?.scadenza || '',
-      'DDT':             s.ddt || '',
-      // Destinatario e Note si vedono in tabella ma non uscivano nel file.
-      'Destinatario':    s.destinatario || '',
-      'Note':            s.note || '',
+      // ── Le colonne della tabella, nell'ordine in cui si vedono ──
+      'Data sped.':       s.data || '',
+      'Ordine':           op?.numero_ordine || '',
+      'Pos':              op?.pos || '',
+      'OP':               op?.numero_op || '',
+      'Rif. cliente':     op?.riferimento_cliente || '',
+      'Cliente':          cli?.nome || '',
+      'Codice':           art?.codice || '',
+      'Qtà':              s.quantita || 0,
+      'Scadenza':         op?.scadenza || '',
+      'DDT':              s.ddt || '',
+      'Destinatario':     s.destinatario || '',
+      'Note':             s.note || '',
       'Ore consuntivate': haOre ? +cons.toFixed(2) : '',
       'Ore pagate':       haOre ? +pagatoOre.toFixed(2) : '',
+      'Esito':            ritardo === null ? '—' : (ritardo <= 0 ? 'In tempo' : 'In ritardo'),
+      // ── Da qui in poi non sono in tabella: stanno in coda ──
+      'Descrizione':      art?.descrizione || '',
+      'Ritardo (gg)':     ritardo,
       'Sforo (h)':        haOre ? +(cons - pagatoOre).toFixed(2) : '',
       'Pagato solo interno': (haOre && soloInterno) ? 'sì' : '',
-      'Esito':           ritardo === null ? '—' : (ritardo <= 0 ? 'In tempo' : 'In ritardo'),
-      'Ritardo (gg)':    ritardo,
-      'Addetti':         addettiNomi.join(', '),
+      'Addetti':          addettiNomi.join(', '),
     };
   });
-  rows.sort((a, b) => (b['Data spedizione']||'').localeCompare(a['Data spedizione']||''));
+  rows.sort((a, b) => (b['Data sped.']||'').localeCompare(a['Data sped.']||''));
 
   const ws = XLSX.utils.json_to_sheet(rows);
   // Larghezze nello stesso ordine delle colonne qui sopra.
   ws['!cols'] = [
-    {wch:14},{wch:16},{wch:8},{wch:16},{wch:20},{wch:24},{wch:18},{wch:30},
+    {wch:14},{wch:16},{wch:7},{wch:16},{wch:24},{wch:24},{wch:18},
     {wch:8},{wch:12},{wch:14},{wch:20},{wch:30},
-    {wch:16},{wch:12},{wch:10},{wch:18},
-    {wch:12},{wch:10},{wch:24},
+    {wch:16},{wch:12},{wch:12},
+    {wch:30},{wch:10},{wch:10},{wch:18},{wch:24},
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Spedizioni');
