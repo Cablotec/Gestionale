@@ -1509,11 +1509,15 @@ const TAB_STRUCTURE = {
     adminOnly: false,
     tabs: [
       { id: 'pianificazione', label: 'Ordini cliente', adminOnly: false },
+      // Storico attaccato a Ordini cliente (31 ago, richiesta Nico): sono le
+      // due metà della stessa cosa — una commessa sta in una o nell'altra — e
+      // ci si passa continuamente. Averci in mezzo Mancanti e Prelievi
+      // costringeva a scavalcarle a ogni salto.
+      { id: 'storico',        label: 'Storico',        adminOnly: false },
       // Spostata qui da Gestione (5 ago, richiesta Nico): i mancanti si
       // guardano mentre si lavora, non mentre si configura il gestionale.
       { id: 'fabbisogno',     label: 'Mancanti',       adminOnly: false },
       { id: 'prelievi',       label: 'Prelievi',       adminOnly: false },
-      { id: 'storico',        label: 'Storico',        adminOnly: false },
       // Ricerca sui timbri NON legati a commessa (6 ago). L'anagrafica delle
       // attività resta in Gestione: qui si guarda cosa è stato fatto.
       { id: 'timbri_extra',   label: 'Attività extra', adminOnly: false },
@@ -5189,40 +5193,53 @@ function operazioniExportExcel(list, filtriAttivi) {
     const orePrev = opCalcOre(o);
     const oreCons = opCalcOreReali(o);
     const inizio = opInizio(o);
+    // Le colonne escono NELL'ORDINE IN CUI SI VEDONO a schermo (31 ago,
+    // richiesta Nico): prima seguivano il tracciato dell'import, e chi apriva
+    // il file doveva ricostruire da sé la corrispondenza con la tabella.
+    // Le prime tre restano separate perché insieme SONO la colonna "Ordine" a
+    // schermo, e l'import ricompone il numero proprio da lì (Eser/Sz/Ord):
+    // unirle in una sola renderebbe il file non più reimportabile.
+    // Le extra (ore, addetti, fornitori) vanno in coda: a schermo non ci sono,
+    // quindi non hanno un posto da rispettare.
     return {
       'Eser':                  eser,
       'Sz Cl':                 sz,
       'Ord/Off cliente':       ord,
       'Riga':                  o.pos || '',
+      'Numero OP':             o.numero_op || '',
+      'Riferimento Cliente':   o.riferimento_cliente || '',
+      'Cliente':               cli?.nome || '',
       'Codice articolo':       art?.codice || '',
       'Descrizione articolo':  art?.descrizione || '',
-      'Scadenza':              o.scadenza ? fmtIT(o.scadenza) : '',
       'Quantità':              o.quantita ?? '',
-      'Cliente':               cli?.nome || '',
-      'Riferimento Cliente':   o.riferimento_cliente || '',
-      'Numero OP':             o.numero_op || '',
-      // ── Colonne extra (ignorate dall'import) ──
-      'Stato':                 o.stato || 'aperta',
-      'Stato preparazione':    o.stato_preparazione || '',
+      // Prodotti e Spediti mancavano: a schermo sono due colonne accanto agli
+      // ordinati, e senza di loro il file non diceva a che punto è la roba.
+      'Prodotti':              quantitaConsegnata(o.id),
+      'Spediti':               quantitaSpedita(o.id),
+      'Scadenza':              o.scadenza ? fmtIT(o.scadenza) : '',
       'Inizio':                inizio ? fmtIT(inizio) : '',
+      'Note':                  o.note || '',
+      'Stato preparazione':    o.stato_preparazione || '',
+      'Stato':                 o.stato || 'aperta',
+      // ── Colonne extra, non presenti in tabella (ignorate dall'import) ──
       'Ore preventivo':        orePrev ? +orePrev.toFixed(2) : 0,
       'Ore consuntivo':        oreCons ? +oreCons.toFixed(2) : 0,
       'Avanzamento %':         orePrev > 0 ? Math.round((oreCons / orePrev) * 100) : '',
       'Addetti assegnati':     addetti,
       'Fornitori':             fornitoriStr,
-      'Note':                  o.note || '',
     };
   });
 
   // Genera workbook
   const ws = XLSX.utils.json_to_sheet(righe);
   // Larghezze colonne ragionevoli (in caratteri)
+  // Larghezze nello stesso ordine delle colonne qui sopra.
   ws['!cols'] = [
-    { wch: 6 }, { wch: 6 }, { wch: 14 }, { wch: 6 },
-    { wch: 18 }, { wch: 36 }, { wch: 11 }, { wch: 8 },
-    { wch: 24 }, { wch: 24 }, { wch: 16 },
-    { wch: 11 }, { wch: 14 }, { wch: 11 }, { wch: 12 },
-    { wch: 12 }, { wch: 11 }, { wch: 30 }, { wch: 36 }, { wch: 30 },
+    { wch: 6 }, { wch: 6 }, { wch: 14 }, { wch: 6 }, { wch: 16 },
+    { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 36 },
+    { wch: 9 }, { wch: 9 }, { wch: 9 },
+    { wch: 11 }, { wch: 11 }, { wch: 30 }, { wch: 14 }, { wch: 11 },
+    { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 30 }, { wch: 36 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Operazioni');
@@ -7324,8 +7341,56 @@ function renderPianificazione(root) {
     // Pos
     tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.pos || '—'));
 
-    // OP (numero ordine di produzione, opzionale)
-    tr.append(el('td', { class:'mono', style:'color:var(--mut);' }, o.numero_op || '—'));
+    // OP — casella APERTA per gli admin (31 ago, richiesta Nico): l'OP arriva
+    // quasi sempre dopo l'ordine, e per aggiungerlo bisognava aprire la scheda
+    // e salvare tutto il modal. Qui si scrive e si esce. Al fuoco la casella
+    // si precompila con "AAAA/OP/": si digita solo il numero, e vale la stessa
+    // normalizzazione di ovunque (2026OP1727 → 2026/OP/01727).
+    const opCell = el('td', { class:'mono' });
+    if (isAdmin) {
+      const inpOp = el('input', {
+        type:'text', value: o.numero_op || '', placeholder:'—',
+        style:'width:110px;font-family:inherit;font-size:11px;padding:2px 5px;border-radius:3px;'
+          + 'background:var(--sur);border:1px solid var(--brd);color:var(--mut);',
+        title:'Numero OP: scrivilo qui, si salva quando esci dal campo (Invio conferma, Esc annulla).',
+        onclick: (e) => e.stopPropagation(),
+        onfocus: (e) => { if (!e.target.value.trim()) e.target.value = prefissoOpCorrente(); },
+        onkeydown: (e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') e.target.blur();
+          else if (e.key === 'Escape') { e.target.value = o.numero_op || ''; e.target.blur(); }
+        },
+        onblur: async (e) => {
+          const raw = (e.target.value || '').trim();
+          // Solo prefisso = campo lasciato in bianco, non un OP sbagliato.
+          const vuoto = !raw || opSoloPrefisso(raw);
+          const nuovo = vuoto ? null : odlANumeroOp(raw);
+          if (!vuoto && !nuovo) {
+            e.target.style.borderColor = 'var(--red)';
+            return toast('Numero OP non riconosciuto. Usa 2026OP1727 oppure 2026/OP/01727, o lascia vuoto.', 'err');
+          }
+          e.target.style.borderColor = 'var(--brd)';
+          if (nuovo === (o.numero_op || null)) { e.target.value = o.numero_op || ''; return; }
+          try {
+            const { data, error } = await eseguiConRetry(
+              () => sb.from('operazioni').update({ numero_op: nuovo }).eq('id', o.id).select().single(),
+              { label: 'numero OP' });
+            if (error) throw error;
+            Object.assign(o, data);
+            e.target.value = o.numero_op || '';
+            toast(nuovo ? 'OP ' + nuovo + ' salvato' : 'OP rimosso', 'ok');
+          } catch (err) {
+            toast('Errore: ' + (err.message || err), 'err');
+            e.target.value = o.numero_op || '';
+          }
+        },
+      });
+      opCell.append(inpOp);
+    } else {
+      opCell.style.color = 'var(--mut)';
+      opCell.append(document.createTextNode(o.numero_op || '—'));
+    }
+    tr.append(opCell);
 
     // Riferimento cliente (testo libero, può essere lungo: tronco con ellissi
     // e mostro il valore completo nel tooltip)
@@ -7540,22 +7605,20 @@ function renderPianificazione(root) {
     }
     tr.append(statoCell);
 
-    // Azioni: ✓ spedizione rapida + ✕ elimina (solo admin, stopPropagation per non aprire il modal)
+    // Azioni: solo il furgoncino, cioè spedire (31 ago, richiesta Nico).
+    // Il ✓ non diceva cosa faceva; 🚚 sì. L'ELIMINA è sparito da qui: stava a
+    // un pixel dall'unica azione che si usa davvero, su una riga che al clic
+    // apre la scheda, e cancellare una commessa non è un gesto da fare di
+    // sfuggita in mezzo alla lista. Resta dov'è giusto che sia, dentro la
+    // scheda della commessa (bottone 🗑 Elimina), dove si vede cosa si perde.
     const azioniCell = el('td', { class:'tc' });
-    if (isAdmin) {
-      if (o.stato !== 'spedita') {
-        azioniCell.append(el('button', {
-          class:'btnsm',
-          style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);',
-          title:'Segna come spedita (modale di conferma)',
-          onclick:(e)=>{ e.stopPropagation(); quickSpedizione(o); },
-        }, '✓'));
-      }
-      azioniCell.append(' ', el('button', {
-        class:'btnd',
-        title:'Elimina commessa',
-        onclick:(e)=>{ e.stopPropagation(); deleteOperazione(o); },
-      }, '✕'));
+    if (isAdmin && o.stato !== 'spedita') {
+      azioniCell.append(el('button', {
+        class:'btnsm',
+        style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);font-size:13px;line-height:1;',
+        title:'Spedisci: registra la spedizione (data, quantità, DDT)',
+        onclick:(e)=>{ e.stopPropagation(); quickSpedizione(o); },
+      }, '🚚'));
     }
     tr.append(azioniCell);
 
@@ -10696,10 +10759,12 @@ function renderStorico(root) {
     el('th', {}, 'Cliente'),
     el('th', {}, 'Codice'),
     el('th', { class:'tr' }, 'Qtà'),
+    // Scadenza subito dopo la quantità come in Ordini cliente: le colonne in
+    // comune fra le due schede stanno nello stesso ordine.
+    el('th', {}, 'Scadenza'),
     el('th', {}, 'DDT'),
     el('th', {}, 'Destinatario'),
     el('th', {}, 'Note'),
-    el('th', {}, 'Scadenza'),
     el('th', { class:'tr' }, 'Ore (cons/pag.)'),
     el('th', { class:'tc' }, 'Esito'),
     el('th', { class:'tc' }, 'Azioni'),
@@ -10743,6 +10808,7 @@ function renderStorico(root) {
       el('td', { class:'tr mono', style:'font-weight:600;',
         title: s._nSped > 1 ? s._nSped + ' spedizioni parziali: apri la commessa per il dettaglio' : '' },
         String(s.quantita || 0) + (s._nSped > 1 ? ' *' : '')),
+      el('td', { class:'mono' }, op?.scadenza ? fmtIT(op.scadenza) : '—'),
       el('td', { class:'mono' }, s.ddt || '—'),
       el('td', {
         style:'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
@@ -10752,7 +10818,6 @@ function renderStorico(root) {
         style:'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mut);',
         title: s.note || '',
       }, s.note || '—'),
-      el('td', { class:'mono' }, op?.scadenza ? fmtIT(op.scadenza) : '—'),
       (() => {
         const pagatoOre = op ? pagatoOreInterne(op) : 0;
         if (!op || pagatoOre <= 0) return el('td', { class:'tr mono', style:'color:var(--mut);' }, '—');
@@ -11156,35 +11221,43 @@ function storicoExportExcel() {
     // Il pagato scende alla sola parte interna quando ci sono fasi a terzisti:
     // senza dirlo, uno legge un pagato più basso e non sa perché.
     const soloInterno = !!op && (state.opFornitori || []).some(r => r.operazione_id === op.id);
+    // Colonne nell'ordine della tabella (31 ago), che per quelle in comune è
+    // anche l'ordine di Ordini cliente: i due file si leggono allo stesso modo.
+    // Quelle che a schermo non ci sono stanno accanto alla colonna che
+    // spiegano (le ore dove sta la cella unica, Ritardo dopo Esito).
     return {
       'Data spedizione': s.data || '',
       'Ordine':          op?.numero_ordine || '',
-      'OP':              op?.numero_op || '',
       'POS':             op?.pos || '',
+      'OP':              op?.numero_op || '',
+      'Riferimento cliente': op?.riferimento_cliente || '',
       'Cliente':         cli?.nome || '',
       'Codice articolo': art?.codice || '',
       'Descrizione':     art?.descrizione || '',
       'Quantità':        s.quantita || 0,
-      'DDT':             s.ddt || '',
       'Scadenza':        op?.scadenza || '',
-      'Ritardo (gg)':    ritardo,
-      'Esito':           ritardo === null ? '—' : (ritardo <= 0 ? 'In tempo' : 'In ritardo'),
+      'DDT':             s.ddt || '',
+      // Destinatario e Note si vedono in tabella ma non uscivano nel file.
+      'Destinatario':    s.destinatario || '',
+      'Note':            s.note || '',
       'Ore consuntivate': haOre ? +cons.toFixed(2) : '',
       'Ore pagate':       haOre ? +pagatoOre.toFixed(2) : '',
       'Sforo (h)':        haOre ? +(cons - pagatoOre).toFixed(2) : '',
       'Pagato solo interno': (haOre && soloInterno) ? 'sì' : '',
+      'Esito':           ritardo === null ? '—' : (ritardo <= 0 ? 'In tempo' : 'In ritardo'),
+      'Ritardo (gg)':    ritardo,
       'Addetti':         addettiNomi.join(', '),
-      'Riferimento cliente': op?.riferimento_cliente || '',
     };
   });
   rows.sort((a, b) => (b['Data spedizione']||'').localeCompare(a['Data spedizione']||''));
 
   const ws = XLSX.utils.json_to_sheet(rows);
+  // Larghezze nello stesso ordine delle colonne qui sopra.
   ws['!cols'] = [
-    {wch:14},{wch:16},{wch:16},{wch:8},{wch:24},{wch:18},{wch:30},{wch:8},
-    {wch:14},{wch:12},{wch:10},{wch:12},
+    {wch:14},{wch:16},{wch:8},{wch:16},{wch:20},{wch:24},{wch:18},{wch:30},
+    {wch:8},{wch:12},{wch:14},{wch:20},{wch:30},
     {wch:16},{wch:12},{wch:10},{wch:18},
-    {wch:24},{wch:20},
+    {wch:12},{wch:10},{wch:24},
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Spedizioni');
