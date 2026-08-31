@@ -1401,6 +1401,19 @@ function odlANumeroOp(odl) {
     .match(/^(\d{4})\s*[\/\-\s]?\s*OP\s*[\/\-\s]?\s*(\d+)$/);
   return m ? m[1] + '/OP/' + m[2].padStart(5, '0') : null;
 }
+// I campi OP nascono precompilati con il solo prefisso dell'anno corrente
+// ("2026/OP/"), perché quello è l'unico pezzo che si sa già. Se l'utente non
+// scrive il numero, quel prefisso NON è un OP sbagliato: è un campo vuoto.
+// Senza questa distinzione il salvataggio si fermerebbe su ogni riga lasciata
+// in bianco, che è il caso normale (l'OP è opzionale).
+function opSoloPrefisso(v) {
+  return /^\d{4}\/OP\/$/.test(String(v == null ? '' : v).trim());
+}
+// Prefisso proposto nei campi OP: l'anno lo prende dall'orologio, quindi il
+// 1 gennaio 2027 propone da solo "2027/OP/" senza toccare il codice.
+function prefissoOpCorrente() {
+  return new Date().getFullYear() + '/OP/';
+}
 // Una riga è BLOCCANTE se il pezzo è ancora da ordinare: nessuno l'ha
 // comprato, quindi non c'è né data né speranza a breve. Se invece è già
 // ordinato ha una consegna prevista: manca, ma arriva. La differenza è tutta

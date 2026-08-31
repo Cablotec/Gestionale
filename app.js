@@ -6579,10 +6579,15 @@ function openNuovoOrdineModal() {
     // mano — e uscendo dal campo diventa la forma canonica, così si VEDE che è
     // stato capito. Prima accettava solo il formato esatto e buttava via il
     // resto in silenzio: si salvava l'ordine e l'OP semplicemente non c'era.
-    const inOP = el('input', { type:'text', class:'ord-inp', placeholder:'OP (opz.)',
+    // Nasce già con "AAAA/OP/" (come il numero OC in intestazione): si digita
+    // solo il numero. Lasciato col solo prefisso vale come vuoto — l'OP resta
+    // opzionale — quindi il bordo non diventa rosso e non blocca il salvataggio.
+    const inOP = el('input', { type:'text', class:'ord-inp', value: prefissoOpCorrente(),
+      placeholder:'OP (opz.)',
       title:'Numero OP. Va bene 2026OP1727 o 2026/OP/1727: viene normalizzato da solo.',
       onblur:(e)=>{ const n=odlANumeroOp(e.target.value); if(n) e.target.value=n;
-        e.target.style.borderColor = (!e.target.value.trim() || n) ? '' : 'var(--red)'; } });
+        const vuoto = !e.target.value.trim() || opSoloPrefisso(e.target.value);
+        e.target.style.borderColor = (vuoto || n) ? '' : 'var(--red)'; } });
     const inRif = el('input', { type:'text', class:'ord-inp', placeholder:'rif.' });
     const inQta = el('input', { type:'number', class:'ord-inp', value:'1', min:'1', oninput:()=>aggiornaTotale() });
     const inPrezzo = prezzoAttivo ? el('input', { type:'number', class:'ord-inp', min:'0', step:'0.01', placeholder:'€',
@@ -6610,8 +6615,8 @@ function openNuovoOrdineModal() {
           articoloId: (v.mode==='existing' && v.id) ? v.id : null,
           nuovoCodice: (v.mode==='new') ? (v.text||'').trim() : null,
           pos: posNormalizzata(inPos.value),
-          numero_op: odlANumeroOp(opRaw),
-          opIlleggibile: !!opRaw && !odlANumeroOp(opRaw),
+          numero_op: opSoloPrefisso(opRaw) ? null : odlANumeroOp(opRaw),
+          opIlleggibile: !!opRaw && !opSoloPrefisso(opRaw) && !odlANumeroOp(opRaw),
           riferimento_cliente: (inRif.value||'').trim() || null,
           quantita: parseInt(inQta.value)||0,
           prezzo: inPrezzo ? (parseFloat((inPrezzo.value||'').replace(',','.'))||0) : 0,
@@ -8622,7 +8627,7 @@ function openOperazioneModal(o) {
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Numero OP'),
         el('input', { type:'text', name:'numero_op',
-          value: o.numero_op || (new Date().getFullYear() + '/OP/'),
+          value: o.numero_op || prefissoOpCorrente(),
           placeholder:'es. 2026/OP/00001 (opzionale)',
           pattern:'\\d{4}/OP/\\d{5}',
           title:'Formato richiesto: AAAA/OP/NNNNN (opzionale)',
@@ -9959,9 +9964,9 @@ function openOperazioneModal(o) {
       // Stessa regola della griglia: si accetta l'OP come è scritto sui
       // documenti (2026OP1727) e non solo la forma canonica.
       let numOp = (fd.get('numero_op')||'').trim();
-      const opSoloPrefisso = /^\d{4}\/OP\/$/.test(numOp);
-      const numOpFinale = (numOp && !opSoloPrefisso) ? odlANumeroOp(numOp) : null;
-      if (numOp && !opSoloPrefisso && !numOpFinale) {
+      const opVuoto = opSoloPrefisso(numOp);
+      const numOpFinale = (numOp && !opVuoto) ? odlANumeroOp(numOp) : null;
+      if (numOp && !opVuoto && !numOpFinale) {
         return toast('Numero OP non riconosciuto. Usa 2026OP1727 oppure 2026/OP/01727, o lascia vuoto.', 'err');
       }
 
