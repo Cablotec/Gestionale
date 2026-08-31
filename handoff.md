@@ -684,3 +684,22 @@ Prenotando un mezzo, se un operatore collegato ha ferie/permesso/malattia in que
 - La scritta "Nessun utente selezionato" è sparita: lo dice il **placeholder**, che diventa "aggiungi…" quando c'è già qualcuno. Una cosa in meno che ripete quello che si vede.
 - **Toccato SOLO il modal prenotazione.** Lo stesso schema a due box è anche nel modal commessa (addetti e fornitori, `addSelectedWrap`/`forSelectedWrap`): lì è invariato, e le classi vecchie restano perché servono a quelli. Se piace, si allineano dopo.
 - Misurato in browser sul CSS **vero** (pagina di test che carica `app.css` dal repo, `scratchpad/test_campo.html`): un bordo solo (campo 1px, casella 0), casella dentro il riquadro e sulla riga delle pillole, lista 1px sotto il campo e larga quanto lui, il fuoco entra cliccando lo spazio vuoto, e togliendo una pillola casella e lista restano al loro posto.
+
+## ▶▶ PROSSIMI (31 ago 2026, chat chiusa qui per contesto pieno)
+
+### Fatto in questa chat
+- **Spostate 3 timbrature di Raoul** da `2026/OC/00155/0010` a `0030`, spalmate 50/50 sul gruppo 758+760 con `ripartisciTimbroGruppo`. 24.601 s in ingresso = 24.601 s in uscita. ⚠ **`sessioni_lavoro.durata_secondi` e una COLONNA GENERATA**: scriverla fa rifiutare tutta la richiesta (`428C9`) — si scrivono solo `inizio` e `fine`, il resto lo calcola Postgres.
+- **`completata` assente dal file non si tace piu** (`2026-08-28.1`) — vedi il blocco sopra. Ne nascondeva 10.
+- **I kit BOX si giudicano sul riferimento** (`2026-08-28.2`) — vedi il blocco sopra. Ne nascondeva 2.
+- **Strumenti messi al sicuro nel repo** (prima vivevano solo nello scratchpad della chat, che muore con la chat):
+  - `strumenti/test/test-import-ordini.js` — **138 test** su `analizzaImportOrdini`. `node strumenti/test/test-import-ordini.js .`
+  - `strumenti/test/prova-coperture.js` — Ordini cliente + Storico coprono tutte le commesse, zero doppie e zero orfane.
+  - `strumenti/anomalie-alnus.js` — genera il workbook delle anomalie. `node strumenti/anomalie-alnus.js . strumenti/test <file-alnus.xlsx> <out.xlsx>`
+  - `strumenti/test/xlsx.full.min.js` — SheetJS per i tool Node (l app la prende dal CDN; qui serve locale).
+
+### Aperti
+1. **Le anomalie rimaste** — `strumenti/anomalie-31ago.xlsx`, rigenerabile in qualsiasi momento col comando qui sopra. Al 31 ago: **11 stati** (aperte + completate senza spedizioni + 2 kit), 0 spedizioni, 4 righe descrittive, 2 aggiornamenti di scadenza, 13 in ritardo. ⚠ Il numero **si muove mentre Nico lavora**: fra due giri a un minuto di distanza e passato da 12 a 11. Si rilegge, non si ricorda.
+2. ⚠ **L estrazione Alnus e ferma al 28/08 14:59** mentre il gestionale si legge dal vivo: cio che Nico sistema **in Alnus** non si vede finche non arriva un export nuovo. Il Riepilogo del workbook dichiara sempre le due date — **leggerle prima di dare i numeri per buoni**.
+3. **Dato da correggere**: su `BOX_EL000515` la colonna `riferimento_cliente` dice `EL0000515` (uno zero di troppo). Oggi non fa danno perche il codice articolo ha la precedenza, ma e un dato sbagliato.
+4. `strumenti/migrazione-tipo-parte.sql` **non ancora eseguita** (l import funziona lo stesso e lo dichiara).
+5. **Egress**: verificare che i giorni dopo il 27 ago stiano sotto i 20 MB.
