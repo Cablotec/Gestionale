@@ -6953,6 +6953,45 @@ function pianificazioneFiltrate(includiStorico) {
   return { list, filtriAttivi };
 }
 
+// Testo del triangolo ⚠ dei mancanti in Ordini cliente.
+// Dall'1 set l'elenco è COMPLETO e comprende il materiale IN ARRIVO (richiesta
+// Nico). Prima mostrava i primi 8 codici di UNA categoria sola: la roba già
+// ordinata — che è metà del file — restava un numero senza nomi, e per sapere
+// QUALI pezzi fossero e QUANDO arrivano bisognava aprire la scheda Mancanti.
+// Passando sopra alla riga si vuole sapere cosa manca e quando arriva, non
+// quanti sono: quello lo dice già il badge.
+// Le righe sono raggruppate per categoria, ognuna con la sua conta; per quelle
+// in arrivo c'è la data della prima consegna, marcata se è già passata.
+// ⚠ La data del fabbisogno è in cima di proposito: l'estrazione è una
+// FOTOGRAFIA e può essere vecchia di giorni — leggere l'elenco senza sapere di
+// quando è vuol dire fidarsi di un dato che magari non vale più.
+function mancantiTooltip(mc, numeroOp, oggiIso) {
+  const oggi = oggiIso || toLocalISO(new Date());
+  const riga = (m) => {
+    const cons = mancanteConsegne(m);
+    const prima = cons.length ? cons[0] : null;
+    return '· ' + m.codice
+      + (m.descrizione ? '  ' + String(m.descrizione).slice(0, 40) : '')
+      + (prima ? '  → ' + fmtIT(prima.data) + (prima.data < oggi ? ' (IN RITARDO)' : '') : '');
+  };
+  const gruppo = (titolo, righe) => righe.length
+    ? '\n\n' + titolo + ' — ' + righe.length + '\n' + righe.map(riga).join('\n')
+    : '';
+  const perCat = (cat) => mc.righe.filter(m => mancanteCategoria(m) === cat);
+
+  return '⚠ ' + mc.nCodici + (mc.nCodici === 1 ? ' codice' : ' codici')
+      + ' su ' + (numeroOp || 'questa commessa')
+    + (mc.dataImport ? '  ·  fabbisogno del ' + fmtIT(mc.dataImport) : '')
+    + gruppo('DA ORDINARE (tocca a noi, ferma la commessa)', perCat('da_ordinare'))
+    + gruppo('IN ATTESA DAL CLIENTE (conto lavoro: non si ordina)', perCat('attesa_cliente'))
+    + gruppo('IN ARRIVO (già ordinato)', perCat('in_arrivo'))
+    + gruppo('DI CONSUMO (non fermano niente)', perCat('consumo'))
+    + (mc.nRitardo ? '\n\n⚠ ' + mc.nRitardo
+        + (mc.nRitardo === 1 ? ' consegna già in ritardo' : ' consegne già in ritardo') : '')
+    + (mc.incoerente ? '\n⚠ Ma la preparazione è dichiarata COMPLETA.' : '')
+    + '\n\nClicca per aprire la scheda Mancanti su questa commessa.';
+}
+
 function renderPianificazione(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.opSearch || '').toLowerCase();
@@ -7428,32 +7467,10 @@ function renderPianificazione(root) {
               : String(mc.nCodici));
         const colore = mc.nBloccanti ? 'var(--red)'
           : (mc.nAttesaCliente ? 'var(--or)' : 'var(--yel)');
-        // Anteprima nel tooltip: i primi codici bloccanti, poi il resto contato.
-        // Con 67 righe un tooltip intero sarebbe illeggibile.
-        // Si elencano i codici della categoria che il badge sta mostrando: su
-        // una commessa di solo conto lavoro, filtrare per "da ordinare"
-        // darebbe una lista vuota sotto un numero che dice 48.
-        const inEvidenza = mc.nBloccanti
-          ? mc.righe.filter(mancanteBloccante)
-          : mc.righe.filter(mancanteAttesaCliente);
-        const primi = inEvidenza.slice(0, 8)
-          .map(x => '· ' + x.codice + (x.descrizione ? '  ' + String(x.descrizione).slice(0, 34) : ''));
-        const restanti = inEvidenza.length - primi.length;
         prepCell.append(el('span', {
           style: 'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;cursor:pointer;color:'
             + colore + ';',
-          title: (mc.nBloccanti
-              ? mc.nBloccanti + (mc.nBloccanti === 1 ? ' codice DA ORDINARE (tocca a noi)' : ' codici DA ORDINARE (tocca a noi)')
-              : 'Nessun codice da ordinare')
-            + (mc.nAttesaCliente ? '\n' + mc.nAttesaCliente
-                + ' in attesa dal CLIENTE (conto lavoro: non si ordina)' : '')
-            + (mc.nInArrivoVero ? '\n' + mc.nInArrivoVero + ' in arrivo'
-                + (mc.prossima ? ', prossima consegna ' + fmtIT(mc.prossima) : '') : '')
-            + (mc.nConsumo ? '\n' + mc.nConsumo + ' di consumo (non fermano niente)' : '')
-            + (mc.nRitardo ? '\n⚠ ' + mc.nRitardo + (mc.nRitardo === 1 ? ' consegna in ritardo' : ' consegne in ritardo') : '')
-            + (primi.length ? '\n\n' + primi.join('\n') + (restanti > 0 ? '\n… e altri ' + restanti : '') : '')
-            + (mc.incoerente ? '\n\n⚠ Ma la preparazione è dichiarata COMPLETA.' : '')
-            + '\n\nClicca per vedere l\'elenco completo.',
+          title: mancantiTooltip(mc, o.numero_op),
           onclick: (e) => { e.stopPropagation(); apriMancantiFiltrati(o.numero_op); },
         }, '⚠' + etichetta));
       }
