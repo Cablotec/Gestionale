@@ -703,3 +703,41 @@ Prenotando un mezzo, se un operatore collegato ha ferie/permesso/malattia in que
 3. **Dato da correggere**: su `BOX_EL000515` la colonna `riferimento_cliente` dice `EL0000515` (uno zero di troppo). Oggi non fa danno perche il codice articolo ha la precedenza, ma e un dato sbagliato.
 4. `strumenti/migrazione-tipo-parte.sql` **non ancora eseguita** (l import funziona lo stesso e lo dichiara).
 5. **Egress**: verificare che i giorni dopo il 27 ago stiano sotto i 20 MB.
+
+
+## ▶▶ PROSSIMI (1 set 2026, chat chiusa qui per contesto pieno)
+
+### Fatto in questa chat — Ordini cliente, Storico, export (`2026-08-31.1` → `2026-09-01.1`)
+
+- **Il campo OP nasce col prefisso dell'anno** (`prefissoOpCorrente()` in domain: `new Date().getFullYear() + '/OP/'`). Vale nei due posti dove si scrive un OP — griglia "+ Nuovo ordine" e form dell'ordine singolo — e **l'anno lo prende dall'orologio**: il 1 gennaio 2027 propone `2027/OP/` da solo, nessuna data scritta a mano nel codice.
+  - ⚠ **Il solo prefisso è un campo VUOTO, non un OP sbagliato** (`opSoloPrefisso()`, domain). Senza questa distinzione il salvataggio si sarebbe fermato su **ogni riga in cui l'OP non viene compilato**, che è il caso normale: l'OP è opzionale. La regola c'era già nel form singolo, scritta a mano; ora è una sola funzione condivisa. Chi aggiunge un terzo campo OP usi quelle due, non riscriva la regex.
+  - Il ⚠ da ricordare: nel submit del form singolo il locale si chiamava `opSoloPrefisso` e **ombreggiava** la funzione globale appena introdotta. Rinominato `opVuoto`. Scope globale condiviso: un nome nuovo in domain può spegnere un locale omonimo in app.js, e nessuno se ne accorge finché non si rompe.
+
+- **OP modificabile direttamente in tabella** (Ordini cliente, solo admin). L'OP **arriva quasi sempre dopo l'ordine** e non c'è nel file di Alnus (vedi "Aperti" della sezione import): finché si doveva aprire la scheda e salvare tutto il modal, aggiungerlo era una pratica. Ora si scrive nella cella: al fuoco si precompila `AAAA/OP/`, Invio conferma, Esc annulla, il salvataggio parte al blur con `eseguiConRetry`. Stessa normalizzazione di ovunque (`odlANumeroOp`). **Da adesso questa è la porta principale per inserire un OP.**
+
+- **Storico spostato subito dopo Ordini cliente** nella barra di Lavoro. Sono le due metà della stessa cosa — la regola che decide dove vive una commessa è una sola (`commessaInStorico`) — e in mezzo c'erano Mancanti e Prelievi da scavalcare a ogni salto.
+
+- **Stesso ordine di colonne nelle due schede.** L'unica inversione era la **Scadenza**: in Ordini cliente viene prima delle Note, nello Storico veniva dopo. Ora lo Storico la mette subito dopo la quantità. Sequenza condivisa, identica nelle due: Ordine · Pos · OP · Rif. cliente · Cliente · Codice · quantità · Scadenza · Note · Azioni.
+
+- **⚠⚠ L'EXPORT NON DEVE SOMIGLIARE ALL'IMPORT** (domanda di Nico: *"perché non puoi fare export pari pari a quello che vedo, dato che l'import ora è legato al file di Alnus?"*). L'export delle commesse ricalcava il tracciato dell'ERP — numero ordine spezzato in `Eser` / `Sz Cl` / `Ord/Off cliente`, intestazioni loro — per restare **reimportabile**. Quella cautela non era solo senza oggetto: era **dannosa**. L'import legge l'estrazione di Alnus **come una fotografia di cosa è ancora aperto di là**, dove l'ASSENZA di una riga è essa stessa informazione di stato ("per Alnus è finita"). Dare in pasto all'import un export di qui — che per giunta esce **filtrato** per quello che si stava guardando — non ricaricherebbe le commesse: **farebbe dichiarare finite tutte quelle che il filtro ha lasciato fuori**.
+  - Lezione generale: **un file che non deve mai essere reimportato non ha motivo di somigliare a quello che si importa**. Prima di conservare un vincolo di formato, chiedersi chi legge davvero quel file.
+  - Ora tutti e due gli export **sono la tabella**: stesse colonne, stesso ordine, stesse intestazioni (`Ordine` intero, `Pos`, `OP`, `Rif. cliente`, `Codice`, `Ordinati`, `Qtà`…), e le poche che a schermo non ci sono dichiarate **in coda**. Le tendine escono con la parola che si legge (`Completo`, `Aperta`), non con la chiave interna. Cancellata `splitNumeroOrdine`, che serviva solo a quello.
+  - Aggiunte le colonne che si vedevano ma non uscivano: **Prodotti** e **Spediti** (commesse), **Destinatario** e **Note** (storico).
+  - **Eccezione voluta**: nello storico la cella "Ore (cons/pag.)" resta divisa in **due numeri** (7 ago, chieste così da Cocco — unite non ci si può sommare né filtrare sopra). Stanno al posto della colonna che sostituiscono.
+  - **La data dello storico resta ISO** (`2026-08-14`, non `14/08/2026`): è l'asse principale di quel file e come testo `gg/mm/aaaa` Excel la ordinerebbe per giorno. Deciso da Nico l'1 set, sapendo che è l'unico punto in cui il file non è "pari pari".
+
+- **Colonna Azioni: solo il 🚚.** Il ✓ non diceva cosa faceva. **L'elimina è sparito dalla riga**: stava a un pixel dall'unica azione che si usa davvero, su una riga che al clic apre la scheda, e cancellare una commessa non è un gesto da fare di sfuggita in mezzo alla lista. Non si è perso niente — resta il 🗑 dentro la scheda, dove si vede cosa si cancella.
+
+- **Tolto il bottone "⠿ Ordina priorità"** da Ordini cliente (deciso da Nico dopo la sua domanda *"ha ancora un senso?"*). **Il campo `operazioni.priorita` RESTA e conta**: ordina le card del kiosk (`cmpCommessaKiosk`) e la coda "prossime assegnate a te" in domain. A sparire è **la porta sbagliata**: in Ordini cliente non si vedeva niente di quello che faceva — nessuna colonna priorità, nessun ordinamento — e la lista che apriva erano **tutte** le commesse aperte, **senza i filtri, la ricerca e i clienti esclusi che si avevano davanti**: si riordinava altro da quello che si stava guardando. Il riordino vive al kiosk (`kioskAttachReorder`), dove si trascinano le schede vere e l'effetto si vede mentre lo si fa.
+  - Con lui se ne sono andate `openPrioritaModal`, `salvaPriorita`, `buildPrioList` e le classi `.prio-*` della sua lista. Restano `persistPriorita` e `.prio-hint`: le usa il kiosk.
+  - Regola che ne esce: **un comando che agisce su un insieme diverso da quello che l'utente ha davanti è un comando sbagliato**, anche quando funziona.
+
+- **Misurato in browser, non deciso a occhio** (banco di prova con `app.css` vera, riga a 16 colonne, contenuti lunghi come i reali, `getBoundingClientRect`):
+  - casella OP: input 110px in una colonna da 130, non esce dalla cella, altezza riga invariata (41px). Sulla larghezza totale pesa **16px** (1805 → 1821): **la tabella chiedeva già lo scorrimento orizzontale prima**, non è la casella ad averlo introdotto.
+  - furgoncino: a 13px in un bottone 38×23 si leggeva a fatica → **15px** (bottone 41×25, riga invariata). A 17px il bottone sale a 44×27, più del necessario.
+
+### Aperti
+1. **Niente è stato provato sull'app vera loggata.** Le misure sono su banco di prova, non sulla pagina reale con i dati veri: al primo giro guardare la colonna OP con OP lunghi e la tabella su schermo pieno.
+2. **La casella OP non ha un test.** Il salvataggio al blur passa da `eseguiConRetry` come le altre scritture inline (prep, stato), ma nessuna prova automatica copre "solo prefisso = null" dal lato tabella. La regola in domain (`opSoloPrefisso`, `prefissoOpCorrente`) è invece banale da coprire.
+3. **Il messaggio del commit `fa90421` ha una `@` di troppo** in prima riga (errore di sintassi shell). Contenuto corretto. **Deciso di lasciarlo**: ripulirlo vuol dire riscrivere 5 commit già pubblicati, forzare il push su `main` e far ripartire Pages, per un carattere in un log.
+4. Restano aperti i punti della sezione precedente (anomalie Alnus, `migrazione-tipo-parte.sql`, egress, il dato `EL0000515`).
