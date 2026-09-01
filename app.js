@@ -7521,7 +7521,7 @@ function renderPianificazione(root) {
     if (isAdmin && o.stato !== 'spedita') {
       azioniCell.append(el('button', {
         class:'btnsm',
-        style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);font-size:13px;line-height:1;',
+        style:'background:rgba(78,255,163,.15);color:var(--grn);border-color:var(--grn);font-size:15px;line-height:1;',
         title:'Spedisci: registra la spedizione (data, quantità, DDT)',
         onclick:(e)=>{ e.stopPropagation(); quickSpedizione(o); },
       }, '🚚'));
