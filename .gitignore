@@ -4,6 +4,8 @@
 backup-gestionale/
 backup/
 *.backup.json
+# Dump di lavoro del caricatore distinte: dati di produzione, non entrano.
+carico-*.json
 segreti*
 *.env
 .env*
