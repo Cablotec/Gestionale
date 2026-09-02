@@ -19,6 +19,23 @@
 // darebbe un numero sbagliato — girerebbe per sempre.
 const DISTINTA_PROFONDITA_MAX = 20;
 
+// ── SEGNAPOSTO: righe di distinta che non sono materiali ───────────
+// `COMP GENERICO` compare in 3.409 distinte, `VARIE` in 404, nessuno dei due
+// e mai un padre e tutti e due sono in `nr`: sono riempitivi che il
+// progettista mette dove il dettaglio non serve, non pezzi da comprare.
+// Sommarli produceva il primo posto della classifica dei fabbisogni con un
+// numero che non vuole dire niente (27.577 di "COMP GENERICO" contro i 21
+// che ne dichiara Alnus).
+// ⚠ Si escludono QUI, al calcolo, e non all'import: a database le righe
+// restano come stanno nel file. Un dato non si cancella perche non lo si sa
+// usare — si cancella la pretesa di usarlo.
+// Aggiungerne uno: basta scriverlo in questa lista.
+const MATERIALI_SEGNAPOSTO = ['COMP GENERICO', 'VARIE'];
+const _segnaposto = new Set(MATERIALI_SEGNAPOSTO.map(c => c.toUpperCase()));
+function eSegnaposto(codice) {
+  return _segnaposto.has(String(codice == null ? '' : codice).trim().toUpperCase());
+}
+
 // Esplode `codice` per `qta` pezzi, scendendo tutta la distinta.
 // `figliDi`: Map codice -> [{ figlio, qta }].
 // Ritorna { materiali: Map codice->qta, cicli: Set, tagliati: n }.
@@ -28,7 +45,7 @@ const DISTINTA_PROFONDITA_MAX = 20;
 // LAVORAZIONE (`_K`, `_KF`: "va ordinata a Botturi") come foglie invece che
 // come distinte mancanti — non hanno figli perche non devono averne.
 function esplodiDistinta(codice, qta, figliDi, acc) {
-  const out = acc || { materiali: new Map(), cicli: new Set(), tagliati: 0 };
+  const out = acc || { materiali: new Map(), segnaposto: new Map(), cicli: new Set(), tagliati: 0 };
   scendi(codice, Number(qta) || 0, new Set(), 0);
   return out;
 
@@ -37,6 +54,9 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     if (prof > DISTINTA_PROFONDITA_MAX) { out.tagliati++; return; }
     const figli = figliDi.get(cod);
     if (!figli || !figli.length) {
+      // Il segnaposto si ferma qui: non e un materiale, non diventa
+      // fabbisogno. Si conta a parte, cosi non sparisce in silenzio.
+      if (eSegnaposto(cod)) { out.segnaposto.set(cod, (out.segnaposto.get(cod) || 0) + q); return; }
       out.materiali.set(cod, (out.materiali.get(cod) || 0) + q);
       return;
     }
@@ -107,6 +127,6 @@ function indiceDistinta(righe) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { DISTINTA_PROFONDITA_MAX, esplodiDistinta, fabbisognoPerCodice,
-    ripartisciGiacenza, indiceDistinta };
+  module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
+    esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza, indiceDistinta };
 }
