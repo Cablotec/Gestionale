@@ -736,6 +736,14 @@ Prenotando un mezzo, se un operatore collegato ha ferie/permesso/malattia in que
   - casella OP: input 110px in una colonna da 130, non esce dalla cella, altezza riga invariata (41px). Sulla larghezza totale pesa **16px** (1805 → 1821): **la tabella chiedeva già lo scorrimento orizzontale prima**, non è la casella ad averlo introdotto.
   - furgoncino: a 13px in un bottone 38×23 si leggeva a fatica → **15px** (bottone 41×25, riga invariata). A 17px il bottone sale a 44×27, più del necessario.
 
+### Mancanti: il messaggio ingannevole (1 set, `2026-09-01.2` e `.3`)
+- **Tooltip completo in Ordini cliente** (richiesta Nico): elenco di TUTTI i codici, in arrivo compresi, raggruppati per categoria con la conta di ognuna e la data della prima consegna (marcata se gia passata). Prima erano i primi 8 di UNA categoria sola. In cima la data del fabbisogno: e una fotografia e puo essere vecchia di giorni. Il testo esce da `mancantiTooltip()`.
+  - Sul caso peggiore dell archivio (`2025/OP/03158`, 49 codici) il tooltip e di **56 righe**: e quello che e stato chiesto, ma su una commessa cosi il riquadro e alto quanto lo schermo. Se dara fastidio, tetto per categoria.
+- **⚠⚠ Poi la domanda vera di Nico**: *"perche 2026/OP/01917 (scad 04/09) ha mancanti e 2026/OP/01918 (scad 03/11) no?"* — stesso articolo `30 010 0510`, stesso ordine `2026/OC/00385`, pos 0010 e 0020. Vedi il blocco in CLAUDE.md: il fabbisogno attribuisce il mancante a **una commessa sola**, quella del "prossimo impegno". `01918` non era servita: era **gia contata sulla sorella**. Prova nei numeri: `30 010 0510_K` richiesta 150 = 100 + 50.
+- **Diagnosi fatta sui DATI VERI** in sola lettura (account kiosk via REST, la strada documentata qui sotto). Senza guardare il database si sarebbe potuto solo tirare a indovinare: il `150` e la prova, e non stava nel codice.
+- **Rimedio**: `mancantiRiflessi(op)` in domain + badge `⚠↗` in Ordini cliente + riquadro giallo nel modal. Copre le sorelle dello **stesso articolo**; il caso del componente condiviso fra articoli diversi **resta scoperto e non e risolvibile** con questa estrazione (serve la distinta base). ⚠ Non far credere che il badge veda tutto.
+- **19 commesse vive su 116 erano in questo caso**, 5 con codici da ordinare: `2026/OC/00385/0020` (l esempio), `00385/0090`, `00385/0100`, `2026/OC/00391/0010`, `2026/OC/00394/0010`. `node strumenti/test/prova-mancanti-riflessi.js .`
+
 ### Aperti
 1. **Niente è stato provato sull'app vera loggata.** Le misure sono su banco di prova, non sulla pagina reale con i dati veri: al primo giro guardare la colonna OP con OP lunghi e la tabella su schermo pieno.
 2. **La casella OP non ha un test.** Il salvataggio al blur passa da `eseguiConRetry` come le altre scritture inline (prep, stato), ma nessuna prova automatica copre "solo prefisso = null" dal lato tabella. La regola in domain (`opSoloPrefisso`, `prefissoOpCorrente`) è invece banale da coprire.

@@ -6992,6 +6992,26 @@ function mancantiTooltip(mc, numeroOp, oggiIso) {
     + '\n\nClicca per aprire la scheda Mancanti su questa commessa.';
 }
 
+// Testo del triangolo ⚠↗ (mancante contato su un'altra commessa dello stesso
+// articolo). Dice tre cose, in quest'ordine: che qui non c'è nessuna riga, che
+// questo NON vuol dire che il materiale ci sia, e dove sta scritto il conto.
+function riflessiTooltip(riflessi, op, art) {
+  const dove = riflessi.map(r => '· ' + (r.op.numero_ordine || '?') + '/' + (r.op.pos || '?')
+    + '  ' + (r.op.numero_op || '—')
+    + (r.op.scadenza ? '  (scad. ' + fmtIT(r.op.scadenza) + ')' : '')
+    + ' → ' + (r.mc.nBloccanti ? r.mc.nBloccanti + ' da ordinare su ' + r.mc.nCodici + ' codici'
+                               : r.mc.nCodici + ' codici, nessuno da ordinare'));
+  return '⚠ Su ' + (op.numero_op || 'questa commessa') + ' non c\'è nessuna riga di fabbisogno'
+    + ' — ma NON vuol dire che il materiale ci sia.\n\n'
+    + 'Il fabbisogno attribuisce ogni codice mancante a UNA SOLA commessa: quella che\n'
+    + 'lo consuma per prima ("OdL Prossimo Impegno"). Questa fa lo stesso articolo'
+    + (art ? ' ' + art : '') + '\ndi:\n\n'
+    + dove.join('\n')
+    + '\n\nStesso articolo = stessi materiali, e la carenza nel file è già calcolata\n'
+    + 'su tutti gli impegni, questo compreso.'
+    + '\n\nClicca per aprire la scheda Mancanti su ' + (riflessi[0].op.numero_op || '') + '.';
+}
+
 function renderPianificazione(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.opSearch || '').toLowerCase();
@@ -7473,6 +7493,23 @@ function renderPianificazione(root) {
           title: mancantiTooltip(mc, o.numero_op),
           onclick: (e) => { e.stopPropagation(); apriMancantiFiltrati(o.numero_op); },
         }, '⚠' + etichetta));
+      } else if (typeof mancantiRiflessi === 'function') {
+        // Nessuna riga QUI, ma può essercene una su una sorella dello stesso
+        // articolo: senza dirlo, la commessa sembrerebbe servita. Il colore è
+        // lo stesso che meriterebbe il badge diretto — se la sorella è ferma,
+        // è ferma anche questa — e la freccia dice che il conto sta altrove.
+        const rifl = mancantiRiflessi(o);
+        if (rifl.length) {
+          const tBlocc = rifl.reduce((n, r) => n + r.mc.nBloccanti, 0);
+          const tAttesa = rifl.reduce((n, r) => n + r.mc.nAttesaCliente, 0);
+          const tCod = rifl.reduce((n, r) => n + r.mc.nCodici, 0);
+          prepCell.append(el('span', {
+            style: 'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;cursor:pointer;color:'
+              + (tBlocc ? 'var(--red)' : (tAttesa ? 'var(--or)' : 'var(--yel)')) + ';',
+            title: riflessiTooltip(rifl, o, (art && art.codice) || ''),
+            onclick: (e) => { e.stopPropagation(); apriMancantiFiltrati(rifl[0].op.numero_op); },
+          }, '⚠↗' + (tBlocc ? tBlocc + '/' + tCod : String(tCod))));
+        }
       }
     }
     tr.append(prepCell);
@@ -8382,8 +8419,41 @@ function openOperazioneModal(o) {
     const m = mancantiCommessa({ ...o, stato_preparazione: selPrep.value });
     if (!m.nCodici) {
       if (o.numero_op && (state.mancanti || []).length) {
-        notaMancanti.append(el('div', { class:'sub', style:'font-size:11px;' },
-          'Nessun codice mancante per ' + o.numero_op + ' nell\'ultimo fabbisogno importato.'));
+        // "Nessun codice mancante" da solo si legge come "il materiale c'è", e
+        // spesso non è vero: il fabbisogno scrive il mancante sotto UNA sola
+        // commessa. Se una sorella dello stesso articolo ce l'ha, si dice.
+        const rifl = (typeof mancantiRiflessi === 'function') ? mancantiRiflessi(o) : [];
+        if (!rifl.length) {
+          notaMancanti.append(el('div', { class:'sub', style:'font-size:11px;' },
+            'Nessun codice mancante per ' + o.numero_op + ' nell\'ultimo fabbisogno importato.'));
+        } else {
+          const tBlocc = rifl.reduce((n, r) => n + r.mc.nBloccanti, 0);
+          const box = el('div', {
+            style:'font-size:11px;border:1px solid var(--yel);border-radius:4px;padding:8px 10px;'
+              + 'background:rgba(255,209,102,.07);' });
+          box.append(el('div', { style:'font-weight:700;color:var(--yel);margin-bottom:4px;' },
+            '⚠ Nessuna riga di fabbisogno qui, ma il materiale NON risulta a posto'));
+          box.append(el('div', { class:'sub', style:'font-size:11px;' },
+            'Il fabbisogno attribuisce ogni codice mancante a una sola commessa: quella che lo '
+            + 'consuma per prima. Lo stesso articolo è in lavorazione anche su:'));
+          rifl.forEach(r => box.append(el('div', {
+            style:'font-family:JetBrains Mono,monospace;font-size:11px;margin-top:4px;cursor:pointer;'
+              + 'text-decoration:underline dotted;text-underline-offset:2px;',
+            title:'Apri la scheda Mancanti su ' + r.op.numero_op,
+            onclick: () => apriMancantiFiltrati(r.op.numero_op),
+          },
+            (r.op.numero_ordine || '?') + '/' + (r.op.pos || '?') + '  ' + (r.op.numero_op || '—')
+            + (r.op.scadenza ? '  scad. ' + fmtIT(r.op.scadenza) : '')
+            + '  →  ' + (r.mc.nBloccanti
+                ? r.mc.nBloccanti + ' da ordinare su ' + r.mc.nCodici
+                : r.mc.nCodici + ' codici'))));
+          box.append(el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
+            tBlocc
+              ? 'Stesso articolo = stessi materiali: quei ' + tBlocc
+                + (tBlocc === 1 ? ' codice manca' : ' codici mancano') + ' anche qui.'
+              : 'Stesso articolo = stessi materiali: quello che manca là riguarda anche questa commessa.'));
+          notaMancanti.append(box);
+        }
       }
       return;
     }

@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-01.2`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-01.3`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -103,6 +103,16 @@
 - **Lo stato DERIVATO e stato valutato e scartato**, coi numeri: su 422 commesse ne sarebbero cambiate 35 e **34 nella direzione sbagliata** (28 da spedita ad aperta), tutte del caricamento del 19 mag. **Derivare tratta "nessun dato" come "nessun fatto".** Non riproporlo senza rileggere questo.
 - **Registrare una spedizione scrive TUTTO il gesto** (27 ago, `.7`): la INSERT su `spedizioni` e, se si arriva al 100%, anche lo `stato = spedita` e `consegnato_il`. Prima lo stato era solo proposto nel form con "salva per confermare", e chi chiudeva senza salvare lasciava il lavoro a meta. **Le due meta dello stesso gesto devono avere la stessa sorte.**
 - ⚠ **34 commesse sono `spedita` con spediti < ordinati e NON e un difetto**: sono quelle del caricamento del 19 mag, mai passate dal registro spedizioni. Non uniformarle.
+## ⚠⚠ Il fabbisogno attribuisce un mancante a UNA commessa sola (1 set, `2026-09-01.3`)
+- **La colonna dell estrazione si chiama `OdL Prossimo Impegno`**: ogni riga del file e un CODICE, e l OdL scritto accanto e quello che lo consumera **per primo**. Due commesse dello stesso articolo vogliono gli stessi materiali, ma **il mancante finisce tutto sulla piu vicina a scadere** e l altra risulta pulita.
+- **Trovato da Nico su `2026/OC/00385`**: pos 0010 (OP 01917, 100 pz, scad 04/09) mostrava 6 codici, pos 0020 (OP 01918, 50 pz, scad 03/11) nessuno. La riga `30 010 0510_K` sotto la prima diceva richiesta **150**, giacenza 0: **150 = 100 + 50**, il fabbisogno di TUTTE E DUE scritto sotto una sola.
+- ⚠ **"Nessun codice mancante" NON vuol dire "il materiale c e"**: puo voler dire "e gia contato su un altra commessa". Era la frase piu ingannevole dell app, e stava proprio nel modal della commessa.
+- **`mancantiRiflessi(op)`** in domain: cerca le commesse **VIVE** (aperta/sospesa) con lo **STESSO `articolo_id`** che hanno righe proprie. Vale solo per chi non ne ha di sue. In Ordini cliente esce un badge **`⚠↗n/N`** col colore che meriterebbe il badge diretto (se la sorella e ferma, e ferma anche questa) e la freccia dice che il conto sta altrove; nel modal esce un riquadro giallo con l elenco delle sorelle, cliccabili.
+- **Perche lo stesso ARTICOLO e nient altro**: stesso articolo = stessa distinta = stessi codici, e la carenza nel file e **globale** (`qta_richiesta` = impegno − giacenza su TUTTI gli impegni, questa commessa compresa). Se manca per la sorella manca anche per questa: e l unico riflesso che si puo affermare senza inventare.
+- ⚠ **Il caso generale NON e risolvibile con questi dati**: per un componente condiviso fra articoli DIVERSI il legame codice→OdL e gia stato ridotto a uno solo prima di arrivare a noi. Serve la distinta base; col solo fabbisogno, no. **Non promettere che il badge veda tutto.**
+- **Sui dati veri (1 set, 358 righe)**: 116 commesse vive, 35 con righe proprie, **19 che sembravano a posto e non lo erano** (5 con codici da ordinare), 62 davvero senza segnalazioni. Prova rieseguibile: `node strumenti/test/prova-mancanti-riflessi.js .`
+- **Lezione**: quando un dato esterno **attribuisce** qualcosa a una chiave, chiedersi *a quante altre righe apparterrebbe* — un'attribuzione unica letta come se fosse completa fa sembrare a posto tutto il resto.
+
 ## Ordini cliente e Storico: due schede, nessun buco (27 ago, `2026-08-27.5`)
 - **UNA regola sola, in domain**: `commessaInStorico(op, spedizioni, oggi)` (16 test). Non spedita -> Ordini cliente · spedita da <30 gg -> Ordini cliente sotto il chip **SPEDITE** · spedita da >30 gg -> Storico · **spedita senza data -> Storico** (le 34 del caricamento 19 mag). `GIORNI_SPEDITE_IN_ORDINI = 30`.
 - **Prima c era un buco**: 21 commesse non si vedevano in NESSUNA scheda — Ordini cliente nasconde le spedite, lo Storico elenca le SPEDIZIONI, il Gantt il LAVORO ASSEGNATO.

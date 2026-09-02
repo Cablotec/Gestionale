@@ -1414,6 +1414,47 @@ function opSoloPrefisso(v) {
 function prefissoOpCorrente() {
   return new Date().getFullYear() + '/OP/';
 }
+// ⚠⚠ IL FABBISOGNO ATTRIBUISCE UN MANCANTE A UNA COMMESSA SOLA (1 set,
+// trovato da Nico su 2026/OC/00385). La colonna dell'estrazione si chiama
+// `OdL Prossimo Impegno`: ogni riga del file è un CODICE, e l'OdL scritto
+// accanto è quello che quel codice lo consumerà PER PRIMO. Due commesse dello
+// stesso articolo vogliono gli stessi materiali, ma il mancante finisce tutto
+// sulla più vicina a scadere — e l'altra risulta pulita.
+//   pos 0010 · OP 01917 · 100 pz · 04/09 -> 6 codici mancanti
+//   pos 0020 · OP 01918 ·  50 pz · 03/11 -> nessuno
+// La riga `30 010 0510_K` sotto la prima diceva: richiesta 150, giacenza 0.
+// **150 = 100 + 50**, cioè il fabbisogno di TUTTE E DUE scritto sotto una sola.
+//
+// Quindi "nessun codice mancante" NON vuol dire "il materiale c'è": può voler
+// dire "è già contato su un'altra commessa". Questa funzione trova quel caso.
+//
+// Perché lo stesso ARTICOLO e non altro: stesso articolo = stessa distinta =
+// stessi codici; e la carenza nel file è GLOBALE (impegno − giacenza su tutti
+// gli impegni, questa commessa compresa), quindi se manca per la sorella manca
+// anche per questa. È l'unico riflesso che si può affermare senza inventare.
+// ⚠ Il caso generale NON è risolvibile: per un componente condiviso fra
+// articoli DIVERSI il legame codice→OdL è già stato ridotto a uno solo prima
+// di arrivare a noi, e da questa estrazione non si ricostruisce. Chi un giorno
+// avrà la distinta base potrà farlo davvero; con il fabbisogno da solo, no.
+//
+// Ritorna [] se la commessa ha già righe sue (il suo badge dice già il vero).
+function mancantiRiflessi(op, oggiIso) {
+  if (!op || !op.articolo_id) return [];
+  if (mancantiCommessa(op, oggiIso).nCodici > 0) return [];
+  return (state.operazioni || [])
+    .filter(x => x.id !== op.id
+      && x.articolo_id === op.articolo_id
+      && x.numero_op
+      // Solo commesse VIVE: su una già completata o spedita il materiale è
+      // stato consumato, e il mancante attribuito a lei non parla più di noi.
+      && (x.stato === 'aperta' || x.stato === 'sospesa'))
+    .map(x => ({ op: x, mc: mancantiCommessa(x, oggiIso) }))
+    .filter(r => r.mc.nCodici > 0)
+    // Prima quella che ferma di più, poi la più vicina a scadere.
+    .sort((a, b) => (b.mc.nBloccanti - a.mc.nBloccanti)
+      || String(a.op.scadenza || '9999').localeCompare(String(b.op.scadenza || '9999')));
+}
+
 // Una riga è BLOCCANTE se il pezzo è ancora da ordinare: nessuno l'ha
 // comprato, quindi non c'è né data né speranza a breve. Se invece è già
 // ordinato ha una consegna prevista: manca, ma arriva. La differenza è tutta
