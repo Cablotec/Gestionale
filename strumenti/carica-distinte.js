@@ -47,14 +47,21 @@ const req = (p, m, b, tok, extra) => new Promise((res, rej) => {
 });
 
 const t = v => String(v == null ? '' : v).trim();
-// ⚠ TRAPPOLA CHIUSA PRIMA DI PAGARLA (2 set). Con `raw:true` SheetJS
-// restituisce NUMERI veri, non stringhe: sul file di oggi sono 38.460 su
-// 38.461, tutti interi. Passarli dal parser all'italiana — che toglie i punti
-// perche li legge come separatore delle migliaia — avrebbe trasformato un
-// domani `2.5` in `25`, cioe dieci volte il materiale, in silenzio.
-// Un numero si usa com'e. La stringa si interpreta, e solo li serve una
-// regola: se c'e la virgola, i punti sono migliaia; se non c'e, il punto e
-// il decimale.
+// ⚠⚠ IL VALORE NUMERICO DELLE CELLE E SBAGLIATO, IL TESTO NO (2 set).
+// Nell'estrazione la cella della quantita ha valore `45` e testo `"0,45"`:
+// il separatore decimale si e perso nel numero ma non nella stringa che
+// Alnus ci ha scritto dentro. Non e uno scarto costante — dipende da quante
+// cifre decimali aveva il valore: `0,45`->45 (x100), `0,435`->435 (x1000),
+// `0,08`->8 (x100). Per questo NON si rimedia dividendo per 100: provato,
+// e peggiora tutto.
+// Sul file del 2 set: **2.820 celle su 38.460 (7%)** hanno il testo con la
+// virgola e il numero sbagliato; le altre 35.640 sono interi veri e i due
+// coincidono. Sono poche ma sono quelle dei FILI, cioe le quantita piu
+// grosse: bastavano a rendere il fabbisogno totale cinque volte il vero.
+// Quindi si legge con `raw:false` e si interpreta la stringa all'italiana:
+// se c'e la virgola i punti sono migliaia, altrimenti il punto e il decimale.
+// **Prima di fidarsi di un numero letto da un foglio, confrontarlo con quello
+// che il foglio MOSTRA.**
 const numDi = v => {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   const grezzo = t(v);
@@ -68,8 +75,11 @@ const numDi = v => {
 
 // ── Il report a blocchi: [padre][intestazioni][componenti...] e da capo ──
 function leggi(file) {
-  const wb = XLSX.read(fs.readFileSync(file), { type: 'buffer', cellDates: true });
-  const righe = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: true });
+  // ⚠⚠ `raw: false` NON e un dettaglio: e la correzione del difetto qui sotto.
+  // Si legge il TESTO che Alnus ha scritto nella cella, non il suo valore
+  // numerico, perche i due non coincidono.
+  const wb = XLSX.read(fs.readFileSync(file), { type: 'buffer', cellDates: true, cellText: true });
+  const righe = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: false });
   const out = []; let cur = null;
   for (const r of righe) {
     const c = r.map(t);

@@ -797,6 +797,17 @@ Nico ha estratto da Alnus **tutte le distinte** (`CAPRTESP0101.xls`). Non e una 
 - ✅ **Verso opposto, zero eccezioni**: commesse vive **con** righe di fabbisogno ma **senza** distinta: **0 su 141**. Conferma pulita che le due assenze sono la stessa: il fabbisogno si calcola dalla distinta, sempre.
 - ⚠ Le classificazioni `AGGANCIO PERSO`, `e un COMPONENTE`, `kit BOX` e `distinta DA SCARTARE` sul file del 2 set non scattano mai: sono state **collaudate su un file finto**. Restano utili al prossimo export, quando i codici cambieranno.
 
+### ▶ TAPPA 2 FATTA: fabbisogno calcolato in casa (2 set)
+`domain/materiali.js` (PURO, **non ancora agganciato ai gusci**: lo usa solo `strumenti/prova-fabbisogno.js`, cosi l app non corre rischi finche i numeri non sono verificati). Tre funzioni per tre domande diverse: `esplodiDistinta` · `fabbisognoPerCodice` · `ripartisciGiacenza`.
+- **E `fabbisognoPerCodice` a chiudere il problema di partenza**: la domanda si costruisce dalle COMMESSE invece che dal magazzino, quindi ogni commessa sa del suo fabbisogno e nessuna eredita il conto della sorella. La ripartizione segue una regola **dichiarata** — chi scade prima serve prima — che vale piu di una implicita perche si puo discutere.
+- **Il fabbisogno si calcola sul RESIDUO da produrre**, non sull ordinato: sui pezzi gia fatti il materiale e stato prelevato. Da solo porta i codici concordi da 212 a 231 su 358.
+- **Sui dati veri**: 241 codici entro il 2% da Alnus, 265 entro il 20%, 37 oltre, 56 che lui segnala e noi non vediamo. **Segnaliamo 61 commesse scoperte contro le 42 di Alnus, e 26 oggi non hanno nessun avviso** — quelle che il prossimo impegno copriva con una sorella.
+
+- ⚠⚠ **IL VALORE NUMERICO DELLE CELLE E SBAGLIATO, IL TESTO NO.** Nell estrazione distinte la cella della quantita ha valore `45` e testo `"0,45"`: il separatore decimale si e perso nel numero ma non nella stringa. **Non e uno scarto costante** — dipende da quante cifre decimali aveva il valore (`0,45`->45, `0,435`->435, `0,08`->8), quindi NON si rimedia dividendo per 100: provato, peggiora tutto (da 212 a 2 codici concordi). Sono **2.820 celle su 38.460 (7%)**, poche ma sono quelle dei FILI, cioe le quantita piu grosse: bastavano a rendere il fabbisogno totale CINQUE VOLTE il vero. Si legge con `raw:false` + `cellText:true` e si interpreta la stringa all italiana. **Prima di fidarsi di un numero letto da un foglio, confrontarlo con quello che il foglio MOSTRA.**
+- ⚠ **Lezione sul mio stesso strumento**: la prima versione stampava solo i dieci scarti peggiori, e leggendoli mi ero convinto che non tornasse niente — erano i peggiori per costruzione, e 212 codici su 302 combaciavano gia. Ora il riepilogo dice PRIMA quanto si va d accordo. **Un report che mostra solo le code fa sembrare rotto tutto il resto.**
+- **Restano 37 codici fuori soglia**, ma ora in territorio ragionevole: diversi esattamente **+100%** (`84545CEMB*`: noi 1104, Alnus 552) e i fili a +260/326%. Da guardare con Nico.
+- ⚠ **Due codici SEGNAPOSTO da escludere dal calcolo**: `COMP GENERICO` (in 3.409 distinte) e `VARIE` (in 404). Non sono mai padri, UM `nr`: sono riempitivi, non materiali. Oggi falsano il primo posto della classifica dei fabbisogni.
+
 ### ▶ RAGIONAMENTI SU DDT, FATTURA E SDI (1 set, per il futuro — nessuna azione ora)
 **Nessun vincolo legale sull'MRP.** Pianificazione, distinta, magazzino, ordini fornitore sono strumenti interni: nessuna omologazione, nessun obbligo di comprare. I vincoli cominciano solo sui documenti fiscalmente rilevanti.
 
