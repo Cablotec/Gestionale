@@ -1517,6 +1517,10 @@ const TAB_STRUCTURE = {
       // Spostata qui da Gestione (5 ago, richiesta Nico): i mancanti si
       // guardano mentre si lavora, non mentre si configura il gestionale.
       { id: 'fabbisogno',     label: 'Mancanti',       adminOnly: false },
+      // "Mancanti" e quello che dice ALNUS; "Fabbisogno" e quello che
+      // calcoliamo noi dalle distinte. Due schede perche sono due fonti, e
+      // finche non coincidono vanno guardate una accanto all'altra.
+      { id: 'fabb_calc',      label: 'Fabbisogno',     adminOnly: false },
       { id: 'prelievi',       label: 'Prelievi',       adminOnly: false },
       // Ricerca sui timbri NON legati a commessa (6 ago). L'anagrafica delle
       // attività resta in Gestione: qui si guarda cosa è stato fatto.
@@ -1633,6 +1637,7 @@ function renderTab(name) {
     else if (name === 'analisi_clienti') renderAnalisiClienti(root);
     else if (name === 'codifica') renderCodifica(root);
     else if (name === 'fabbisogno') renderFabbisogno(root);
+    else if (name === 'fabb_calc') renderFabbisognoCalcolato(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
     else if (name === 'attivita_extra') renderAttivitaExtra(root);
@@ -3810,6 +3815,241 @@ let mancantiFiltroOp = null;
 function apriMancantiFiltrati(numeroOp) {
   mancantiFiltroOp = numeroOp || null;
   renderTab('fabbisogno');
+}
+
+// ═══════════════════════════════════════════════════════════
+// FABBISOGNO CALCOLATO IN CASA (2 set) — dalle distinte, non da Alnus.
+//
+// Sta accanto a "Mancanti" e non la sostituisce: finche i due numeri non
+// dicono la stessa cosa vanno guardati uno accanto all'altro, che e la
+// stessa regola dei due sistemi in parallelo sugli ordini.
+//
+// ⚠ LA DISTINTA NON STA IN `state`: sono 38.461 righe e il gestionale
+// carica tutto all'avvio. Qui si scaricano SOLO i rami che servono, un
+// livello alla volta, e solo all'apertura della scheda. Sul giro di oggi
+// sono qualche centinaio di righe invece di 38 mila.
+// ═══════════════════════════════════════════════════════════
+let _fabbCalcSeq = 0;
+let fabbCalcVista = 'materiale';      // 'materiale' | 'commessa'
+let fabbCalcSoloScoperti = true;
+
+// Scarica la distinta per i codici dati, poi per i loro figli, finche non
+// esce piu niente di nuovo. La profondita vera e 3, il tetto a 8 e solo una
+// rete: senza, una distinta ad anello girerebbe per sempre.
+async function fabbScaricaDistinta(codiciRadice) {
+  const righe = [];
+  const chiesti = new Set();
+  let fronte = [...new Set(codiciRadice.filter(Boolean))];
+  for (let liv = 0; liv < 8 && fronte.length; liv++) {
+    const nuovi = fronte.filter(c => !chiesti.has(c));
+    nuovi.forEach(c => chiesti.add(c));
+    if (!nuovi.length) break;
+    const trovate = [];
+    // ⚠ Si usa `.in()` di supabase-js e NON un filtro costruito a mano: fra
+    // questi codici ce ne sono con la virgola dentro (`83010FILO0H05VK,25BI`)
+    // e in un `in.(a,b)` scritto a mano quella virgola spezzerebbe il valore
+    // in due — con la query che torna dati sbagliati SENZA dare errore.
+    for (let i = 0; i < nuovi.length; i += 80) {
+      const blocco = nuovi.slice(i, i + 80);
+      const { data, error } = await sb.from('distinta')
+        .select('padre,figlio,qta,um,tipo_parte,figlio_descrizione')
+        .in('padre', blocco);
+      if (error) throw error;
+      trovate.push(...(data || []));
+    }
+    righe.push(...trovate);
+    fronte = [...new Set(trovate.map(r => r.figlio))];
+  }
+  return righe;
+}
+
+async function renderFabbisognoCalcolato(root) {
+  const mySeq = ++_fabbCalcSeq;
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Fabbisogno')));
+  const info = el('div', { class:'sub', style:'margin:4px 0 14px;' }, 'Calcolo in corso…');
+  root.append(info);
+
+  if (typeof fabbisognoPerCodice !== 'function') {
+    info.textContent = 'Motore materiali non caricato: ricarica la pagina.';
+    return;
+  }
+
+  // ── Le commesse vive, con il RESIDUO da produrre ──
+  // Il materiale serve per quello che resta da fare: sui pezzi gia prodotti
+  // e stato prelevato. Sull'ordinato il fabbisogno sarebbe sempre gonfio.
+  const vive = state.operazioni
+    .filter(o => o.stato === 'aperta' || o.stato === 'sospesa')
+    .map(o => {
+      const art = state.articoli.find(a => a.id === o.articolo_id);
+      const cli = state.aziende.find(a => a.id === o.cliente_id);
+      const ordinati = Number(o.quantita) || 0;
+      const prodotti = quantitaConsegnata(o.id);
+      return {
+        id: o.id, op: o, numero_op: o.numero_op || '',
+        etichetta: (o.numero_ordine || '?') + '/' + (o.pos || '?'),
+        cliente: cli?.nome || '—', codiceArticolo: art?.codice || '',
+        ordinati, prodotti, quantita: Math.max(0, ordinati - prodotti),
+        scadenza: o.scadenza || '',
+      };
+    })
+    .filter(c => c.codiceArticolo && c.quantita > 0);
+
+  let righeDist = [];
+  try {
+    righeDist = await fabbScaricaDistinta(vive.map(c => c.codiceArticolo));
+  } catch (e) {
+    if (mySeq !== _fabbCalcSeq) return;
+    info.textContent = 'Errore nel caricamento delle distinte: ' + (e.message || e);
+    return;
+  }
+  if (mySeq !== _fabbCalcSeq || !root.isConnected) return;
+
+  const figliDi = indiceDistinta(righeDist);
+  const conDistinta = vive.filter(c => figliDi.has(c.codiceArticolo));
+  const senzaDistinta = vive.filter(c => !figliDi.has(c.codiceArticolo));
+  const perCodice = fabbisognoPerCodice(vive, figliDi);
+
+  // ── Giacenza: si sa SOLO per i codici che Alnus segnala ──
+  // Sono 358 su 776 richiesti. Per gli altri il magazzino non lo conosciamo:
+  // si dichiara, non si assume che ci siano. Quando il magazzino sara di
+  // casa (tappa 3) questa riga sparisce.
+  const manPerCod = {};
+  (state.mancanti || []).forEach(m => {
+    const k = String(m.codice || '').trim();
+    if (k) manPerCod[k] = m;
+  });
+  const dataFabb = (state.mancanti || []).reduce((d, m) =>
+    (!d || String(m.import_data || '') > d) ? (m.import_data || d) : d, null);
+
+  const materiali = [...perCodice.entries()].map(([cod, righe]) => {
+    const man = manPerCod[cod];
+    const giacenza = man ? (Number(man.giacenza) || 0) : null;
+    const richiesto = righe.reduce((a, r) => a + r.qta, 0);
+    const rip = ripartisciGiacenza(righe, giacenza == null ? 0 : giacenza);
+    const scoperto = rip.esito.reduce((a, e) => a + e.scoperto, 0);
+    return {
+      codice: cod, richiesto, giacenza,
+      descrizione: (man && man.descrizione) || (righeDist.find(r => r.figlio === cod) || {}).figlio_descrizione || '',
+      um: (righeDist.find(r => r.figlio === cod) || {}).um || (man && man.um) || '',
+      tipo_parte: (man && man.tipo_parte) || (righeDist.find(r => r.figlio === cod) || {}).tipo_parte || '',
+      scoperto, righe, esito: rip.esito, giacenzaNota: giacenza != null,
+    };
+  });
+  const sottoScorta = materiali.filter(m => m.giacenzaNota && m.scoperto > 0);
+  const commesseScoperte = new Set();
+  sottoScorta.forEach(m => m.esito.forEach(e => { if (e.scoperto > 0) commesseScoperte.add(e.commessa.id); }));
+
+  if (mySeq !== _fabbCalcSeq || !root.isConnected) return;
+  root.innerHTML = '';
+
+  // ── Testata ──
+  const tb = el('div', { class:'toolbar' }, el('h2', {}, 'Fabbisogno'));
+  const btnVista = el('button', { class:'btng', onclick: () => {
+    fabbCalcVista = fabbCalcVista === 'materiale' ? 'commessa' : 'materiale';
+    renderTab('fabb_calc');
+  } }, fabbCalcVista === 'materiale' ? '⇄ Vedi per commessa' : '⇄ Vedi per materiale');
+  const btnFiltro = el('button', { class: fabbCalcSoloScoperti ? 'btnp' : 'btng', onclick: () => {
+    fabbCalcSoloScoperti = !fabbCalcSoloScoperti;
+    renderTab('fabb_calc');
+  } }, fabbCalcSoloScoperti ? '● Solo scoperti' : '○ Tutti');
+  tb.append(btnVista, btnFiltro);
+  root.append(tb);
+
+  root.append(el('div', { class:'kpis' },
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Commesse calcolate'),
+      el('div', { class:'kv ka' }, conDistinta.length + '/' + vive.length)),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Materiali richiesti'),
+      el('div', { class:'kv kb' }, String(materiali.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Sotto scorta'),
+      el('div', { class:'kv kr' }, String(sottoScorta.length))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Commesse scoperte'),
+      el('div', { class:'kv ky' }, String(commesseScoperte.size))),
+  ));
+
+  // Da dove vengono i numeri: senza questa riga la scheda sembrerebbe
+  // sapere piu di quello che sa.
+  root.append(el('div', { class:'sub', style:'font-size:11px;margin:-4px 0 14px;line-height:1.7;' },
+    el('div', {}, 'Calcolato dalle distinte sul RESIDUO da produrre di ' + vive.length
+      + ' commesse aperte o sospese. ' + senzaDistinta.length
+      + ' non hanno distinta e restano fuori dal conto.'),
+    el('div', {}, '⚠ La giacenza si conosce solo per i '
+      + Object.keys(manPerCod).length + ' codici dell\'ultimo fabbisogno Alnus'
+      + (dataFabb ? ' (' + fmtIT(String(dataFabb).slice(0, 10)) + ')' : '')
+      + ': sugli altri il fabbisogno si vede, la copertura no.'),
+  ));
+
+  const nf = (n) => n == null ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+  const tw = el('div', { class:'tw' });
+  const tbl = el('table', { class:'rt op-table' });
+
+  if (fabbCalcVista === 'materiale') {
+    tbl.append(el('thead', {}, el('tr', {},
+      el('th', {}, 'Codice'), el('th', {}, 'Descrizione'), el('th', {}, 'Tipo'),
+      el('th', { class:'tr' }, 'Richiesto'), el('th', {}, 'UM'),
+      el('th', { class:'tr' }, 'Giacenza'), el('th', { class:'tr' }, 'Scoperto'),
+      el('th', { class:'tr' }, 'Commesse'))));
+    const body = el('tbody');
+    materiali
+      .filter(m => !fabbCalcSoloScoperti || m.scoperto > 0)
+      .sort((a, b) => (b.scoperto - a.scoperto) || (b.richiesto - a.richiesto))
+      .forEach(m => body.append(el('tr', {},
+        el('td', { class:'mono' }, m.codice),
+        el('td', { style:'max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
+          title: m.descrizione }, m.descrizione || '—'),
+        el('td', { style:'font-size:11px;color:var(--mut);' }, m.tipo_parte || '—'),
+        el('td', { class:'tr mono' }, nf(m.richiesto)),
+        el('td', { style:'font-size:11px;color:var(--mut);' }, m.um || '—'),
+        el('td', { class:'tr mono', style: m.giacenzaNota ? 'color:var(--mut);' : 'color:var(--mut);opacity:.5;',
+          title: m.giacenzaNota ? '' : 'Non nella fotografia di Alnus: giacenza sconosciuta' },
+          m.giacenzaNota ? nf(m.giacenza) : '?'),
+        el('td', { class:'tr mono', style: m.scoperto > 0 ? 'color:var(--red);font-weight:700;' : 'color:var(--mut);' },
+          m.giacenzaNota ? nf(m.scoperto) : '—'),
+        el('td', { class:'tr mono', style:'color:var(--mut);',
+          title: m.righe.map(r => r.commessa.etichetta + '  ' + nf(r.qta)).join('\n') },
+          String(m.righe.length)),
+      )));
+    tbl.append(body);
+  } else {
+    tbl.append(el('thead', {}, el('tr', {},
+      el('th', {}, 'Commessa'), el('th', {}, 'OP'), el('th', {}, 'Cliente'),
+      el('th', {}, 'Articolo'), el('th', { class:'tr' }, 'Da produrre'),
+      el('th', {}, 'Scadenza'), el('th', { class:'tr' }, 'Codici scoperti'))));
+    const body = el('tbody');
+    const scoperti = {};
+    sottoScorta.forEach(m => m.esito.forEach(e => {
+      if (e.scoperto <= 0) return;
+      (scoperti[e.commessa.id] = scoperti[e.commessa.id] || []).push({ m, e });
+    }));
+    vive
+      .filter(c => !fabbCalcSoloScoperti || (scoperti[c.id] || []).length)
+      .sort((a, b) => ((scoperti[b.id] || []).length - (scoperti[a.id] || []).length)
+        || String(a.scadenza || '9999').localeCompare(String(b.scadenza || '9999')))
+      .forEach(c => {
+        const s = scoperti[c.id] || [];
+        body.append(el('tr', { style:'cursor:pointer;', onclick: () => openOperazioneModal(c.op),
+          title:'Apri la commessa' },
+          el('td', { class:'mono' }, c.etichetta),
+          el('td', { class:'mono', style:'color:var(--mut);' }, c.numero_op || '—'),
+          el('td', { style:'max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, c.cliente),
+          el('td', { class:'mono', style:'color:var(--or);' }, c.codiceArticolo),
+          el('td', { class:'tr mono', title: c.ordinati + ' ordinati · ' + c.prodotti + ' prodotti' },
+            String(c.quantita)),
+          el('td', { class:'mono' }, c.scadenza ? fmtIT(c.scadenza) : '—'),
+          el('td', { class:'tr mono', style: s.length ? 'color:var(--red);font-weight:700;' : 'color:var(--mut);',
+            title: s.slice(0, 20).map(x => x.m.codice + '  manca ' + nf(x.e.scoperto)
+              + (x.m.um ? ' ' + x.m.um : '')).join('\n') + (s.length > 20 ? '\n… e altri ' + (s.length - 20) : '') },
+            s.length ? String(s.length) : (figliDi.has(c.codiceArticolo) ? '0' : 'no distinta')),
+        ));
+      });
+    tbl.append(body);
+  }
+  tw.append(tbl);
+  root.append(tw);
+  root.append(el('div', { class:'sub', style:'margin-top:14px;font-size:11px;' },
+    'La giacenza va a chi scade prima: ogni commessa vede la SUA copertura, '
+    + 'non quella di una sorella. È la differenza con la scheda Mancanti, '
+    + 'dove il mancante è attribuito a una commessa sola.'));
 }
 
 function renderFabbisogno(root) {
