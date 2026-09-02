@@ -95,6 +95,27 @@ function fabbisognoPerCodice(commesse, figliDi) {
   return perCodice;
 }
 
+// ⚠⚠ LA GIACENZA NON E TUTTA NOSTRA DA DISTRIBUIRE (2 set, chiesto da Nico:
+// *"stai tenendo conto anche degli impegni giusto?"*).
+// Alnus dichiara per ogni codice un `impegno`: quanto ne e gia promesso a
+// qualcuno. Noi la domanda ce la calcoliamo dalle commesse VIVE NEL
+// GESTIONALE. Se il suo impegno e piu grande della nostra domanda, la
+// differenza e domanda che NON VEDIAMO — commesse chiuse qui e aperte la,
+// ordini che non passano da noi, scorte gia promesse — e quella parte di
+// magazzino e gia parlata.
+// Distribuirla lo stesso vorrebbe dire dire a una commessa che e coperta
+// mentre il pezzo e destinato a un altro: l'errore piu caro di tutti, perche
+// si scopre in linea.
+// Quando invece la nostra domanda e >= al suo impegno, non c'e niente di
+// nascosto e la giacenza e tutta disponibile.
+function disponibilePerNoi(giacenza, impegnoAlnus, nostraDomanda) {
+  const g = Number(giacenza) || 0;
+  const imp = Number(impegnoAlnus) || 0;
+  const nostra = Number(nostraDomanda) || 0;
+  const riservato = Math.max(0, imp - nostra);
+  return { disponibile: Math.max(0, g - riservato), riservato };
+}
+
 // Ripartisce quello che c e fra chi lo vuole, in ordine di scadenza.
 // `righe`: [{ commessa, qta }] gia ordinate. `disponibile`: numero.
 // Ritorna [{ commessa, qta, coperto, scoperto }] piu il residuo.
@@ -147,5 +168,5 @@ function indiceDistinta(righe) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza, indiceDistinta,
-    applicaDistinteLocali };
+    applicaDistinteLocali, disponibilePerNoi };
 }

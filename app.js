@@ -3868,21 +3868,12 @@ async function fabbScaricaDistinta(codiciRadice) {
   return righe;
 }
 
-async function renderFabbisognoCalcolato(root) {
-  const mySeq = ++_fabbCalcSeq;
-  root.innerHTML = '';
-  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Fabbisogno')));
-  const info = el('div', { class:'sub', style:'margin:4px 0 14px;' }, 'Calcolo in corso…');
-  root.append(info);
-
-  if (typeof fabbisognoPerCodice !== 'function') {
-    info.textContent = 'Motore materiali non caricato: ricarica la pagina.';
-    return;
-  }
-
-  // ── Le commesse vive, con il RESIDUO da produrre ──
-  // Il materiale serve per quello che resta da fare: sui pezzi gia prodotti
-  // e stato prelevato. Sull'ordinato il fabbisogno sarebbe sempre gonfio.
+// Il fabbisogno di tutte le commesse vive, calcolato una volta sola e usato
+// da chi serve: la vista calcolata e il riquadro di risposta.
+// ⚠ Serve TUTTA la domanda anche quando interessa UNA commessa: la giacenza
+// si divide fra tutte quelle che vogliono lo stesso codice, e guardarne una
+// sola le darebbe una copertura che non ha.
+async function calcolaFabbisognoVivo() {
   const vive = state.operazioni
     .filter(o => o.stato === 'aperta' || o.stato === 'sospesa')
     .map(o => {
@@ -3900,31 +3891,69 @@ async function renderFabbisognoCalcolato(root) {
     })
     .filter(c => c.codiceArticolo && c.quantita > 0);
 
-  // Radici: gli articoli delle commesse PIU i figli delle distinte scritte a
-  // mano, che possono essere sottoassiemi con una distinta Alnus sotto.
   const radici = vive.map(c => c.codiceArticolo);
   state.articoli.forEach(a => {
     if (Array.isArray(a.distinta)) a.distinta.forEach(r => { if (r && r.codice) radici.push(String(r.codice).trim()); });
   });
-  let righeDist = [];
+  const righeDist = await fabbScaricaDistinta(radici);
+  const figliDi = indiceDistinta(righeDist);
+  const conLocale = (typeof applicaDistinteLocali === 'function')
+    ? applicaDistinteLocali(figliDi, state.articoli) : new Set();
+  return { vive, righeDist, figliDi, conLocale, perCodice: fabbisognoPerCodice(vive, figliDi) };
+}
+
+// Quanto serve a UNA commessa di ogni codice, e quanto gliene manca davvero
+// dopo che la giacenza e stata divisa fra tutte quelle che la vogliono.
+// Ritorna Map codice -> { serve, coperto, manca, um }.
+async function fabbisognoDiCommessa(numeroOp) {
+  const { perCodice } = await calcolaFabbisognoVivo();
+  const out = new Map();
+  const giacDi = (cod) => {
+    const m = (state.mancanti || []).find(x => String(x.codice || '').trim() === cod);
+    return m ? (Number(m.giacenza) || 0) : null;
+  };
+  const manDi = (cod) => (state.mancanti || []).find(x => String(x.codice || '').trim() === cod);
+  perCodice.forEach((righe, cod) => {
+    if (!righe.some(r => r.commessa.numero_op === numeroOp)) return;
+    const m = manDi(cod);
+    const g = m ? (Number(m.giacenza) || 0) : null;
+    // Quello che Alnus ha gia promesso ad altri non si puo dare a noi.
+    const nostra = righe.reduce((a, r) => a + r.qta, 0);
+    const { disponibile, riservato } = disponibilePerNoi(g == null ? 0 : g,
+      m ? m.impegno : 0, nostra);
+    const { esito } = ripartisciGiacenza(righe, disponibile);
+    const mia = esito.find(e => e.commessa.numero_op === numeroOp);
+    if (!mia) return;
+    out.set(cod, { serve: mia.qta, coperto: mia.coperto, manca: mia.scoperto,
+      giacenzaNota: g != null, riservato });
+  });
+  return out;
+}
+
+async function renderFabbisognoCalcolato(root) {
+  const mySeq = ++_fabbCalcSeq;
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Fabbisogno')));
+  const info = el('div', { class:'sub', style:'margin:4px 0 14px;' }, 'Calcolo in corso…');
+  root.append(info);
+
+  if (typeof fabbisognoPerCodice !== 'function') {
+    info.textContent = 'Motore materiali non caricato: ricarica la pagina.';
+    return;
+  }
+
+  let calcolo;
   try {
-    righeDist = await fabbScaricaDistinta(radici);
+    calcolo = await calcolaFabbisognoVivo();
   } catch (e) {
     if (mySeq !== _fabbCalcSeq) return;
     info.textContent = 'Errore nel caricamento delle distinte: ' + (e.message || e);
     return;
   }
   if (mySeq !== _fabbCalcSeq || !root.isConnected) return;
-
-  const figliDi = indiceDistinta(righeDist);
-  // Le distinte scritte a mano nella scheda articolo vincono su Alnus. Vanno
-  // applicate PRIMA di contare cosa e coperto, o la scheda direbbe che un
-  // articolo non ha distinta mentre uno l'ha appena scritta.
-  const conLocale = (typeof applicaDistinteLocali === 'function')
-    ? applicaDistinteLocali(figliDi, state.articoli) : new Set();
+  const { vive, righeDist, figliDi, conLocale, perCodice } = calcolo;
   const conDistinta = vive.filter(c => figliDi.has(c.codiceArticolo));
   const senzaDistinta = vive.filter(c => !figliDi.has(c.codiceArticolo));
-  const perCodice = fabbisognoPerCodice(vive, figliDi);
 
   // ── Giacenza: si sa SOLO per i codici che Alnus segnala ──
   // Sono 358 su 776 richiesti. Per gli altri il magazzino non lo conosciamo:
@@ -3942,7 +3971,11 @@ async function renderFabbisognoCalcolato(root) {
     const man = manPerCod[cod];
     const giacenza = man ? (Number(man.giacenza) || 0) : null;
     const richiesto = righe.reduce((a, r) => a + r.qta, 0);
-    const rip = ripartisciGiacenza(righe, giacenza == null ? 0 : giacenza);
+    // Stessa regola del riquadro di risposta: la parte di giacenza gia
+    // impegnata da Alnus su domanda che non vediamo non si distribuisce.
+    const disp = disponibilePerNoi(giacenza == null ? 0 : giacenza,
+      man ? man.impegno : 0, richiesto);
+    const rip = ripartisciGiacenza(righe, disp.disponibile);
     const scoperto = rip.esito.reduce((a, e) => a + e.scoperto, 0);
     return {
       codice: cod, richiesto, giacenza,
@@ -4110,17 +4143,23 @@ function riquadroRispostaMateriali(numeroOp) {
     document.createTextNode(op ? '  ·  ' + (op.numero_ordine || '') + '/' + (op.pos || '') : ''),
     document.createTextNode(art ? '  ·  ' + art.codice : '')));
 
+  // Le celle della quantita si riempiono dopo, quando il calcolo e pronto:
+  // serve la distinta, e quella non sta in memoria.
+  const celleQta = new Map();
   const gruppo = (voci, colore, titolo, dettaglio) => {
     if (!voci.length) return;
     box.append(el('div', { style:'margin-top:12px;font-family:JetBrains Mono,monospace;font-size:11px;'
       + 'letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:' + colore + ';' },
       titolo + ' — ' + voci.length));
     voci.forEach(({ m, st }) => {
-      box.append(el('div', { style:'display:grid;grid-template-columns:minmax(150px,auto) 1fr auto;'
+      const qta = el('span', { class:'mono', style:'font-size:11px;white-space:nowrap;text-align:right;color:var(--mut);' }, '…');
+      celleQta.set(m.codice, qta);
+      box.append(el('div', { style:'display:grid;grid-template-columns:minmax(150px,auto) 1fr 160px auto;'
         + 'gap:10px;align-items:baseline;padding:3px 0 3px 12px;font-size:12px;' },
         el('span', { class:'mono', style:'font-size:11px;' }, m.codice),
         el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
           m.descrizione || ''),
+        qta,
         el('span', { style:'font-size:11px;color:' + colore + ';white-space:nowrap;' }, dettaglio(st, m))));
     });
   };
@@ -4144,12 +4183,55 @@ function riquadroRispostaMateriali(numeroOp) {
   // La riga che dice se si parte o no. Senza, uno legge cinque gruppi e deve
   // tirare le somme da solo.
   const ferma = per.da_ordinare.length + per.in_ritardo.length + per.attesa_cliente.length;
-  box.append(el('div', { class:'sub', style:'margin-top:14px;padding-top:10px;'
+  const chiusa = el('div', { class:'sub', style:'margin-top:14px;padding-top:10px;'
     + 'border-top:1px solid var(--brd);font-size:11px;' },
     ferma
       ? '⚠ Questa commessa non si chiude finché non si sistemano ' + ferma
         + (ferma === 1 ? ' codice.' : ' codici.')
-      : 'Nessun codice ferma la commessa: quello che manca è ordinato e ha una data.'));
+      : 'Nessun codice ferma la commessa: quello che manca è ordinato e ha una data.');
+  box.append(chiusa);
+
+  // ── Le quantita DI QUESTA COMMESSA, appena il calcolo e pronto ──
+  // Servono la distinta e la ripartizione della giacenza fra tutte le
+  // commesse che vogliono lo stesso codice: e per questo che arriva dopo
+  // invece che subito.
+  (async () => {
+    let mio;
+    try { mio = await fabbisognoDiCommessa(numeroOp); } catch (e) { mio = null; }
+    if (!mio || !box.isConnected) {
+      celleQta.forEach(c => { c.textContent = ''; });
+      return;
+    }
+    const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+    celleQta.forEach((cella, codice) => {
+      const q = mio.get(codice);
+      if (!q) {
+        // Il codice sta nei mancanti di Alnus ma la nostra distinta non lo
+        // prevede per questo articolo: si dichiara invece di inventare uno zero.
+        cella.textContent = 'non in distinta';
+        cella.style.color = 'var(--mut)';
+        cella.title = 'Alnus lo attribuisce a questa commessa, la distinta no.';
+        return;
+      }
+      const um = (state.mancanti || []).find(x => String(x.codice || '').trim() === codice)?.um || '';
+      cella.textContent = q.manca > 0
+        ? 'servono ' + nf(q.serve) + ' · mancano ' + nf(q.manca) + (um ? ' ' + um : '')
+        : 'servono ' + nf(q.serve) + ' · coperti';
+      cella.style.color = q.manca > 0 ? 'var(--red)' : 'var(--grn)';
+      cella.style.fontWeight = q.manca > 0 ? '700' : '';
+      cella.title = q.giacenzaNota
+        ? 'Giacenza ripartita fra le commesse che vogliono questo codice, chi scade prima serve prima.'
+        : 'Giacenza sconosciuta: non è fra i codici dell\'ultimo fabbisogno Alnus.';
+    });
+    // Adesso si puo dire quanti codici fermano DAVVERO questa commessa: non
+    // quelli che Alnus segnala in generale, ma quelli che a lei mancano.
+    const bloccanti = [...mio.values()].filter(q => q.manca > 0).length;
+    chiusa.textContent = bloccanti
+      ? '⚠ A questa commessa mancano ' + bloccanti
+        + (bloccanti === 1 ? ' codice' : ' codici') + ' per poter partire.'
+      : 'Nessun codice manca a questa commessa: la giacenza le basta.';
+  })();
+
   return box;
 }
 

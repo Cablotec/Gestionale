@@ -822,6 +822,15 @@ Richiesta di Nico: *"dalla schermata ordini clienti voglio vedere l avviso come 
 - ⚠ `apriMancantiFiltrati` forza la vista Alnus: restando sull ultima scelta si poteva atterrare sul fabbisogno calcolato, che risponde a un altra domanda.
 - ⚠ Togliendo la scheda `fabb_calc` erano rimasti **due `renderTab(fabb_calc)`** nei bottoni della vista calcolata: bottoni che non avrebbero fatto piu niente, in silenzio. Trovati col grep prima di committare — **dopo aver tolto una scheda, cercare il suo id in tutto il file.**
 
+### ▶ LE QUANTITA PER COMMESSA, e gli IMPEGNI (2 set, `2026-09-02.6`)
+- **La domanda di Nico che ha trovato il buco**: *"dove vedo che mi mancano 24 pz del cod 20 080 2455 per completare 2026/OP/01917?"* — **non si vedeva da nessuna parte**. Il riquadro mostrava le quantita GLOBALI di Alnus (324 mancanti su 400 impegnati su TUTTI gli ordini), che di quella commessa non dicono niente.
+- Ora ogni riga del riquadro dice **`servono N · mancano M`** per QUELLA commessa, e la riga finale conta i codici che mancano a lei, non quelli che Alnus segnala in generale. Le quantita arrivano dopo il resto: servono la distinta e la ripartizione, e la distinta non sta in memoria.
+- **Verificato sul caso che Nico conosce**: `20 080 2455`, giacenza 76, tre commesse dello stesso ordine — OP 01917 (100 pz, scad 04/09) · 01918 (50, 03/11) · 01921 (250, 02/12). La giacenza va alla scadenza piu vicina: **01917 coperto 76, MANCA 24**. Esattamente il numero che aveva in testa lui.
+- ⚠⚠ **GLI IMPEGNI** (chiesto da Nico: *"stai tenendo conto anche degli impegni giusto?"*). Alnus dichiara per ogni codice quanto e gia promesso (`impegno`); noi la domanda ce la calcoliamo dalle commesse VIVE NEL GESTIONALE. **Se il suo impegno e piu grande della nostra domanda, la differenza e domanda che non vediamo** — commesse chiuse qui e aperte la, ordini che non passano da noi — e quella parte di magazzino **e gia parlata**. `disponibilePerNoi(giacenza, impegno, nostraDomanda)` in domain la mette da parte prima di ripartire.
+  - Distribuirla lo stesso vorrebbe dire dire a una commessa che e coperta mentre il pezzo e destinato a un altro: **l errore piu caro, perche si scopre in linea.**
+  - **Sui dati veri: 40 codici su 301 hanno impegno Alnus > nostra domanda**, quindi la riserva morde davvero. Su `20 080 2455` invece impegno 400 = nostra domanda 400: riserva 0, e i 24 restano 24.
+  - La stessa regola vale nella vista calcolata: due numeri nella stessa scheda non possono dire cose diverse.
+
 ### ▶ RAGIONAMENTI SU DDT, FATTURA E SDI (1 set, per il futuro — nessuna azione ora)
 **Nessun vincolo legale sull'MRP.** Pianificazione, distinta, magazzino, ordini fornitore sono strumenti interni: nessuna omologazione, nessun obbligo di comprare. I vincoli cominciano solo sui documenti fiscalmente rilevanti.
 
