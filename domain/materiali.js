@@ -36,6 +36,16 @@ function eSegnaposto(codice) {
   return _segnaposto.has(String(codice == null ? '' : codice).trim().toUpperCase());
 }
 
+// I codici che finiscono in `_K` / `_KF` sono LAVORAZIONI, non pezzi da
+// magazzino: `30 010 0510_K` e "Lavorazione Botturi", il promemoria che quella
+// lavorazione va ordinata a un terzista (detto da Nico, 2 set). Non hanno
+// sottodistinta e non devono averla — nell'esplosione sono foglie.
+// Vanno mostrate a parte: mescolarle ai materiali fa cercare in magazzino una
+// cosa che si ordina, e il gesto per rimediare e completamente diverso.
+function eLavorazione(codice) {
+  return /_K[A-Z]?$/i.test(String(codice == null ? '' : codice).trim());
+}
+
 // Esplode `codice` per `qta` pezzi, scendendo tutta la distinta.
 // `figliDi`: Map codice -> [{ figlio, qta }].
 // Ritorna { materiali: Map codice->qta, cicli: Set, tagliati: n }.
@@ -168,5 +178,5 @@ function indiceDistinta(righe) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza, indiceDistinta,
-    applicaDistinteLocali, disponibilePerNoi };
+    applicaDistinteLocali, disponibilePerNoi, eLavorazione };
 }

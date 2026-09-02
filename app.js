@@ -4123,113 +4123,132 @@ function bottoneVistaMateriali() {
 //   in arrivo       -> c'e e ha una data: non si fa niente, si aspetta
 // L'OF sta in chiaro perche e la cosa con cui si va a sollecitare: sapere che
 // un pezzo e in ritardo senza sapere su quale ordine non serve a muoversi.
+// LA RISPOSTA, quando si arriva dal triangolino di Ordini cliente.
+//
+// ⚠⚠ SI RAGGRUPPA SU QUELLO CHE MANCA A QUESTA COMMESSA, non su quello che
+// Alnus segnala in generale (2 set, corretto da Nico: *"nell'OP 01917 dovrei
+// vedere mancante solo il 20 080 2455... sono in quelli a seguire che mi
+// mancheranno dei componenti"*). Aveva ragione: dei 6 codici che Alnus
+// attribuisce a quella commessa, 4 sono coperti dalla giacenza e mancano
+// invece alle commesse dopo, che la stessa giacenza non la trovano piu.
+// Mostrarli tutti e sei come problemi faceva sembrare ferma una commessa che
+// aspetta un pezzo solo.
+//
+// Tre domande in ordine di urgenza, e ognuna ha un destinatario diverso:
+//   in ritardo      -> l'ordine c'e, la data e passata: si sollecita l'OF
+//   manca l'ordine  -> tocca a NOI comprarlo, e nessuno l'ha ancora fatto
+//   in arrivo       -> c'e e ha una data: si aspetta
+// Le LAVORAZIONI stanno in un gruppo loro: non si cercano in magazzino, si
+// ordinano a un terzista.
 function riquadroRispostaMateriali(numeroOp) {
   if (typeof statoMateriale !== 'function') return null;
-  const righe = (state.mancanti || []).filter(m => m.numero_op === numeroOp);
-  if (!righe.length) return null;
-  const oggi = toLocalISO(new Date());
-  const per = { da_ordinare: [], in_ritardo: [], in_arrivo: [], attesa_cliente: [], consumo: [] };
-  righe.forEach(m => {
-    const st = statoMateriale(m, oggi);
-    (per[st.stato] || per.in_arrivo).push({ m, st });
-  });
-
+  const suoi = (state.mancanti || []).filter(m => m.numero_op === numeroOp);
   const box = el('div', { style:'border:1px solid var(--brd);border-radius:5px;background:var(--sur);'
     + 'padding:16px 18px;margin:0 0 16px;' });
   const op = (state.operazioni || []).find(o => o.numero_op === numeroOp);
   const art = op ? (state.articoli || []).find(x => x.id === op.articolo_id) : null;
-  box.append(el('div', { style:'font-family:JetBrains Mono,monospace;font-size:12px;margin-bottom:12px;' },
+  const testa = el('div', { style:'font-family:JetBrains Mono,monospace;font-size:12px;margin-bottom:12px;' },
     el('span', { style:'color:var(--acc);font-weight:700;' }, numeroOp),
     document.createTextNode(op ? '  ·  ' + (op.numero_ordine || '') + '/' + (op.pos || '') : ''),
-    document.createTextNode(art ? '  ·  ' + art.codice : '')));
+    document.createTextNode(art ? '  ·  ' + art.codice : ''));
+  const corpo = el('div', {}, el('div', { class:'sub', style:'font-size:11px;' }, 'Calcolo in corso…'));
+  box.append(testa, corpo);
 
-  // Le celle della quantita si riempiono dopo, quando il calcolo e pronto:
-  // serve la distinta, e quella non sta in memoria.
-  const celleQta = new Map();
-  const gruppo = (voci, colore, titolo, dettaglio) => {
-    if (!voci.length) return;
-    box.append(el('div', { style:'margin-top:12px;font-family:JetBrains Mono,monospace;font-size:11px;'
-      + 'letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:' + colore + ';' },
-      titolo + ' — ' + voci.length));
-    voci.forEach(({ m, st }) => {
-      const qta = el('span', { class:'mono', style:'font-size:11px;white-space:nowrap;text-align:right;color:var(--mut);' }, '…');
-      celleQta.set(m.codice, qta);
-      box.append(el('div', { style:'display:grid;grid-template-columns:minmax(150px,auto) 1fr 160px auto;'
-        + 'gap:10px;align-items:baseline;padding:3px 0 3px 12px;font-size:12px;' },
-        el('span', { class:'mono', style:'font-size:11px;' }, m.codice),
-        el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
-          m.descrizione || ''),
-        qta,
-        el('span', { style:'font-size:11px;color:' + colore + ';white-space:nowrap;' }, dettaglio(st, m))));
-    });
-  };
-
-  gruppo(per.da_ordinare, 'var(--red)', '⛔ Manca l\'ordine',
-    (st, m) => 'da comprare' + (m.qta_da_ordinare != null
-      ? ' ' + Number(m.qta_da_ordinare).toLocaleString('it-IT', { maximumFractionDigits: 2 })
-        + (m.um ? ' ' + m.um : '') : ''));
-  gruppo(per.in_ritardo, 'var(--red)', '⏰ In ritardo',
-    (st) => 'doveva arrivare il ' + fmtIT(st.data)
-      + (st.of ? '  ·  OF ' + st.of : '  ·  OF non indicato')
-      + (st.fornitore ? '  ·  ' + st.fornitore : ''));
-  gruppo(per.in_arrivo, 'var(--blu)', '📦 In arrivo',
-    (st) => (st.data ? 'arriva il ' + fmtIT(st.data) : 'ordinato, senza data')
-      + (st.of ? '  ·  OF ' + st.of : '')
-      + (st.fornitore ? '  ·  ' + st.fornitore : ''));
-  gruppo(per.attesa_cliente, 'var(--or)', '⏳ Lo manda il cliente',
-    () => 'conto lavoro: non si ordina');
-  gruppo(per.consumo, 'var(--mut)', '· Di consumo', () => 'non ferma la commessa');
-
-  // La riga che dice se si parte o no. Senza, uno legge cinque gruppi e deve
-  // tirare le somme da solo.
-  const ferma = per.da_ordinare.length + per.in_ritardo.length + per.attesa_cliente.length;
-  const chiusa = el('div', { class:'sub', style:'margin-top:14px;padding-top:10px;'
-    + 'border-top:1px solid var(--brd);font-size:11px;' },
-    ferma
-      ? '⚠ Questa commessa non si chiude finché non si sistemano ' + ferma
-        + (ferma === 1 ? ' codice.' : ' codici.')
-      : 'Nessun codice ferma la commessa: quello che manca è ordinato e ha una data.');
-  box.append(chiusa);
-
-  // ── Le quantita DI QUESTA COMMESSA, appena il calcolo e pronto ──
-  // Servono la distinta e la ripartizione della giacenza fra tutte le
-  // commesse che vogliono lo stesso codice: e per questo che arriva dopo
-  // invece che subito.
   (async () => {
-    let mio;
+    let mio = null;
     try { mio = await fabbisognoDiCommessa(numeroOp); } catch (e) { mio = null; }
-    if (!mio || !box.isConnected) {
-      celleQta.forEach(c => { c.textContent = ''; });
+    if (!box.isConnected) return;
+    corpo.innerHTML = '';
+    const oggi = toLocalISO(new Date());
+    const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+    const manDi = (c) => suoi.find(m => String(m.codice || '').trim() === c);
+
+    // Se il calcolo non c'e (niente distinta per questo articolo) si torna a
+    // quello che dice Alnus, dichiarandolo: meglio un dato dichiarato parziale
+    // che una schermata vuota.
+    if (!mio || !mio.size) {
+      if (!suoi.length) { corpo.append(el('div', { class:'sub', style:'font-size:11px;' },
+        'Nessun materiale segnalato per questa commessa.')); return; }
+      corpo.append(el('div', { class:'sub', style:'font-size:11px;margin-bottom:8px;color:var(--yel);' },
+        '⚠ Senza distinta non si può dire quanto manca a QUESTA commessa: '
+        + 'qui sotto c\'è quello che Alnus segnala in generale.'));
+      suoi.forEach(m => {
+        const st = statoMateriale(m, oggi);
+        corpo.append(el('div', { style:'display:grid;grid-template-columns:minmax(150px,auto) 1fr auto;'
+          + 'gap:10px;padding:3px 0 3px 12px;font-size:12px;' },
+          el('span', { class:'mono', style:'font-size:11px;' }, m.codice),
+          el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+            m.descrizione || ''),
+          el('span', { class:'sub', style:'font-size:11px;white-space:nowrap;' }, st.stato.replace('_', ' '))));
+      });
       return;
     }
-    const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
-    celleQta.forEach((cella, codice) => {
-      const q = mio.get(codice);
-      if (!q) {
-        // Il codice sta nei mancanti di Alnus ma la nostra distinta non lo
-        // prevede per questo articolo: si dichiara invece di inventare uno zero.
-        cella.textContent = 'non in distinta';
-        cella.style.color = 'var(--mut)';
-        cella.title = 'Alnus lo attribuisce a questa commessa, la distinta no.';
-        return;
-      }
-      const um = (state.mancanti || []).find(x => String(x.codice || '').trim() === codice)?.um || '';
-      cella.textContent = q.manca > 0
-        ? 'servono ' + nf(q.serve) + ' · mancano ' + nf(q.manca) + (um ? ' ' + um : '')
-        : 'servono ' + nf(q.serve) + ' · coperti';
-      cella.style.color = q.manca > 0 ? 'var(--red)' : 'var(--grn)';
-      cella.style.fontWeight = q.manca > 0 ? '700' : '';
-      cella.title = q.giacenzaNota
-        ? 'Giacenza ripartita fra le commesse che vogliono questo codice, chi scade prima serve prima.'
-        : 'Giacenza sconosciuta: non è fra i codici dell\'ultimo fabbisogno Alnus.';
+
+    // Ogni codice che questa commessa vuole, con quanto le manca DAVVERO.
+    const voci = [];
+    mio.forEach((q, cod) => {
+      const m = manDi(cod);
+      const st = m ? statoMateriale(m, oggi) : { stato:'da_ordinare', data:null, of:null, fornitore:null };
+      voci.push({ cod, q, m, st, lavorazione: typeof eLavorazione === 'function' && eLavorazione(cod) });
     });
-    // Adesso si puo dire quanti codici fermano DAVVERO questa commessa: non
-    // quelli che Alnus segnala in generale, ma quelli che a lei mancano.
-    const bloccanti = [...mio.values()].filter(q => q.manca > 0).length;
-    chiusa.textContent = bloccanti
-      ? '⚠ A questa commessa mancano ' + bloccanti
-        + (bloccanti === 1 ? ' codice' : ' codici') + ' per poter partire.'
-      : 'Nessun codice manca a questa commessa: la giacenza le basta.';
+    const mancanti = voci.filter(v => v.q.manca > 0);
+    const coperti = voci.filter(v => v.q.manca <= 0);
+
+    const gruppo = (sel, colore, titolo, dettaglio) => {
+      const v = mancanti.filter(sel);
+      if (!v.length) return;
+      corpo.append(el('div', { style:'margin-top:12px;font-family:JetBrains Mono,monospace;font-size:11px;'
+        + 'letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:' + colore + ';' },
+        titolo + ' — ' + v.length));
+      v.forEach(x => {
+        const um = (x.m && x.m.um) ? ' ' + x.m.um : '';
+        corpo.append(el('div', { style:'display:grid;grid-template-columns:minmax(150px,auto) 1fr 170px auto;'
+          + 'gap:10px;align-items:baseline;padding:3px 0 3px 12px;font-size:12px;' },
+          el('span', { class:'mono', style:'font-size:11px;' }, x.cod),
+          el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+            (x.m && x.m.descrizione) || ''),
+          el('span', { class:'mono', style:'font-size:11px;color:var(--red);font-weight:700;white-space:nowrap;',
+            title:'Serve ' + nf(x.q.serve) + ', in magazzino ne tocca ' + nf(x.q.coperto)
+              + (x.q.riservato ? ' (' + nf(x.q.riservato) + ' è impegnato altrove)' : '') },
+            'servono ' + nf(x.q.serve) + ' · mancano ' + nf(x.q.manca) + um),
+          el('span', { style:'font-size:11px;color:' + colore + ';white-space:nowrap;' }, dettaglio(x))));
+      });
+    };
+
+    gruppo(v => !v.lavorazione && v.st.stato === 'in_ritardo', 'var(--red)', '⏰ In ritardo',
+      x => 'doveva arrivare il ' + fmtIT(x.st.data)
+        + (x.st.of ? '  ·  OF ' + x.st.of : '  ·  OF non indicato')
+        + (x.st.fornitore ? '  ·  ' + x.st.fornitore : ''));
+    gruppo(v => !v.lavorazione && v.st.stato === 'da_ordinare', 'var(--red)', '⛔ Manca l\'ordine',
+      () => 'nessuno l\'ha ancora comprato');
+    gruppo(v => !v.lavorazione && v.st.stato === 'in_arrivo', 'var(--blu)', '📦 In arrivo',
+      x => (x.st.data ? 'arriva il ' + fmtIT(x.st.data) : 'ordinato, senza data')
+        + (x.st.of ? '  ·  OF ' + x.st.of : '') + (x.st.fornitore ? '  ·  ' + x.st.fornitore : ''));
+    gruppo(v => !v.lavorazione && v.st.stato === 'attesa_cliente', 'var(--or)', '⏳ Lo manda il cliente',
+      () => 'conto lavoro: non si ordina');
+    gruppo(v => v.lavorazione, 'var(--vio)', '🔧 Lavorazioni da ordinare',
+      () => 'si ordina a un terzista, non sta in magazzino');
+    gruppo(v => !v.lavorazione && v.st.stato === 'consumo', 'var(--mut)', '· Di consumo',
+      () => 'non ferma la commessa');
+
+    // I coperti si dicono, ma su una riga sola: sapere che gli altri quattro
+    // ci sono e' quello che permette di guardare solo il resto.
+    if (coperti.length) {
+      corpo.append(el('div', { class:'sub', style:'margin-top:12px;font-size:11px;color:var(--grn);' },
+        '✅ ' + coperti.length + (coperti.length === 1 ? ' codice coperto' : ' codici coperti')
+        + ' per questa commessa: ',
+        el('span', { class:'mono', style:'font-size:11px;color:var(--mut);' },
+          coperti.slice(0, 12).map(v => v.cod).join(' · ')
+          + (coperti.length > 12 ? ' · …' : ''))));
+    }
+
+    const bloccanti = mancanti.filter(v => v.st.stato !== 'consumo').length;
+    corpo.append(el('div', { class:'sub', style:'margin-top:14px;padding-top:10px;'
+      + 'border-top:1px solid var(--brd);font-size:11px;' },
+      bloccanti
+        ? '⚠ A questa commessa mancano ' + bloccanti
+          + (bloccanti === 1 ? ' codice' : ' codici') + ' per poter partire.'
+        : 'Nessun codice manca a questa commessa: la giacenza le basta.'));
   })();
 
   return box;
