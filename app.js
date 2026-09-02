@@ -4934,7 +4934,7 @@ function openArticoloModal(a, opts) {
     });
   }
   const btnAddFase = readonly ? null : el('button', {
-    type:'button', class:'btnsm', style:'margin-top:8px;',
+    type:'button', class:'btnsm', style:'margin-top:8px;align-self:flex-start;',
     onclick: () => { fasi.push({ tipo_lavorazione_id:null, minuti_unitari:0 }); renderFasi(); aggiornaConfronto(); }
   }, '+ Aggiungi fase');
   renderFasi();
@@ -4958,87 +4958,105 @@ function openArticoloModal(a, opts) {
   // silenzio. Qui sopravvive per costruzione.
   const distinta = Array.isArray(a.distinta) ? a.distinta.map(r => ({ ...r })) : [];
   let distintaAlnus = null;            // null = non ancora caricata
-  const distWrap = el('div', { class:'fasi-list' });
-  const distNota = el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' });
-
+  const distWrap = el('div', {});
+  const distNota = el('div', { class:'sub', style:'font-size:11px;margin-top:8px;line-height:1.6;' });
   const distintaLocale = () => distinta.length > 0;
+
+  // Le tre colonne hanno una misura sola, dichiarata qui: la usano
+  // l'intestazione e ogni riga. Scriverle due volte vuol dire vederle
+  // scivolare alla prima modifica.
+  const COL_DIST = 'display:grid;grid-template-columns:24px 1fr 110px 64px 34px;gap:8px;align-items:center;';
+
+  function intestazioneDist() {
+    const et = (t, alt) => el('span', { class:'sub',
+      style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (alt || '') }, t);
+    return el('div', { style: COL_DIST + 'margin-bottom:2px;' },
+      el('span', {}), et('Codice materiale'), et('Q.tà per pezzo', 'text-align:right;'), et('UM'), el('span', {}));
+  }
 
   function renderDistinta() {
     distWrap.innerHTML = '';
-    // Caso 1: la scrive questo gestionale.
+
+    // ── Caso 1: la scrive questo gestionale ──
     if (distintaLocale()) {
+      distWrap.append(intestazioneDist());
+      // Oltre una dozzina di righe la scheda diventerebbe un rotolo: si
+      // scorre dentro il riquadro invece che dentro la modale.
+      const lista = el('div', distinta.length > 12
+        ? { style:'max-height:340px;overflow-y:auto;padding-right:4px;' } : {});
       distinta.forEach((r, i) => {
         const inCod = el('input', { type:'text', value: r.codice || '', placeholder:'codice materiale',
-          style:'flex:1;min-width:0;font-family:JetBrains Mono,monospace;font-size:11px;' });
+          style:'font-family:JetBrains Mono,monospace;font-size:11px;min-width:0;' });
         const inQta = el('input', { type:'number', step:'0.001', min:'0', value: String(r.qta ?? ''),
-          placeholder:'q.tà/pz', style:'max-width:100px;' });
-        const inUm = el('input', { type:'text', value: r.um || '', placeholder:'um',
-          style:'max-width:60px;' });
+          placeholder:'0', style:'text-align:right;' });
+        const inUm = el('input', { type:'text', value: r.um || '', placeholder:'um' });
         [inCod, inQta, inUm].forEach(x => { x.disabled = readonly; });
-        // La descrizione del materiale si mostra se il codice si riconosce:
-        // un elenco di soli codici non si rilegge.
         // Il codice si riconosce chiedendolo all'anagrafica, UNA riga alla
-        // volta e solo quando si e finito di scriverlo. L'alternativa —
-        // tenersi in memoria i 9.325 materiali per un suggerimento — sarebbe
-        // egress buttato a ogni apertura del gestionale.
-        const hint = el('span', { class:'sub', style:'font-size:11px;flex-basis:100%;margin-left:28px;' });
-        const cercaMateriale = async () => {
+        // volta e solo quando si e finito di scriverlo. Tenersi in memoria i
+        // 9.325 materiali per un suggerimento sarebbe egress buttato a ogni
+        // apertura del gestionale.
+        const hint = el('div', { class:'sub', style:'grid-column:2 / -1;font-size:11px;margin:-4px 0 2px;' });
+        const cerca = async () => {
           const c = (inCod.value || '').trim();
           hint.style.color = ''; hint.textContent = '';
           if (!c) return;
           try {
-            const { data } = await sb.from('materiali')
-              .select('descrizione,um').eq('codice', c).limit(1);
+            const { data } = await sb.from('materiali').select('descrizione,um').eq('codice', c).limit(1);
             const m = (data || [])[0];
             if (m) {
-              hint.textContent = (m.descrizione || '') + (m.um ? ' · ' + m.um : '');
+              hint.textContent = m.descrizione || '';
               if (!r.um && m.um) { r.um = m.um; inUm.value = m.um; }
-            } else {
-              hint.textContent = 'codice non in anagrafica materiali';
-              hint.style.color = 'var(--yel)';
-            }
+            } else { hint.textContent = 'codice non in anagrafica materiali'; hint.style.color = 'var(--yel)'; }
           } catch (e) { /* l'anagrafica puo non esserci ancora: si tace */ }
         };
         inCod.oninput = () => { r.codice = inCod.value.trim(); hint.textContent = ''; };
-        inCod.onblur = cercaMateriale;
-        if (r.codice) cercaMateriale();
+        inCod.onblur = cerca;
         inQta.oninput = () => { r.qta = inQta.value === '' ? null : Number(inQta.value); };
         inUm.oninput = () => { r.um = inUm.value.trim() || null; };
-        const row = el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0;' }, inCod, inQta, inUm);
-        if (!readonly) row.append(el('button', { type:'button', class:'btnd', style:'padding:4px 8px;',
-          onclick: () => { distinta.splice(i, 1); renderDistinta(); } }, '✕'));
-        row.append(hint);
-        distWrap.append(row);
+        const riga = el('div', { style: COL_DIST },
+          el('span', { class:'sub', style:'font-size:11px;' }, '#' + (i + 1)),
+          inCod, inQta, inUm,
+          readonly ? el('span', {}) : el('button', { type:'button', class:'btnsm', style:'padding:4px 6px;',
+            onclick: () => { distinta.splice(i, 1); renderDistinta(); aggiornaNotaDistinta(); } }, '✕'),
+          hint);
+        lista.append(riga);
+        if (r.codice) cerca();
       });
+      distWrap.append(lista);
       return;
     }
-    // Caso 2: quella di Alnus, in sola lettura.
+
+    // ── Caso 2: quella di Alnus, in sola lettura ──
     if (distintaAlnus === null) {
       distWrap.append(el('div', { class:'sub' }, 'Carico la distinta…'));
       return;
     }
     if (!distintaAlnus.length) {
       distWrap.append(el('div', { class:'sub' },
-        'Nessuna distinta: né dall\'estrazione Alnus né scritta qui.'));
+        'Nessuna distinta, né dall\'estrazione Alnus né scritta qui.'));
       return;
     }
-    distintaAlnus.forEach(r => {
-      distWrap.append(el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0;opacity:.85;' },
-        el('span', { style:'flex:1;min-width:0;font-family:JetBrains Mono,monospace;font-size:11px;' }, r.figlio),
-        el('span', { class:'mono', style:'max-width:100px;text-align:right;' },
-          String(r.qta ?? '—').replace('.', ',')),
-        el('span', { class:'sub', style:'max-width:60px;font-size:11px;' }, r.um || ''),
-        el('span', { class:'sub', style:'flex-basis:100%;margin-left:28px;font-size:11px;' },
-          r.figlio_descrizione || ''),
-      ));
-    });
+    // Un elenco lungo si richiude: su certi articoli sono settanta righe e
+    // riempirebbero la scheda coprendo tutto il resto. Stesso componente
+    // usato per i mancanti nel modal commessa.
+    distWrap.append(entityTimeline({
+      sommario: distintaAlnus.length + (distintaAlnus.length === 1 ? ' materiale' : ' materiali')
+        + ' · dall\'estrazione Alnus',
+      apertaDiDefault: distintaAlnus.length <= 12,
+      righe: distintaAlnus.map(r => ({
+        titolo: r.figlio,
+        meta: r.figlio_descrizione || '',
+        valore: String(r.qta ?? '—').replace('.', ',') + (r.um ? ' ' + r.um : ''),
+      })),
+    }));
   }
 
   function aggiornaNotaDistinta() {
     distNota.innerHTML = '';
     if (distintaLocale()) {
-      distNota.append(el('span', { style:'color:var(--acc);' }, '✎ Distinta scritta qui'),
-        document.createTextNode(': vale questa, e i reimport da Alnus non la toccano.'));
+      distNota.append(
+        el('span', { style:'color:var(--acc);font-weight:600;' }, '✎ Scritta qui'),
+        document.createTextNode(' — vale questa, e i reimport da Alnus non la toccano.'));
       if (!readonly && distintaAlnus && distintaAlnus.length) {
         distNota.append(document.createTextNode(' '), el('button', {
           type:'button', class:'btnsm', style:'padding:1px 8px;',
@@ -5050,15 +5068,17 @@ function openArticoloModal(a, opts) {
       return;
     }
     if (distintaAlnus === null) return;
-    distNota.append(document.createTextNode(distintaAlnus.length
-      ? 'Dall\'ultima estrazione Alnus, in sola lettura.'
-      : 'Qui puoi scriverla a mano: è il caso degli articoli che in Alnus non hanno una distinta.'));
+    distNota.textContent = distintaAlnus.length
+      ? 'Sola lettura. Scrivendo anche una riga sola qui sotto, da quel momento vale la tua.'
+      : 'Scrivila a mano: è il caso degli articoli che in Alnus una distinta non ce l\'hanno.';
   }
 
-  // Come per le fasi: chi non puo modificare non vede il bottone.
-  const btnDistAdd = readonly ? null : el('button', { type:'button', class:'btnsm', style:'margin-top:6px;',
+  const btnDistAdd = readonly ? null : el('button', {
+    // `align-self` perche `.field` e una colonna flex: senza, il bottone si
+    // stira a tutta la scheda e sembra un comando principale.
+    type:'button', class:'btnsm', style:'margin-top:8px;align-self:flex-start;',
     onclick: () => {
-      // Il primo clic su un articolo che ha la distinta di Alnus la RICOPIA,
+      // Il primo clic su un articolo che ha la distinta di Alnus la RICOPIA
       // invece di partire da un foglio bianco: correggere una riga su venti
       // non deve voler dire riscriverne venti.
       if (!distintaLocale() && distintaAlnus && distintaAlnus.length
@@ -5079,10 +5099,7 @@ function openArticoloModal(a, opts) {
     sb.from('distinta').select('figlio,qta,um,figlio_descrizione').eq('padre', a.codice)
       .then(({ data, error }) => {
         distintaAlnus = error ? [] : (data || []);
-        if (error && String(error.message || '').includes('distinta')) {
-          distNota.textContent = 'Tabella distinte non attiva: migrazione dal pannello Supabase.';
-          return;
-        }
+        if (error) { distNota.textContent = 'Distinte non disponibili: ' + (error.message || ''); return; }
         renderDistinta(); aggiornaNotaDistinta();
       });
   } else { distintaAlnus = []; renderDistinta(); aggiornaNotaDistinta(); }
@@ -5130,8 +5147,8 @@ function openArticoloModal(a, opts) {
   // Corpo a SEZIONI (stile scheda azienda): anagrafica → tempi → listino
   // → note. Hint corti, uno per campo dove serve davvero.
   const sez = (t) => el('div', { class:'sub',
-    style:'margin:16px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
-    '── ' + t + ' ──');
+    style:'margin:24px 0 10px;padding-top:14px;border-top:1px solid var(--brd);'
+      + 'color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' }, t);
   inCategoria.placeholder = 'es. Cablaggi';
   form.append(
     el('div', { style:'display:grid;grid-template-columns:minmax(160px,2fr) minmax(110px,1fr) 120px;gap:10px;' },
@@ -5140,28 +5157,25 @@ function openArticoloModal(a, opts) {
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
     ),
     el('div', { class:'field' }, el('label', {}, 'Descrizione'), inDesc),
-    sez('Tempo pagato e fasi'),
-    el('div', { class:'field' }, el('label', {}, 'Tempo pagato (min/pz)'), inMinuti, notaMinuti),
+    sez('Materiali'),
     el('div', { class:'field' },
-      el('label', {}, 'Fasi — scomposizione interna (opzionale)'),
-      fasiWrap,
-      btnAddFase,
-      notaConfronto,
-      el('div', { class:'sub', style:'margin-top:4px;' },
-        'Auto-compilate dalla media storica (viva a ogni apertura); i valori manuali '
-        + 'contano solo per i tipi senza storico. La somma dovrebbe stare entro il tempo pagato.')),
-    sez('Distinta base'),
-    el('div', { class:'field' },
-      el('label', {}, 'Materiali per un pezzo'),
       distWrap,
       ...(btnDistAdd ? [btnDistAdd] : []),
       distNota),
-    sez('Listino'),
+    sez('Lavorazioni e tempo'),
+    el('div', { class:'field' }, el('label', {}, 'Tempo pagato (min/pz)'), inMinuti, notaMinuti),
+    el('div', { class:'field' },
+      el('label', {}, 'Fasi (opzionale)'),
+      fasiWrap,
+      btnAddFase,
+      notaConfronto,
+      el('div', { class:'sub', style:'margin-top:6px;' },
+        'Auto-compilate dalla media storica. La somma dovrebbe stare entro il tempo pagato.')),
+    sez('Prezzi'),
     el('div', { class:'field' },
       listinoWrap,
-      el('div', { class:'sub', style:'margin-top:4px;' },
-        'Ultimo prezzo per cliente, derivato dagli ordini (non la media). Click per l\'andamento. '
-        + 'Pre-compila il prezzo nei nuovi ordini.')),
+      el('div', { class:'sub', style:'margin-top:6px;' },
+        'Ultimo prezzo per cliente, dagli ordini. Click per l\'andamento; pre-compila i nuovi ordini.')),
     sez('Note'),
     el('div', { class:'field' }, inNote),
   );
