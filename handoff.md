@@ -811,6 +811,17 @@ Nico ha estratto da Alnus **tutte le distinte** (`CAPRTESP0101.xls`). Non e una 
 - **Restano 36 codici fuori soglia**, di cui una parte spiegata dal multilivello qui sopra. I fili (`83010FILO*`, +260/326%) restano da capire.
 - ✅ **SEGNAPOSTO ESCLUSI** (decisione Nico, 2 set): `MATERIALI_SEGNAPOSTO` in domain — `COMP GENERICO` (in 3.409 distinte) e `VARIE` (in 404). Non sono mai padri, UM `nr`: sono riempitivi che il progettista mette dove il dettaglio non serve, non pezzi da comprare. ⚠ Si escludono **al CALCOLO, non all import**: a database le righe restano come stanno nel file — un dato non si cancella perche non lo si sa usare, si cancella la pretesa di usarlo. Si contano a parte in `out.segnaposto`, cosi non spariscono in silenzio. Aggiungerne uno: una riga nella lista.
 
+### ▶ LA STRADA UNICA sui materiali (2 set, `2026-09-02.5`)
+Richiesta di Nico: *"dalla schermata ordini clienti voglio vedere l avviso come adesso col triangolino... cliccando vorrei passare a una schermata che mi dice se quel codice e in ritardo o manca l ordine, di conseguenza sapere in quale OF si trova. E il percorso che unisce e semplifica tutto quello fatto oggi."*
+- **UNA SCHEDA SOLA, `Materiali`**: le due schede Mancanti e Fabbisogno sono diventate una, con un bottone che passa fra le due FONTI (quello che dice Alnus / quello che calcoliamo dalle distinte). Due schede per lo stesso argomento erano due posti dove cercare.
+- **Il triangolino in Ordini cliente NON e cambiato** — Nico l ha chiesto "come adesso". Cambia dove porta.
+- **`statoMateriale(m, oggi)` in domain**: la lettura che mancava. `mancanteCategoria` metteva nello stesso `in_arrivo` la roba che arriva domani e quella che doveva arrivare a maggio. Qui `in_arrivo` si spacca sulla data e si tira su l ORDINE FORNITORE. Ritorna `{stato, data, of, fornitore, qta}` con stato = `da_ordinare` · `in_ritardo` · `in_arrivo` · `attesa_cliente` · `consumo`.
+- **`riquadroRispostaMateriali(numeroOp)`**: arrivando dal triangolino la domanda non e "quali codici mancano" (quella e la tabella) ma **"posso finire questa commessa, e se no di chi e la mossa"**. Tre gruppi in ordine di urgenza — ⛔ manca l ordine (tocca a noi) · ⏰ in ritardo (si sollecita l OF) · 📦 in arrivo (si aspetta) — piu conto lavoro e consumo, e una riga finale che dice quanti codici fermano davvero la commessa.
+- ⚠ **L OF sta in chiaro perche e la cosa con cui si va a sollecitare**: sapere che un pezzo e in ritardo senza sapere su quale ordine non serve a muoversi.
+- **Sui dati veri (2 set)**: 227 attesa cliente · 63 in arrivo · 41 consumo · **14 in ritardo, tutti e 14 con OF e fornitore** (es. `20 080 2455` doveva arrivare il 31/08, OF `2026OF581`, FABBRI S.R.L.) · 13 da ordinare.
+- ⚠ `apriMancantiFiltrati` forza la vista Alnus: restando sull ultima scelta si poteva atterrare sul fabbisogno calcolato, che risponde a un altra domanda.
+- ⚠ Togliendo la scheda `fabb_calc` erano rimasti **due `renderTab(fabb_calc)`** nei bottoni della vista calcolata: bottoni che non avrebbero fatto piu niente, in silenzio. Trovati col grep prima di committare — **dopo aver tolto una scheda, cercare il suo id in tutto il file.**
+
 ### ▶ RAGIONAMENTI SU DDT, FATTURA E SDI (1 set, per il futuro — nessuna azione ora)
 **Nessun vincolo legale sull'MRP.** Pianificazione, distinta, magazzino, ordini fornitore sono strumenti interni: nessuna omologazione, nessun obbligo di comprare. I vincoli cominciano solo sui documenti fiscalmente rilevanti.
 

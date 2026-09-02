@@ -1506,6 +1506,34 @@ function mancanteConsegne(m) {
   return (Array.isArray(c) ? c : []).filter(x => x && x.data)
     .slice().sort((a, b) => String(a.data).localeCompare(String(b.data)));
 }
+// LA DOMANDA DI CHI GUARDA UNA COMMESSA FERMA (2 set, chiesta da Nico):
+// *"questo codice e in ritardo o manca l'ordine? e in che OF sta?"*
+// Le categorie di `mancanteCategoria` non bastavano a rispondere: mettevano
+// nello stesso `in_arrivo` la roba che arriva domani e quella che doveva
+// arrivare a maggio. Qui `in_arrivo` si spacca in due sulla data, e si tira
+// su l'ordine fornitore, che e la cosa che serve per andare a sollecitare.
+// Ritorna { stato, data, of, fornitore, qta }.
+//   da_ordinare    -> nessuno l'ha comprato: manca proprio l'ordine
+//   in_ritardo     -> ordinato, ma la data e passata
+//   in_arrivo      -> ordinato, con una data davanti
+//   attesa_cliente -> conto lavoro: lo manda il cliente, non si ordina
+//   consumo        -> non ferma niente
+function statoMateriale(m, oggiIso) {
+  const cat = mancanteCategoria(m);
+  if (cat === 'consumo' || cat === 'attesa_cliente' || cat === 'da_ordinare') {
+    return { stato: cat, data: null, of: null, fornitore: null, qta: null };
+  }
+  const oggi = oggiIso || new Date().toISOString().slice(0, 10);
+  const cons = mancanteConsegne(m);
+  const prima = cons[0] || null;
+  if (!prima) return { stato: 'in_arrivo', data: null, of: null, fornitore: null, qta: null };
+  return {
+    stato: prima.data < oggi ? 'in_ritardo' : 'in_arrivo',
+    data: prima.data, of: prima.ordine || null,
+    fornitore: prima.fornitore || null, qta: prima.qta != null ? prima.qta : null,
+  };
+}
+
 // Mancanti di una commessa + coerenza con la tendina "Preparazione materiale".
 // `incoerente` = il fabbisogno dice che manca roba ma la preparazione è
 // dichiarata completa: contraddizione da mostrare, non da nascondere.

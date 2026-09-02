@@ -1516,11 +1516,12 @@ const TAB_STRUCTURE = {
       { id: 'storico',        label: 'Storico',        adminOnly: false },
       // Spostata qui da Gestione (5 ago, richiesta Nico): i mancanti si
       // guardano mentre si lavora, non mentre si configura il gestionale.
-      { id: 'fabbisogno',     label: 'Mancanti',       adminOnly: false },
-      // "Mancanti" e quello che dice ALNUS; "Fabbisogno" e quello che
-      // calcoliamo noi dalle distinte. Due schede perche sono due fonti, e
-      // finche non coincidono vanno guardate una accanto all'altra.
-      { id: 'fabb_calc',      label: 'Fabbisogno',     adminOnly: false },
+      // UNA scheda sola per il materiale (2 set, richiesta Nico: "cerchiamo
+      // di fare una sintesi fra la scheda mancanti e fabbisogno"). Dentro ci
+      // sono le due fonti — quello che dice Alnus e quello che calcoliamo noi
+      // dalle distinte — con un bottone che passa dall'una all'altra. Due
+      // schede per lo stesso argomento erano due posti dove cercare.
+      { id: 'fabbisogno',     label: 'Materiali',      adminOnly: false },
       { id: 'prelievi',       label: 'Prelievi',       adminOnly: false },
       // Ricerca sui timbri NON legati a commessa (6 ago). L'anagrafica delle
       // attività resta in Gestione: qui si guarda cosa è stato fatto.
@@ -1637,7 +1638,6 @@ function renderTab(name) {
     else if (name === 'analisi_clienti') renderAnalisiClienti(root);
     else if (name === 'codifica') renderCodifica(root);
     else if (name === 'fabbisogno') renderFabbisogno(root);
-    else if (name === 'fabb_calc') renderFabbisognoCalcolato(root);
     else if (name === 'chiusure') renderChiusure(root);
     else if (name === 'tipi_assenza') renderTipiAssenza(root);
     else if (name === 'attivita_extra') renderAttivitaExtra(root);
@@ -3814,6 +3814,11 @@ function fabbRigaNormalizza(r, mappa) {
 let mancantiFiltroOp = null;
 function apriMancantiFiltrati(numeroOp) {
   mancantiFiltroOp = numeroOp || null;
+  // Arrivando dal triangolino si vuole LA RISPOSTA su quella commessa, e la
+  // da la vista Alnus col suo riquadro. Se si restasse sull ultima vista
+  // scelta si potrebbe atterrare sul fabbisogno calcolato, che risponde a
+  // un altra domanda.
+  materialiVista = 'alnus';
   renderTab('fabbisogno');
 }
 
@@ -3955,14 +3960,15 @@ async function renderFabbisognoCalcolato(root) {
   root.innerHTML = '';
 
   // ── Testata ──
-  const tb = el('div', { class:'toolbar' }, el('h2', {}, 'Fabbisogno'));
+  const tb = el('div', { class:'toolbar' }, el('h2', {}, 'Materiali'),
+    bottoneVistaMateriali());
   const btnVista = el('button', { class:'btng', onclick: () => {
     fabbCalcVista = fabbCalcVista === 'materiale' ? 'commessa' : 'materiale';
-    renderTab('fabb_calc');
+    renderTab('fabbisogno');
   } }, fabbCalcVista === 'materiale' ? '⇄ Vedi per commessa' : '⇄ Vedi per materiale');
   const btnFiltro = el('button', { class: fabbCalcSoloScoperti ? 'btnp' : 'btng', onclick: () => {
     fabbCalcSoloScoperti = !fabbCalcSoloScoperti;
-    renderTab('fabb_calc');
+    renderTab('fabbisogno');
   } }, fabbCalcSoloScoperti ? '● Solo scoperti' : '○ Tutti');
   tb.append(btnVista, btnFiltro);
   root.append(tb);
@@ -4066,9 +4072,98 @@ async function renderFabbisognoCalcolato(root) {
     + 'dove il mancante è attribuito a una commessa sola.'));
 }
 
+// Quale delle due fonti si sta guardando. Si ricorda fra un giro e l'altro:
+// chi lavora sul calcolato non vuole ritrovarsi su Alnus a ogni ritorno.
+let materialiVista = 'alnus';        // 'alnus' | 'calcolato'
+function bottoneVistaMateriali() {
+  return el('button', { class:'btng', onclick: () => {
+    materialiVista = materialiVista === 'alnus' ? 'calcolato' : 'alnus';
+    renderTab('fabbisogno');
+  } }, materialiVista === 'alnus'
+    ? '⇄ Vedi il fabbisogno calcolato' : '⇄ Vedi i mancanti di Alnus');
+}
+
+// LA RISPOSTA, quando si arriva dal triangolino di Ordini cliente.
+// Tre domande in ordine di urgenza, e ognuna ha un destinatario diverso:
+//   manca l'ordine  -> tocca a NOI comprarlo, e nessuno l'ha ancora fatto
+//   in ritardo      -> l'ordine c'e, la data e passata: si sollecita l'OF
+//   in arrivo       -> c'e e ha una data: non si fa niente, si aspetta
+// L'OF sta in chiaro perche e la cosa con cui si va a sollecitare: sapere che
+// un pezzo e in ritardo senza sapere su quale ordine non serve a muoversi.
+function riquadroRispostaMateriali(numeroOp) {
+  if (typeof statoMateriale !== 'function') return null;
+  const righe = (state.mancanti || []).filter(m => m.numero_op === numeroOp);
+  if (!righe.length) return null;
+  const oggi = toLocalISO(new Date());
+  const per = { da_ordinare: [], in_ritardo: [], in_arrivo: [], attesa_cliente: [], consumo: [] };
+  righe.forEach(m => {
+    const st = statoMateriale(m, oggi);
+    (per[st.stato] || per.in_arrivo).push({ m, st });
+  });
+
+  const box = el('div', { style:'border:1px solid var(--brd);border-radius:5px;background:var(--sur);'
+    + 'padding:16px 18px;margin:0 0 16px;' });
+  const op = (state.operazioni || []).find(o => o.numero_op === numeroOp);
+  const art = op ? (state.articoli || []).find(x => x.id === op.articolo_id) : null;
+  box.append(el('div', { style:'font-family:JetBrains Mono,monospace;font-size:12px;margin-bottom:12px;' },
+    el('span', { style:'color:var(--acc);font-weight:700;' }, numeroOp),
+    document.createTextNode(op ? '  ·  ' + (op.numero_ordine || '') + '/' + (op.pos || '') : ''),
+    document.createTextNode(art ? '  ·  ' + art.codice : '')));
+
+  const gruppo = (voci, colore, titolo, dettaglio) => {
+    if (!voci.length) return;
+    box.append(el('div', { style:'margin-top:12px;font-family:JetBrains Mono,monospace;font-size:11px;'
+      + 'letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:' + colore + ';' },
+      titolo + ' — ' + voci.length));
+    voci.forEach(({ m, st }) => {
+      box.append(el('div', { style:'display:grid;grid-template-columns:minmax(150px,auto) 1fr auto;'
+        + 'gap:10px;align-items:baseline;padding:3px 0 3px 12px;font-size:12px;' },
+        el('span', { class:'mono', style:'font-size:11px;' }, m.codice),
+        el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+          m.descrizione || ''),
+        el('span', { style:'font-size:11px;color:' + colore + ';white-space:nowrap;' }, dettaglio(st, m))));
+    });
+  };
+
+  gruppo(per.da_ordinare, 'var(--red)', '⛔ Manca l\'ordine',
+    (st, m) => 'da comprare' + (m.qta_da_ordinare != null
+      ? ' ' + Number(m.qta_da_ordinare).toLocaleString('it-IT', { maximumFractionDigits: 2 })
+        + (m.um ? ' ' + m.um : '') : ''));
+  gruppo(per.in_ritardo, 'var(--red)', '⏰ In ritardo',
+    (st) => 'doveva arrivare il ' + fmtIT(st.data)
+      + (st.of ? '  ·  OF ' + st.of : '  ·  OF non indicato')
+      + (st.fornitore ? '  ·  ' + st.fornitore : ''));
+  gruppo(per.in_arrivo, 'var(--blu)', '📦 In arrivo',
+    (st) => (st.data ? 'arriva il ' + fmtIT(st.data) : 'ordinato, senza data')
+      + (st.of ? '  ·  OF ' + st.of : '')
+      + (st.fornitore ? '  ·  ' + st.fornitore : ''));
+  gruppo(per.attesa_cliente, 'var(--or)', '⏳ Lo manda il cliente',
+    () => 'conto lavoro: non si ordina');
+  gruppo(per.consumo, 'var(--mut)', '· Di consumo', () => 'non ferma la commessa');
+
+  // La riga che dice se si parte o no. Senza, uno legge cinque gruppi e deve
+  // tirare le somme da solo.
+  const ferma = per.da_ordinare.length + per.in_ritardo.length + per.attesa_cliente.length;
+  box.append(el('div', { class:'sub', style:'margin-top:14px;padding-top:10px;'
+    + 'border-top:1px solid var(--brd);font-size:11px;' },
+    ferma
+      ? '⚠ Questa commessa non si chiude finché non si sistemano ' + ferma
+        + (ferma === 1 ? ' codice.' : ' codici.')
+      : 'Nessun codice ferma la commessa: quello che manca è ordinato e ha una data.'));
+  return box;
+}
+
 function renderFabbisogno(root) {
+  // Delega alla vista calcolata: e la stessa scheda, un'altra fonte.
+  if (materialiVista === 'calcolato') return renderFabbisognoCalcolato(root);
   root.innerHTML = '';
-  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Materiale mancante')));
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Materiali'),
+    bottoneVistaMateriali()));
+  // Arrivando dal triangolino la domanda non e "quali codici mancano" — quella
+  // e la tabella piu sotto — ma "posso finire questa commessa, e se no di chi
+  // e la mossa". Il riquadro risponde a quella, e il resto viene dopo.
+  const risposta = mancantiFiltroOp ? riquadroRispostaMateriali(mancantiFiltroOp) : null;
+  if (risposta) root.append(risposta);
   root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
     'Tutto ciò che è sotto scorta secondo l\'ultima estrazione del magazzino. '
     + 'DA ORDINARE = nessuno l\'ha ancora comprato: ferma la commessa e non ha una data. '
