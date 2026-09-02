@@ -79,8 +79,12 @@ const nudo   = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const distinte = leggiDistinte(FILE);
   const auth = await req('/auth/v1/token?grant_type=password', 'POST', { email: EMAIL, password: PASS });
   const tok = auth.access_token;
-  const [art, ops, az] = await Promise.all([
-    tutte('articoli', tok), tutte('operazioni', tok), tutte('aziende', tok)]);
+  const [art, ops, az, man] = await Promise.all([
+    tutte('articoli', tok), tutte('operazioni', tok), tutte('aziende', tok), tutte('mancanti', tok)]);
+  // Righe di fabbisogno per OP: servono a dire se una commessa senza distinta
+  // e anche fuori dal controllo materiale, che e la cosa che fa danno.
+  const manPerOp = {};
+  man.forEach(m => { (manPerOp[m.numero_op] = manPerOp[m.numero_op] || []).push(m); });
 
   const artById = {}; art.forEach(a => artById[a.id] = a);
   const azById = {}; az.forEach(a => azById[a.id] = a);
@@ -129,6 +133,7 @@ const nudo   = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       descrizione: (a && a.descrizione) || '',
       qta: o.quantita, scadenza: o.scadenza || '', stato: o.stato,
       esito: d.esito, dettaglio: d.dettaglio,
+      righeFabbisogno: (manPerOp[o.numero_op] || []).length,
     };
   });
 
@@ -154,6 +159,38 @@ const nudo   = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       if (e.dettaglio) console.log('      ' + e.dettaglio);
     });
   });
+
+  // ── Chi sono, per cliente: e li che si vede il disegno ──
+  const perCli = {};
+  esiti.forEach(e => {
+    const c = e.cliente || '?';
+    perCli[c] = perCli[c] || { tot: 0, sco: 0 };
+    perCli[c].tot++;
+    if (e.esito !== 'coperta') perCli[c].sco++;
+  });
+  const conScoperte = Object.entries(perCli).filter(([, v]) => v.sco).sort((a, b) => b[1].sco - a[1].sco);
+  if (conScoperte.length) {
+    console.log('\n══ PER CLIENTE ══');
+    conScoperte.forEach(([n, v]) => console.log('  ' + n.slice(0, 32).padEnd(34)
+      + 'vive ' + String(v.tot).padStart(3) + '  ·  senza distinta ' + String(v.sco).padStart(3)
+      + '  (' + Math.round(v.sco / v.tot * 100) + '%)'));
+    console.log('  Un cliente al 100% non e un caso: e una domanda da fare a chi tiene Alnus.');
+  }
+
+  // ── Il punto cieco: senza distinta Alnus non calcola nemmeno il fabbisogno ──
+  // Non sono due mancanze, e la stessa: il fabbisogno si calcola DALLA distinta.
+  // Quelle commesse non mostrano nessun avviso materiale — e non perche' il
+  // materiale ci sia, ma perche' non e mai stato calcolato niente per loro.
+  // Il badge dei riflessi non le salva: righe non ne ha nemmeno una sorella.
+  const scoperte = esiti.filter(e => e.esito !== 'coperta');
+  const cieche = scoperte.filter(e => e.righeFabbisogno === 0);
+  if (scoperte.length) {
+    console.log('\n══ PUNTO CIECO ══');
+    console.log('  senza distinta: ' + scoperte.length
+      + '  ·  di queste, ZERO righe di fabbisogno: ' + cieche.length);
+    console.log('  Sono FUORI dal controllo materiale: nessun avviso, ma non perche il');
+    console.log('  materiale ci sia — perche per loro non e mai stato calcolato niente.');
+  }
 
   const recuperabili = (per['AGGANCIO PERSO'] || []).length;
   console.log('\n' + (recuperabili
