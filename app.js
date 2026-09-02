@@ -4805,7 +4805,9 @@ function openArticoloModal(a, opts) {
   const minutiOrig = (a.minuti_unitari != null && a.minuti_unitari !== '')
     ? Number(a.minuti_unitari) : null;
 
-  const modal = el('div', { class:'modal' });
+  // 900px come il modal commessa: la distinta ha tre colonne piu la
+  // descrizione sotto, e a 560 stava stretta.
+  const modal = el('div', { class:'modal', style:'max-width:900px;' });
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, isNew ? 'Nuovo Articolo' : (readonly ? 'Articolo' : 'Modifica Articolo')),
     el('button', { class:'mclose', onclick:chiudi }, '✕'),
@@ -4965,13 +4967,15 @@ function openArticoloModal(a, opts) {
   // Le tre colonne hanno una misura sola, dichiarata qui: la usano
   // l'intestazione e ogni riga. Scriverle due volte vuol dire vederle
   // scivolare alla prima modifica.
-  const COL_DIST = 'display:grid;grid-template-columns:24px 1fr 110px 64px 34px;gap:8px;align-items:center;';
+  const COL_DIST = 'display:grid;grid-template-columns:24px minmax(170px,1fr) minmax(150px,1.3fr) 100px 60px 32px;'
+    + 'gap:8px;align-items:center;';
 
   function intestazioneDist() {
     const et = (t, alt) => el('span', { class:'sub',
       style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (alt || '') }, t);
     return el('div', { style: COL_DIST + 'margin-bottom:2px;' },
-      el('span', {}), et('Codice materiale'), et('Q.tà per pezzo', 'text-align:right;'), et('UM'), el('span', {}));
+      el('span', {}), et('Codice materiale'), et('Descrizione'),
+      et('Q.tà per pezzo', 'text-align:right;'), et('UM'), el('span', {}));
   }
 
   function renderDistinta() {
@@ -4995,7 +4999,8 @@ function openArticoloModal(a, opts) {
         // volta e solo quando si e finito di scriverlo. Tenersi in memoria i
         // 9.325 materiali per un suggerimento sarebbe egress buttato a ogni
         // apertura del gestionale.
-        const hint = el('div', { class:'sub', style:'grid-column:2 / -1;font-size:11px;margin:-4px 0 2px;' });
+        const hint = el('div', { class:'sub',
+          style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;' });
         const cerca = async () => {
           const c = (inCod.value || '').trim();
           hint.style.color = ''; hint.textContent = '';
@@ -5015,10 +5020,10 @@ function openArticoloModal(a, opts) {
         inUm.oninput = () => { r.um = inUm.value.trim() || null; };
         const riga = el('div', { style: COL_DIST },
           el('span', { class:'sub', style:'font-size:11px;' }, '#' + (i + 1)),
-          inCod, inQta, inUm,
+          inCod, hint, inQta, inUm,
           readonly ? el('span', {}) : el('button', { type:'button', class:'btnsm', style:'padding:4px 6px;',
-            onclick: () => { distinta.splice(i, 1); renderDistinta(); aggiornaNotaDistinta(); } }, '✕'),
-          hint);
+            onclick: () => { distinta.splice(i, 1); renderDistinta(); aggiornaNotaDistinta();
+              if (typeof aggiornaEtichette === 'function') aggiornaEtichette(); } }, '✕'));
         lista.append(riga);
         if (r.codice) cerca();
       });
@@ -5088,6 +5093,7 @@ function openArticoloModal(a, opts) {
       }
       distinta.push({ codice:'', qta:null, um:null });
       renderDistinta(); aggiornaNotaDistinta();
+      if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
     } }, '+ aggiungi riga');
 
   renderDistinta();
@@ -5101,6 +5107,7 @@ function openArticoloModal(a, opts) {
         distintaAlnus = error ? [] : (data || []);
         if (error) { distNota.textContent = 'Distinte non disponibili: ' + (error.message || ''); return; }
         renderDistinta(); aggiornaNotaDistinta();
+        if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
       });
   } else { distintaAlnus = []; renderDistinta(); aggiornaNotaDistinta(); }
 
@@ -5146,39 +5153,80 @@ function openArticoloModal(a, opts) {
 
   // Corpo a SEZIONI (stile scheda azienda): anagrafica → tempi → listino
   // → note. Hint corti, uno per campo dove serve davvero.
-  const sez = (t) => el('div', { class:'sub',
-    style:'margin:24px 0 10px;padding-top:14px;border-top:1px solid var(--brd);'
-      + 'color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' }, t);
   inCategoria.placeholder = 'es. Cablaggi';
+
+  // ── IDENTITA sempre in vista, il resto in linguette ──
+  // Codice e descrizione dicono DI CHE PEZZO si sta parlando: nascosti dentro
+  // una linguetta, uno non saprebbe piu cosa sta modificando. Tutto il resto
+  // sono approfondimenti, e uno alla volta basta.
+  // Si riusa `.nav`/`.navtab` dell'app: nessun componente nuovo da imparare.
+  // ⚠ Le sezioni si NASCONDONO, non si smontano: il salvataggio legge il form
+  // con FormData, e un campo tolto dal DOM sparirebbe dal salvataggio.
+  const schede = [
+    { id:'materiali', nome:'Materiali' },
+    { id:'lavoro',    nome:'Lavorazioni e tempo' },
+    { id:'prezzi',    nome:'Prezzi' },
+    { id:'note',      nome:'Note' },
+  ];
+  const pannelli = {};
+  const linguette = {};
+  const navSchede = el('div', { class:'nav nav-sub', style:'margin:18px 0 16px;' });
+  let schedaAttiva = 'materiali';
+  const mostraScheda = (id) => {
+    schedaAttiva = id;
+    schede.forEach(sc => {
+      pannelli[sc.id].style.display = sc.id === id ? '' : 'none';
+      linguette[sc.id].className = 'navtab' + (sc.id === id ? ' active' : '');
+    });
+  };
+  schede.forEach(sc => {
+    pannelli[sc.id] = el('div', {});
+    linguette[sc.id] = el('button', { type:'button', class:'navtab',
+      onclick: () => mostraScheda(sc.id) }, sc.nome);
+    navSchede.append(linguette[sc.id]);
+  });
+
+  // Il conto accanto al nome fa fare a una linguetta due mestieri: portarti
+  // di la e dirti se di la c'e qualcosa. Senza, per sapere se un articolo ha
+  // una distinta bisogna aprirla.
+  function aggiornaEtichette() {
+    const nMat = distinta.length || (distintaAlnus ? distintaAlnus.length : null);
+    linguette.materiali.textContent = 'Materiali' + (nMat ? ' · ' + nMat : '');
+    linguette.lavoro.textContent = 'Lavorazioni e tempo' + (fasi.length ? ' · ' + fasi.length : '');
+    linguette.prezzi.textContent = 'Prezzi' + (listinoRighe.length ? ' · ' + listinoRighe.length : '');
+  }
+  aggiornaEtichette();
+
+  pannelli.materiali.append(
+    el('div', { class:'field' },
+      distWrap,
+      ...(btnDistAdd ? [btnDistAdd] : []),
+      distNota));
+  pannelli.lavoro.append(
+    el('div', { class:'field' }, el('label', {}, 'Tempo pagato (min/pz)'), inMinuti, notaMinuti),
+    el('div', { class:'field' },
+      el('label', {}, 'Fasi (opzionale)'),
+      fasiWrap, btnAddFase, notaConfronto,
+      el('div', { class:'sub', style:'margin-top:6px;' },
+        'Auto-compilate dalla media storica. La somma dovrebbe stare entro il tempo pagato.')));
+  pannelli.prezzi.append(
+    el('div', { class:'field' },
+      listinoWrap,
+      el('div', { class:'sub', style:'margin-top:6px;' },
+        'Ultimo prezzo per cliente, dagli ordini. Click per l\'andamento; pre-compila i nuovi ordini.')));
+  pannelli.note.append(el('div', { class:'field' }, inNote));
+
   form.append(
-    el('div', { style:'display:grid;grid-template-columns:minmax(160px,2fr) minmax(110px,1fr) 120px;gap:10px;' },
+    el('div', { style:'display:grid;grid-template-columns:minmax(200px,2fr) minmax(140px,1fr) 130px;gap:12px;' },
       el('div', { class:'field' }, el('label', {}, 'Codice *'), inCodice),
       el('div', { class:'field' }, el('label', {}, 'Categoria'), inCategoria),
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
     ),
     el('div', { class:'field' }, el('label', {}, 'Descrizione'), inDesc),
-    sez('Materiali'),
-    el('div', { class:'field' },
-      distWrap,
-      ...(btnDistAdd ? [btnDistAdd] : []),
-      distNota),
-    sez('Lavorazioni e tempo'),
-    el('div', { class:'field' }, el('label', {}, 'Tempo pagato (min/pz)'), inMinuti, notaMinuti),
-    el('div', { class:'field' },
-      el('label', {}, 'Fasi (opzionale)'),
-      fasiWrap,
-      btnAddFase,
-      notaConfronto,
-      el('div', { class:'sub', style:'margin-top:6px;' },
-        'Auto-compilate dalla media storica. La somma dovrebbe stare entro il tempo pagato.')),
-    sez('Prezzi'),
-    el('div', { class:'field' },
-      listinoWrap,
-      el('div', { class:'sub', style:'margin-top:6px;' },
-        'Ultimo prezzo per cliente, dagli ordini. Click per l\'andamento; pre-compila i nuovi ordini.')),
-    sez('Note'),
-    el('div', { class:'field' }, inNote),
+    navSchede,
+    ...schede.map(sc => pannelli[sc.id]),
   );
+  mostraScheda(schedaAttiva);
 
   body.append(form);
   modal.append(body);
