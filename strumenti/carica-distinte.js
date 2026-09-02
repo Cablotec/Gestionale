@@ -47,8 +47,21 @@ const req = (p, m, b, tok, extra) => new Promise((res, rej) => {
 });
 
 const t = v => String(v == null ? '' : v).trim();
+// ⚠ TRAPPOLA CHIUSA PRIMA DI PAGARLA (2 set). Con `raw:true` SheetJS
+// restituisce NUMERI veri, non stringhe: sul file di oggi sono 38.460 su
+// 38.461, tutti interi. Passarli dal parser all'italiana — che toglie i punti
+// perche li legge come separatore delle migliaia — avrebbe trasformato un
+// domani `2.5` in `25`, cioe dieci volte il materiale, in silenzio.
+// Un numero si usa com'e. La stringa si interpreta, e solo li serve una
+// regola: se c'e la virgola, i punti sono migliaia; se non c'e, il punto e
+// il decimale.
 const numDi = v => {
-  const s = t(v).replace(/\./g, '').replace(',', '.');
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const grezzo = t(v);
+  if (!grezzo) return null;
+  const s = grezzo.includes(',')
+    ? grezzo.replace(/\./g, '').replace(',', '.')
+    : grezzo;
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : null;
 };
