@@ -773,6 +773,17 @@ Il foglio "Fabbisogno Massivo" è una query fatta su misura per Cablotec, quindi
 - **Da scrivere nella richiesta**: (a) **aggiungere, non sostituire, e NON rinominare le colonne esistenti** — l'import cerca per NOME, quindi le colonne in più sono ignorate senza rompere niente e il file nuovo si può importare anche prima che l'app le usi; (b) dire **quale colonna porta l'OdL della riga**: se resta `OdL Prossimo Impegno` non si tocca niente.
 - **La distinta base si chiede a parte**, come export separato: è quella che sblocca il calcolo in casa, ma non deve far arenare questa richiesta, che è piccola e risolve subito.
 
+### ▶ DISTINTE: il file c e, ed e buono (2 set)
+Nico ha estratto da Alnus **tutte le distinte** (`CAPRTESP0101.xls`). Non e una tabella: e un **REPORT a blocchi** — [riga padre][riga intestazioni][componenti...] e poi da capo — e va ricostruito. Strumento: `node strumenti/copertura-distinte.js . <file> [out.xlsx]`.
+- **Sul file vero**: 5.366 distinte · 38.461 righe componente · 7,2 componenti di media · 4.156 codici componente distinti · solo 10 marcate NON USARE/ANNULLATO.
+- **Copertura**: 229 dei 341 articoli in anagrafica hanno la distinta; **99 delle 141 commesse vive (70%)**.
+- ⚠⚠ **I CODICI COMBACIANO GIA**: **357 dei 358** codici che Alnus riporta come mancanti compaiono come componente nelle distinte, e **3.213 dei 4.156** componenti sono nel formato a 20 caratteri della Codifica. **La decisione sulla chiave dei materiali — il primo scoglio del piano MRP — l hanno gia presa i dati**: la chiave e il codice componente. Niente tabella di corrispondenza.
+- ⚠⚠ **LA DISTINTA E MULTILIVELLO**: **197 componenti sono a loro volta padri** (es. `EL50511CABL...`, e verosimilmente i codici `_K` tipo `30 010 0510_K` "Lavorazione Botturi"). **L esplosione dev essere RICORSIVA, con una guardia sui cicli** o una distinta che si richiama fa girare il calcolo all infinito.
+- **UM dei componenti**: nr 30.278 · mt 8.174 · pz 8 · gr 1. Tipo parte dei padri: PRD 5.251 · C/L 70 · ACQ 30 · FAN 12 · MAC 1.
+- ⚠ **IL FILE E SPARITO MENTRE CI LAVORAVO**: stava in `C:\alnustmp\mater\spltmp\Cestino\`, una cartella temporanea di Alnus che **si e svuotata da sola**, portandosi via anche un PDF di DDT. **Al prossimo export: copia in un posto stabile.** E chiedere a chi ha fatto l estrazione **se si puo rigenerare a comando**: una distinta cambia nel tempo, e cosi e utile una volta sola.
+- Lo strumento **classifica**, non conta: `AGGANCIO PERSO` (la distinta c e ma il codice combacia solo a meno di spazi o punteggiatura → si recupera) · `e un COMPONENTE` (si compra, giusto che non abbia distinta) · `kit BOX` (codice inventato dall import per fondere le righe Senzani: in Alnus non esiste) · `distinta DA SCARTARE` · `assente dal file`. La scala di normalizzazione (esatto → a meno di spazi → a meno di punteggiatura) e la lezione del 25 ago, dove "0040" contro "40" aveva prodotto 51 commesse doppie.
+- ⚠ **Collaudato su un file FINTO**, ricostruito con la stessa struttura a blocchi: le cinque classificazioni scattano tutte. Sul file vero non e ancora girato.
+
 ### ▶ RAGIONAMENTI SU DDT, FATTURA E SDI (1 set, per il futuro — nessuna azione ora)
 **Nessun vincolo legale sull'MRP.** Pianificazione, distinta, magazzino, ordini fornitore sono strumenti interni: nessuna omologazione, nessun obbligo di comprare. I vincoli cominciano solo sui documenti fiscalmente rilevanti.
 
