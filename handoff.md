@@ -757,6 +757,54 @@ Prenotando un mezzo, se un operatore collegato ha ferie/permesso/malattia in que
   2. **Metri e sfridi**: 38 codici a metri portano virgole, bobine e scarto di taglio. Una distinta senza sfrido sul cavo dirà sempre che basta.
   3. **Chi carica il magazzino**: una persona con un'abitudine, non una funzione. Da nominare prima della tappa 3.
 
+### ▶ DA CHIEDERE AD ALNUS: il file mancanti esploso per OdL (1 set)
+Il foglio "Fabbisogno Massivo" è una query fatta su misura per Cablotec, quindi si può chiedere di cambiarla. **La richiesta principale non è una colonna: è la GRANA.**
+- **Oggi**: una riga per CODICE, con accanto l'OdL che lo consumerà per primo (`OdL Prossimo Impegno`) → il mancante finisce su una commessa sola.
+- **Chiedere**: una riga per CODICE **e per OdL**, cioè gli impegni esplosi invece che sommati. Alnus li ha per forza: la colonna `Impegno` è la loro somma.
+- ⚠⚠ **QUESTO DA SOLO SISTEMA IL BADGE SENZA TOCCARE CODICE**: `fabbRigaNormalizza` fa **una riga di `mancanti` per ogni riga del foglio** e legge l'OdL da quella riga — non deduplica per codice. Se il foglio arriva esploso, ogni commessa riceve i suoi codici. Il file passa da 358 righe a un migliaio: l'import scrive già a blocchi di 500.
+- **Colonne da aggiungere, in ordine di valore**:
+  1. **`Qta impegnata dall'OdL`** — la più importante. Oggi c'è `Impegno` (totale su TUTTI gli ordini) e `Qta richiesta` (= impegno − giacenza, lo scoperto GLOBALE): si sa chi è coinvolto, non quanto. Senza, dopo l'esplosione le quantità sarebbero ripetute su ogni riga.
+  2. **`Data fabbisogno dell'OdL`** — quando quell'ordine consuma il pezzo: è la chiave per assegnare la giacenza a chi la usa per primo. Senza, si ripiega sulla scadenza commessa.
+  3. **`Qta in ordine`** esplicita — oggi dedotta da `Qta da ord` = 0 + presenza di una data.
+  4. **`Codice interno` a 20 caratteri** su ogni riga — oggi ce l'hanno 110 righe su 358. Risolve gratis anche la decisione sulla chiave dei materiali.
+  5. **`Scorta minima`** / punto di riordino — oggi "sotto scorta" e "manca per una commessa" sono la stessa cosa.
+  6. **`Data e ora dell'estrazione`** in colonna — oggi `import_data` la mette l'app al momento dell'import.
+  7. `Lotto minimo` e `lead time` fornitore — servono per le proposte d'ordine, tanto vale chiederli ora.
+- **Da scrivere nella richiesta**: (a) **aggiungere, non sostituire, e NON rinominare le colonne esistenti** — l'import cerca per NOME, quindi le colonne in più sono ignorate senza rompere niente e il file nuovo si può importare anche prima che l'app le usi; (b) dire **quale colonna porta l'OdL della riga**: se resta `OdL Prossimo Impegno` non si tocca niente.
+- **La distinta base si chiede a parte**, come export separato: è quella che sblocca il calcolo in casa, ma non deve far arenare questa richiesta, che è piccola e risolve subito.
+
+### ▶ RAGIONAMENTI SU DDT, FATTURA E SDI (1 set, per il futuro — nessuna azione ora)
+**Nessun vincolo legale sull'MRP.** Pianificazione, distinta, magazzino, ordini fornitore sono strumenti interni: nessuna omologazione, nessun obbligo di comprare. I vincoli cominciano solo sui documenti fiscalmente rilevanti.
+
+**DDT — si può fare in casa, ed è FUORI dal percorso MRP** (non serve distinta né magazzino, non passa dal cancello).
+- Deve contenere quanto chiede il DPR 472/96: data, **numero progressivo**, mittente/destinatario/vettore, natura-qualità-quantità dei beni, causale del trasporto. Va conservato. Regge la **fattura differita**.
+- **Il furgoncino è il posto giusto**, ma ⚠ **un DDT non è una spedizione: è un VIAGGIO**. Misurato sullo storico: 124 gruppi cliente+giorno, **63 con più di una riga** (fino a 8). "Un clic = un DDT" avrebbe stampato 2-8 bolle per un carico solo, una volta su due.
+- **Disegno a due tempi**: il furgoncino mette la riga in una **bolla aperta** per quel cliente/giorno → si chiude la bolla e nasce il DDT con tutte le righe. Stessa forma di "vedi l'ordine per intero", raggruppata per cliente.
+- ⚠ **La numerazione la dà il DATABASE**, progressiva e senza buchi: due postazioni che chiudono insieme stamperebbero lo stesso numero. È la trappola degli accavallamenti dei timbri, già pagata una volta.
+- ⚠ **Il DDT deve esistere PRIMA che il furgone parta** (accompagna la merce): il gesto di chiusura va dove si carica — kiosk o telefono — non solo alla scrivania.
+- ⚠ **Chiave della bolla**: cliente + giorno, **o cliente + destinazione + giorno?** `spedizioni.destinatario` è **vuoto su tutte e 264**, quindi dai dati non si sa se capita di spedire allo stesso cliente in posti diversi. **Domanda da fare a Nico prima di costruire**: aggiungerla dopo vuol dire rifare la chiave.
+- ⚠ **È un interruttore, non una transizione**: dal giorno che il DDT lo emette il gestionale, in Alnus non se ne devono più fare per la stessa merce, o si hanno due numerazioni sulla stessa consegna. E se oggi Alnus fattura dai suoi DDT, spostando il DDT qui **gli si toglie l'origine della fattura**: si decide con chi fattura, non da soli.
+- **Oggi NON si registrano DDT qui, ed è giusto così**: sarebbe doppio lavoro con Alnus. I 17 numeri DDT su 244 spedizioni **non sono un rischio**, sono copie a mano di numeri nati altrove.
+
+**Fattura — il confine è netto.**
+- **Sapere COSA fatturare**: zero vincoli, ed è dove il gestionale è imbattibile (è l'unico che sa commessa, pos, pezzi spediti e prezzo; il software del commercialista non sa cosa sia una `pos`).
+- **EMETTERE**: XML FatturaPA via SdI + conservazione a norma 10 anni + registri. Resta fuori. Decisione già presa e coerente con il filo aperto 5.
+- **Volume reale**: 8-16 fatture al mese (giugno 16, luglio 16, agosto 8). A questa scala **il portale AdE manuale basta**: niente provider per trasmettere.
+- ⚠ **Ma i dati non ci sono**: sulle spedizioni degli ultimi 90 giorni **solo il 22% ha un prezzo** (54 su 244), e **0 clienti su 26 hanno la p.iva** (gli indirizzi invece ci sono quasi tutti). Prima di qualsiasi cosa: p.iva, e il prezzo che diventa un dato che c'è SEMPRE (249 commesse su 423 non ce l'hanno).
+- **Ordine giusto**: p.iva → prezzo sempre presente → DDT generato → **prospetto di fatturazione mensile** → (solo se serve) XML a un intermediario. Le prime quattro non hanno vincoli legali e danno quasi tutto il valore.
+- ⚠ **Il rischio vero non è sbagliare l'XML** (lo scarta lo SdI e te ne accorgi): è **dimenticarsi di fatturare una spedizione**.
+
+**SdI — cosa comporta davvero.**
+- Non si manda la fattura al cliente: si manda allo SdI, che valida e consegna. Serve il **codice destinatario** (7 caratteri) o la PEC del cliente: **due campi che l'anagrafica non ha**, insieme alla p.iva.
+- Canali: portale AdE (manuale, gratis) · PEC · SDICoop (accreditamento, certificati, collaudo) · SDIFTP · **intermediario** (quello che fa ogni PMI). **Il canale proprio non va costruito mai**: non dà niente che non si compri per poche decine di euro al mese.
+- ⚠ **Le notifiche sono la parte che si dimentica**: consegnata / **scartata** (= NON emessa, pochi giorni per correggere senza perdere la data) / mancata consegna (va avvisato il cliente). Sono **due passaggi al mese, non uno**.
+- ⚠ **La conservazione non è inclusa nel caricamento**: 10 anni a norma, convenzione gratuita AdE o provider. Facile dimenticarsene perché caricare sembra "fatto".
+- ⚠ **L'XML non è prezzo × quantità**: aliquota IVA per riga, natura dove non imponibile (**il conto lavoro può portare reverse charge**), modalità e termini di pagamento, IBAN, riferimento ai DDT (numero e data, è ciò che legittima la differita), bollo dove ricorre.
+- **La differita è una scelta PER CLIENTE**, non una legge del sistema: va messa come impostazione sulla scheda azienda dall'inizio.
+- ⚠⚠ **INVARIANTE, vale per DDT e doppio per la fattura: UN SISTEMA SOLO NUMERA ED EMETTE.** Due serie progressive sulla stessa azienda sono un guaio che si scopre a marzo dell'anno dopo. La parte tecnica è piccola: **l'accordo con lo studio è la parte che richiede tempo.**
+- **Rovescio da vedere ora che si pensa agli ordini fornitore**: dallo SdI le fatture **arrivano** anche. Confrontare le fatture fornitore con gli ordini vuol dire costruire un lato ricezione, non un dettaglio dello stesso lavoro.
+- ⚠ Non sono un commercialista, e formati e termini si aggiornano: alla resa dei conti verificare le specifiche AdE del momento e farsi confermare dallo studio.
+
 ### Aperti
 1. **Niente è stato provato sull'app vera loggata.** Le misure sono su banco di prova, non sulla pagina reale con i dati veri: al primo giro guardare la colonna OP con OP lunghi e la tabella su schermo pieno.
 2. **La casella OP non ha un test.** Il salvataggio al blur passa da `eseguiConRetry` come le altre scritture inline (prep, stato), ma nessuna prova automatica copre "solo prefisso = null" dal lato tabella. La regola in domain (`opSoloPrefisso`, `prefissoOpCorrente`) è invece banale da coprire.
