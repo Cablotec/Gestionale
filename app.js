@@ -3895,9 +3895,15 @@ async function renderFabbisognoCalcolato(root) {
     })
     .filter(c => c.codiceArticolo && c.quantita > 0);
 
+  // Radici: gli articoli delle commesse PIU i figli delle distinte scritte a
+  // mano, che possono essere sottoassiemi con una distinta Alnus sotto.
+  const radici = vive.map(c => c.codiceArticolo);
+  state.articoli.forEach(a => {
+    if (Array.isArray(a.distinta)) a.distinta.forEach(r => { if (r && r.codice) radici.push(String(r.codice).trim()); });
+  });
   let righeDist = [];
   try {
-    righeDist = await fabbScaricaDistinta(vive.map(c => c.codiceArticolo));
+    righeDist = await fabbScaricaDistinta(radici);
   } catch (e) {
     if (mySeq !== _fabbCalcSeq) return;
     info.textContent = 'Errore nel caricamento delle distinte: ' + (e.message || e);
@@ -3906,6 +3912,11 @@ async function renderFabbisognoCalcolato(root) {
   if (mySeq !== _fabbCalcSeq || !root.isConnected) return;
 
   const figliDi = indiceDistinta(righeDist);
+  // Le distinte scritte a mano nella scheda articolo vincono su Alnus. Vanno
+  // applicate PRIMA di contare cosa e coperto, o la scheda direbbe che un
+  // articolo non ha distinta mentre uno l'ha appena scritta.
+  const conLocale = (typeof applicaDistinteLocali === 'function')
+    ? applicaDistinteLocali(figliDi, state.articoli) : new Set();
   const conDistinta = vive.filter(c => figliDi.has(c.codiceArticolo));
   const senzaDistinta = vive.filter(c => !figliDi.has(c.codiceArticolo));
   const perCodice = fabbisognoPerCodice(vive, figliDi);
@@ -4014,7 +4025,8 @@ async function renderFabbisognoCalcolato(root) {
     tbl.append(el('thead', {}, el('tr', {},
       el('th', {}, 'Commessa'), el('th', {}, 'OP'), el('th', {}, 'Cliente'),
       el('th', {}, 'Articolo'), el('th', { class:'tr' }, 'Da produrre'),
-      el('th', {}, 'Scadenza'), el('th', { class:'tr' }, 'Codici scoperti'))));
+      el('th', {}, 'Scadenza'), el('th', { class:'tr' }, 'Codici scoperti'),
+      el('th', {}, 'Distinta'))));
     const body = el('tbody');
     const scoperti = {};
     sottoScorta.forEach(m => m.esito.forEach(e => {
@@ -4040,6 +4052,8 @@ async function renderFabbisognoCalcolato(root) {
             title: s.slice(0, 20).map(x => x.m.codice + '  manca ' + nf(x.e.scoperto)
               + (x.m.um ? ' ' + x.m.um : '')).join('\n') + (s.length > 20 ? '\n… e altri ' + (s.length - 20) : '') },
             s.length ? String(s.length) : (figliDi.has(c.codiceArticolo) ? '0' : 'no distinta')),
+          el('td', { style:'font-size:11px;color:var(--mut);' },
+            conLocale.has(c.codiceArticolo) ? '✎ qui' : (figliDi.has(c.codiceArticolo) ? 'Alnus' : '—')),
         ));
       });
     tbl.append(body);
@@ -4926,6 +4940,153 @@ function openArticoloModal(a, opts) {
   renderFasi();
   aggiornaConfronto();
 
+  // --- DISTINTA BASE: di cosa e fatto questo articolo. ---
+  // Sta QUI, accanto alle fasi, perche e qui che uno viene a vedere come si
+  // fa un pezzo: le fasi dicono che lavorazioni servono, la distinta che
+  // materiali. Erano l'unica meta mancante (richiesta Nico, 2 set:
+  // "voglio semplicita e immediatezza" — quindi nessuna scheda a parte).
+  //
+  // DUE ORIGINI, UNA SOLA VERITA:
+  //   nessuna riga scritta qui -> vale la distinta di ALNUS, in sola lettura
+  //   almeno una riga scritta qui -> vale QUESTA, per intero
+  // Mai una fusione: un fabbisogno meta di qua e meta di la e un numero che
+  // nessuno riesce piu a spiegare.
+  //
+  // ⚠ La colonna `articoli.distinta` il caricatore delle distinte NON la
+  // tocca mai. La tabella `distinta` invece e una fotografia e viene
+  // svuotata a ogni reimport: una correzione scritta li sparirebbe in
+  // silenzio. Qui sopravvive per costruzione.
+  const distinta = Array.isArray(a.distinta) ? a.distinta.map(r => ({ ...r })) : [];
+  let distintaAlnus = null;            // null = non ancora caricata
+  const distWrap = el('div', { class:'fasi-list' });
+  const distNota = el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' });
+
+  const distintaLocale = () => distinta.length > 0;
+
+  function renderDistinta() {
+    distWrap.innerHTML = '';
+    // Caso 1: la scrive questo gestionale.
+    if (distintaLocale()) {
+      distinta.forEach((r, i) => {
+        const inCod = el('input', { type:'text', value: r.codice || '', placeholder:'codice materiale',
+          style:'flex:1;min-width:0;font-family:JetBrains Mono,monospace;font-size:11px;' });
+        const inQta = el('input', { type:'number', step:'0.001', min:'0', value: String(r.qta ?? ''),
+          placeholder:'q.tà/pz', style:'max-width:100px;' });
+        const inUm = el('input', { type:'text', value: r.um || '', placeholder:'um',
+          style:'max-width:60px;' });
+        [inCod, inQta, inUm].forEach(x => { x.disabled = readonly; });
+        // La descrizione del materiale si mostra se il codice si riconosce:
+        // un elenco di soli codici non si rilegge.
+        // Il codice si riconosce chiedendolo all'anagrafica, UNA riga alla
+        // volta e solo quando si e finito di scriverlo. L'alternativa —
+        // tenersi in memoria i 9.325 materiali per un suggerimento — sarebbe
+        // egress buttato a ogni apertura del gestionale.
+        const hint = el('span', { class:'sub', style:'font-size:11px;flex-basis:100%;margin-left:28px;' });
+        const cercaMateriale = async () => {
+          const c = (inCod.value || '').trim();
+          hint.style.color = ''; hint.textContent = '';
+          if (!c) return;
+          try {
+            const { data } = await sb.from('materiali')
+              .select('descrizione,um').eq('codice', c).limit(1);
+            const m = (data || [])[0];
+            if (m) {
+              hint.textContent = (m.descrizione || '') + (m.um ? ' · ' + m.um : '');
+              if (!r.um && m.um) { r.um = m.um; inUm.value = m.um; }
+            } else {
+              hint.textContent = 'codice non in anagrafica materiali';
+              hint.style.color = 'var(--yel)';
+            }
+          } catch (e) { /* l'anagrafica puo non esserci ancora: si tace */ }
+        };
+        inCod.oninput = () => { r.codice = inCod.value.trim(); hint.textContent = ''; };
+        inCod.onblur = cercaMateriale;
+        if (r.codice) cercaMateriale();
+        inQta.oninput = () => { r.qta = inQta.value === '' ? null : Number(inQta.value); };
+        inUm.oninput = () => { r.um = inUm.value.trim() || null; };
+        const row = el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0;' }, inCod, inQta, inUm);
+        if (!readonly) row.append(el('button', { type:'button', class:'btnd', style:'padding:4px 8px;',
+          onclick: () => { distinta.splice(i, 1); renderDistinta(); } }, '✕'));
+        row.append(hint);
+        distWrap.append(row);
+      });
+      return;
+    }
+    // Caso 2: quella di Alnus, in sola lettura.
+    if (distintaAlnus === null) {
+      distWrap.append(el('div', { class:'sub' }, 'Carico la distinta…'));
+      return;
+    }
+    if (!distintaAlnus.length) {
+      distWrap.append(el('div', { class:'sub' },
+        'Nessuna distinta: né dall\'estrazione Alnus né scritta qui.'));
+      return;
+    }
+    distintaAlnus.forEach(r => {
+      distWrap.append(el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0;opacity:.85;' },
+        el('span', { style:'flex:1;min-width:0;font-family:JetBrains Mono,monospace;font-size:11px;' }, r.figlio),
+        el('span', { class:'mono', style:'max-width:100px;text-align:right;' },
+          String(r.qta ?? '—').replace('.', ',')),
+        el('span', { class:'sub', style:'max-width:60px;font-size:11px;' }, r.um || ''),
+        el('span', { class:'sub', style:'flex-basis:100%;margin-left:28px;font-size:11px;' },
+          r.figlio_descrizione || ''),
+      ));
+    });
+  }
+
+  function aggiornaNotaDistinta() {
+    distNota.innerHTML = '';
+    if (distintaLocale()) {
+      distNota.append(el('span', { style:'color:var(--acc);' }, '✎ Distinta scritta qui'),
+        document.createTextNode(': vale questa, e i reimport da Alnus non la toccano.'));
+      if (!readonly && distintaAlnus && distintaAlnus.length) {
+        distNota.append(document.createTextNode(' '), el('button', {
+          type:'button', class:'btnsm', style:'padding:1px 8px;',
+          onclick: () => {
+            if (!confirm('Cancellare le righe scritte qui e tornare alla distinta di Alnus?')) return;
+            distinta.length = 0; renderDistinta(); aggiornaNotaDistinta();
+          } }, 'torna a quella di Alnus'));
+      }
+      return;
+    }
+    if (distintaAlnus === null) return;
+    distNota.append(document.createTextNode(distintaAlnus.length
+      ? 'Dall\'ultima estrazione Alnus, in sola lettura.'
+      : 'Qui puoi scriverla a mano: è il caso degli articoli che in Alnus non hanno una distinta.'));
+  }
+
+  // Come per le fasi: chi non puo modificare non vede il bottone.
+  const btnDistAdd = readonly ? null : el('button', { type:'button', class:'btnsm', style:'margin-top:6px;',
+    onclick: () => {
+      // Il primo clic su un articolo che ha la distinta di Alnus la RICOPIA,
+      // invece di partire da un foglio bianco: correggere una riga su venti
+      // non deve voler dire riscriverne venti.
+      if (!distintaLocale() && distintaAlnus && distintaAlnus.length
+          && confirm('Vuoi partire dalla distinta di Alnus (' + distintaAlnus.length
+            + ' righe) e modificarla?\n\nAnnulla per partire da una riga vuota.')) {
+        distintaAlnus.forEach(r => distinta.push({ codice: r.figlio, qta: r.qta, um: r.um }));
+      }
+      distinta.push({ codice:'', qta:null, um:null });
+      renderDistinta(); aggiornaNotaDistinta();
+    } }, '+ aggiungi riga');
+
+  renderDistinta();
+  aggiornaNotaDistinta();
+
+  // La distinta di Alnus si chiede solo se l'articolo esiste: su uno nuovo
+  // non c'e niente da cercare.
+  if (a.id && a.codice) {
+    sb.from('distinta').select('figlio,qta,um,figlio_descrizione').eq('padre', a.codice)
+      .then(({ data, error }) => {
+        distintaAlnus = error ? [] : (data || []);
+        if (error && String(error.message || '').includes('distinta')) {
+          distNota.textContent = 'Tabella distinte non attiva: migrazione dal pannello Supabase.';
+          return;
+        }
+        renderDistinta(); aggiornaNotaDistinta();
+      });
+  } else { distintaAlnus = []; renderDistinta(); aggiornaNotaDistinta(); }
+
   // --- Listino: ultimo prezzo per cliente, DERIVATO dagli ordini (mai una
   // tabella). Sola lettura: si aggiorna da solo a ogni ordine con €/pz.
   // Un blocco per cliente, drill-down = andamento (stile fasi). ---
@@ -4989,6 +5150,12 @@ function openArticoloModal(a, opts) {
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Auto-compilate dalla media storica (viva a ogni apertura); i valori manuali '
         + 'contano solo per i tipi senza storico. La somma dovrebbe stare entro il tempo pagato.')),
+    sez('Distinta base'),
+    el('div', { class:'field' },
+      el('label', {}, 'Materiali per un pezzo'),
+      distWrap,
+      ...(btnDistAdd ? [btnDistAdd] : []),
+      distNota),
     sez('Listino'),
     el('div', { class:'field' },
       listinoWrap,
@@ -5046,6 +5213,15 @@ function openArticoloModal(a, opts) {
         attivo: fd.get('attivo') === 'true',
         minuti_unitari: minutiVal,
         fasi: fasiPayload,
+        // Righe vuote scartate. Se non ne resta nessuna si salva `null`, che
+        // vuol dire "torna a valere quella di Alnus" — cosi si disfa una
+        // distinta locale svuotandola, senza un comando apposta.
+        distinta: (() => {
+          const righe = distinta
+            .filter(r => r && String(r.codice || '').trim() && Number(r.qta) > 0)
+            .map(r => ({ codice: String(r.codice).trim(), qta: Number(r.qta), um: r.um || null }));
+          return righe.length ? righe : null;
+        })(),
       };
       if (!payload.codice) return toast('Codice obbligatorio', 'err');
       btnSave.disabled = true;

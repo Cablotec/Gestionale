@@ -115,6 +115,24 @@ function ripartisciGiacenza(righe, disponibile) {
   return { esito, residuo: Math.max(0, resta) };
 }
 
+// Le distinte scritte a mano nella scheda articolo VINCONO su quelle di
+// Alnus, e vincono PER INTERO: si sostituisce l'elenco dei figli di quel
+// padre, non si fondono i due. Una distinta meta' da una parte e meta'
+// dall'altra darebbe un fabbisogno che nessuno riesce piu' a spiegare.
+// `articoli`: [{ codice, distinta:[{codice,qta,um}] }].
+function applicaDistinteLocali(figliDi, articoli) {
+  const locali = new Set();
+  (articoli || []).forEach(a => {
+    const d = a && a.distinta;
+    if (!a || !a.codice || !Array.isArray(d) || !d.length) return;
+    figliDi.set(a.codice, d
+      .filter(r => r && r.codice)
+      .map(r => ({ figlio: String(r.codice).trim(), qta: Number(r.qta) || 0, um: r.um || null })));
+    locali.add(a.codice);
+  });
+  return locali;
+}
+
 // Comodo per i chiamanti: da righe di `distinta` a Map padre -> figli.
 function indiceDistinta(righe) {
   const m = new Map();
@@ -128,5 +146,6 @@ function indiceDistinta(righe) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
-    esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza, indiceDistinta };
+    esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza, indiceDistinta,
+    applicaDistinteLocali };
 }

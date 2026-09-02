@@ -1,0 +1,36 @@
+-- ═══════════════════════════════════════════════════════════════════
+-- articoli.distinta  (2 set 2026)
+--
+-- UNA COLONNA, non una tabella. La distinta di un articolo sta DENTRO
+-- l'articolo, accanto alle sue fasi, ed e modificabile dalla sua scheda:
+-- e' li' che uno va a vedere come e' fatto un pezzo, e non deve andare
+-- da nessun'altra parte. Stessa forma di `articoli.fasi`, che e' gia'
+-- jsonb ed e' gia' modificata cosi'.
+--
+-- Richiesta di Nico, testuale: "e' per questo che in articoli ti dicevo
+-- di inserire per ognuno una sua distinta. troppe schermate incomplete
+-- che fanno lavori a meta'! voglio semplicita' e immediatezza."
+--
+-- FORMA: array di righe, come le fasi.
+--   [{ "codice": "05 170 0039", "qta": 0.45, "um": "mt" }, ...]
+--
+-- ⚠ PERCHE' NON BASTAVA LA TABELLA `distinta`: quella e' la FOTOGRAFIA di
+-- Alnus e a ogni caricamento viene svuotata e riscritta. Una correzione
+-- fatta li' sopravvivrebbe fino al reimport e poi sparirebbe in silenzio,
+-- che e' il modo peggiore di perdere un dato. Questa colonna il
+-- caricatore non la tocca mai: sopravvive per COSTRUZIONE, non per
+-- attenzione di chi ricarica.
+--
+-- REGOLA DEL CALCOLO: se un articolo ha `distinta` valorizzata, quella
+-- VINCE PER INTERO su quella di Alnus. Mai una fusione fra le due —
+-- un fabbisogno che esce meta' da una parte e meta' dall'altra e' un
+-- numero che nessuno riesce piu' a spiegare.
+--
+-- SENZA QUESTA MIGRAZIONE non si rompe niente: la scheda articolo se ne
+-- accorge, mostra la distinta di Alnus in sola lettura e lo dichiara.
+-- ═══════════════════════════════════════════════════════════════════
+
+ALTER TABLE articoli ADD COLUMN IF NOT EXISTS distinta jsonb;
+
+-- Verifica: deve rispondere 0 (nessun articolo ha ancora una distinta sua).
+--   SELECT count(*) FROM articoli WHERE distinta IS NOT NULL;
