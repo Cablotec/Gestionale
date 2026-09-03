@@ -839,6 +839,14 @@ Sequenza completata in due giorni, tutte le migrazioni ESEGUITE da Nico. Il dett
 - ⚠ **Un errore preso per un pelo**: uno script di modifica si e interrotto PRIMA di salvare mentre una correzione successiva era gia andata a segno -> `pMat` usato due volte e mai dichiarato. `node --check` passava (errore di RUNTIME) e la commessa sarebbe esplosa all apertura. **Dopo una modifica interrotta, contare dichiarazioni e usi: il --check non basta.**
 - **Sequenza delle correzioni di Nico, tutte giuste**: "voglio semplicita" (la distinta va nella scheda articolo, non in una schermata nuova) -> "deve essere una scheda a se" (Materiali e una linguetta della commessa, non una sezione dentro Dati) -> "tutti i componenti, in ordine di codice" (la scheda risponde a *di cosa e fatta*, cosa manca e una colonna) -> "non deve essere un calcolo live" (e un impegno preso con l ordine).
 
+### ▶ CHIUSO: il triangolino porta dentro l ordine (3 set, `2026-09-03.6`)
+- **Il conto viene dalla LISTA CONGELATA**, non dall attribuzione di Alnus: il triangolino dice quanti codici mancano a QUELLA riga, e il clic apre la sua scheda Materiali. Sui dati veri: 68 commesse col conto esatto, **57 con almeno un codice mancante**, 984 codici in tutto. Su `2026/OP/01917` escono i due giusti (20 080 2455 con 24 mancanti, e la lavorazione Botturi) piu 10 coperti.
+- **`disponibile` ≠ `coperto`** (domanda di Nico, ed era la prova che le etichette non si spiegavano): disponibile = non e nemmeno sotto scorta · coperto = **E** sotto scorta ma la fetta di questa commessa c e perche scade prima. **Coperto e FRAGILE**: il tooltip dice quante altre commesse se lo contendono, che e il numero che dice quanto.
+
+- ⚠⚠ **DUE DIFETTI MIEI IN FILA, e la seconda lezione vale piu della prima.**
+  1. *"esco da una commessa e rientro e non ritrova la situazione, a meno che non clicco rigenera"*: `renderMancanti()` gira 500 righe prima di `openModal()`, e dentro c era `if (!sezMateriali.isConnected) return`. La guardia era **giusta finche il calcolo era asincrono**; reso sincrono, scattava sempre. **Una guardia scritta per del codice asincrono diventa un difetto il giorno che quel codice smette di esserlo** — non basta togliere l `await`.
+  2. Sistemando la 1, ho tolto il wrapper `(async () => {…})()` e i `return` che stavano dentro sono passati a uscire da TUTTA `openOperazioneModal`, saltando `openModal()`: il caso piu comune (nessun codice mancante, 11 su 68) avrebbe impedito alla scheda di aprirsi. Preso prima di committare con un controllo mirato. **Togliendo un wrapper di funzione, ogni `return` che c era dentro cambia significato.**
+
 ### ▶ RAGIONAMENTI SU DDT, FATTURA E SDI (1 set, per il futuro — nessuna azione ora)
 **Nessun vincolo legale sull'MRP.** Pianificazione, distinta, magazzino, ordini fornitore sono strumenti interni: nessuna omologazione, nessun obbligo di comprare. I vincoli cominciano solo sui documenti fiscalmente rilevanti.
 
