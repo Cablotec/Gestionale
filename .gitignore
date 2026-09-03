@@ -6,6 +6,7 @@ backup/
 *.backup.json
 # Dump di lavoro del caricatore distinte: dati di produzione, non entrano.
 carico-*.json
+materiali-commesse.sql
 segreti*
 *.env
 .env*
