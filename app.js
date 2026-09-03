@@ -9385,14 +9385,25 @@ function openOperazioneModal(o, opts) {
     }
 
     // Lo stato di OGGI, appoggiato sopra le quantita fisse.
-    (async () => {
+    // ⚠⚠ NIENTE `async` E NIENTE GUARDIA `isConnected` QUI (3 set, difetto
+    // trovato da Nico: "ogni volta che esco da una commessa e rientro non mi
+    // ritrova la situazione, a meno che non clicco rigenera").
+    // La guardia era GIUSTA finche il calcolo era asincrono: serviva a non
+    // scrivere dentro una scheda chiusa nel frattempo. Ma da quando il conto
+    // si fa tutto in memoria il corpo gira SUBITO — e a quel punto il modal
+    // non e ancora nel documento (`renderMancanti()` sta 500 righe prima di
+    // `openModal`), quindi la guardia scattava sempre e lo stato non si
+    // scriveva mai. Premere Rigenera rifaceva il giro a modal aperto, ed e
+    // per questo che funzionava solo cosi.
+    // **Una guardia scritta per del codice asincrono diventa un difetto il
+    // giorno che quel codice smette di esserlo.**
+    {
       const viveConLista = (state.operazioni || []).filter(x =>
         (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
       const manPerCodice = {};
       (state.mancanti || []).forEach(m => { const k = String(m.codice || '').trim(); if (k) manPerCodice[k] = m; });
       const mio = (typeof materialiCommessa === 'function')
         ? materialiCommessa(o, viveConLista, manPerCodice) : null;
-      if (!sezMateriali.isConnected) return;
       const oggi = toLocalISO(new Date());
       const manDi = (c) => (state.mancanti || []).find(x => String(x.codice || '').trim() === c);
       let nMancano = 0;
@@ -9451,7 +9462,7 @@ function openOperazioneModal(o, opts) {
           '⚠ La preparazione è dichiarata COMPLETA ma ' + nMancano
           + (nMancano === 1 ? ' componente manca' : ' componenti mancano') + '.'));
       }
-    })();
+    }
   };
   selPrep.addEventListener('change', renderMancanti);
 
@@ -10901,20 +10912,29 @@ function openOperazioneModal(o, opts) {
   // per la stessa cosa. E niente colore inline, che sovrascriverebbe
   // l'accento della linguetta attiva — Materiali resterebbe rossa invece di
   // accendersi come tutte le altre quando la selezioni.
-  if (!isNew && Array.isArray(o.materiali) && o.materiali.length && typeof materialiCommessa === 'function') {
-    (async () => {
-      const vive = (state.operazioni || []).filter(x =>
-        (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
-      const mp = {};
-      (state.mancanti || []).forEach(m => { const k = String(m.codice || '').trim(); if (k) mp[k] = m; });
-      const m = materialiCommessa(o, vive, mp);
-      if (!m || !tabBtns.mat || !tabBtns.mat.isConnected) return;
-      const n = [...m.values()].filter(q => q.manca > 0).length;
-      if (!n) return;
+  // Stesso difetto della scheda: qui il conto e sincrono, quindi niente
+  // `async` e niente `isConnected` — il bottone esiste ma il modal non e
+  // ancora nel documento, e la linguetta restava senza numero.
+  // ⚠⚠ NIENTE `return` QUI DENTRO. Prima questo blocco era una funzione
+  // asincrona e i `return` uscivano da quella; ora che e codice in linea
+  // uscirebbero da TUTTA `openOperazioneModal`, saltando `openModal()` — e il
+  // caso piu comune (`!n`, cioe nessun codice mancante: 11 commesse su 68)
+  // avrebbe impedito alla scheda di aprirsi. Preso prima di committare.
+  // **Togliendo un wrapper di funzione, ogni `return` che c'era dentro cambia
+  // significato.**
+  if (!isNew && Array.isArray(o.materiali) && o.materiali.length
+      && typeof materialiCommessa === 'function' && tabBtns.mat) {
+    const vive = (state.operazioni || []).filter(x =>
+      (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
+    const mp = {};
+    (state.mancanti || []).forEach(m => { const k = String(m.codice || '').trim(); if (k) mp[k] = m; });
+    const m = materialiCommessa(o, vive, mp);
+    const n = m ? [...m.values()].filter(q => q.manca > 0).length : 0;
+    if (n) {
       tabBtns.mat.textContent = 'Materiali ⚠' + n;
       tabBtns.mat.title = n === 1 ? 'Manca 1 codice a questa commessa'
         : 'Mancano ' + n + ' codici a questa commessa';
-    })().catch(() => {});
+    }
   }
 
   body.append(form);
