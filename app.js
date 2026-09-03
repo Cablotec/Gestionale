@@ -9399,15 +9399,34 @@ function openOperazioneModal(o, opts) {
       celleStato.forEach((cella, codice) => {
         const m = manDi(codice);
         const lav = typeof eLavorazione === 'function' && eLavorazione(codice);
-        // Non nei sotto scorta = ce n'e abbastanza. E' il verso giusto: quel
-        // file elenca cio che manca, non cio che c'e.
-        if (!m) { cella.textContent = 'disponibile'; cella.style.color = 'var(--mut)';
-          cella.title = 'Non compare fra i sotto scorta dell\'ultima estrazione.'; return; }
+        // ⚠ DUE STATI CHE SEMBRAVANO UGUALI, e non lo sono (3 set, chiesto da
+        // Nico: "cosa cambia fra coperto e disponibile?"). La domanda stessa
+        // era la prova che le etichette non si spiegavano da sole.
+        //   disponibile = non e nemmeno sotto scorta: ce n'e, e non dipende
+        //                 da nessun'altra commessa
+        //   coperto     = E sotto scorta, ma la fetta di questa commessa c'e
+        //                 perche scade prima delle altre
+        // La differenza che conta e che COPERTO E FRAGILE: dipende dall'ordine
+        // di ripartizione, e una commessa piu urgente che entra domani se lo
+        // porta via. Per questo dice anche quante altre se lo contendono.
+        if (!m) {
+          cella.textContent = 'disponibile'; cella.style.color = 'var(--mut)';
+          cella.title = "Non compare fra i sotto scorta dell'ultima estrazione di Alnus: "
+            + "ce n'è in magazzino, e non dipende da nessun'altra commessa.";
+          return;
+        }
         const q = mio && mio.get(codice);
         const st = statoMateriale(m, oggi);
         if (!q || q.manca <= 0) {
+          const quante = (viveConLista || []).filter(x => (x.materiali || [])
+            .some(z => String(z.codice || '').trim() === codice)).length;
           cella.textContent = 'coperto'; cella.style.color = 'var(--grn)';
-          cella.title = 'Giacenza ' + nf(m.giacenza) + ', ripartita fra le commesse che lo vogliono.';
+          cella.title = 'Questo codice È sotto scorta (in casa ' + nf(m.giacenza)
+            + "), ma la parte che serve a questa commessa c'è perché scade prima.\n"
+            + (quante > 1
+                ? 'Se lo contendono ' + quante + ' commesse: se ne entra una più urgente, '
+                  + 'questo può tornare a mancare.'
+                : "Nessun'altra commessa lo chiede.");
           return;
         }
         nMancano++;
