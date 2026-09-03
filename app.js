@@ -3941,20 +3941,90 @@ async function fabbisognoDiCommessa(numeroOp) {
   };
   const manDi = (cod) => (state.mancanti || []).find(x => String(x.codice || '').trim() === cod);
   perCodice.forEach((righe, cod) => {
-    if (!righe.some(r => r.commessa.numero_op === numeroOp)) return;
+    const mieRighe = righe.filter(r => r.commessa.numero_op === numeroOp);
+    if (!mieRighe.length) return;
+    const serve = mieRighe.reduce((a, r) => a + r.qta, 0);
     const m = manDi(cod);
-    const g = m ? (Number(m.giacenza) || 0) : null;
+    // ⚠ UN CODICE CHE NON STA NEI MANCANTI NON MANCA: vuol dire il CONTRARIO.
+    // L'estrazione di Alnus contiene tutto cio che e sotto scorta — se un
+    // codice non c'e, di quello ce n'e abbastanza. Trattarlo come giacenza
+    // zero (che e quello che facevo) faceva risultare mancante meta distinta.
+    if (!m) { out.set(cod, { serve, coperto: serve, manca: 0, segnalato: false, riservato: 0 }); return; }
+    const g = Number(m.giacenza) || 0;
     // Quello che Alnus ha gia promesso ad altri non si puo dare a noi.
     const nostra = righe.reduce((a, r) => a + r.qta, 0);
-    const { disponibile, riservato } = disponibilePerNoi(g == null ? 0 : g,
-      m ? m.impegno : 0, nostra);
+    const { disponibile, riservato } = disponibilePerNoi(g, m.impegno, nostra);
     const { esito } = ripartisciGiacenza(righe, disponibile);
     const mia = esito.find(e => e.commessa.numero_op === numeroOp);
     if (!mia) return;
     out.set(cod, { serve: mia.qta, coperto: mia.coperto, manca: mia.scoperto,
-      giacenzaNota: g != null, riservato });
+      segnalato: true, giacenza: g, riservato });
   });
   return out;
+}
+
+// La lista dei materiali di una commessa, CONGELATA. Esplode la distinta
+// dell'articolo per i pezzi dell'ordine e ritorna le righe da salvare.
+// ⚠ Si congelano le QUANTITA, non la disponibilita: quanto serve non cambia,
+// quanto ce n'e in magazzino cambia ogni giorno e resta live.
+// Chiamata dopo OGNI creazione di commesse, da tutte e tre le porte
+// (griglia "+ Nuovo ordine", modal singolo, import da Alnus).
+// ⚠ NON blocca e NON fa fallire la creazione: se la distinta non c'e o la
+// migrazione non e stata eseguita, la commessa nasce lo stesso e la lista si
+// crea dopo col bottone. Una commessa che non si salva perche mancava una
+// distinta sarebbe un rimedio peggiore del male.
+async function creaMaterialiPerCommesse(commesse) {
+  if (!Array.isArray(commesse) || !commesse.length) return 0;
+  let fatte = 0;
+  for (const op of commesse) {
+    try {
+      const art = (state.articoli || []).find(a => a.id === op.articolo_id);
+      if (!art || !art.codice) continue;
+      const righe = await generaMaterialiCommessa(art.codice, Number(op.quantita) || 0);
+      if (!righe.length) continue;
+      await salvaMaterialiCommessa(op, righe);
+      fatte++;
+    } catch (e) { /* la commessa resta, la lista si fara dopo */ }
+  }
+  return fatte;
+}
+
+async function generaMaterialiCommessa(codiceArticolo, pezzi) {
+  if (!codiceArticolo || !(pezzi > 0)) return [];
+  const righeDist = await fabbScaricaDistinta([codiceArticolo]);
+  const figliDi = indiceDistinta(righeDist);
+  if (typeof applicaDistinteLocali === 'function') applicaDistinteLocali(figliDi, state.articoli);
+  if (!figliDi.has(codiceArticolo)) return [];
+  const e = esplodiDistinta(codiceArticolo, pezzi, figliDi);
+  const descr = {}, ums = {};
+  righeDist.forEach(r => {
+    if (r.figlio_descrizione && !descr[r.figlio]) descr[r.figlio] = r.figlio_descrizione;
+    if (r.um && !ums[r.figlio]) ums[r.figlio] = r.um;
+  });
+  return [...e.materiali.entries()]
+    .map(([codice, qta]) => ({
+      codice,
+      descrizione: descr[codice] || null,
+      um: ums[codice] || null,
+      // Il per-pezzo si salva accanto al totale: cosi la riga si rilegge anche
+      // quando la quantita dell'ordine, un domani, sara cambiata.
+      qta_pz: +(qta / pezzi).toFixed(6),
+      qta: +qta.toFixed(4),
+    }))
+    .sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true, sensitivity: 'base' }));
+}
+
+// Scrive la lista sulla commessa. Ritorna le righe scritte.
+async function salvaMaterialiCommessa(op, righe) {
+  const { data, error } = await eseguiConRetry(
+    () => sb.from('operazioni').update({ materiali: righe.length ? righe : null })
+      .eq('id', op.id).select().single(),
+    { label: 'materiali commessa' });
+  if (error) throw error;
+  Object.assign(op, data);
+  const i = state.operazioni.findIndex(x => x.id === op.id);
+  if (i >= 0) state.operazioni[i] = op;
+  return righe;
 }
 
 async function renderFabbisognoCalcolato(root) {
@@ -6380,7 +6450,7 @@ async function operazioniImportEsegui(piano) {
       };
     }).filter(p => p.cliente_id && p.articolo_id);
 
-    const nate = [];
+    const nate = [];   // servono anche per creare la loro lista materiali
     for (let i = 0; i < payloads.length; i += 200) {
       const batch = payloads.slice(i, i + 200);
       const { data, error } = await eseguiConRetry(
@@ -6414,6 +6484,11 @@ async function operazioniImportEsegui(piano) {
     // 6) Fasi automatiche sulle nuove, come fa "+ Nuovo ordine".
     // Best-effort: una fase mancante si aggiunge a mano, un import bloccato no.
     for (const r of nate) { try { await autoGeneraFasiDaMedia(r); } catch (e) {} }
+
+    // 7) La lista materiali sulle nuove, dalla stessa porta della griglia.
+    // Stesso principio: best-effort. Un import che si ferma perche un
+    // articolo non ha la distinta sarebbe un rimedio peggiore del male.
+    await creaMaterialiPerCommesse(nate);
 
   } catch (e) {
     toast('Import interrotto: ' + (e.message || e), 'err');
@@ -7435,6 +7510,8 @@ function openNuovoOrdineModal() {
       if (error) throw new Error(error.message);
       (data||[]).forEach(r => { if (!state.operazioni.find(x=>x.id===r.id)) state.operazioni.push(r); });
       for (const r of (data||[])) { try { await autoGeneraFasiDaMedia(r); } catch(e){} }
+      // La lista materiali nasce con l ordine, dalla distinta dell articolo.
+      await creaMaterialiPerCommesse(data || []);
       // Semina i minuti pagati sull'anagrafica articolo SOLO dove mancano
       // (stesso pattern del modal commessa: si popola il vuoto, mai si
       // sovrascrive uno standard già impostato). Copre i codici creati al
@@ -9145,28 +9222,148 @@ function openOperazioneModal(o) {
   // articolo ogni volta che si apre. Quindi nasce da sola con la commessa, e
   // il giorno che la distinta cambia cambia anche lei — che e la ragione per
   // cui in questo progetto i derivati non si materializzano mai.
+  // ── SCHEDA MATERIALI ───────────────────────────────────────────────
+  // TUTTI i componenti di QUESTA commessa, in ordine di codice, con le
+  // quantita CONGELATE quando l'ordine e nato (3 set, richiesta Nico).
+  // ⚠ Fisse le QUANTITA, live la DISPONIBILITA: quanto serve non cambia,
+  // quanto ce n'e in magazzino e su quale OF sta cambiano ogni giorno.
   const sezMateriali = el('div', { style:'margin-top:6px;' });
   const renderMancanti = () => {
     sezMateriali.innerHTML = '';
-    if (!o.numero_op) {
-      sezMateriali.append(el('div', { class:'sub', style:'font-size:11px;' },
-        'Senza numero OP non si possono agganciare i materiali: scrivilo qui sopra.'));
+    const art = (state.articoli || []).find(x => x.id === o.articolo_id);
+    const ordinati = Number(o.quantita) || 0;
+    const righe = Array.isArray(o.materiali) ? o.materiali : null;
+
+    // ── Non c'e ancora: si genera, e si dice da cosa ──
+    if (!righe || !righe.length) {
+      sezMateriali.append(el('div', { class:'sub', style:'font-size:11px;line-height:1.7;' },
+        isNew
+          ? 'La lista dei materiali si crea insieme all\'ordine, dalla distinta dell\'articolo.'
+          : 'Questa commessa non ha ancora la sua lista materiali.'));
+      if (!isNew && isAdmin && art) {
+        const btn = el('button', { type:'button', class:'btnsm',
+          style:'margin-top:8px;align-self:flex-start;' }, '⚙ Crea dalla distinta di ' + art.codice);
+        btn.onclick = async () => {
+          btn.disabled = true; btn.textContent = 'Calcolo…';
+          try {
+            const nuove = await generaMaterialiCommessa(art.codice, ordinati);
+            if (!nuove.length) {
+              btn.disabled = false; btn.textContent = '⚙ Crea dalla distinta di ' + art.codice;
+              return toast('L\'articolo ' + art.codice + ' non ha una distinta.', 'err');
+            }
+            await salvaMaterialiCommessa(o, nuove);
+            toast(nuove.length + ' materiali collegati alla commessa', 'ok');
+            renderMancanti();
+          } catch (e) {
+            btn.disabled = false; btn.textContent = '⚙ Crea dalla distinta di ' + art.codice;
+            toast('Errore: ' + (e.message || e), 'err');
+          }
+        };
+        sezMateriali.append(btn);
+      }
       return;
     }
-    if (typeof riquadroMaterialiCommessa !== 'function') return;
-    const r = riquadroMaterialiCommessa(o.numero_op, { testata: false, cornice: false });
-    if (r) sezMateriali.append(r);
-    // La contraddizione si dichiara, come prima: la tendina dice "completo"
-    // ma il materiale non c'e.
-    if (selPrep.value === 'completo' && typeof mancantiCommessa === 'function') {
-      const m = mancantiCommessa({ ...o, stato_preparazione: 'completo' });
-      if (m.nCodici) {
+
+    // ── C'e: la si mostra, e ci si appoggia sopra lo stato di oggi ──
+    const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+    sezMateriali.append(el('div', { class:'sub', style:'font-size:11px;margin-bottom:10px;line-height:1.7;' },
+      el('div', {}, 'Dalla distinta di ',
+        el('span', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
+        ' × ', el('span', { style:'color:var(--txt);font-weight:700;' }, String(ordinati)), ' pz.',
+        ' Le quantità sono fissate su questa commessa; disponibilità e consegne sono di oggi.')));
+
+    const intestazione = el('div', { class:'sub', style:'font-size:11px;margin-bottom:8px;' },
+      righe.length + (righe.length === 1 ? ' componente' : ' componenti'));
+    sezMateriali.append(intestazione);
+
+    const COL = 'display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(140px,1.4fr) '
+      + '70px 90px 44px minmax(160px,auto);gap:10px;align-items:baseline;';
+    const et = (t, alt) => el('span', { class:'sub',
+      style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (alt || '') }, t);
+    sezMateriali.append(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);' },
+      et('Codice'), et('Descrizione'), et('Per pz', 'text-align:right;'),
+      et('Necessari', 'text-align:right;'), et('UM'), et('Stato')));
+
+    const celleStato = new Map();
+    righe.forEach(r => {
+      const stato = el('span', { class:'sub', style:'font-size:11px;' }, '…');
+      celleStato.set(r.codice, stato);
+      sezMateriali.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
+        el('span', { class:'mono', style:'font-size:11px;' }, r.codice),
+        el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+          title: r.descrizione || '' }, r.descrizione || '—'),
+        el('span', { class:'mono', style:'font-size:11px;text-align:right;color:var(--mut);' },
+          r.qta_pz != null ? nf(r.qta_pz) : '—'),
+        el('span', { class:'mono', style:'font-size:11px;text-align:right;font-weight:700;' }, nf(r.qta)),
+        el('span', { class:'sub', style:'font-size:11px;' }, r.um || ''),
+        stato));
+    });
+
+    if (isAdmin && art) {
+      const btnRi = el('button', { type:'button', class:'btnsm',
+        style:'margin-top:10px;align-self:flex-start;' }, '⟳ Rigenera dalla distinta');
+      btnRi.onclick = async () => {
+        if (!confirm('Rifare la lista dalla distinta di ' + art.codice + ' per ' + ordinati + ' pz?\n\n'
+          + 'Le quantità attuali di questa commessa vengono sostituite.')) return;
+        btnRi.disabled = true; btnRi.textContent = 'Calcolo…';
+        try {
+          const nuove = await generaMaterialiCommessa(art.codice, ordinati);
+          await salvaMaterialiCommessa(o, nuove);
+          toast('Lista rifatta: ' + nuove.length + ' materiali', 'ok');
+          renderMancanti();
+        } catch (e) {
+          btnRi.disabled = false; btnRi.textContent = '⟳ Rigenera dalla distinta';
+          toast('Errore: ' + (e.message || e), 'err');
+        }
+      };
+      sezMateriali.append(btnRi);
+    }
+
+    // Lo stato di OGGI, appoggiato sopra le quantita fisse.
+    (async () => {
+      let mio = null;
+      try { mio = o.numero_op ? await fabbisognoDiCommessa(o.numero_op) : null; } catch (e) { mio = null; }
+      if (!sezMateriali.isConnected) return;
+      const oggi = toLocalISO(new Date());
+      const manDi = (c) => (state.mancanti || []).find(x => String(x.codice || '').trim() === c);
+      let nMancano = 0;
+      celleStato.forEach((cella, codice) => {
+        const m = manDi(codice);
+        const lav = typeof eLavorazione === 'function' && eLavorazione(codice);
+        // Non nei sotto scorta = ce n'e abbastanza. E' il verso giusto: quel
+        // file elenca cio che manca, non cio che c'e.
+        if (!m) { cella.textContent = 'disponibile'; cella.style.color = 'var(--mut)';
+          cella.title = 'Non compare fra i sotto scorta dell\'ultima estrazione.'; return; }
+        const q = mio && mio.get(codice);
+        const st = statoMateriale(m, oggi);
+        if (!q || q.manca <= 0) {
+          cella.textContent = 'coperto'; cella.style.color = 'var(--grn)';
+          cella.title = 'Giacenza ' + nf(m.giacenza) + ', ripartita fra le commesse che lo vogliono.';
+          return;
+        }
+        nMancano++;
+        let t = 'mancano ' + nf(q.manca), c = 'var(--red)';
+        if (lav) { t += ' · da ordinare a terzista'; c = 'var(--vio)'; }
+        else if (st.stato === 'in_ritardo') t += ' · in ritardo dal ' + fmtIT(st.data) + (st.of ? ' · OF ' + st.of : '');
+        else if (st.stato === 'in_arrivo') { t += st.data ? ' · arriva il ' + fmtIT(st.data) : ' · ordinato';
+          if (st.of) t += ' · OF ' + st.of; c = 'var(--blu)'; }
+        else if (st.stato === 'attesa_cliente') { t += ' · lo manda il cliente'; c = 'var(--or)'; }
+        else t += ' · da ordinare';
+        cella.textContent = t; cella.style.color = c;
+        cella.title = st.fornitore || '';
+      });
+      if (nMancano) {
+        intestazione.append(document.createTextNode(' · '),
+          el('span', { style:'color:var(--red);font-weight:700;' },
+            nMancano + (nMancano === 1 ? ' manca' : ' mancano')));
+      }
+      if (selPrep.value === 'completo' && nMancano) {
         sezMateriali.append(el('div', { class:'sub',
           style:'margin-top:10px;color:var(--red);font-size:11px;' },
-          '⚠ La preparazione è dichiarata COMPLETA ma risultano '
-          + m.nCodici + (m.nCodici === 1 ? ' codice mancante' : ' codici mancanti') + '.'));
+          '⚠ La preparazione è dichiarata COMPLETA ma ' + nMancano
+          + (nMancano === 1 ? ' componente manca' : ' componenti mancano') + '.'));
       }
-    }
+    })();
   };
   selPrep.addEventListener('change', renderMancanti);
 
@@ -10823,6 +11020,8 @@ function openOperazioneModal(o) {
         }
         if (isNew) {
           if (!state.operazioni.find(x => x.id === data.id)) state.operazioni.push(data);
+          // Terza e ultima porta: anche di qui la lista nasce con l ordine.
+          try { await creaMaterialiPerCommesse([data]); } catch (e) {}
         } else {
           state.operazioni = state.operazioni.map(x => x.id === o.id ? data : x);
         }

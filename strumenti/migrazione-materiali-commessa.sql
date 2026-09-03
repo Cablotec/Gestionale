@@ -1,0 +1,33 @@
+-- ═══════════════════════════════════════════════════════════════════
+-- operazioni.materiali  (3 set 2026)
+--
+-- I materiali di una commessa sono un DATO FISSO, non un calcolo live
+-- (richiesta di Nico: "non deve essere un calcolo live, ma un dato fisso
+-- che viene creato insieme all'ordine").
+--
+-- PERCHE' HA RAGIONE: la lista e' un IMPEGNO preso quando l'ordine parte.
+-- Se domani qualcuno corregge la distinta dell'articolo, una commessa gia'
+-- lanciata non deve cambiare sotto i piedi a chi ci sta lavorando — e
+-- soprattutto non deve cambiare in silenzio. E' la stessa ragione per cui
+-- in `ore_esterne` la tariffa e' congelata sulla riga: un costo sostenuto
+-- non si riscrive.
+--
+-- FORMA: array di righe, come `articoli.distinta` e `articoli.fasi`.
+--   [{ "codice": "20 080 2455", "descrizione": "SUPPORTO...",
+--      "um": "nr", "qta_pz": 1, "qta": 100 }, ...]
+--   `qta_pz` = quanto ne vuole UN pezzo (dalla distinta)
+--   `qta`    = il totale congelato per questa commessa
+--
+-- ⚠⚠ SI CONGELANO LE QUANTITA, NON LA DISPONIBILITA. Quanto serve non
+-- cambia; quanto ce n'e in magazzino, se e' in ritardo e su quale OF sta
+-- cambiano ogni giorno e restano LIVE, lette dal fabbisogno. Congelare
+-- anche quelli vorrebbe dire mostrare un ritardo di tre settimane fa.
+--
+-- SENZA QUESTA MIGRAZIONE non si rompe niente: la scheda Materiali se ne
+-- accorge e lo dichiara.
+-- ═══════════════════════════════════════════════════════════════════
+
+ALTER TABLE operazioni ADD COLUMN IF NOT EXISTS materiali jsonb;
+
+-- Verifica: deve rispondere 0 (nessuna commessa ha ancora la sua lista).
+--   SELECT count(*) FROM operazioni WHERE materiali IS NOT NULL;
