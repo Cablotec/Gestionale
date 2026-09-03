@@ -831,6 +831,14 @@ Richiesta di Nico: *"dalla schermata ordini clienti voglio vedere l avviso come 
   - **Sui dati veri: 40 codici su 301 hanno impegno Alnus > nostra domanda**, quindi la riserva morde davvero. Su `20 080 2455` invece impegno 400 = nostra domanda 400: riserva 0, e i 24 restano 24.
   - La stessa regola vale nella vista calcolata: due numeri nella stessa scheda non possono dire cose diverse.
 
+### ▶ FATTO: i materiali dalla distinta alla commessa (2-3 set)
+Sequenza completata in due giorni, tutte le migrazioni ESEGUITE da Nico. Il dettaglio delle regole sta in CLAUDE.md, sezione "I MATERIALI". Qui restano le cose che si perdono.
+- **Stato finale sui dati veri**: 9.325 materiali e 38.461 righe di distinta caricate · **68 commesse vive con la lista congelata, 2.735 righe**, coerenza `qta = qta_pz × pezzi` verificata 2735/2735 · 42 commesse senza distinta in Alnus · 31 con distinta fatta solo di segnaposto.
+- ⚠⚠ **CI SONO CASCATO SULL RLS, che era gia scritto qui da agosto.** Lo strumento in blocco ha stampato "67/67 scritte" senza aver scritto niente: la PATCH su `operazioni` torna HTTP 200 con ZERO righe. Ora ogni scrittura si fa restituire la riga (`return=representation`) e se non torna niente si ferma. **Un comando che dichiara successo senza averlo fatto e peggio di uno che fallisce.** La strada buona e `--sql` + pannello.
+- ⚠ **I CONTI DEVONO TORNARE, sempre.** La prima passata diceva 67 + 42 su 140 candidate: **31 sparivano in silenzio**, ed erano quelle con la distinta fatta solo di segnaposto. Ora lo strumento verifica da solo che la somma faccia il totale e lo stampa. Una categoria che manca all appello e un difetto, non un dettaglio.
+- ⚠ **Un errore preso per un pelo**: uno script di modifica si e interrotto PRIMA di salvare mentre una correzione successiva era gia andata a segno -> `pMat` usato due volte e mai dichiarato. `node --check` passava (errore di RUNTIME) e la commessa sarebbe esplosa all apertura. **Dopo una modifica interrotta, contare dichiarazioni e usi: il --check non basta.**
+- **Sequenza delle correzioni di Nico, tutte giuste**: "voglio semplicita" (la distinta va nella scheda articolo, non in una schermata nuova) -> "deve essere una scheda a se" (Materiali e una linguetta della commessa, non una sezione dentro Dati) -> "tutti i componenti, in ordine di codice" (la scheda risponde a *di cosa e fatta*, cosa manca e una colonna) -> "non deve essere un calcolo live" (e un impegno preso con l ordine).
+
 ### ▶ RAGIONAMENTI SU DDT, FATTURA E SDI (1 set, per il futuro — nessuna azione ora)
 **Nessun vincolo legale sull'MRP.** Pianificazione, distinta, magazzino, ordini fornitore sono strumenti interni: nessuna omologazione, nessun obbligo di comprare. I vincoli cominciano solo sui documenti fiscalmente rilevanti.
 
