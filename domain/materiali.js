@@ -126,6 +126,61 @@ function disponibilePerNoi(giacenza, impegnoAlnus, nostraDomanda) {
   return { disponibile: Math.max(0, g - riservato), riservato };
 }
 
+// ⚠⚠ IL CONTO SI FA DALLE LISTE CONGELATE, NON DALLA DISTINTA (3 set).
+// Da quando ogni commessa porta la sua `materiali`, la domanda di ogni codice
+// si ricostruisce SENZA scaricare niente: e tutta in memoria. Vuol dire che
+// il triangolino in Ordini cliente puo essere calcolato riga per riga mentre
+// si disegna la tabella, invece di arrivare dopo.
+// E soprattutto: la stessa lista che si vede nella commessa e quella su cui
+// si conta. Contare sulla distinta di OGGI mentre la commessa mostra le
+// quantita congelate ieri farebbe dire due cose diverse alle due schermate.
+// `commesse`: [{ ..., materiali:[{codice, qta}] }].
+function fabbisognoDaListe(commesse) {
+  const perCodice = new Map();
+  (commesse || []).forEach(c => {
+    if (!c || !Array.isArray(c.materiali)) return;
+    c.materiali.forEach(m => {
+      const cod = String((m && m.codice) || '').trim();
+      const q = Number(m && m.qta) || 0;
+      if (!cod || !(q > 0) || eSegnaposto(cod)) return;
+      if (!perCodice.has(cod)) perCodice.set(cod, []);
+      perCodice.get(cod).push({ commessa: c, qta: q });
+    });
+  });
+  const senzaData = '9999-12-31';
+  perCodice.forEach(righe => righe.sort((a, b) =>
+    String(a.commessa.scadenza || senzaData).localeCompare(String(b.commessa.scadenza || senzaData))));
+  return perCodice;
+}
+
+// Cosa manca a UNA commessa, con la giacenza gia ripartita fra tutte quelle
+// che vogliono lo stesso codice. Sincrona: legge solo cio che sta in memoria.
+// `mancantiPerCodice`: mappa codice -> riga del fabbisogno Alnus (giacenza,
+// impegno). Un codice che li NON c e non manca: vuol dire che non e sotto
+// scorta, cioe che ce n e abbastanza.
+// Ritorna Map codice -> { serve, coperto, manca, segnalato, giacenza, riservato }.
+function materialiCommessa(op, commesse, mancantiPerCodice) {
+  const out = new Map();
+  if (!op || !Array.isArray(op.materiali)) return out;
+  const perCodice = fabbisognoDaListe(commesse);
+  perCodice.forEach((righe, cod) => {
+    const mie = righe.filter(r => r.commessa.id === op.id);
+    if (!mie.length) return;
+    const serve = mie.reduce((a, r) => a + r.qta, 0);
+    const m = mancantiPerCodice ? mancantiPerCodice[cod] : null;
+    if (!m) { out.set(cod, { serve, coperto: serve, manca: 0, segnalato: false, riservato: 0 }); return; }
+    const nostra = righe.reduce((a, r) => a + r.qta, 0);
+    const g = Number(m.giacenza) || 0;
+    const { disponibile, riservato } = disponibilePerNoi(g, m.impegno, nostra);
+    const { esito } = ripartisciGiacenza(righe, disponibile);
+    const mia = esito.find(e => e.commessa.id === op.id);
+    if (!mia) return;
+    out.set(cod, { serve: mia.qta, coperto: mia.coperto, manca: mia.scoperto,
+      segnalato: true, giacenza: g, riservato });
+  });
+  return out;
+}
+
 // Ripartisce quello che c e fra chi lo vuole, in ordine di scadenza.
 // `righe`: [{ commessa, qta }] gia ordinate. `disponibile`: numero.
 // Ritorna [{ commessa, qta, coperto, scoperto }] piu il residuo.
@@ -178,5 +233,6 @@ function indiceDistinta(righe) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza, indiceDistinta,
-    applicaDistinteLocali, disponibilePerNoi, eLavorazione };
+    applicaDistinteLocali, disponibilePerNoi, eLavorazione,
+    fabbisognoDaListe, materialiCommessa };
 }

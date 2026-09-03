@@ -8030,6 +8030,20 @@ function renderPianificazione(root) {
   )));
 
   const tb = el('tbody');
+  // Le due mappe che servono al triangolino, costruite UNA volta sola: dentro
+  // il ciclo sarebbero rifatte per ogni riga, e su 140 commesse diventa un
+  // conto quadratico su una tabella che si ridisegna a ogni filtro.
+  // `viveConLista` serve TUTTA anche per una riga sola: la giacenza si divide
+  // fra tutte le commesse che vogliono lo stesso codice, e guardarne una sola
+  // le darebbe una copertura che non ha.
+  const viveConLista = (state.operazioni || []).filter(x =>
+    (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
+  const manPerCodice = {};
+  (state.mancanti || []).forEach(m => {
+    const k = String(m.codice || '').trim();
+    if (k) manPerCodice[k] = m;
+  });
+
   list.forEach(o => {
     const cli = state.aziende.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
@@ -8271,45 +8285,93 @@ function renderPianificazione(root) {
     }
     // Mancanti dal fabbisogno: si vedono senza aprire la commessa. Rosso se la
     // preparazione è dichiarata completa (contraddizione), altrimenti giallo.
-    if (typeof mancantiCommessa === 'function') {
+    // ── IL TRIANGOLINO: la situazione DENTRO l'ordine ──────────────────
+    // Dal 3 set il conto viene dalla LISTA CONGELATA della commessa, non
+    // dall'attribuzione di Alnus: quindi dice quanti codici mancano a QUESTA
+    // riga, e cliccandolo si apre la sua scheda Materiali invece di portare
+    // su una schermata d'archivio da rifiltrare.
+    // ⚠ Il conto e SINCRONO: da quando ogni commessa porta la sua lista, la
+    // domanda di ogni codice si ricostruisce tutta in memoria. Niente da
+    // scaricare mentre si disegna la tabella.
+    // Tre fonti in scala, dalla piu forte alla piu debole, e si dice sempre
+    // quale si sta usando:
+    //   1. lista congelata -> quantita esatte per questa commessa
+    //   2. niente lista    -> le righe che Alnus attribuisce a questo OP
+    //   3. niente nemmeno quelle -> il riflesso da una commessa sorella
+    const apriMateriali = (e) => { e.stopPropagation(); openOperazioneModal(o, { scheda:'mat' }); };
+    let badgeFatto = false;
+    if (Array.isArray(o.materiali) && o.materiali.length && typeof materialiCommessa === 'function') {
+      const mm = materialiCommessa(o, viveConLista, manPerCodice);
+      const mancanti = [...mm.entries()].filter(([, q]) => q.manca > 0);
+      if (mancanti.length) {
+        const oggiB = toLocalISO(new Date());
+        const stati = mancanti.map(([cod]) => {
+          const m = manPerCodice[cod];
+          return { cod, lav: typeof eLavorazione === 'function' && eLavorazione(cod),
+            st: m ? statoMateriale(m, oggiB) : { stato:'da_ordinare' } };
+        });
+        // Rosso se qualcosa FERMA davvero: da comprare, gia in ritardo, o
+        // atteso dal cliente. Blu se il mancante e solo roba ordinata con una
+        // data davanti: manca, ma arriva.
+        const ferma = stati.some(x => x.lav || x.st.stato === 'da_ordinare'
+          || x.st.stato === 'in_ritardo' || x.st.stato === 'attesa_cliente');
+        const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+        const dettaglio = mancanti.slice(0, 10).map(([cod, q]) => {
+          const x = stati.find(y => y.cod === cod);
+          let s = '· ' + cod + '  mancano ' + nf(q.manca);
+          if (x.lav) s += '  (lavorazione)';
+          else if (x.st.stato === 'in_ritardo') s += '  in ritardo dal ' + fmtIT(x.st.data)
+            + (x.st.of ? ' · OF ' + x.st.of : '');
+          else if (x.st.stato === 'in_arrivo' && x.st.data) s += '  arriva il ' + fmtIT(x.st.data);
+          else if (x.st.stato === 'attesa_cliente') s += '  lo manda il cliente';
+          return s;
+        });
+        prepCell.append(el('span', {
+          style: 'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;'
+            + 'cursor:pointer;color:' + (ferma ? 'var(--red)' : 'var(--blu)') + ';',
+          title: mancanti.length + (mancanti.length === 1 ? ' codice manca' : ' codici mancano')
+            + ' a questa commessa, su ' + o.materiali.length + '.\n\n' + dettaglio.join('\n')
+            + (mancanti.length > 10 ? '\n… e altri ' + (mancanti.length - 10) : '')
+            + '\n\nClicca per aprire la scheda Materiali di questa commessa.',
+          onclick: apriMateriali,
+        }, '⚠' + mancanti.length));
+      }
+      badgeFatto = true;
+    }
+
+    // ── Fonte 2 e 3: solo per chi la lista non ce l'ha ancora ──
+    if (!badgeFatto && typeof mancantiCommessa === 'function') {
       const mc = mancantiCommessa(o);
       if (mc.nCodici) {
-        // Tre mestieri diversi, tre numeri (27 ago). Prima erano due, e il
-        // conto lavoro finiva nel rosso "da ordinare": su 31 commesse, 16
-        // mostravano un rosso da 48 o 36 codici quando non c'era NIENTE da
-        // ordinare — si aspettava il cliente. Un rosso che si accende sempre
-        // smette di voler dire qualcosa.
         //   rosso   = c'è un ordine da emettere, tocca a noi
         //   arancio = manca ma lo manda il cliente, la mossa non è nostra
         //   giallo  = ordinato, ha una data
-        const etichetta = mc.nBloccanti
-          ? mc.nBloccanti + '/' + mc.nCodici
-          : (mc.nAttesaCliente
-              ? mc.nAttesaCliente + '/' + mc.nCodici
-              : String(mc.nCodici));
+        const etichetta = mc.nBloccanti ? mc.nBloccanti + '/' + mc.nCodici
+          : (mc.nAttesaCliente ? mc.nAttesaCliente + '/' + mc.nCodici : String(mc.nCodici));
         const colore = mc.nBloccanti ? 'var(--red)'
           : (mc.nAttesaCliente ? 'var(--or)' : 'var(--yel)');
         prepCell.append(el('span', {
-          style: 'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;cursor:pointer;color:'
-            + colore + ';',
-          title: mancantiTooltip(mc, o.numero_op),
-          onclick: (e) => { e.stopPropagation(); apriMancantiFiltrati(o.numero_op); },
+          style: 'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;'
+            + 'cursor:pointer;color:' + colore + ';',
+          title: 'Questa commessa non ha ancora la sua lista materiali: il conto '
+            + 'viene da quello che Alnus attribuisce a ' + (o.numero_op || 'questo OP')
+            + ', che è globale.\n\n' + mancantiTooltip(mc, o.numero_op),
+          onclick: apriMateriali,
         }, '⚠' + etichetta));
       } else if (typeof mancantiRiflessi === 'function') {
-        // Nessuna riga QUI, ma può essercene una su una sorella dello stesso
-        // articolo: senza dirlo, la commessa sembrerebbe servita. Il colore è
-        // lo stesso che meriterebbe il badge diretto — se la sorella è ferma,
-        // è ferma anche questa — e la freccia dice che il conto sta altrove.
+        // Senza lista e senza righe proprie resta il riflesso: debole, ma
+        // meglio di un silenzio che si legge come 'a posto'.
         const rifl = mancantiRiflessi(o);
         if (rifl.length) {
           const tBlocc = rifl.reduce((n, r) => n + r.mc.nBloccanti, 0);
           const tAttesa = rifl.reduce((n, r) => n + r.mc.nAttesaCliente, 0);
           const tCod = rifl.reduce((n, r) => n + r.mc.nCodici, 0);
           prepCell.append(el('span', {
-            style: 'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;cursor:pointer;color:'
+            style: 'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;'
+              + 'cursor:pointer;color:'
               + (tBlocc ? 'var(--red)' : (tAttesa ? 'var(--or)' : 'var(--yel)')) + ';',
             title: riflessiTooltip(rifl, o, (art && art.codice) || ''),
-            onclick: (e) => { e.stopPropagation(); apriMancantiFiltrati(rifl[0].op.numero_op); },
+            onclick: apriMateriali,
           }, '⚠↗' + (tBlocc ? tBlocc + '/' + tCod : String(tCod))));
         }
       }
@@ -8511,7 +8573,10 @@ function makeAutocompleteCreate(opts) {
   };
 }
 
-function openOperazioneModal(o) {
+// `opts.scheda` = id della linguetta su cui aprirsi ('mat' per i materiali).
+// Serve al triangolino di Ordini cliente: portare sulla scheda giusta e
+// meta del gesto, e senza si atterra sui Dati e si deve cliccare ancora.
+function openOperazioneModal(o, opts) {
   const isNew = !o;
   const isAdmin = state.profile?.ruolo === 'admin';
   o = o || {
@@ -9321,8 +9386,12 @@ function openOperazioneModal(o) {
 
     // Lo stato di OGGI, appoggiato sopra le quantita fisse.
     (async () => {
-      let mio = null;
-      try { mio = o.numero_op ? await fabbisognoDiCommessa(o.numero_op) : null; } catch (e) { mio = null; }
+      const viveConLista = (state.operazioni || []).filter(x =>
+        (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
+      const manPerCodice = {};
+      (state.mancanti || []).forEach(m => { const k = String(m.codice || '').trim(); if (k) manPerCodice[k] = m; });
+      const mio = (typeof materialiCommessa === 'function')
+        ? materialiCommessa(o, viveConLista, manPerCodice) : null;
       if (!sezMateriali.isConnected) return;
       const oggi = toLocalISO(new Date());
       const manDi = (c) => (state.mancanti || []).find(x => String(x.codice || '').trim() === c);
@@ -10790,6 +10859,8 @@ function openOperazioneModal(o) {
   }
   const tabBar = el('div', { class:'optabs' });
   const tabBtns = {};
+  const schedaIniziale = (opts && opts.scheda && tabs.some(t => t.id === opts.scheda))
+    ? opts.scheda : 'dati';
   const switchTab = (id) => {
     tabs.forEach(t => {
       t.panel.classList.toggle('on', t.id === id);
@@ -10797,11 +10868,12 @@ function openOperazioneModal(o) {
     });
   };
   tabs.forEach(t => {
-    tabBtns[t.id] = el('button', { type:'button', class:'optab-btn' + (t.id === 'dati' ? ' act' : ''),
+    tabBtns[t.id] = el('button', { type:'button', class:'optab-btn' + (t.id === schedaIniziale ? ' act' : ''),
       onclick: () => switchTab(t.id) }, t.label);
     tabBar.append(tabBtns[t.id]);
   });
   body.append(tabBar);
+  if (schedaIniziale !== 'dati') switchTab(schedaIniziale);
 
   // Quanti codici mancano, scritto sulla linguetta: cosi si sa se andare a
   // guardare senza doverci andare. Arriva dopo, col calcolo, perche la
@@ -10810,15 +10882,20 @@ function openOperazioneModal(o) {
   // per la stessa cosa. E niente colore inline, che sovrascriverebbe
   // l'accento della linguetta attiva — Materiali resterebbe rossa invece di
   // accendersi come tutte le altre quando la selezioni.
-  if (!isNew && o.numero_op && typeof fabbisognoDiCommessa === 'function') {
-    fabbisognoDiCommessa(o.numero_op).then(m => {
+  if (!isNew && Array.isArray(o.materiali) && o.materiali.length && typeof materialiCommessa === 'function') {
+    (async () => {
+      const vive = (state.operazioni || []).filter(x =>
+        (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
+      const mp = {};
+      (state.mancanti || []).forEach(m => { const k = String(m.codice || '').trim(); if (k) mp[k] = m; });
+      const m = materialiCommessa(o, vive, mp);
       if (!m || !tabBtns.mat || !tabBtns.mat.isConnected) return;
       const n = [...m.values()].filter(q => q.manca > 0).length;
       if (!n) return;
       tabBtns.mat.textContent = 'Materiali ⚠' + n;
       tabBtns.mat.title = n === 1 ? 'Manca 1 codice a questa commessa'
         : 'Mancano ' + n + ' codici a questa commessa';
-    }).catch(() => {});
+    })().catch(() => {});
   }
 
   body.append(form);
