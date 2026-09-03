@@ -3615,6 +3615,8 @@ async function caricaMancanti() {
     if (error) { mancantiTabellaOk = false; state.mancanti = []; return; }
     mancantiTabellaOk = true;
     state.mancanti = data || [];
+    // Giacenze e impegni nuovi: il fabbisogno tenuto in caldo non vale piu.
+    if (typeof svuotaCacheFabbisogno === 'function') svuotaCacheFabbisogno();
   } catch (e) { mancantiTabellaOk = false; state.mancanti = []; }
 }
 
@@ -3873,7 +3875,32 @@ async function fabbScaricaDistinta(codiciRadice) {
 // ⚠ Serve TUTTA la domanda anche quando interessa UNA commessa: la giacenza
 // si divide fra tutte quelle che vogliono lo stesso codice, e guardarne una
 // sola le darebbe una copertura che non ha.
-async function calcolaFabbisognoVivo() {
+// Il calcolo si tiene in caldo per un minuto. Senza, APRIRE UNA COMMESSA
+// scaricherebbe le distinte di tutte le commesse vive, ogni volta: su una
+// scheda che si apre e si chiude venti volte di fila sarebbe egress buttato,
+// e questo progetto l egress lo conta.
+// Un minuto e la misura giusta: abbastanza per una sfogliata di commesse,
+// abbastanza poco perche dopo un import dei mancanti i numeri si aggiornino
+// da soli senza ricaricare la pagina.
+let _fabbCache = null;      // { quando, chiave, promessa }
+function _fabbChiave() {
+  return (state.operazioni || []).length + '|' + (state.mancanti || []).length
+    + '|' + (state.articoli || []).length;
+}
+function svuotaCacheFabbisogno() { _fabbCache = null; }
+
+function calcolaFabbisognoVivo() {
+  const ora = Date.now();
+  const chiave = _fabbChiave();
+  if (_fabbCache && _fabbCache.chiave === chiave && (ora - _fabbCache.quando) < 60000) {
+    return _fabbCache.promessa;
+  }
+  const promessa = _calcolaFabbisognoVivo().catch(e => { _fabbCache = null; throw e; });
+  _fabbCache = { quando: ora, chiave, promessa };
+  return promessa;
+}
+
+async function _calcolaFabbisognoVivo() {
   const vive = state.operazioni
     .filter(o => o.stato === 'aperta' || o.stato === 'sospesa')
     .map(o => {
@@ -4140,19 +4167,29 @@ function bottoneVistaMateriali() {
 //   in arrivo       -> c'e e ha una data: si aspetta
 // Le LAVORAZIONI stanno in un gruppo loro: non si cercano in magazzino, si
 // ordinano a un terzista.
-function riquadroRispostaMateriali(numeroOp) {
+// `opts.testata` = false quando il riquadro sta GIA dentro la commessa: li
+// ripetere numero e articolo sarebbe dire due volte dove si e.
+// `opts.cornice` = false quando e una sezione di una scheda, non un riquadro
+// a se: la cornice dentro un'altra cornice fa solo rumore.
+function riquadroMaterialiCommessa(numeroOp, opts) {
+  opts = opts || {};
   if (typeof statoMateriale !== 'function') return null;
+  const conTesta = opts.testata !== false;
+  const conCornice = opts.cornice !== false;
   const suoi = (state.mancanti || []).filter(m => m.numero_op === numeroOp);
-  const box = el('div', { style:'border:1px solid var(--brd);border-radius:5px;background:var(--sur);'
-    + 'padding:16px 18px;margin:0 0 16px;' });
+  const box = el('div', { style: conCornice
+    ? 'border:1px solid var(--brd);border-radius:5px;background:var(--sur);padding:16px 18px;margin:0 0 16px;'
+    : 'margin:0;' });
   const op = (state.operazioni || []).find(o => o.numero_op === numeroOp);
   const art = op ? (state.articoli || []).find(x => x.id === op.articolo_id) : null;
-  const testa = el('div', { style:'font-family:JetBrains Mono,monospace;font-size:12px;margin-bottom:12px;' },
-    el('span', { style:'color:var(--acc);font-weight:700;' }, numeroOp),
-    document.createTextNode(op ? '  ·  ' + (op.numero_ordine || '') + '/' + (op.pos || '') : ''),
-    document.createTextNode(art ? '  ·  ' + art.codice : ''));
+  if (conTesta) {
+    box.append(el('div', { style:'font-family:JetBrains Mono,monospace;font-size:12px;margin-bottom:12px;' },
+      el('span', { style:'color:var(--acc);font-weight:700;' }, numeroOp),
+      document.createTextNode(op ? '  ·  ' + (op.numero_ordine || '') + '/' + (op.pos || '') : ''),
+      document.createTextNode(art ? '  ·  ' + art.codice : '')));
+  }
   const corpo = el('div', {}, el('div', { class:'sub', style:'font-size:11px;' }, 'Calcolo in corso…'));
-  box.append(testa, corpo);
+  box.append(corpo);
 
   (async () => {
     let mio = null;
@@ -4167,8 +4204,18 @@ function riquadroRispostaMateriali(numeroOp) {
     // quello che dice Alnus, dichiarandolo: meglio un dato dichiarato parziale
     // che una schermata vuota.
     if (!mio || !mio.size) {
-      if (!suoi.length) { corpo.append(el('div', { class:'sub', style:'font-size:11px;' },
-        'Nessun materiale segnalato per questa commessa.')); return; }
+      if (!suoi.length) {
+        corpo.append(el('div', { class:'sub', style:'font-size:11px;' },
+          art ? 'L\'articolo ' + art.codice + ' non ha una distinta: senza, i materiali '
+            + 'di questa commessa non si possono sapere.'
+            : 'Nessun materiale segnalato per questa commessa.'));
+        // Non basta dire che manca: si porta dove si scrive.
+        if (art && state.profile?.ruolo === 'admin') {
+          corpo.append(el('button', { type:'button', class:'btnsm', style:'margin-top:8px;',
+            onclick: () => openArticoloModal(art) }, '✎ Scrivi la distinta di ' + art.codice));
+        }
+        return;
+      }
       corpo.append(el('div', { class:'sub', style:'font-size:11px;margin-bottom:8px;color:var(--yel);' },
         '⚠ Senza distinta non si può dire quanto manca a QUESTA commessa: '
         + 'qui sotto c\'è quello che Alnus segnala in generale.'));
@@ -4263,7 +4310,7 @@ function renderFabbisogno(root) {
   // Arrivando dal triangolino la domanda non e "quali codici mancano" — quella
   // e la tabella piu sotto — ma "posso finire questa commessa, e se no di chi
   // e la mossa". Il riquadro risponde a quella, e il resto viene dopo.
-  const risposta = mancantiFiltroOp ? riquadroRispostaMateriali(mancantiFiltroOp) : null;
+  const risposta = mancantiFiltroOp ? riquadroMaterialiCommessa(mancantiFiltroOp) : null;
   if (risposta) root.append(risposta);
   root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
     'Tutto ciò che è sotto scorta secondo l\'ultima estrazione del magazzino. '
@@ -5500,6 +5547,10 @@ function openArticoloModal(a, opts) {
         } else {
           state.articoli = state.articoli.map(x => x.id === a.id ? data : x);
         }
+        // La distinta dell articolo puo essere cambiata: il fabbisogno tenuto
+        // in caldo si butta, o la sezione Materiali delle commesse continuerebbe
+        // a mostrare il conto vecchio per un minuto.
+        if (typeof svuotaCacheFabbisogno === 'function') svuotaCacheFabbisogno();
         toast(isNew ? 'Articolo creato' : 'Articolo aggiornato');
         if (opts && typeof opts.dopoChiusura === 'function') { chiudi(); }
         else { closeModal(); renderTab('articoli'); }
@@ -9086,105 +9137,35 @@ function openOperazioneModal(o) {
   // modifica. Compare ogni volta che ci sono mancanti su questo numero OP —
   // anche se la tendina dice "completo": in quel caso la contraddizione viene
   // DICHIARATA invece di restare nascosta (decisione Nico).
-  const notaMancanti = el('div', { style:'margin-top:6px;' });
+  // ── SEZIONE MATERIALI ──────────────────────────────────────────────
+  // Prima era un elenco appeso sotto la tendina "Preparazione materiale":
+  // un pezzo a meta, in un posto che non era il suo. Ora e una SEZIONE della
+  // commessa, e mostra i materiali DI QUESTA COMMESSA e basta.
+  // ⚠ Non si crea e non si salva niente: si DERIVA dalla distinta dell
+  // articolo ogni volta che si apre. Quindi nasce da sola con la commessa, e
+  // il giorno che la distinta cambia cambia anche lei — che e la ragione per
+  // cui in questo progetto i derivati non si materializzano mai.
+  const sezMateriali = el('div', { style:'margin-top:6px;' });
   const renderMancanti = () => {
-    notaMancanti.innerHTML = '';
-    if (typeof mancantiCommessa !== 'function') return;
-    const m = mancantiCommessa({ ...o, stato_preparazione: selPrep.value });
-    if (!m.nCodici) {
-      if (o.numero_op && (state.mancanti || []).length) {
-        // "Nessun codice mancante" da solo si legge come "il materiale c'è", e
-        // spesso non è vero: il fabbisogno scrive il mancante sotto UNA sola
-        // commessa. Se una sorella dello stesso articolo ce l'ha, si dice.
-        const rifl = (typeof mancantiRiflessi === 'function') ? mancantiRiflessi(o) : [];
-        if (!rifl.length) {
-          notaMancanti.append(el('div', { class:'sub', style:'font-size:11px;' },
-            'Nessun codice mancante per ' + o.numero_op + ' nell\'ultimo fabbisogno importato.'));
-        } else {
-          const tBlocc = rifl.reduce((n, r) => n + r.mc.nBloccanti, 0);
-          const box = el('div', {
-            style:'font-size:11px;border:1px solid var(--yel);border-radius:4px;padding:8px 10px;'
-              + 'background:rgba(255,209,102,.07);' });
-          box.append(el('div', { style:'font-weight:700;color:var(--yel);margin-bottom:4px;' },
-            '⚠ Nessuna riga di fabbisogno qui, ma il materiale NON risulta a posto'));
-          box.append(el('div', { class:'sub', style:'font-size:11px;' },
-            'Il fabbisogno attribuisce ogni codice mancante a una sola commessa: quella che lo '
-            + 'consuma per prima. Lo stesso articolo è in lavorazione anche su:'));
-          rifl.forEach(r => box.append(el('div', {
-            style:'font-family:JetBrains Mono,monospace;font-size:11px;margin-top:4px;cursor:pointer;'
-              + 'text-decoration:underline dotted;text-underline-offset:2px;',
-            title:'Apri la scheda Mancanti su ' + r.op.numero_op,
-            onclick: () => apriMancantiFiltrati(r.op.numero_op),
-          },
-            (r.op.numero_ordine || '?') + '/' + (r.op.pos || '?') + '  ' + (r.op.numero_op || '—')
-            + (r.op.scadenza ? '  scad. ' + fmtIT(r.op.scadenza) : '')
-            + '  →  ' + (r.mc.nBloccanti
-                ? r.mc.nBloccanti + ' da ordinare su ' + r.mc.nCodici
-                : r.mc.nCodici + ' codici'))));
-          box.append(el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
-            tBlocc
-              ? 'Stesso articolo = stessi materiali: quei ' + tBlocc
-                + (tBlocc === 1 ? ' codice manca' : ' codici mancano') + ' anche qui.'
-              : 'Stesso articolo = stessi materiali: quello che manca là riguarda anche questa commessa.'));
-          notaMancanti.append(box);
-        }
-      }
+    sezMateriali.innerHTML = '';
+    if (!o.numero_op) {
+      sezMateriali.append(el('div', { class:'sub', style:'font-size:11px;' },
+        'Senza numero OP non si possono agganciare i materiali: scrivilo qui sopra.'));
       return;
     }
-    const nf = (n) => n == null ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
-    const oggi = toLocalISO(new Date());
-    const righe = m.righe.map(x => {
-      const blocc = mancanteBloccante(x);
-      const cat = mancanteCategoria(x);
-      const cons = mancanteConsegne(x);
-      const prima = cons[0];
-      // Stessa distinzione del resto dell'app: il conto lavoro manca eccome,
-      // ma non è "da ordinare" — e non è nemmeno "già ordinato".
-      const ICONA = { da_ordinare:'⛔ ', attesa_cliente:'⏳ ', in_arrivo:'📦 ', consumo:'· ' };
-      const DETTA = {
-        da_ordinare:    ' · da ordinare',
-        attesa_cliente: ' · in attesa dal cliente',
-        consumo:        ' · materiale di consumo',
-      };
-      return {
-        titolo: (ICONA[cat] || '📦 ') + x.codice,
-        meta: (x.descrizione ? String(x.descrizione).slice(0, 40) : '—')
-          + (DETTA[cat] !== undefined ? DETTA[cat]
-                   : (prima ? ' · in arrivo ' + fmtIT(prima.data)
-                       + (prima.data < oggi ? ' ⚠ in ritardo' : '') : ' · già ordinato')),
-        valore: 'mancano ' + nf((blocc || cat === 'attesa_cliente') ? x.qta_da_ordinare
-            : Math.abs((Number(x.giacenza) || 0) - (Number(x.impegno) || 0)))
-          + (x.um ? ' ' + x.um : ''),
-      };
-    });
-    // Il sommario dice subito la cosa che conta: chi deve muoversi. Le quattro
-    // categorie restano distinte anche qui — sommare conto lavoro e "in
-    // arrivo" farebbe sembrare ordinato qualcosa che nessuno ha ordinato.
-    const pezzi = [];
-    if (m.nBloccanti) pezzi.push('⛔ ' + m.nBloccanti
-      + (m.nBloccanti === 1 ? ' codice da ordinare' : ' codici da ordinare'));
-    if (m.nAttesaCliente) pezzi.push('⏳ ' + m.nAttesaCliente + ' in attesa dal cliente');
-    if (m.nInArrivoVero) pezzi.push('📦 ' + m.nInArrivoVero + ' in arrivo'
-      + (m.prossima ? ', prossima consegna ' + fmtIT(m.prossima) : ''));
-    if (m.nConsumo) pezzi.push('· ' + m.nConsumo + ' di consumo');
-    const sommario = pezzi.join('  ·  ')
-      || ('📦 ' + m.nCodici + (m.nCodici === 1 ? ' codice' : ' codici'));
-    notaMancanti.append(entityTimeline({
-      sommario: sommario
-        + (m.nRitardo ? ' · ⚠ ' + m.nRitardo + ' in ritardo' : '')
-        + (m.dataImport ? ' · estrazione del ' + fmtIT(String(m.dataImport).slice(0, 10)) : ''),
-      debole: m.nBloccanti > 0,
-      // APERTO di default: qui lo scopo è vedere i codici, non doverli cercare.
-      // Sopra una certa lunghezza resta chiuso, altrimenti 67 righe sommergono
-      // il resto della scheda: il riepilogo basta, il dettaglio si apre.
-      apertaDiDefault: righe.length <= 15,
-      righe,
-    }));
-    if (m.incoerente) {
-      notaMancanti.append(el('div', { class:'sub',
-        style:'margin-top:4px;color:var(--red);font-size:11px;' },
-        '⚠ La preparazione è dichiarata COMPLETA ma il fabbisogno riporta '
-        + m.nCodici + (m.nCodici === 1 ? ' codice mancante' : ' codici mancanti') + '.'));
+    if (typeof riquadroMaterialiCommessa !== 'function') return;
+    const r = riquadroMaterialiCommessa(o.numero_op, { testata: false, cornice: false });
+    if (r) sezMateriali.append(r);
+    // La contraddizione si dichiara, come prima: la tendina dice "completo"
+    // ma il materiale non c'e.
+    if (selPrep.value === 'completo' && typeof mancantiCommessa === 'function') {
+      const m = mancantiCommessa({ ...o, stato_preparazione: 'completo' });
+      if (m.nCodici) {
+        sezMateriali.append(el('div', { class:'sub',
+          style:'margin-top:10px;color:var(--red);font-size:11px;' },
+          '⚠ La preparazione è dichiarata COMPLETA ma risultano '
+          + m.nCodici + (m.nCodici === 1 ? ' codice mancante' : ' codici mancanti') + '.'));
+      }
     }
   };
   selPrep.addEventListener('change', renderMancanti);
@@ -9510,9 +9491,12 @@ function openOperazioneModal(o) {
         + 'nella scheda Consuntivo, sezione "Ore esterne".')),
     ...(fieldRealistica ? [fieldRealistica] : []),
     el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep, notaMancanti),
+      el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
       el('div', { class:'field' }),
     ),
+    el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;'
+      + 'letter-spacing:.1em;font-size:11px;' }, '── Materiali ──'),
+    sezMateriali,
   );
 
   // Confronto fasi ↔ pagato: aggiorna quando cambi i minuti pagati, e una volta all'avvio.
