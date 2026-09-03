@@ -9301,10 +9301,16 @@ function openOperazioneModal(o) {
   // Vengono agganciati SUBITO al form (prima di riempirli), così tutti i
   // form.querySelector(...) dei blocchi di setup trovano i campi.
   const pDati = el('div', { class:'optab-panel on' });
+  // I materiali sono una SCHEDA, come Dati e Lavorazione (3 set, corretto da
+  // Nico: "deve essere una scheda a se"). Erano finiti come sezione dentro
+  // Dati, e li facevano scorrere un pannello che parla d'altro.
+  const pMat  = el('div', { class:'optab-panel' });
   const pLav  = el('div', { class:'optab-panel' });
   const pProd = el('div', { class:'optab-panel' });
   const pCons = el('div', { class:'optab-panel' });
-  form.append(pDati, pLav, pProd, pCons);
+  form.append(pDati, pMat, pLav, pProd, pCons);
+  // La sezione dei materiali e tutto il contenuto della sua scheda.
+  pMat.append(sezMateriali);
 
   pDati.append(
     el('div', { class:'frow' },
@@ -9494,9 +9500,6 @@ function openOperazioneModal(o) {
       el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
       el('div', { class:'field' }),
     ),
-    el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;'
-      + 'letter-spacing:.1em;font-size:11px;' }, '── Materiali ──'),
-    sezMateriali,
   );
 
   // Confronto fasi ↔ pagato: aggiorna quando cambi i minuti pagati, e una volta all'avvio.
@@ -10581,6 +10584,7 @@ function openOperazioneModal(o) {
   // ── Barra schede ──
   const tabs = [
     { id:'dati', label:'Dati', panel:pDati },
+    { id:'mat', label:'Materiali', panel:pMat },
     { id:'lav', label:'Lavorazione', panel:pLav },
   ];
   if (!isNew) {
@@ -10601,6 +10605,24 @@ function openOperazioneModal(o) {
     tabBar.append(tabBtns[t.id]);
   });
   body.append(tabBar);
+
+  // Quanti codici mancano, scritto sulla linguetta: cosi si sa se andare a
+  // guardare senza doverci andare. Arriva dopo, col calcolo, perche la
+  // distinta non sta in memoria.
+  // ⚠ `⚠N` e la stessa dicitura del badge in Ordini cliente: una lingua sola
+  // per la stessa cosa. E niente colore inline, che sovrascriverebbe
+  // l'accento della linguetta attiva — Materiali resterebbe rossa invece di
+  // accendersi come tutte le altre quando la selezioni.
+  if (!isNew && o.numero_op && typeof fabbisognoDiCommessa === 'function') {
+    fabbisognoDiCommessa(o.numero_op).then(m => {
+      if (!m || !tabBtns.mat || !tabBtns.mat.isConnected) return;
+      const n = [...m.values()].filter(q => q.manca > 0).length;
+      if (!n) return;
+      tabBtns.mat.textContent = 'Materiali ⚠' + n;
+      tabBtns.mat.title = n === 1 ? 'Manca 1 codice a questa commessa'
+        : 'Mancano ' + n + ' codici a questa commessa';
+    }).catch(() => {});
+  }
 
   body.append(form);
   modal.append(body);
