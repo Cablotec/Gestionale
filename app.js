@@ -5434,15 +5434,6 @@ function openArticoloModal(a, opts) {
       distNota.append(
         el('span', { style:'color:var(--acc);font-weight:600;' }, '✎ Scritta qui'),
         document.createTextNode(' — vale questa, e i reimport da Alnus non la toccano.'));
-      if (!readonly && distintaAlnus && distintaAlnus.length) {
-        distNota.append(document.createTextNode(' '), el('button', {
-          type:'button', class:'btnsm', style:'padding:1px 8px;',
-          onclick: () => {
-            if (!confirm('Cancellare le righe scritte qui e tornare alla distinta di Alnus?')) return;
-            distinta.length = 0; renderDistinta(); aggiornaNotaDistinta();
-            if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
-          } }, 'torna a quella di Alnus'));
-      }
       return;
     }
     if (distintaAlnus === null) return;
