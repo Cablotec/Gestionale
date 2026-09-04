@@ -37,7 +37,7 @@ button{font-family:inherit;}
 .hdr-op{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--bg);background:var(--acc);border:none;border-radius:20px;padding:7px 14px;font-weight:700;cursor:pointer;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .hdr-btn{background:var(--sur2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;width:38px;height:34px;font-size:16px;cursor:pointer;}
 
-/* ── Nav sezioni (Lavoro / Mezzi / Ferie) ── */
+/* ── Nav sezioni (Produzione / Mezzi / Ferie) ── */
 .mnav{display:flex;gap:4px;padding:8px 14px 0;border-bottom:1px solid var(--brd);}
 .mnav-btn{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:9px 4px;cursor:pointer;}
 .mnav-btn.act{color:var(--acc);border-bottom-color:var(--acc);}
@@ -199,7 +199,7 @@ button{font-family:inherit;}
 </div>
 
 <div class="mnav">
-  <button class="mnav-btn act" id="nav-lavoro" onclick="navTo('lavoro')">⏱ Lavoro</button>
+  <button class="mnav-btn act" id="nav-lavoro" onclick="navTo('lavoro')">⏱ Produzione</button>
   <button class="mnav-btn" id="nav-mezzi" onclick="navTo('mezzi')">🚐 Mezzi</button>
   <button class="mnav-btn" id="nav-ferie" onclick="navTo('ferie')">🏖 Ferie</button>
 </div>
@@ -298,7 +298,7 @@ function show(id) {
   });
 }
 
-// Navigazione tra le sezioni dell'app (Lavoro / Mezzi / Ferie).
+// Navigazione tra le sezioni dell'app (Produzione / Mezzi / Ferie).
 function navTo(sez) {
   if (sez === 'mezzi') { mezziVista = 'lista'; show('step-mezzi'); renderMezzi(); return; }
   if (sez === 'ferie') { ferieVista = 'lista'; show('step-ferie'); renderFerie(); return; }
