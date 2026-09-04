@@ -5133,10 +5133,29 @@ function openArticoloModal(a, opts) {
   // Chiusura: se chi ha aperto la scheda vuole riprendere il controllo dopo
   // (es. modal commessa → matita fasi → anagrafica → ritorno alla commessa),
   // passa opts.dopoChiusura. In quel caso NIENTE salto alla tab articoli.
+  // ⚠ Stessa guardia del modal commessa: da quando dalla distinta si salta
+  // in un sottoassieme, uscire di qui con delle modifiche scritte e un gesto
+  // che capita per sbaglio. `openModal` svuota la radice e si porta via
+  // tutto, in silenzio.
+  let artModificato = false;
   const chiudi = () => {
     closeModal();
     if (opts && typeof opts.dopoChiusura === 'function') opts.dopoChiusura();
   };
+  // `poi` si esegue solo se si e deciso di andare. Una domanda sola per la
+  // ✕, per Esc e per il salto a un sottoassieme.
+  const lasciaArticolo = async (poi) => {
+    if (!artModificato || readonly) return poi();
+    const scelta = await chiediConferma({
+      titolo: 'Modifiche non salvate',
+      testo: 'Su questo prodotto ci sono modifiche che non hai ancora salvato.\n'
+        + 'Uscendo adesso vanno perse.',
+      bottoni: [{ id:'esci', etichetta:'Esci senza salvare', tipo:'pericolo' },
+        { id:'annulla', etichetta:'Annulla' }],
+    });
+    if (scelta === 'esci') return poi();
+  };
+  const chiudiArticolo = () => lasciaArticolo(chiudi);
   // Valore originale dei minuti, per chiedere conferma se cambia
   const minutiOrig = (a.minuti_unitari != null && a.minuti_unitari !== '')
     ? Number(a.minuti_unitari) : null;
@@ -5144,9 +5163,10 @@ function openArticoloModal(a, opts) {
   // 900px come il modal commessa: la distinta ha tre colonne piu la
   // descrizione sotto, e a 560 stava stretta.
   const modal = el('div', { class:'modal', style:'max-width:900px;' });
+  ['input', 'change'].forEach(ev => modal.addEventListener(ev, () => { artModificato = true; }, true));
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, isNew ? 'Nuovo Articolo' : (readonly ? 'Articolo' : 'Modifica Articolo')),
-    el('button', { class:'mclose', onclick:chiudi }, '✕'),
+    el('button', { class:'mclose', onclick:chiudiArticolo }, '✕'),
   ));
 
   const body = el('div', { class:'mbody' });
@@ -5348,6 +5368,32 @@ function openArticoloModal(a, opts) {
       return;
     }
 
+    // ── Chi di queste righe e a sua volta un prodotto con la sua distinta ──
+    // La distinta E GIA un albero: mancava solo che dicesse quali rami si
+    // aprono. Niente vista ad albero a parte — sarebbe una seconda schermata
+    // per lo stesso dato, e la seconda schermata e sempre quella che poi
+    // racconta un'altra storia.
+    const sottoDi = (cod) => (state.articoli || []).find(x => x.codice === cod
+      && Array.isArray(x.distinta) && x.distinta.length);
+    const conSotto = distinta.filter(r => r && r.codice && sottoDi(String(r.codice).trim()));
+    if (conSotto.length && typeof applicaDistinteProdotti === 'function') {
+      // Quanti materiali VERI vengono fuori una volta scesi tutti i rami.
+      // E il numero che conta: la lista della commessa sara lunga cosi, non
+      // quanto la tabella qui sotto.
+      let esplosi = null;
+      try {
+        const figliDi = new Map();
+        applicaDistinteProdotti(figliDi, state.articoli);
+        if (a.codice && figliDi.has(a.codice)) {
+          const e = esplodiDistinta(a.codice, 1, figliDi);
+          esplosi = e.materiali.size + (e.segnaposto ? e.segnaposto.size : 0);
+        }
+      } catch (err) { /* se il conto non riesce si tace il numero, non la riga */ }
+      distWrap.append(el('div', { class:'sub', style:'font-size:11px;margin-bottom:6px;' },
+        distinta.length + ' righe · ' + conSotto.length
+          + (conSotto.length === 1 ? ' è un sottoassieme' : ' sono sottoassiemi')
+          + (esplosi ? ' · ' + esplosi + ' materiali una volta esploso' : '')));
+    }
     distWrap.append(intestazioneDist());
     // Oltre una dozzina di righe la scheda diventerebbe un rotolo: si
     // scorre dentro il riquadro invece che dentro la modale.
@@ -5366,29 +5412,36 @@ function openArticoloModal(a, opts) {
       // volta e solo quando si e finito di scriverlo. Tenersi in memoria i
       // 9.327 materiali per un suggerimento sarebbe egress buttato a ogni
       // apertura del gestionale.
+      // ⚠ DUE ELEMENTI, non uno. Il testo della descrizione arriva dopo (dalla
+      // chiamata all'anagrafica) e si scrive con `textContent`: se il badge del
+      // sottoassieme stesse nella stessa cella, quella scrittura se lo
+      // porterebbe via. Separati, il badge sopravvive — e non si accorcia mai,
+      // mentre la descrizione lunga sfuma nei puntini.
+      const hintTxt = el('span', {
+        style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;' });
       const hint = el('div', { class:'sub',
-        style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;' });
+        style:'font-size:11px;min-width:0;display:flex;gap:6px;align-items:center;' }, hintTxt);
       const cerca = async () => {
         const c = (inCod.value || '').trim();
-        hint.style.color = ''; hint.style.fontWeight = ''; hint.textContent = '';
+        hintTxt.style.color = ''; hintTxt.style.fontWeight = ''; hintTxt.textContent = '';
         if (!c) return;
         try {
           const { data } = await sb.from('materiali').select('descrizione,um').eq('codice', c).limit(1);
           const m = (data || [])[0];
           if (m) {
-            hint.textContent = m.descrizione || '';
+            hintTxt.textContent = m.descrizione || '';
             if (!r.um && m.um) { r.um = m.um; inUm.value = m.um; }
           } else {
             // UN CODICE CHE NON C'E NON E UN ERRORE: e un materiale NUOVO.
             // Dirlo con questa parola distingue "l'ho scritto male", che si
             // scopre subito perche il simile in anagrafica esiste, da
             // "questo pezzo in anagrafica non c'e ancora".
-            hint.textContent = '✱ NUOVO · non è in anagrafica materiali';
-            hint.style.color = 'var(--yel)'; hint.style.fontWeight = '700';
+            hintTxt.textContent = '✱ NUOVO · non è in anagrafica materiali';
+            hintTxt.style.color = 'var(--yel)'; hintTxt.style.fontWeight = '700';
           }
         } catch (e) { /* l'anagrafica puo non esserci ancora: si tace */ }
       };
-      inCod.oninput = () => { r.codice = inCod.value.trim(); hint.textContent = ''; };
+      inCod.oninput = () => { r.codice = inCod.value.trim(); hintTxt.textContent = ''; };
       inCod.onblur = cerca;
       inQta.oninput = () => { r.qta = inQta.value === '' ? null : Number(inQta.value); };
       inUm.oninput = () => { r.um = inUm.value.trim() || null; };
@@ -5403,8 +5456,27 @@ function openArticoloModal(a, opts) {
           } }, '✕')));
       // La descrizione che la riga si porta dietro si mostra subito; per le
       // altre ci pensa la chiamata unica qui sotto.
-      if (r.descrizione) hint.textContent = r.descrizione;
-      else if (r.codice) daCercare.push({ codice: r.codice, hint, riga: r, inUm });
+      if (r.descrizione) hintTxt.textContent = r.descrizione;
+      else if (r.codice) daCercare.push({ codice: r.codice, hint: hintTxt, riga: r, inUm });
+      // Se questo codice e a sua volta un prodotto con distinta, la riga lo
+      // dice e ci si entra. Il ramo si apre dove sta, non in un'altra vista.
+      const sub = r.codice ? sottoDi(String(r.codice).trim()) : null;
+      if (sub) {
+        hint.append(el('span', {
+          style:'color:var(--acc);font-weight:700;cursor:pointer;white-space:nowrap;',
+          title: 'Sottoassieme: ' + sub.distinta.length + ' righe di distinta sue.\n'
+            + 'Nella lista della commessa questa riga non compare: al suo posto '
+            + 'ci sono i suoi materiali.\n\nClicca per aprirlo.',
+          onclick: (ev) => {
+            ev.stopPropagation();
+            // Passa dalla guardia: si sta lasciando QUESTA scheda.
+            lasciaArticolo(() => openArticoloModal(sub, {
+              dopoChiusura: () => openArticoloModal(
+                (state.articoli || []).find(x => x.id === a.id) || a, opts),
+            }));
+          },
+        }, '▸ ' + sub.distinta.length + ' righe'));
+      }
     });
     distWrap.append(lista);
 
@@ -5738,6 +5810,8 @@ function openArticoloModal(a, opts) {
   }
   modal.append(foot);
   openModal(modal);
+  // Anche questa scheda dichiara la sua guardia: Esc deve chiedere come la ✕.
+  window.__modalGuardia = chiudiArticolo;
 }
 
 // Ritorna true solo a eliminazione avvenuta (il chiamante decide se chiudere).
