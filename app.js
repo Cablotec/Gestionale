@@ -8755,6 +8755,17 @@ function openOperazioneModal(o, opts) {
 
   // Stato locale degli addetti previsti (modificabile, sincronizzato al salvataggio)
   let addettiSel = isNew ? [] : getOperazioneAddetti(o.id).slice();
+  // ── Modifiche non salvate ──────────────────────────────────────────
+  // Da quando salvando la scheda resta aperta (4 set) si puo uscire con
+  // delle correzioni scritte e mai mandate. Si avvisa SOLO se qualcosa e
+  // stato davvero toccato: un avviso che compare sempre si impara a
+  // scacciare, e da quel momento non protegge piu niente.
+  // Il flag si alza dagli eventi `input`/`change` presi in CATTURA sul
+  // modal: cosi vale anche per i campi che nascono dopo (una fase
+  // aggiunta, una riga di distinta). Assegnare un valore da codice NON
+  // scatena quegli eventi, quindi le precompilazioni automatiche non
+  // fanno falsi allarmi.
+  let modificato = false;
   const canEdit = isAdmin;
   // La colonna prezzo esiste sul DB? (rilevata dai dati caricati). Finché non
   // c'è la migrazione, non mostro il campo né provo a salvarlo — così il
@@ -8762,9 +8773,17 @@ function openOperazioneModal(o, opts) {
   const prezzoAttivo = (state.operazioni || []).some(x => 'prezzo_unitario' in x);
 
   const modal = el('div', { class:'modal', style:'max-width:720px;' });
+  ['input', 'change'].forEach(ev => modal.addEventListener(ev, () => { modificato = true; }, true));
+  const chiudiCommessa = () => {
+    if (!modificato) return closeModal();
+    if (!confirm('Ci sono modifiche non salvate su questa commessa.\n\n'
+      + 'OK = esci e perdile\n'
+      + 'Annulla = torna alla scheda per salvare')) return;
+    closeModal();
+  };
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, isNew ? 'Nuova Operazione' : (isAdmin ? 'Modifica Operazione' : 'Operazione')),
-    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+    el('button', { class:'mclose', onclick:chiudiCommessa }, '✕'),
   ));
 
   const body = el('div', { class:'mbody' });
@@ -11121,7 +11140,9 @@ function openOperazioneModal(o, opts) {
       },
     }, '🗑 Elimina'));
   }
-  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  // Niente tasto "Chiudi" accanto a Salva (4 set, richiesta Nico): la ✕ in
+  // alto fa gia quel mestiere, e due uscite affiancate a un salvataggio
+  // sono un invito a sbagliare bottone.
   if (isAdmin) {
     const btnSave = el('button', { class:'btnp' }, 'Salva');
     btnSave.onclick = async () => {
@@ -11444,6 +11465,7 @@ function openOperazioneModal(o, opts) {
         // riproporrebbe di creare il lotto di produzione — due volte lo
         // stesso fatto.
         Object.assign(o, data);
+        modificato = false;          // da qui in poi non c'e piu niente da perdere
         btnSave.disabled = false;
         btnSave.textContent = 'Salva';
       } catch (e) {
@@ -11457,6 +11479,8 @@ function openOperazioneModal(o, opts) {
   }
   modal.append(foot);
   openModal(modal);
+  // Dopo openModal, che passando da closeModal azzera la guardia precedente.
+  window.__modalGuardia = chiudiCommessa;
 }
 
 async function deleteOperazione(o) {
@@ -12475,8 +12499,21 @@ function openModal(content, opts) {
   bg.append(content);
   $('#modal-root').append(bg);
 }
-function closeModal() { $('#modal-root').innerHTML = ''; }
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+function closeModal() {
+  // La guardia vale per il modal che sta uscendo di scena e non deve
+  // sopravvivergli: chi apre il prossimo non c'entra con le sue modifiche.
+  window.__modalGuardia = null;
+  $('#modal-root').innerHTML = '';
+}
+// ⚠ ESC E LA ✕ SONO DUE PORTE PER LA STESSA USCITA, e in questo progetto
+// ogni volta che ce n'erano due una si dimenticava del controllo (le
+// chiusure dei timbri, gli stati commessa). Qui passano tutte e due di qua:
+// se il modal aperto ha dichiarato una guardia, decide lei.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (typeof window.__modalGuardia === 'function') { window.__modalGuardia(); return; }
+  closeModal();
+});
 
 function openMezzoModal(m) {
   const isNew = !m;
