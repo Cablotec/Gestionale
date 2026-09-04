@@ -5399,9 +5399,7 @@ function openArticoloModal(a, opts) {
   }
 
   const btnDistAdd = readonly ? null : el('button', {
-    // `align-self` perche `.field` e una colonna flex: senza, il bottone si
-    // stira a tutta la scheda e sembra un comando principale.
-    type:'button', class:'btnsm', style:'margin-top:8px;align-self:flex-start;',
+    type:'button', class:'btnsm',
     onclick: () => {
       // Il primo clic su un articolo che ha la distinta di Alnus la RICOPIA
       // invece di partire da un foglio bianco: correggere una riga su venti
@@ -5415,6 +5413,61 @@ function openArticoloModal(a, opts) {
       renderDistinta(); aggiornaNotaDistinta();
       if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
     } }, '+ aggiungi riga');
+
+  // Riempire la distinta dal file invece che a mano. NON scrive niente: mette
+  // le righe nella scheda e basta, il salvataggio resta quello del modal.
+  // Cosi un import sbagliato si annulla chiudendo senza salvare.
+  async function importaDistintaExcel(file) {
+    if (!file) return;
+    let XL;
+    try { XL = await caricaXLSX(); }
+    catch (e) { toast('Excel: ' + (e.message || e), 'err'); return; }
+    try {
+      const buf = await file.arrayBuffer();
+      // `raw:false` + `cellText:true`: si legge il TESTO della cella. Vedi il
+      // commento su `distNum`, e la stessa trappola dei decimali.
+      const wb = XL.read(buf, { type:'array', cellDates:true, cellText:true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const griglia = XL.utils.sheet_to_json(ws, { header:1, defval:'', raw:false });
+      const esito = leggiDistintaExcel(griglia);
+      if (esito.errore) { toast(esito.errore, 'err'); return; }
+      if (!esito.righe.length) { toast('Nessuna riga con codice e quantita nel file', 'err'); return; }
+      // SOSTITUISCE, non fonde: una distinta meta dal file e meta scritta a
+      // mano e un fabbisogno che nessuno riesce piu a spiegare. Se c'e gia
+      // qualcosa lo si dice prima, con i numeri.
+      if (distintaLocale() && !confirm('Sostituire le ' + distinta.length
+          + ' righe scritte qui con le ' + esito.righe.length + ' del file?\n\n'
+          + 'Le righe attuali vanno perse.')) return;
+      distinta.length = 0;
+      esito.righe.forEach(r => distinta.push({ codice: r.codice, qta: r.qta, um: r.um }));
+      renderDistinta(); aggiornaNotaDistinta();
+      if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
+      let msg = esito.righe.length + (esito.righe.length === 1 ? ' riga importata' : ' righe importate');
+      if (esito.scartate.length) msg += ' \u00b7 ' + esito.scartate.length + ' senza quantita, scartate';
+      toast(msg + ' \u2014 premi Salva per confermare');
+    } catch (e) {
+      toast('Errore lettura file: ' + (e.message || e), 'err');
+    }
+  }
+
+  // Il selettore di sistema sta NASCOSTO dentro l'etichetta, che fa da
+  // bottone: una cosa sola, non due. Si azzera `value` dopo la scelta, o
+  // reimportare lo stesso file non farebbe scattare `change`.
+  const btnDistImport = readonly ? null : el('label', {
+    class:'btnsm', style:'position:relative;cursor:pointer;',
+  }, '\u2b06 importa da Excel',
+    el('input', {
+      type:'file', accept:'.xlsx,.xls',
+      style:'position:absolute;inset:0;opacity:0;cursor:pointer;',
+      onchange: (e) => { const f = e.target.files[0]; e.target.value = ''; importaDistintaExcel(f); },
+    }));
+
+  // I due modi di riempirla stanno sulla stessa riga. `align-self` perche
+  // `.field` e una colonna flex: senza, la riga si stira a tutta la scheda e
+  // sembra un comando principale.
+  const distAzioni = readonly ? null : el('div',
+    { style:'display:flex;gap:8px;margin-top:8px;align-self:flex-start;align-items:center;flex-wrap:wrap;' },
+    btnDistAdd, btnDistImport);
 
   renderDistinta();
   aggiornaNotaDistinta();
@@ -5520,7 +5573,7 @@ function openArticoloModal(a, opts) {
   pannelli.materiali.append(
     el('div', { class:'field' },
       distWrap,
-      ...(btnDistAdd ? [btnDistAdd] : []),
+      ...(distAzioni ? [distAzioni] : []),
       distNota));
   pannelli.lavoro.append(
     el('div', { class:'field' }, el('label', {}, 'Tempo pagato (min/pz)'), inMinuti, notaMinuti),
@@ -5660,6 +5713,99 @@ async function deleteArticolo(a) {
 }
 
 // ─── Import Excel ───
+// ══ IMPORT DISTINTA DA EXCEL (4 set, richiesta Nico) ═══════════════════
+// L'estrazione di UNA distinta: un foglio, una riga di intestazioni, una riga
+// per componente. Nel file NON c'e il codice del padre — e per questo che
+// l'import sta DENTRO la scheda del prodotto e non in una pagina d'archivio:
+// il file da solo non sa a chi appartiene, il padre e il prodotto aperto.
+// Diverso dal formato di `strumenti/carica-distinte.js`, che invece porta
+// molte distinte a blocchi con la riga `Codice Padre`.
+//
+// ⚠ Colonne cercate PER NOME, non per posizione (stessa regola del
+// fabbisogno): il file ha la colonna A vuota, 26 colonne in tutto e le
+// intestazioni ERP finiscono con uno spazio. Il confronto normalizza spazi,
+// maiuscole e ACCENTI, cosi "Quantita' Impiego " e "Quantita  Impiego" sono
+// la stessa colonna.
+const DIST_COLONNE = {
+  codice:      ['Codice Componente', 'Codice Articolo', 'Codice'],
+  qta:         ['Quantita Impiego', 'Qta Impiego', 'Quantita'],
+  um:          ['UM', 'U.M.', 'Unita di Misura'],
+  descrizione: ['Descrizione Articolo', 'Descrizione'],
+};
+
+function distNorm(v) {
+  return String(v == null ? '' : v)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+// IL NUMERO SI LEGGE COME LO MOSTRA IL FOGLIO, non come lo dichiara la cella.
+// Sulle distinte di Alnus 2.820 celle su 38.460 avevano perso il separatore
+// decimale — 0,45 letto 45 — e un fabbisogno cinque volte il vero. Stessa
+// regola di `strumenti/carica-distinte.js`: se c'e la virgola i punti sono
+// migliaia, altrimenti il punto e il decimale.
+function distNum(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const grezzo = String(v == null ? '' : v).trim();
+  if (!grezzo) return null;
+  const s = grezzo.includes(',') ? grezzo.replace(/\./g, '').replace(',', '.') : grezzo;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Da griglia (`header:1`) a righe di distinta. PURA: nessun DOM, nessuna
+// scrittura — cosi si puo provare senza aprire il gestionale.
+// Ritorna { righe, scartate, intestazione } oppure { errore }.
+function leggiDistintaExcel(griglia) {
+  const trovaCol = (riga, nomi) => {
+    const cercati = nomi.map(distNorm);
+    for (let i = 0; i < riga.length; i++) {
+      if (cercati.includes(distNorm(riga[i]))) return i;
+    }
+    return -1;
+  };
+  // L'intestazione non e per forza la prima riga: certe estrazioni hanno
+  // sopra un titolo o una riga vuota. Si cerca la riga che ha SIA il codice
+  // SIA la quantita — una sola delle due non basta a riconoscerla.
+  let col = null, testa = -1;
+  for (let i = 0; i < Math.min(griglia.length, 20); i++) {
+    const riga = griglia[i] || [];
+    const cCod = trovaCol(riga, DIST_COLONNE.codice);
+    const cQta = trovaCol(riga, DIST_COLONNE.qta);
+    if (cCod >= 0 && cQta >= 0) {
+      testa = i;
+      col = { codice: cCod, qta: cQta,
+        um: trovaCol(riga, DIST_COLONNE.um),
+        descrizione: trovaCol(riga, DIST_COLONNE.descrizione) };
+      break;
+    }
+  }
+  if (testa < 0) {
+    return { errore: 'Non trovo le colonne "Codice Componente" e "Quantita Impiego": '
+      + 'non sembra l\'estrazione di una distinta.' };
+  }
+  const righe = [], scartate = [];
+  const etCod = distNorm((griglia[testa] || [])[col.codice]);
+  for (let i = testa + 1; i < griglia.length; i++) {
+    const r = griglia[i] || [];
+    const cod = String(r[col.codice] == null ? '' : r[col.codice]).trim();
+    if (!cod) continue;
+    // Certe estrazioni ripetono l'intestazione a ogni pagina.
+    if (distNorm(cod) === etCod) continue;
+    const q = distNum(r[col.qta]);
+    // Una riga senza quantita non e un materiale: si scarta, ma si CONTA —
+    // sparire in silenzio e il modo piu facile per perdere mezza distinta.
+    if (!(q > 0)) { scartate.push(cod); continue; }
+    righe.push({
+      codice: cod,
+      qta: q,
+      um: col.um >= 0 ? (String(r[col.um] || '').trim() || null) : null,
+      descrizione: col.descrizione >= 0 ? (String(r[col.descrizione] || '').trim() || null) : null,
+    });
+  }
+  return { righe, scartate, intestazione: testa };
+}
+
 async function articoliImportExcel(file) {
   if (!file) return;
   if (typeof XLSX === 'undefined') {
