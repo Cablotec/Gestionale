@@ -5414,15 +5414,16 @@ function openArticoloModal(a, opts) {
     }
   }
 
+  // La nota dice solo cosa fare quando non c'e ancora niente. Su una distinta
+  // gia scritta taceva: "vale questa, e i reimport da Alnus non la toccano"
+  // rassicurava su un pericolo che non esiste piu — la tabella di Alnus e
+  // stata ritirata il 4 set, e non c'e piu nessun'altra origine da cui
+  // difendersi. Una spiegazione che sopravvive alla cosa che spiegava non e
+  // innocua: fa credere che ci sia ancora qualcosa da sapere.
   function aggiornaNotaDistinta() {
-    distNota.innerHTML = '';
-    if (!distintaLocale()) {
-      distNota.textContent = 'Scrivi le righe qui sotto, oppure importa il foglio Excel della distinta.';
-      return;
-    }
-    distNota.append(
-      el('span', { style:'color:var(--acc);font-weight:600;' }, '✎ Distinta del prodotto'),
-      document.createTextNode(' — vale questa, e i reimport da Alnus non la toccano.'));
+    distNota.textContent = distintaLocale()
+      ? ''
+      : 'Scrivi le righe qui sotto, oppure importa il foglio Excel della distinta.';
   }
 
   const btnDistAdd = readonly ? null : el('button', {
