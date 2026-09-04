@@ -11429,8 +11429,23 @@ function openOperazioneModal(o, opts) {
         stopWatchdog();
         toast(isNew ? 'Operazione creata' : 'Operazione aggiornata');
         // Refresha la tab da cui è stato aperto il modal (Pianificazione, Gantt,
-        // Magazzino, Storico…), non forzare un cambio di vista.
-        closeModal(); renderTab(state.currentTab || 'pianificazione');
+        // Storico…), non forzare un cambio di vista. Il modal vive fuori da
+        // `#tab-content`, quindi ridisegnare la tab sotto non lo tocca.
+        renderTab(state.currentTab || 'pianificazione');
+        // SALVANDO UNA MODIFICA LA FINESTRA RESTA APERTA (4 set, richiesta
+        // Nico): si apre un ordine per correggere due campi, e chiudere a
+        // ogni salvataggio costringe a riaprirlo per la correzione dopo.
+        // ⚠ Su una commessa NUOVA si chiude lo stesso: `isNew` resta vero
+        // anche dopo l'insert, quindi un secondo Salva creerebbe un DOPPIONE.
+        if (isNew) { closeModal(); return; }
+        // ⚠⚠ `o` va riallineato alla riga appena scritta. Serve ai controlli
+        // che confrontano lo stato PRIMA e DOPO: con un `o` fermo al vecchio
+        // stato, un secondo Salva su una commessa passata a completata
+        // riproporrebbe di creare il lotto di produzione — due volte lo
+        // stesso fatto.
+        Object.assign(o, data);
+        btnSave.disabled = false;
+        btnSave.textContent = 'Salva';
       } catch (e) {
         stopWatchdog();
         btnSave.disabled = false;
