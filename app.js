@@ -5361,19 +5361,33 @@ function openArticoloModal(a, opts) {
         'Nessuna distinta, né dall\'estrazione Alnus né scritta qui.'));
       return;
     }
-    // Un elenco lungo si richiude: su certi articoli sono settanta righe e
-    // riempirebbero la scheda coprendo tutto il resto. Stesso componente
-    // usato per i mancanti nel modal commessa.
-    distWrap.append(entityTimeline({
-      sommario: distintaAlnus.length + (distintaAlnus.length === 1 ? ' materiale' : ' materiali')
-        + ' · dall\'estrazione Alnus',
-      apertaDiDefault: distintaAlnus.length <= 12,
-      righe: distintaAlnus.map(r => ({
-        titolo: r.figlio,
-        meta: r.figlio_descrizione || '',
-        valore: String(r.qta ?? '—').replace('.', ',') + (r.um ? ' ' + r.um : ''),
-      })),
-    }));
+    // STESSA TABELLA DEL CASO 1, in sola lettura (4 set, richiesta Nico:
+    // "vorrei che anche quelle gia salvate si presentassero cosi"). Prima
+    // erano due disegni diversi per la stessa cosa — un elenco richiudibile
+    // di qua, una tabella a colonne di la — e passando dall'una all'altra
+    // sembrava di guardare due dati diversi. Le colonne sono le stesse
+    // (`COL_DIST`), cambia solo che qui non si scrive.
+    // Il rotolo lo ferma lo scorrimento dentro il riquadro, come nel caso 1:
+    // su certi articoli sono settanta righe.
+    distWrap.append(el('div', { class:'sub', style:'font-size:11px;margin-bottom:6px;' },
+      distintaAlnus.length + (distintaAlnus.length === 1 ? ' materiale' : ' materiali')
+        + ' · dall\'estrazione Alnus'));
+    distWrap.append(intestazioneDist());
+    const listaA = el('div', distintaAlnus.length > 12
+      ? { style:'max-height:340px;overflow-y:auto;padding-right:4px;' } : {});
+    distintaAlnus.forEach((r, i) => {
+      const cella = (t, st) => el('div', { class:'sub',
+        style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;'
+          + (st || '') }, t);
+      listaA.append(el('div', { style: COL_DIST },
+        el('span', { class:'sub', style:'font-size:11px;' }, '#' + (i + 1)),
+        cella(r.figlio || '', 'font-family:JetBrains Mono,monospace;color:var(--txt);'),
+        cella(r.figlio_descrizione || ''),
+        cella(String(r.qta == null ? '—' : r.qta).replace('.', ','), 'text-align:right;'),
+        cella(r.um || ''),
+        el('span', {})));
+    });
+    distWrap.append(listaA);
   }
 
   function aggiornaNotaDistinta() {
@@ -5475,7 +5489,7 @@ function openArticoloModal(a, opts) {
   // La distinta di Alnus si chiede solo se l'articolo esiste: su uno nuovo
   // non c'e niente da cercare.
   if (a.id && a.codice) {
-    sb.from('distinta').select('figlio,qta,um,figlio_descrizione').eq('padre', a.codice)
+    sb.from('distinta').select('figlio,qta,um,figlio_descrizione').eq('padre', a.codice).order('figlio')
       .then(({ data, error }) => {
         distintaAlnus = error ? [] : (data || []);
         if (error) { distNota.textContent = 'Distinte non disponibili: ' + (error.message || ''); return; }
