@@ -95,6 +95,11 @@ grant execute on function public.mig_crea_indice(text, text) to authenticated;
 -- Oggi l'account kiosk è bloccato in scrittura qui (giustamente): serviva a
 -- te dal pannello per ogni riga. Questa policy apre la scrittura al SOLO
 -- utente dedicato, in aggiunta alle regole esistenti (che restano com'erano).
+-- ⚠ Il drop davanti serve a poterlo RIESEGUIRE: senza, la seconda volta
+-- Postgres si ferma con "policy already exists" e il resto del file non
+-- viene applicato. Rieseguirlo e successo davvero, il 4 set, quando
+-- l account tecnico ha cambiato nome.
+drop policy if exists attivita_extra_claude on public.attivita_extra;
 create policy attivita_extra_claude on public.attivita_extra
   for all to authenticated
   using      (lower(coalesce(auth.jwt() ->> 'email', '')) = 'ai@cablotec.local')
