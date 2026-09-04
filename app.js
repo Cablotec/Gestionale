@@ -8774,12 +8774,17 @@ function openOperazioneModal(o, opts) {
 
   const modal = el('div', { class:'modal', style:'max-width:720px;' });
   ['input', 'change'].forEach(ev => modal.addEventListener(ev, () => { modificato = true; }, true));
-  const chiudiCommessa = () => {
+  const chiudiCommessa = async () => {
     if (!modificato) return closeModal();
-    if (!confirm('Ci sono modifiche non salvate su questa commessa.\n\n'
-      + 'OK = esci e perdile\n'
-      + 'Annulla = torna alla scheda per salvare')) return;
-    closeModal();
+    const esci = await chiediConferma({
+      titolo: 'Modifiche non salvate',
+      testo: 'Su questa commessa ci sono modifiche che non hai ancora salvato.\n'
+        + 'Uscendo adesso vanno perse.',
+      conferma: 'Esci senza salvare',
+      annulla: 'Annulla',
+      pericolo: true,
+    });
+    if (esci) closeModal();
   };
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, isNew ? 'Nuova Operazione' : (isAdmin ? 'Modifica Operazione' : 'Operazione')),
@@ -12503,14 +12508,59 @@ function closeModal() {
   // La guardia vale per il modal che sta uscendo di scena e non deve
   // sopravvivergli: chi apre il prossimo non c'entra con le sue modifiche.
   window.__modalGuardia = null;
+  window.__confermaChiudi = null;
   $('#modal-root').innerHTML = '';
 }
+// Una conferma CHE SI VEDE, al posto del `confirm()` del browser: quello
+// non si puo scrivere come si vuole, mette "OK" e "Annulla" e tocca
+// spiegare a parole quale dei due fa cosa. Qui i bottoni dicono il gesto.
+//
+// ⚠⚠ NON passa da `openModal`: quello svuota `#modal-root` e si porterebbe
+// via proprio la scheda che stiamo cercando di proteggere. Si APPENDE un
+// secondo velo che, venendo dopo nel DOM a parita di z-index, copre il
+// primo; alla risposta si toglie solo lui.
+//
+// Ritorna una promessa: `true` se si conferma, `false` se si annulla.
+function chiediConferma(opz) {
+  const o = opz || {};
+  return new Promise((risolvi) => {
+    const bg = el('div', { class:'modal-bg' });
+    const finestra = el('div', { class:'modal', style:'max-width:430px;' });
+    const chiudi = (esito) => {
+      window.__confermaChiudi = null;
+      bg.remove();
+      risolvi(esito);
+    };
+    finestra.append(
+      el('div', { class:'mhd' }, el('h2', {}, o.titolo || 'Confermi?')),
+      el('div', { class:'mbody' },
+        el('div', { class:'sub', style:'font-size:13px;line-height:1.7;white-space:pre-line;' },
+          o.testo || '')),
+      el('div', { class:'mfoot' },
+        el('button', {
+          class:'btng',
+          style: o.pericolo ? 'color:var(--red);border-color:var(--red);' : '',
+          onclick: () => chiudi(true),
+        }, o.conferma || 'Conferma'),
+        // Il ripiego sta in fondo e in evidenza: se si preme a caso, si
+        // preme quello che non fa danni.
+        el('button', { class:'btnp', onclick: () => chiudi(false) }, o.annulla || 'Annulla')),
+    );
+    bg.append(finestra);
+    $('#modal-root').append(bg);
+    window.__confermaChiudi = () => chiudi(false);
+  });
+}
+
 // ⚠ ESC E LA ✕ SONO DUE PORTE PER LA STESSA USCITA, e in questo progetto
 // ogni volta che ce n'erano due una si dimenticava del controllo (le
 // chiusure dei timbri, gli stati commessa). Qui passano tutte e due di qua:
 // se il modal aperto ha dichiarato una guardia, decide lei.
+// L'ordine conta: se c'e una conferma aperta, Esc annulla QUELLA e non
+// tocca il modal sotto — altrimenti la domanda si richiamerebbe da sola.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  if (typeof window.__confermaChiudi === 'function') { window.__confermaChiudi(); return; }
   if (typeof window.__modalGuardia === 'function') { window.__modalGuardia(); return; }
   closeModal();
 });
