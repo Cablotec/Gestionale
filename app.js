@@ -1522,6 +1522,14 @@ const TAB_STRUCTURE = {
       // dalle distinte — con un bottone che passa dall'una all'altra. Due
       // schede per lo stesso argomento erano due posti dove cercare.
       { id: 'fabbisogno',     label: 'Materiali',      adminOnly: false },
+      // Spostata qui da Gestione e rinominata "Prodotti" (4 set, richiesta
+      // Nico). Sta attaccata a Materiali perché è la stessa catena: il
+      // prodotto porta la distinta, la distinta genera la lista materiali
+      // della commessa. In Gestione era fra le anagrafiche da configurare,
+      // ma la si apre mentre si lavora. ⚠ Resta `adminOnly`: spostare una
+      // scheda non è aprirla a tutti — l'id resta 'articoli' perché è la
+      // chiave di dispatch e della tabella.
+      { id: 'articoli',       label: 'Prodotti',       adminOnly: true },
       { id: 'prelievi',       label: 'Prelievi',       adminOnly: false },
       // Ricerca sui timbri NON legati a commessa (6 ago). L'anagrafica delle
       // attività resta in Gestione: qui si guarda cosa è stato fatto.
@@ -1534,7 +1542,6 @@ const TAB_STRUCTURE = {
     label: 'Gestione',
     adminOnly: true,
     tabs: [
-      { id: 'articoli',       label: 'Articoli',          adminOnly: true },
       { id: 'codifica',       label: 'Codifica',          adminOnly: true },
       { id: 'aziende',        label: 'Aziende',           adminOnly: true },
       { id: 'analisi_clienti', label: 'Analisi clienti',  adminOnly: true },
@@ -3524,7 +3531,7 @@ function renderArticoli(root) {
   root.append(chips);
 
   const toolbar = el('div', { class:'toolbar' },
-    el('h2', {}, 'Articoli'),
+    el('h2', {}, 'Prodotti'),
     el('input', {
       type:'text', class:'search', id:'art-search',
       placeholder:'Cerca per codice, descrizione, categoria…',
@@ -7937,7 +7944,7 @@ function renderPianificazione(root) {
   if (state.aziende.length === 0 || state.articoli.length === 0) {
     root.append(el('div', { class:'empty' },
       el('div', { style:'margin-bottom:8px;' }, '⚠ Per creare operazioni servono prima clienti e articoli.'),
-      el('div', { class:'sub' }, 'Vai in Anagrafiche → Clienti e Articoli per aggiungerne.')));
+      el('div', { class:'sub' }, 'Vai in Gestione → Aziende e in Lavoro → Prodotti per aggiungerne.')));
     return;
   }
   if (list.length === 0) {
