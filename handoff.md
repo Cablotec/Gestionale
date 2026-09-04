@@ -1,4 +1,4 @@
-# Handoff — Gestionale Cablotec (aggiornato 28 lug 2026)
+# Handoff — Gestionale Cablotec (aggiornato 4 set 2026)
 
 > Fonte per i fili aperti. CLAUDE.md è derivato da qui: se cambia questo, rigenerare quello.
 
@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages**, script classici (niente ES module), scope globale condiviso. Deploy = git push.
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug: build fermi ore, run non cancellabili). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata), `domain/scheduling.js` (motore PURO, no DOM/Supabase), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-08-24.5`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-04.16`. La **versione è visibile sotto il logo** (gestionale e kiosk): prima cosa da controllare quando "non si vede una modifica" (quasi sempre è cache).
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo se c'è versione nuova e la postazione è sulla schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -884,3 +884,90 @@ Sequenza completata in due giorni, tutte le migrazioni ESEGUITE da Nico. Il dett
 2. **La casella OP non ha un test.** Il salvataggio al blur passa da `eseguiConRetry` come le altre scritture inline (prep, stato), ma nessuna prova automatica copre "solo prefisso = null" dal lato tabella. La regola in domain (`opSoloPrefisso`, `prefissoOpCorrente`) è invece banale da coprire.
 3. **Il messaggio del commit `fa90421` ha una `@` di troppo** in prima riga (errore di sintassi shell). Contenuto corretto. **Deciso di lasciarlo**: ripulirlo vuol dire riscrivere 5 commit già pubblicati, forzare il push su `main` e far ripartire Pages, per un carattere in un log.
 4. Restano aperti i punti della sezione precedente (anomalie Alnus, `migrazione-tipo-parte.sql`, egress, il dato `EL0000515`).
+
+## 4 SETTEMBRE: la distinta diventa nostra (`2026-09-04.16`)
+- **UNA SOLA ORIGINE.** La tabella `distinta` di Alnus (38.461 righe) e stata **travasata dentro i prodotti** e poi **RITIRATA** (drop eseguito). Nessuna riga di codice la legge piu; l'archivio e fuori dal repo in `backup-gestionale/distinta-archivio-2026-09-04.json` (5.366 padri). Cancellati i cinque strumenti che ci calcolavano sopra (`carica-distinte`, `copertura-distinte`, `genera-materiali-commesse`, `prova-fabbisogno`, `materializza-distinte`): **stavano nella storia git**, e tenerli avrebbe voluto dire avere strumenti che dicono una cosa mentre l'app ne dice un'altra.
+- **Travaso**: 155 prodotti riempiti, 3.822 righe, scritte le **FOGLIE** e non i figli diretti (su 4 prodotti multilivello le due cose divergono: `TS-342010003` aveva 82 figli di cui 37 sottoassiemi).
+- ⚠ **CONSEGUENZA ACCETTATA**: l'anagrafica `materiali` (9.327 codici) non ha piu uno strumento che la aggiorni. I codici nuovi entrano dalle distinte importate, che ora **si portano dietro la descrizione dal file**.
+- **`fabbAnagraficaMateriali(codici)`** ha sostituito `fabbScaricaDistinta`: descrizione, UM e tipo parte si chiedono all'anagrafica, **una riga per codice** invece di una per ogni accoppiata padre-figlio. Meno dati della query che sostituisce.
+- ⚠⚠ **UN PRODOTTO SENZA DISTINTA NON E UN MATERIALE** (guardia in `fabbisognoPerCodice`). Nell esplosione la foglia e un pezzo da comprare, ma la RADICE e il prodotto: senza guardia **65 codici di prodotto finito** entravano nella lista dei fabbisogni come componenti da ordinare. C era gia prima (41), il travaso l aveva peggiorato.
+- **Prova fatta**: calcolo vecchio (dalla tabella) e nuovo (dai prodotti) a confronto sui dati veri — **742 codici da entrambe le parti, zero spariti, zero comparsi, zero quantita diverse.**
+
+### Import distinta da Excel, nella scheda del prodotto
+- Formato: **UNA distinta per foglio**, intestazioni per nome, una riga per componente. Diverso da quello a blocchi con `Codice Padre` del vecchio caricatore.
+- **Il file non contiene il padre**: per questo l'import sta DENTRO la scheda del prodotto e non in una pagina d'archivio.
+- Colonne **per nome**, confronto che normalizza spazi, maiuscole e **accenti**; intestazione cercata nelle prime 20 righe. Numeri letti col **TESTO** della cella (`raw:false` + `cellText:true`) e interpretati all'italiana — la trappola dei 2.820 decimali persi.
+- **SOSTITUISCE**, mai fonde, e lo chiede prima coi numeri. **Non scrive a database**: riempie la scheda, il salvataggio resta quello del modal.
+- ⚠ **La descrizione del file si SALVA** (trovato da Nico): si perdeva due volte — l'import non la copiava e il payload non la scriveva. Per un codice gia in anagrafica il difetto era **invisibile** (la scheda la ripescava da `materiali`); per un codice NUOVO il file e l'unica fonte. **Un dato che si perde solo dove non hai modo di accorgertene e il difetto che sopravvive piu a lungo.**
+
+### La distinta si scrive sempre, e l'adozione e a senso unico
+- **UNA tabella sola, sempre a campi aperti.** Prima erano due schermate per la stessa cosa (sola lettura di qua, campi di la) e per correggere una riga bisognava prima capire in quale si era.
+- ⚠ **`null` e `[]` sono due cose diverse**: `null` = mai dichiarata, `[]` = dichiarata vuota, cioe "questo prodotto non ha materiali". `applicaDistinteProdotti` le distingue e **l'elenco vuoto VINCE** — saltarlo avrebbe rimesso in gioco Alnus proprio dove qualcuno ha detto il contrario.
+- **Svuotare non fa piu tornare indietro** (decisione Nico: *"quelle inserite con Alnus sono un fatto finito"*).
+- **Un codice non in anagrafica si dichiara `✱ NUOVO`**, non "codice non trovato": distingue "l'ho scritto male" (il simile esiste, si vede subito) da "questo pezzo non c'e ancora".
+- ⚠ L'anagrafica si interroga **una volta per tutta la distinta** con `in()`, non riga per riga: su un prodotto da 82 componenti erano 82 richieste a ogni apertura.
+
+### Multilivello: i sottoassiemi sono PRODOTTI
+- Un sottoassieme e un prodotto come gli altri, con la sua distinta (`TS-342015G00`, 11 righe). `esplodiDistinta` scende da sola a qualsiasi profondita, con la guardia sui cicli.
+- **La distinta E GIA l'albero**: niente vista ad albero a parte — sarebbe una seconda schermata per lo stesso dato, e la seconda schermata e sempre quella che poi racconta un'altra storia. Si e aggiunto solo: riga di riepilogo (`82 righe · 1 è un sottoassieme · 83 materiali una volta esploso`) e **badge `▸ N righe`** cliccabile che apre il ramo e torna indietro.
+- ⚠ **Difetto mio, durato mezza giornata**: togliendo la tabella avevo fatto smettere di esplodere a `generaMaterialiCommessa` — allora giusto, i sottoassiemi non esistevano. Dal momento in cui e nato il primo, la lista della commessa si fermava al primo livello mentre il Fabbisogno scendeva fino in fondo. **Quando si semplifica un calcolo perche "quel caso non esiste", scrivere DOVE andra rimesso il giorno che esistera.**
+
+### VARIE e COMP GENERICO
+- **In commessa si vedono, nel fabbisogno no** (decisione Nico: *"in futuro probabilmente verranno rimosse ma non ora"*). Il filtro sta SOLO nel conto (`fabbisognoDaListe`, `esplodiDistinta`), non nella lista.
+- Nella scheda Materiali della commessa si dichiarano **"non conteggiato"**, mai "disponibile": dire disponibile vorrebbe dire che a magazzino ce n'e, e COMP GENERICO a magazzino non esiste.
+- L'import **non li filtra**: scarta solo righe senza codice, righe con quantita mancante o <= 0 (contate e dichiarate) e un'intestazione ripetuta.
+
+### ⚠⚠ LE COMMESSE SENZA LISTA SONO CONTO LAVORO, non un buco
+- 141 commesse vive, **75 senza lista materiali**. Di queste: **74 perche il prodotto non ha distinta**, 1 sola perche vecchia (`2026/OP/00861`, 19 mag, prodotto con 31 righe pronte).
+- **Il buco e per CLIENTE, non sparso**: Elcotec **39 su 39**, Senzani **22 su 22**, Tema Sinergie 10 su 16 — contro Sacmi **0 su 36** e JMA **0 su 10**. Un dato che manca *sempre* per certi clienti e *mai* per altri non e una lacuna: e una differenza di come si lavora.
+- **Prova indipendente**: Elcotec e l'unico cliente con `tariffa_cliente` (27,3 €/h), cioe l'unico a cui si fattura **solo manodopera**. Fatturare solo manodopera *e* il conto lavoro: il materiale lo manda il cliente, e in Alnus una distinta non c'e perche non c'e niente da comprare.
+- **Quindi non c'e niente da riempire** e lo strumento in blocco non serve. Resta aperto solo il **significato**: la scheda dice "Nessuna distinta", che si legge come "manca un dato", mentre la frase giusta sarebbe "materiale fornito dal cliente". Oggi nessun campo dichiara quali clienti lavorano cosi — lo si deduce dalla tariffa, che e un indizio, non una dichiarazione.
+
+### Uscire da una scheda senza perdere il lavoro
+- **Salvando una MODIFICA la finestra resta aperta** (si apre un ordine per correggere due campi). ⚠ Su una commessa NUOVA si chiude: `isNew` resta vero dopo l'insert e un secondo Salva creerebbe un doppione. ⚠ Dopo l'update si riallinea `o` alla riga scritta, o un secondo Salva su una commessa appena completata riproporrebbe di creare il lotto.
+- **`chiediConferma({titolo, testo, bottoni})`** — finestra vera al posto del `confirm()` del browser, ritorna l'id del bottone. ⚠⚠ **NON passa da `openModal`**: quello svuota `#modal-root` e si porterebbe via la scheda che si sta proteggendo. Appende un **secondo velo**. Esc annulla la conferma e non tocca il modal sotto.
+- **`lasciaCommessa(poi)` / `lasciaArticolo(poi)`**: ⚠ **LASCIARE LA SCHEDA E SEMPRE LO STESSO GESTO**, che si esca del tutto o si vada altrove. Una domanda sola per la ✕, per Esc, per la matita ✎ e per il salto a un sottoassieme. Due domande diverse avrebbero voluto dire che quella dimenticata diventava la scorciatoia per perdere il lavoro.
+- Si avvisa **solo se qualcosa e stato toccato** (eventi `input`/`change` in cattura sul modal, che valgono anche per i campi nati dopo; assegnare da codice non li scatena, quindi le precompilazioni non fanno falsi allarmi). **Un avviso che compare sempre si impara a scacciare.**
+- **Tolto il tasto "Chiudi" accanto a Salva**: due uscite affiancate a un salvataggio sono un invito a sbagliare bottone.
+- `window.__modalGuardia` e `window.__confermaChiudi`, azzerate da `closeModal`: la guardia non sopravvive al modal che l'ha dichiarata.
+
+### Nomi e account
+- Macro-area **Lavoro → Produzione**; scheda **Articoli → Prodotti**, spostata da Gestione a Produzione e attaccata a Materiali (stessa catena: il prodotto porta la distinta, la distinta genera la lista). Gli **id** (`lavoro`, `articoli`) non cambiano: sono chiavi di dispatch.
+- Account tecnico rinominato **`ai@cablotec.local`**. ⚠⚠ **Supabase normalizza le email in minuscolo**: il confronto nelle policy passa da `lower()`, o scrivendo `AI@...` non combacerebbe **mai** — e si scoprirebbe col solito HTTP 200 e zero righe. Policy aggiunta anche su `articoli` (UPDATE). Credenziali via `strumenti/credenziali.js` da `PW.txt`, **fuori dal repo**.
+- ⚠ **Lo SQL da eseguire va scritto IN CHAT**, non lasciato in un file: l'SQL Editor di Supabase non carica file, si usa solo a copia-incolla.
+
+
+## ▶▶ PROSSIMI (4 set 2026, chat chiusa qui)
+
+Niente e rimasto a meta: albero pulito, tutto pushato, 28 commit. Quello che
+segue e lavoro NON iniziato, in ordine di quanto conta.
+
+1. **La prova sul campo di oggi non e stata fatta.** Nico non ha confermato di
+   aver riaperto l app dopo l ultimo deploy. Da guardare per primo: versione
+   `v. 2026-09-04.16` sotto il logo · un prodotto con la distinta a campi
+   aperti e il badge `▸ N righe` su `TS-342010003` · un ordine dove si
+   modifica un campo, si preme la ✕ e devono uscire i tre bottoni.
+2. **`2026/OP/00861` (19 mag) e l unica commessa viva che ha una lista da
+   generare** e non ce l ha: il suo prodotto `SP-TS4386892` ha 31 righe pronte.
+   Un clic su "⟳ Rigenera dalla distinta" nella sua scheda Materiali. Tutte le
+   altre 74 sono conto lavoro e NON vanno riempite.
+3. **I 36 sottoassiemi restanti di `TS-342010003`.** Nico ne ha creato uno
+   (`TS-342015G00`, 11 righe) come prova e funziona: creando gli altri come
+   prodotti con la loro distinta, l esplosione li scende da sola. Non serve
+   codice nuovo. Dopo ognuno, rigenerare le 5 commesse vive sull articolo.
+4. **"Materiale fornito dal cliente" non e dichiarato da nessuna parte.** Per i
+   74 conto lavoro la scheda dice "Nessuna distinta", che si legge come "manca
+   un dato". Lo si deduce dalla `tariffa_cliente` (solo Elcotec ce l ha), che e
+   un indizio e non una dichiarazione. Servirebbe un flag sull anagrafica
+   cliente, e la scheda smetterebbe di far sembrare un buco una cosa normale.
+5. **`VARIE` e `COMP GENERICO` un domani si tolgono** (detto da Nico: "in futuro
+   probabilmente verranno rimosse ma non ora"). Oggi entrano in commessa e non
+   nel fabbisogno.
+6. **L anagrafica `materiali` non ha piu uno strumento che la aggiorni**: il
+   caricatore e stato cancellato oggi e sta nella storia git. Finche i codici
+   nuovi arrivano dalle distinte importate (che portano la descrizione) non
+   serve; il giorno che servisse, si recupera da li.
+7. **Filo 4c, ancora aperto dal 3 set**: il badge `⚠↗` dei riflessi e la vista
+   "per commessa" della scheda Materiali sono doppioni di fonti piu forti.
+   Nico li ha visti e non ha ancora detto se toglierli.
+
