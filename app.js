@@ -3982,40 +3982,54 @@ async function fabbisognoDiCommessa(numeroOp) {
 // commessa vuole una riga per codice.
 async function generaMaterialiCommessa(codiceArticolo, pezzi) {
   if (!codiceArticolo || !(pezzi > 0)) return [];
-  const art = (state.articoli || []).find(a => a.codice === codiceArticolo);
-  const righeArt = art && Array.isArray(art.distinta) ? art.distinta : null;
-  if (!righeArt || !righeArt.length) return [];
+  // ⚠⚠ SI ESPLODE, E SI ESPLODE QUI COME NEL FABBISOGNO. Un sottoassieme che
+  // ha una distinta sua non e un pezzo da prelevare: e una scatola, e quello
+  // che serve davvero sono i materiali dentro. Dal 4 set i sottoassiemi sono
+  // PRODOTTI come gli altri (`TS-342015G00`, 11 righe) e l'esplosione li
+  // scende da sola, con la guardia sui cicli.
+  // Per un attimo questa lista si e fermata al primo livello mentre la scheda
+  // Fabbisogno scendeva fino in fondo: due risposte diverse alla stessa
+  // domanda, che e il difetto che questo progetto paga da mesi.
+  const figliDi = new Map();
+  if (typeof applicaDistinteProdotti === 'function') applicaDistinteProdotti(figliDi, state.articoli);
+  if (!figliDi.has(codiceArticolo)) return [];
+  const e = esplodiDistinta(codiceArticolo, pezzi, figliDi);
 
-  const per = new Map();
-  righeArt.forEach(r => {
-    const cod = String((r && r.codice) || '').trim();
-    const q = Number(r && r.qta) || 0;
-    if (!cod || !(q > 0)) return;
-    // ⚠ I SEGNAPOSTO (COMP GENERICO, VARIE) ENTRANO NELLA LISTA (4 set,
-    // deciso da Nico: "le riportiamo anche nelle commesse, ma le nascondiamo
-    // dal fabbisogno"). Sono righe che il progettista ha messo apposta e chi
-    // lavora deve vederle; quello che non devono fare e' FARE NUMERO — un
-    // COMP GENERICO da 27.577 pezzi in cima alla classifica dei fabbisogni
-    // non vuol dire niente. Il filtro sta quindi solo nel conto
-    // (`fabbisognoDaListe`, `esplodiDistinta`), non qui.
-    const gia = per.get(cod);
-    if (gia) { gia.qta += q; if (!gia.um && r.um) gia.um = r.um; return; }
-    per.set(cod, { qta: q, um: r.um || null, descrizione: r.descrizione || null });
+  // I SEGNAPOSTO (COMP GENERICO, VARIE) RIENTRANO (4 set, deciso da Nico:
+  // "le riportiamo anche nelle commesse, ma le nascondiamo dal fabbisogno").
+  // `esplodiDistinta` li tiene da parte apposta: qui si rimettono, perche chi
+  // lavora deve vederli. Quello che non devono fare e FARE NUMERO, e di
+  // quello si occupa `fabbisognoDaListe`, che li salta.
+  const tutte = new Map(e.materiali);
+  (e.segnaposto || new Map()).forEach((q, cod) => tutte.set(cod, (tutte.get(cod) || 0) + q));
+  if (!tutte.size) return [];
+
+  // Descrizione e UM: prima da una riga di distinta che le porti (l'import da
+  // Excel le salva), poi dall'anagrafica. Cosi un codice NUOVO, che in
+  // anagrafica non c'e ancora, arriva in commessa col suo nome.
+  const daDistinta = new Map();
+  (state.articoli || []).forEach(a => {
+    if (!Array.isArray(a.distinta)) return;
+    a.distinta.forEach(r => {
+      const cod = String((r && r.codice) || '').trim();
+      if (!cod || daDistinta.has(cod)) return;
+      if (r.descrizione || r.um) daDistinta.set(cod, { descrizione: r.descrizione || null, um: r.um || null });
+    });
   });
-  if (!per.size) return [];
 
-  const anag = await fabbAnagraficaMateriali([...per.keys()]);
-  return [...per.entries()]
-    .map(([codice, x]) => {
+  const anag = await fabbAnagraficaMateriali([...tutte.keys()]);
+  return [...tutte.entries()]
+    .map(([codice, qta]) => {
+      const d = daDistinta.get(codice) || {};
       const m = anag.get(codice);
       return {
         codice,
-        descrizione: x.descrizione || (m && m.descrizione) || null,
-        um: x.um || (m && m.um) || null,
+        descrizione: d.descrizione || (m && m.descrizione) || null,
+        um: d.um || (m && m.um) || null,
         // Il per-pezzo si salva accanto al totale: cosi la riga si rilegge anche
         // quando la quantita dell'ordine, un domani, sara cambiata.
-        qta_pz: +Number(x.qta).toFixed(6),
-        qta: +Number(x.qta * pezzi).toFixed(4),
+        qta_pz: +Number(qta / pezzi).toFixed(6),
+        qta: +Number(qta).toFixed(4),
       };
     })
     .sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true, sensitivity: 'base' }));
