@@ -5269,20 +5269,30 @@ function openArticoloModal(a, opts) {
   // "voglio semplicita e immediatezza" — quindi nessuna scheda a parte).
   //
   // DUE ORIGINI, UNA SOLA VERITA:
-  //   nessuna riga scritta qui -> vale la distinta di ALNUS, in sola lettura
-  //   almeno una riga scritta qui -> vale QUESTA, per intero
+  //   mai adottata  -> vale la distinta di ALNUS, e i reimport la aggiornano
+  //   adottata      -> vale QUESTA, per intero, e Alnus non la tocca piu
   // Mai una fusione: un fabbisogno meta di qua e meta di la e un numero che
   // nessuno riesce piu a spiegare.
+  //
+  // ⚠⚠ L'ADOZIONE E' A SENSO UNICO (4 set, deciso da Nico: "quelle inserite
+  // con Alnus sono un fatto finito, se dovro' modificarle lo faro'
+  // manualmente"). Prima svuotare le righe rimetteva in gioco quella di
+  // Alnus: era un ritorno indietro che non chiedeva niente a nessuno e non
+  // si vedeva da nessuna parte. Ora una distinta adottata resta adottata
+  // anche se la si svuota, e svuotata vuol dire DAVVERO senza materiali.
+  // Per questo la memoria non e' piu' `distinta.length > 0` ma un flag suo:
+  // una lista vuota e una lista mai toccata sono due cose diverse.
   //
   // ⚠ La colonna `articoli.distinta` il caricatore delle distinte NON la
   // tocca mai. La tabella `distinta` invece e una fotografia e viene
   // svuotata a ogni reimport: una correzione scritta li sparirebbe in
   // silenzio. Qui sopravvive per costruzione.
   const distinta = Array.isArray(a.distinta) ? a.distinta.map(r => ({ ...r })) : [];
+  let distintaAdottata = Array.isArray(a.distinta);
   let distintaAlnus = null;            // null = non ancora caricata
   const distWrap = el('div', {});
   const distNota = el('div', { class:'sub', style:'font-size:11px;margin-top:8px;line-height:1.6;' });
-  const distintaLocale = () => distinta.length > 0;
+  const distintaLocale = () => distintaAdottata;
 
   // Le tre colonne hanno una misura sola, dichiarata qui: la usano
   // l'intestazione e ogni riga. Scriverle due volte vuol dire vederle
@@ -5330,8 +5340,11 @@ function openArticoloModal(a, opts) {
       : distinta;
 
     if (!righe.length) {
-      distWrap.append(el('div', { class:'sub' },
-        'Nessuna distinta, né dall\'estrazione Alnus né scritta qui.'));
+      // Vuota e adottata non e la stessa cosa di vuota e basta: la prima e
+      // una dichiarazione, e va letta come tale da chi la guarda.
+      distWrap.append(el('div', { class:'sub' }, daAlnus
+        ? 'Nessuna distinta, né dall\'estrazione Alnus né scritta qui.'
+        : 'Nessuna riga: questo prodotto risulta senza materiali. Gli ordini nuovi nasceranno senza lista.'));
       return;
     }
 
@@ -5357,6 +5370,7 @@ function openArticoloModal(a, opts) {
       // quella UM si vede nel campo e deve finire nel salvataggio. Copiando
       // dalla sorgente si perderebbe restando visibile: il modo peggiore.
       righe.forEach(x => distinta.push({ codice: x.codice, qta: x.qta, um: x.um }));
+      distintaAdottata = true;
       return true;
     };
 
@@ -5452,6 +5466,7 @@ function openArticoloModal(a, opts) {
       if (!distintaLocale() && distintaAlnus && distintaAlnus.length) {
         distintaAlnus.forEach(r => distinta.push({ codice: r.figlio, qta: r.qta, um: r.um }));
       }
+      distintaAdottata = true;
       distinta.push({ codice:'', qta:null, um:null });
       renderDistinta(); aggiornaNotaDistinta();
       if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
@@ -5482,6 +5497,7 @@ function openArticoloModal(a, opts) {
           + ' righe scritte qui con le ' + esito.righe.length + ' del file?\n\n'
           + 'Le righe attuali vanno perse.')) return;
       distinta.length = 0;
+      distintaAdottata = true;
       esito.righe.forEach(r => distinta.push({ codice: r.codice, qta: r.qta, um: r.um }));
       renderDistinta(); aggiornaNotaDistinta();
       if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
@@ -5606,7 +5622,7 @@ function openArticoloModal(a, opts) {
   // di la e dirti se di la c'e qualcosa. Senza, per sapere se un articolo ha
   // una distinta bisogna aprirla.
   function aggiornaEtichette() {
-    const nMat = distinta.length || (distintaAlnus ? distintaAlnus.length : null);
+    const nMat = distintaLocale() ? distinta.length : (distintaAlnus ? distintaAlnus.length : null);
     linguette.materiali.textContent = 'Materiali' + (nMat ? ' · ' + nMat : '');
     linguette.lavoro.textContent = 'Lavorazioni e tempo' + (fasi.length ? ' · ' + fasi.length : '');
     linguette.prezzi.textContent = 'Prezzi' + (listinoRighe.length ? ' · ' + listinoRighe.length : '');
@@ -5691,14 +5707,15 @@ function openArticoloModal(a, opts) {
         attivo: fd.get('attivo') === 'true',
         minuti_unitari: minutiVal,
         fasi: fasiPayload,
-        // Righe vuote scartate. Se non ne resta nessuna si salva `null`, che
-        // vuol dire "torna a valere quella di Alnus" — cosi si disfa una
-        // distinta locale svuotandola, senza un comando apposta.
+        // Righe incomplete scartate. `null` vuol dire SOLO "mai adottata":
+        // una distinta adottata si scrive anche se e rimasta vuota, perche
+        // vuota vuol dire "questo prodotto non ha materiali" e non "rimetti
+        // quella di Alnus".
         distinta: (() => {
-          const righe = distinta
+          if (!distintaAdottata) return null;
+          return distinta
             .filter(r => r && String(r.codice || '').trim() && Number(r.qta) > 0)
             .map(r => ({ codice: String(r.codice).trim(), qta: Number(r.qta), um: r.um || null }));
-          return righe.length ? righe : null;
         })(),
       };
       if (!payload.codice) return toast('Codice obbligatorio', 'err');

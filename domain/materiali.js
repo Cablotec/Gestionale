@@ -210,7 +210,12 @@ function applicaDistinteLocali(figliDi, articoli) {
   const locali = new Set();
   (articoli || []).forEach(a => {
     const d = a && a.distinta;
-    if (!a || !a.codice || !Array.isArray(d) || !d.length) return;
+    // ⚠ Un elenco VUOTO vince lo stesso (4 set): da quando l adozione e a
+    // senso unico, `[]` vuol dire "questo prodotto non ha materiali" ed e
+    // una dichiarazione. Saltarlo rimetterebbe in gioco quella di Alnus
+    // proprio dove qualcuno ha detto il contrario. `null` invece vuol dire
+    // "mai adottata", e li Alnus comanda ancora.
+    if (!a || !a.codice || !Array.isArray(d)) return;
     figliDi.set(a.codice, d
       .filter(r => r && r.codice)
       .map(r => ({ figlio: String(r.codice).trim(), qta: Number(r.qta) || 0, um: r.um || null })));
