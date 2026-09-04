@@ -8766,6 +8766,11 @@ function openOperazioneModal(o, opts) {
   // scatena quegli eventi, quindi le precompilazioni automatiche non
   // fanno falsi allarmi.
   let modificato = false;
+  // Impostata piu sotto e solo per l'admin: senza il bottone Salva non c'e
+  // niente da salvare, e la scelta non va nemmeno offerta.
+  let salvaOra = null;
+  // Alza la mano al salvataggio: "quando hai finito, chiudi".
+  let chiudiDopoSalva = false;
   const canEdit = isAdmin;
   // La colonna prezzo esiste sul DB? (rilevata dai dati caricati). Finché non
   // c'è la migrazione, non mostro il campo né provo a salvarlo — così il
@@ -8776,15 +8781,20 @@ function openOperazioneModal(o, opts) {
   ['input', 'change'].forEach(ev => modal.addEventListener(ev, () => { modificato = true; }, true));
   const chiudiCommessa = async () => {
     if (!modificato) return closeModal();
-    const esci = await chiediConferma({
+    const bottoni = [{ id:'esci', etichetta:'Esci senza salvare', tipo:'pericolo' },
+      { id:'annulla', etichetta:'Annulla' }];
+    // "Salva ed esci" e l'ultimo e l'unico pieno: e la strada consigliata,
+    // ed e dove va il pollice. Stesso posto del Salva nelle altre schede.
+    if (salvaOra) bottoni.push({ id:'salva', etichetta:'Salva ed esci', tipo:'primario' });
+    const scelta = await chiediConferma({
       titolo: 'Modifiche non salvate',
       testo: 'Su questa commessa ci sono modifiche che non hai ancora salvato.\n'
         + 'Uscendo adesso vanno perse.',
-      conferma: 'Esci senza salvare',
-      annulla: 'Annulla',
-      pericolo: true,
+      bottoni,
     });
-    if (esci) closeModal();
+    if (scelta === 'esci') return closeModal();
+    if (scelta === 'salva') return salvaOra();
+    // 'annulla': non si fa niente e si resta dove si era.
   };
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, isNew ? 'Nuova Operazione' : (isAdmin ? 'Modifica Operazione' : 'Operazione')),
@@ -11150,6 +11160,18 @@ function openOperazioneModal(o, opts) {
   // sono un invito a sbagliare bottone.
   if (isAdmin) {
     const btnSave = el('button', { class:'btnp' }, 'Salva');
+    // ⚠ UNA PORTA SOLA PER SALVARE. "Salva ed esci" non rifa il salvataggio
+    // per conto suo: preme lo stesso bottone e gli dice di chiudere alla
+    // fine. Se fossero due pezzi di codice, uno si dimenticherebbe un
+    // controllo — qui e gia successo con le chiusure dei timbri e con gli
+    // stati commessa.
+    // Il flag si abbassa SEMPRE: se il salvataggio si ferma su un errore la
+    // scheda resta aperta, e un Salva premuto a mano dopo non deve
+    // ritrovarsi addosso un ordine di chiusura vecchio.
+    salvaOra = async () => {
+      chiudiDopoSalva = true;
+      try { await btnSave.onclick(); } finally { chiudiDopoSalva = false; }
+    };
     btnSave.onclick = async () => {
       const fd = new FormData(form);
 
@@ -11463,7 +11485,7 @@ function openOperazioneModal(o, opts) {
         // ogni salvataggio costringe a riaprirlo per la correzione dopo.
         // ⚠ Su una commessa NUOVA si chiude lo stesso: `isNew` resta vero
         // anche dopo l'insert, quindi un secondo Salva creerebbe un DOPPIONE.
-        if (isNew) { closeModal(); return; }
+        if (isNew || chiudiDopoSalva) { closeModal(); return; }
         // ⚠⚠ `o` va riallineato alla riga appena scritta. Serve ai controlli
         // che confrontano lo stato PRIMA e DOPO: con un `o` fermo al vecchio
         // stato, un secondo Salva su una commessa passata a completata
@@ -12520,35 +12542,42 @@ function closeModal() {
 // secondo velo che, venendo dopo nel DOM a parita di z-index, copre il
 // primo; alla risposta si toglie solo lui.
 //
-// Ritorna una promessa: `true` se si conferma, `false` se si annulla.
+// `bottoni`: [{ id, etichetta, tipo }] con tipo 'primario' | 'pericolo' |
+// niente. Ritorna una promessa con l'id del bottone premuto.
+// Uscendo con Esc si ottiene `o.idAnnulla` (default 'annulla'): premere Esc
+// e' un ripensamento, non una scelta — non deve mai valere per la voce piu
+// avanti nell'elenco.
 function chiediConferma(opz) {
   const o = opz || {};
+  const bottoni = (o.bottoni && o.bottoni.length) ? o.bottoni : [
+    { id:'conferma', etichetta: o.conferma || 'Conferma', tipo: o.pericolo ? 'pericolo' : '' },
+    { id:'annulla', etichetta: o.annulla || 'Annulla', tipo:'primario' },
+  ];
+  const idAnnulla = o.idAnnulla || 'annulla';
   return new Promise((risolvi) => {
     const bg = el('div', { class:'modal-bg' });
-    const finestra = el('div', { class:'modal', style:'max-width:430px;' });
+    const finestra = el('div', { class:'modal', style:'max-width:470px;' });
     const chiudi = (esito) => {
       window.__confermaChiudi = null;
       bg.remove();
       risolvi(esito);
     };
+    const piede = el('div', { class:'mfoot' });
+    bottoni.forEach(b => piede.append(el('button', {
+      class: b.tipo === 'primario' ? 'btnp' : 'btng',
+      style: b.tipo === 'pericolo' ? 'color:var(--red);border-color:var(--red);' : '',
+      onclick: () => chiudi(b.id),
+    }, b.etichetta)));
     finestra.append(
       el('div', { class:'mhd' }, el('h2', {}, o.titolo || 'Confermi?')),
       el('div', { class:'mbody' },
         el('div', { class:'sub', style:'font-size:13px;line-height:1.7;white-space:pre-line;' },
           o.testo || '')),
-      el('div', { class:'mfoot' },
-        el('button', {
-          class:'btng',
-          style: o.pericolo ? 'color:var(--red);border-color:var(--red);' : '',
-          onclick: () => chiudi(true),
-        }, o.conferma || 'Conferma'),
-        // Il ripiego sta in fondo e in evidenza: se si preme a caso, si
-        // preme quello che non fa danni.
-        el('button', { class:'btnp', onclick: () => chiudi(false) }, o.annulla || 'Annulla')),
+      piede,
     );
     bg.append(finestra);
     $('#modal-root').append(bg);
-    window.__confermaChiudi = () => chiudi(false);
+    window.__confermaChiudi = () => chiudi(idAnnulla);
   });
 }
 
