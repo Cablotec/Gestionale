@@ -209,12 +209,13 @@ function ripartisciGiacenza(righe, disponibile) {
   return { esito, residuo: Math.max(0, resta) };
 }
 
-// Le distinte scritte a mano nella scheda articolo VINCONO su quelle di
-// Alnus, e vincono PER INTERO: si sostituisce l'elenco dei figli di quel
-// padre, non si fondono i due. Una distinta meta' da una parte e meta'
-// dall'altra darebbe un fabbisogno che nessuno riesce piu' a spiegare.
+// Costruisce l'indice padre -> figli dalle distinte dei PRODOTTI, che dal
+// 4 set sono l'unica origine: la tabella `distinta` di Alnus e stata
+// travasata dentro `articoli.distinta` e non la legge piu nessuno.
+// Si chiamava `applicaDistinteProdotti` quando le origini erano due e questa
+// era quella che vinceva; adesso non c e piu niente da cui distinguersi.
 // `articoli`: [{ codice, distinta:[{codice,qta,um}] }].
-function applicaDistinteLocali(figliDi, articoli) {
+function applicaDistinteProdotti(figliDi, articoli) {
   const locali = new Set();
   (articoli || []).forEach(a => {
     const d = a && a.distinta;
@@ -232,20 +233,9 @@ function applicaDistinteLocali(figliDi, articoli) {
   return locali;
 }
 
-// Comodo per i chiamanti: da righe di `distinta` a Map padre -> figli.
-function indiceDistinta(righe) {
-  const m = new Map();
-  (righe || []).forEach(r => {
-    if (!r || !r.padre) return;
-    if (!m.has(r.padre)) m.set(r.padre, []);
-    m.get(r.padre).push({ figlio: r.figlio, qta: r.qta, um: r.um, tipo_parte: r.tipo_parte });
-  });
-  return m;
-}
-
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
-    esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza, indiceDistinta,
-    applicaDistinteLocali, disponibilePerNoi, eLavorazione,
+    esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
+    applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa };
 }

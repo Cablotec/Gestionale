@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-04.11`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-04.12`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -123,7 +123,11 @@
 
 ## I MATERIALI: dalla distinta alla commessa (2-3 set, `2026-09-03.3`)
 - **La distinta sta nell ARTICOLO, la lista sta nella COMMESSA.** Sono due cose diverse: la distinta dice come e fatto un pezzo (1 unita), la lista dice cosa serve a QUELL ordine (× i pezzi). L una si corregge, l altra si congela.
-- **`articoli.distinta`**: sezione nella scheda articolo, sotto le fasi. Nessuna riga scritta -> vale quella di ALNUS in sola lettura; almeno una riga -> **vince questa, per intero**. Mai una fusione: un fabbisogno meta di qua e meta di la e un numero che nessuno riesce a spiegare. Svuotandola si torna ad Alnus. ⚠ La tabella `distinta` e una FOTOGRAFIA e il caricatore la svuota a ogni reimport: una correzione scritta li sparirebbe in silenzio, questa colonna il caricatore non la tocca mai.
+- **`articoli.distinta` E L'UNICA ORIGINE** (dal 4 set): la distinta di un prodotto sta li, si scrive a mano nella scheda o si importa dal foglio Excel della distinta. La vecchia tabella `distinta` di Alnus **non la legge piu nessuno**: le 155 distinte che stavano solo li sono state travasate dentro i prodotti (3.822 righe). Prima erano due origini con un fondo — niente riga qui = valeva quella di Alnus — e la scheda mostrava due schermate diverse per la stessa cosa.
+  - ⚠ **`null` e `[]` NON sono la stessa cosa**: `null` = mai dichiarata, `[]` = dichiarata vuota, cioe "questo prodotto non ha materiali". `applicaDistinteProdotti` le distingue, e l'elenco vuoto VINCE (saltarlo avrebbe rimesso in gioco Alnus proprio dove qualcuno ha detto il contrario).
+  - ⚠ **L'adozione e a senso unico**: svuotare le righe non fa piu tornare indietro. Decisione di Nico: *"quelle inserite con Alnus sono un fatto finito, se dovro modificarle lo faro manualmente"*.
+  - ⚠ **UN PRODOTTO SENZA DISTINTA NON E UN MATERIALE**: nell esplosione la foglia e un pezzo da comprare, ma la RADICE e il prodotto. Senza la guardia in `fabbisognoPerCodice`, 65 codici di prodotto finito entravano nella lista dei fabbisogni come componenti da ordinare.
+  - **186 prodotti restano senza distinta** e non e una perdita: 113 in Alnus non ce l'avevano proprio, 73 avevano SOLO segnaposto (COMP GENERICO / VARIE), che non sono materiali e il fabbisogno gia scartava.
 - **`operazioni.materiali`**: scheda **Materiali** della commessa (seconda linguetta, dopo Dati). TUTTI i componenti in ordine di codice, con `qta_pz` e `qta`. ⚠⚠ **SI CONGELANO LE QUANTITA, NON LA DISPONIBILITA**: quanto serve non cambia (e un impegno preso quando l ordine e partito), ma giacenza, ritardi e OF cambiano ogni giorno e restano LIVE. Congelare anche quelli mostrerebbe un ritardo di tre settimane fa come se fosse di oggi.
 - **Nasce da sola con l ordine**, da `creaMaterialiPerCommesse()` — **una porta sola** chiamata da tutte e tre le strade (griglia, modal singolo, import Alnus). Se fossero tre pezzi di codice una si dimenticherebbe: e gia successo con le chiusure dei timbri e coi controlli di stato. Best-effort: senza distinta la commessa nasce lo stesso e la lista si fa dopo col bottone.
 - **`⟳ Rigenera dalla distinta`** e l unico modo di aggiornarla, di proposito.
@@ -208,9 +212,7 @@
 - **DB in lettura** via REST con account kiosk (credenziali in core/db.js) — diagnosi su dati reali; curl con `--ssl-no-revoke`; l'account NON può DELETE → cancellazioni via SQL dal pannello (Nico).
 - **Suite test Node** in scratchpad (test_livella/finestra/fasi_eff/mero/interne/quote/stima/gruppo/listino): stub + eval di domain/scheduling.js. Rilanciare dopo modifiche al domain.
 - **Data realistica** nel modal commessa nuova (`livellaOperatore` + `stimaFineCommessaNuova`): fondamenta per Gantt livellato/autodistribuzione futuri.
-- **Catena materiali** (2-3 set), tutti in `strumenti/`, tutti con prova a vuoto per default:
-  - `carica-distinte.js . <file.xls> [--scrivi]` — carica l'estrazione Alnus in `materiali` + `distinta`. ⚠ Legge il **testo** della cella, non il valore.
-  - `copertura-distinte.js . <file.xls> [out.xlsx]` — quali commesse non hanno distinta **e perche** (classifica, non conta).
-  - `genera-materiali-commesse.js . [--sql|--scrivi] [--tutte]` — lista materiali sulle commesse che non ce l'hanno. ⚠ **usare `--sql`**: le UPDATE su `operazioni` l'RLS le rifiuta in silenzio.
-  - `prova-fabbisogno.js . [out.xlsx]` — il calcolo di casa messo accanto a quello di Alnus.
-  - `test/prova-mancanti-riflessi.js .` — le commesse che sembrano servite e non lo sono.
+- **Catena materiali: RITIRATA il 4 set** insieme alla cache Alnus. Cancellati `carica-distinte.js`, `copertura-distinte.js`, `genera-materiali-commesse.js`, `prova-fabbisogno.js`, `materializza-distinte.js` e i loro file (stanno nella storia git se dovessero servire). Calcolavano tutti dalla tabella `distinta`: tenerli avrebbe voluto dire avere strumenti che rispondono una cosa mentre l'app ne dice un'altra.
+  - `test/prova-mancanti-riflessi.js .` — le commesse che sembrano servite e non lo sono. **Resta**, non tocca le distinte.
+  - ⚠ **CONSEGUENZA ACCETTATA**: l'anagrafica `materiali` (9.327 codici) non ha piu' uno strumento che la aggiorni — la riempiva `carica-distinte.js`. I codici nuovi entrano dalle distinte importate a mano, che dal 4 set **si portano dietro la descrizione dal file**. Se un domani servisse ricaricarla, il caricatore e' nella storia git.
+  - `ritira-tabella-distinta.sql` — il DROP della tabella, da eseguire dal pannello. Righe salvate fuori dal repo in `backup-gestionale/distinta-archivio-2026-09-04.json` (38.461 righe, 5.366 padri).

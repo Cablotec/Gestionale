@@ -3922,8 +3922,8 @@ async function _calcolaFabbisognoVivo() {
   // La distinta e dentro il prodotto: niente da scaricare, si costruisce
   // l'indice padre->figli direttamente da `state.articoli`.
   const figliDi = new Map();
-  const conLocale = (typeof applicaDistinteLocali === 'function')
-    ? applicaDistinteLocali(figliDi, state.articoli) : new Set();
+  const conLocale = (typeof applicaDistinteProdotti === 'function')
+    ? applicaDistinteProdotti(figliDi, state.articoli) : new Set();
   const perCodice = fabbisognoPerCodice(vive, figliDi);
   // Descrizione, UM e tipo parte non stanno nella distinta: si chiedono
   // all'anagrafica, una riga per codice.
@@ -5280,7 +5280,7 @@ function openArticoloModal(a, opts) {
   //
   // ⚠ `null` e `[]` restano due cose diverse: `null` = mai dichiarata,
   // `[]` = dichiarata vuota, cioe "questo prodotto non ha materiali".
-  // A schermo si vedono uguali, ma `applicaDistinteLocali` le distingue.
+  // A schermo si vedono uguali, ma `applicaDistinteProdotti` le distingue.
   const distinta = Array.isArray(a.distinta) ? a.distinta.map(r => ({ ...r })) : [];
   let distintaAdottata = Array.isArray(a.distinta);
   const distWrap = el('div', {});

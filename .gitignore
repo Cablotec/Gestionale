@@ -10,4 +10,3 @@ materiali-commesse.sql
 segreti*
 *.env
 .env*
-strumenti/materializza-distinte.json
