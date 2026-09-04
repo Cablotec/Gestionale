@@ -40,15 +40,15 @@
 drop policy if exists operazioni_claude_update on public.operazioni;
 create policy operazioni_claude_update on public.operazioni
   for update to authenticated
-  using      (coalesce(auth.jwt() ->> 'email', '') = 'claude@cablotec.local')
-  with check (coalesce(auth.jwt() ->> 'email', '') = 'claude@cablotec.local');
+  using      (lower(coalesce(auth.jwt() ->> 'email', '')) = 'ai@cablotec.local')
+  with check (lower(coalesce(auth.jwt() ->> 'email', '')) = 'ai@cablotec.local');
 
 -- ── aziende: idem ──────────────────────────────────────────────────────
 drop policy if exists aziende_claude_update on public.aziende;
 create policy aziende_claude_update on public.aziende
   for update to authenticated
-  using      (coalesce(auth.jwt() ->> 'email', '') = 'claude@cablotec.local')
-  with check (coalesce(auth.jwt() ->> 'email', '') = 'claude@cablotec.local');
+  using      (lower(coalesce(auth.jwt() ->> 'email', '')) = 'ai@cablotec.local')
+  with check (lower(coalesce(auth.jwt() ->> 'email', '')) = 'ai@cablotec.local');
 
 -- ── VERIFICA ───────────────────────────────────────────────────────────
 -- Devono comparire due righe, entrambe con cmd = UPDATE.

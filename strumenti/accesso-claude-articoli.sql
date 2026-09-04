@@ -16,7 +16,7 @@
 -- di `mobile.html` e di `prelievo.html`. Aprire `articoli` a QUELLO
 -- vorrebbe dire dare a ogni kiosk il permesso di riscrivere le distinte
 -- dei prodotti. Non si fa.
--- Quindi questa policy è legata a `claude@cablotec.local`, e perché
+-- Quindi questa policy è legata a `ai@cablotec.local`, e perché
 -- serva a qualcosa quell'utente deve (1) esistere e (2) avere una
 -- password in un file locale fuori dal repo — `PW.txt` oggi contiene il
 -- kiosk, non lui.
@@ -41,8 +41,8 @@
 drop policy if exists articoli_claude_update on public.articoli;
 create policy articoli_claude_update on public.articoli
   for update to authenticated
-  using      (coalesce(auth.jwt() ->> 'email', '') = 'claude@cablotec.local')
-  with check (coalesce(auth.jwt() ->> 'email', '') = 'claude@cablotec.local');
+  using      (lower(coalesce(auth.jwt() ->> 'email', '')) = 'ai@cablotec.local')
+  with check (lower(coalesce(auth.jwt() ->> 'email', '')) = 'ai@cablotec.local');
 
 -- ── VERIFICA ───────────────────────────────────────────────────────────
 -- Deve comparire una riga, con cmd = UPDATE.

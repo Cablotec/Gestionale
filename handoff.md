@@ -392,7 +392,7 @@ Subito dopo il reimport le commesse **in ritardo sono passate da 4 a 49**. Non e
 
 ## Accesso di Claude alle scritture (25 ago 2026)
 Domanda di Nico: *"ma tu non avevi un account per poter far tutto sull app?"* — e la risposta era **no, non per quello**.
-- `claude@cablotec.local` esiste ed e nei profili, ma con **`ruolo = user`**, e `accesso-claude.sql` gli dava solo tre cose: aggiungi colonna, crea indice, scrivi su `attivita_extra`. **Niente su `operazioni` e `aziende`** — quindi l allineamento delle 190 posizioni sarebbe stato rifiutato uguale. Quello che avevo usato era l account **kiosk**, che e `user` anche lui.
+- `ai@cablotec.local` esiste ed e nei profili, ma con **`ruolo = user`**, e `accesso-claude.sql` gli dava solo tre cose: aggiungi colonna, crea indice, scrivi su `attivita_extra`. **Niente su `operazioni` e `aziende`** — quindi l allineamento delle 190 posizioni sarebbe stato rifiutato uguale. Quello che avevo usato era l account **kiosk**, che e `user` anche lui.
 - **L RLS rifiuta in silenzio**: HTTP 200 e zero righe toccate. Non un errore, proprio niente. E il modo piu facile per credere che una scrittura sia andata.
 - **Decisione: si apre il solo UPDATE** su `operazioni` e `aziende` (`strumenti/accesso-claude-scritture.sql`), con policy mirate sull utente dedicato e **senza promuoverlo admin** — stessa filosofia del primo file, il permesso sta sull operazione e non sul ruolo. **INSERT e DELETE restano fuori.**
 - Onesta sul perche: la protezione attuale **non ha impedito il danno del 25 ago**, perche l import e passato dalla sessione admin di Nico nel browser. La frizione non proteggeva le scritture; sulle **cancellazioni** invece si — i 51 doppioni li ha cancellati lui dopo aver visto i numeri, e quel passaggio e il valore, non l attrito.
@@ -588,7 +588,7 @@ Contati sui dati veri prima di decidere (backup del 7 ago, 2.208 sessioni):
 - Tetto 1000 righe PostgREST: tabelle a crescita libera SEMPRE via `fetchTutte` (successo: 3 timbri persi silenziosamente il 7 lug).
 
 ## ACCESSO DI CLAUDE AL DATABASE (7 ago 2026)
-- **Account dedicato** `claude@cablotec.local` (password in un file **locale fuori dal repo**, percorso noto a Nico; mai in chat, mai nel repo — che è pubblico). Distinto dall'account kiosk.
+- **Account dedicato** `ai@cablotec.local` (password in un file **locale fuori dal repo**, percorso noto a Nico; mai in chat, mai nel repo — che è pubblico). Distinto dall'account kiosk.
 - **Migrazioni additive da solo, DROP impossibile per costruzione.** Il permesso non sta sul ruolo ma sulle OPERAZIONI: due funzioni `SECURITY DEFINER` in `strumenti/accesso-claude.sql` — `mig_aggiungi_colonna(tabella, colonna, tipo)` e `mig_crea_indice(tabella, colonna)` — chiamabili via RPC REST. Il DROP non è vietato: **non esiste una funzione che lo faccia**.
   - **Perché così**: `ADD COLUMN` richiede di essere **proprietario** della tabella, e il proprietario può anche fare `DROP`. "Scrittura sì, DROP no" come ruolo Postgres **non esiste**. In più su questa macchina non c'è `psql`: il canale è REST, quindi un utente Postgres non sarebbe nemmeno utilizzabile.
   - Nomi validati con regex, tipi da lista chiusa, idempotenti (rilanciarle non è un errore). Il controllo di **chi** può chiamarle sta DENTRO le funzioni (`auth.jwt() ->> 'email'`) e non sul grant, perché la chiave anon è pubblica come tutto il repo.

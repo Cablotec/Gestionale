@@ -10,7 +10,7 @@
 --
 -- PRIMA di eseguire: crea l'utente dalla dashboard Supabase
 --   Authentication → Users → Add user
---   email:    claude@cablotec.local
+--   email:    ai@cablotec.local
 --   password: scegline una e mettila in un file LOCALE, fuori dal repo
 --             (il repo è pubblico). Non serve che me la scriva in chat:
 --             dimmi solo dove l'hai messa.
@@ -30,7 +30,7 @@ declare
 begin
   -- Chi può: solo l'utente dedicato. La chiave anon è pubblica (il repo lo è),
   -- quindi il controllo sta QUI dentro e non sul grant.
-  if coalesce(auth.jwt() ->> 'email', '') <> 'claude@cablotec.local' then
+  if lower(coalesce(auth.jwt() ->> 'email', '')) <> 'ai@cablotec.local' then
     raise exception 'non autorizzato';
   end if;
   -- Nomi: solo identificatori semplici. Niente virgolette, niente spazi,
@@ -68,7 +68,7 @@ as $$
 declare
   v_nome text;
 begin
-  if coalesce(auth.jwt() ->> 'email', '') <> 'claude@cablotec.local' then
+  if lower(coalesce(auth.jwt() ->> 'email', '')) <> 'ai@cablotec.local' then
     raise exception 'non autorizzato';
   end if;
   if p_tabella !~ '^[a-z_][a-z0-9_]*$' or p_colonna !~ '^[a-z_][a-z0-9_]*$' then
@@ -97,8 +97,8 @@ grant execute on function public.mig_crea_indice(text, text) to authenticated;
 -- utente dedicato, in aggiunta alle regole esistenti (che restano com'erano).
 create policy attivita_extra_claude on public.attivita_extra
   for all to authenticated
-  using      (coalesce(auth.jwt() ->> 'email', '') = 'claude@cablotec.local')
-  with check (coalesce(auth.jwt() ->> 'email', '') = 'claude@cablotec.local');
+  using      (lower(coalesce(auth.jwt() ->> 'email', '')) = 'ai@cablotec.local')
+  with check (lower(coalesce(auth.jwt() ->> 'email', '')) = 'ai@cablotec.local');
 
 -- PARTE 2: `accesso-claude-scritture.sql` aggiunge l UPDATE su operazioni
 -- e aziende (correggere righe esistenti). INSERT e DELETE restano fuori
