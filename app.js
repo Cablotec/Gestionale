@@ -1505,7 +1505,7 @@ const TAB_STRUCTURE = {
     ],
   },
   lavoro: {
-    label: 'Lavoro',
+    label: 'Produzione',
     adminOnly: false,
     tabs: [
       { id: 'pianificazione', label: 'Ordini cliente', adminOnly: false },
@@ -7944,7 +7944,7 @@ function renderPianificazione(root) {
   if (state.aziende.length === 0 || state.articoli.length === 0) {
     root.append(el('div', { class:'empty' },
       el('div', { style:'margin-bottom:8px;' }, '⚠ Per creare operazioni servono prima clienti e articoli.'),
-      el('div', { class:'sub' }, 'Vai in Gestione → Aziende e in Lavoro → Prodotti per aggiungerne.')));
+      el('div', { class:'sub' }, 'Vai in Gestione → Aziende e in Produzione → Prodotti per aggiungerne.')));
     return;
   }
   if (list.length === 0) {
@@ -18586,7 +18586,7 @@ function rifRecenti(attivitaId, giorni = 45) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// TIMBRI SU ATTIVITÀ EXTRA — scheda di ricerca (Lavoro)
+// TIMBRI SU ATTIVITÀ EXTRA — scheda di ricerca (Produzione)
 // L'anagrafica delle attività resta in Gestione: qui si guarda COSA è stato
 // fatto. Nasce da un conto: 228 h in dieci settimane, il 6,3% del timbrato,
 // e nessun posto dove cercarle. I timbri sono `sessioni_lavoro` con
