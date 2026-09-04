@@ -3847,34 +3847,28 @@ let _fabbCalcSeq = 0;
 let fabbCalcVista = 'materiale';      // 'materiale' | 'commessa'
 let fabbCalcSoloScoperti = true;
 
-// Scarica la distinta per i codici dati, poi per i loro figli, finche non
-// esce piu niente di nuovo. La profondita vera e 3, il tetto a 8 e solo una
-// rete: senza, una distinta ad anello girerebbe per sempre.
-async function fabbScaricaDistinta(codiciRadice) {
-  const righe = [];
-  const chiesti = new Set();
-  let fronte = [...new Set(codiciRadice.filter(Boolean))];
-  for (let liv = 0; liv < 8 && fronte.length; liv++) {
-    const nuovi = fronte.filter(c => !chiesti.has(c));
-    nuovi.forEach(c => chiesti.add(c));
-    if (!nuovi.length) break;
-    const trovate = [];
-    // ⚠ Si usa `.in()` di supabase-js e NON un filtro costruito a mano: fra
-    // questi codici ce ne sono con la virgola dentro (`83010FILO0H05VK,25BI`)
-    // e in un `in.(a,b)` scritto a mano quella virgola spezzerebbe il valore
-    // in due — con la query che torna dati sbagliati SENZA dare errore.
-    for (let i = 0; i < nuovi.length; i += 80) {
-      const blocco = nuovi.slice(i, i + 80);
-      const { data, error } = await sb.from('distinta')
-        .select('padre,figlio,qta,um,tipo_parte,figlio_descrizione')
-        .in('padre', blocco);
-      if (error) throw error;
-      trovate.push(...(data || []));
-    }
-    righe.push(...trovate);
-    fronte = [...new Set(trovate.map(r => r.figlio))];
+// L'anagrafica dei materiali per i codici dati: descrizione, UM, tipo parte.
+// Sostituisce `fabbScaricaDistinta`, che scaricava la tabella `distinta` per
+// ricavare le stesse tre informazioni dalle righe padre-figlio. Da quando la
+// distinta e dentro il prodotto (4 set) quel giro non serve piu, e questo
+// costa meno: UNA riga per codice invece di una per ogni accoppiata
+// padre-figlio in cui quel codice compare.
+//
+// ⚠ Si usa `.in()` di supabase-js e NON un filtro costruito a mano: fra
+// questi codici ce ne sono con la virgola dentro (`83010FILO0H05VK,25BI`) e
+// in un `in.(a,b)` scritto a mano quella virgola spezzerebbe il valore in
+// due — con la query che torna dati sbagliati SENZA dare errore.
+async function fabbAnagraficaMateriali(codici) {
+  const out = new Map();
+  const lista = [...new Set((codici || []).map(c => String(c || '').trim()).filter(Boolean))];
+  for (let i = 0; i < lista.length; i += 80) {
+    const { data, error } = await sb.from('materiali')
+      .select('codice,descrizione,um,tipo_parte')
+      .in('codice', lista.slice(i, i + 80));
+    if (error) throw error;
+    (data || []).forEach(m => out.set(String(m.codice).trim(), m));
   }
-  return righe;
+  return out;
 }
 
 // Il fabbisogno di tutte le commesse vive, calcolato una volta sola e usato
@@ -3925,15 +3919,16 @@ async function _calcolaFabbisognoVivo() {
     })
     .filter(c => c.codiceArticolo && c.quantita > 0);
 
-  const radici = vive.map(c => c.codiceArticolo);
-  state.articoli.forEach(a => {
-    if (Array.isArray(a.distinta)) a.distinta.forEach(r => { if (r && r.codice) radici.push(String(r.codice).trim()); });
-  });
-  const righeDist = await fabbScaricaDistinta(radici);
-  const figliDi = indiceDistinta(righeDist);
+  // La distinta e dentro il prodotto: niente da scaricare, si costruisce
+  // l'indice padre->figli direttamente da `state.articoli`.
+  const figliDi = new Map();
   const conLocale = (typeof applicaDistinteLocali === 'function')
     ? applicaDistinteLocali(figliDi, state.articoli) : new Set();
-  return { vive, righeDist, figliDi, conLocale, perCodice: fabbisognoPerCodice(vive, figliDi) };
+  const perCodice = fabbisognoPerCodice(vive, figliDi);
+  // Descrizione, UM e tipo parte non stanno nella distinta: si chiedono
+  // all'anagrafica, una riga per codice.
+  const anag = await fabbAnagraficaMateriali([...perCodice.keys()]);
+  return { vive, anag, figliDi, conLocale, perCodice };
 }
 
 // Quanto serve a UNA commessa di ogni codice, e quanto gliene manca davvero
@@ -3970,54 +3965,53 @@ async function fabbisognoDiCommessa(numeroOp) {
   return out;
 }
 
-// La lista dei materiali di una commessa, CONGELATA. Esplode la distinta
-// dell'articolo per i pezzi dell'ordine e ritorna le righe da salvare.
+// La lista dei materiali di una commessa, CONGELATA. Prende la distinta del
+// prodotto e la moltiplica per i pezzi dell'ordine.
 // ⚠ Si congelano le QUANTITA, non la disponibilita: quanto serve non cambia,
 // quanto ce n'e in magazzino cambia ogni giorno e resta live.
 // Chiamata dopo OGNI creazione di commesse, da tutte e tre le porte
 // (griglia "+ Nuovo ordine", modal singolo, import da Alnus).
-// ⚠ NON blocca e NON fa fallire la creazione: se la distinta non c'e o la
-// migrazione non e stata eseguita, la commessa nasce lo stesso e la lista si
-// crea dopo col bottone. Una commessa che non si salva perche mancava una
-// distinta sarebbe un rimedio peggiore del male.
-async function creaMaterialiPerCommesse(commesse) {
-  if (!Array.isArray(commesse) || !commesse.length) return 0;
-  let fatte = 0;
-  for (const op of commesse) {
-    try {
-      const art = (state.articoli || []).find(a => a.id === op.articolo_id);
-      if (!art || !art.codice) continue;
-      const righe = await generaMaterialiCommessa(art.codice, Number(op.quantita) || 0);
-      if (!righe.length) continue;
-      await salvaMaterialiCommessa(op, righe);
-      fatte++;
-    } catch (e) { /* la commessa resta, la lista si fara dopo */ }
-  }
-  return fatte;
-}
-
+// ⚠ NON blocca e NON fa fallire la creazione: se la distinta non c'e, la
+// commessa nasce lo stesso e la lista si crea dopo col bottone. Una commessa
+// che non si salva perche mancava una distinta sarebbe un rimedio peggiore
+// del male.
+//
+// Dal 4 set NON esplode piu niente: `articoli.distinta` porta gia le foglie,
+// e la tabella `distinta` non si legge. I duplicati si sommano lo stesso —
+// lo stesso codice puo comparire due volte in due fasi, e la lista della
+// commessa vuole una riga per codice.
 async function generaMaterialiCommessa(codiceArticolo, pezzi) {
   if (!codiceArticolo || !(pezzi > 0)) return [];
-  const righeDist = await fabbScaricaDistinta([codiceArticolo]);
-  const figliDi = indiceDistinta(righeDist);
-  if (typeof applicaDistinteLocali === 'function') applicaDistinteLocali(figliDi, state.articoli);
-  if (!figliDi.has(codiceArticolo)) return [];
-  const e = esplodiDistinta(codiceArticolo, pezzi, figliDi);
-  const descr = {}, ums = {};
-  righeDist.forEach(r => {
-    if (r.figlio_descrizione && !descr[r.figlio]) descr[r.figlio] = r.figlio_descrizione;
-    if (r.um && !ums[r.figlio]) ums[r.figlio] = r.um;
+  const art = (state.articoli || []).find(a => a.codice === codiceArticolo);
+  const righeArt = art && Array.isArray(art.distinta) ? art.distinta : null;
+  if (!righeArt || !righeArt.length) return [];
+
+  const per = new Map();
+  righeArt.forEach(r => {
+    const cod = String((r && r.codice) || '').trim();
+    const q = Number(r && r.qta) || 0;
+    if (!cod || !(q > 0)) return;
+    if (typeof eSegnaposto === 'function' && eSegnaposto(cod)) return;
+    const gia = per.get(cod);
+    if (gia) { gia.qta += q; if (!gia.um && r.um) gia.um = r.um; return; }
+    per.set(cod, { qta: q, um: r.um || null, descrizione: r.descrizione || null });
   });
-  return [...e.materiali.entries()]
-    .map(([codice, qta]) => ({
-      codice,
-      descrizione: descr[codice] || null,
-      um: ums[codice] || null,
-      // Il per-pezzo si salva accanto al totale: cosi la riga si rilegge anche
-      // quando la quantita dell'ordine, un domani, sara cambiata.
-      qta_pz: +(qta / pezzi).toFixed(6),
-      qta: +qta.toFixed(4),
-    }))
+  if (!per.size) return [];
+
+  const anag = await fabbAnagraficaMateriali([...per.keys()]);
+  return [...per.entries()]
+    .map(([codice, x]) => {
+      const m = anag.get(codice);
+      return {
+        codice,
+        descrizione: x.descrizione || (m && m.descrizione) || null,
+        um: x.um || (m && m.um) || null,
+        // Il per-pezzo si salva accanto al totale: cosi la riga si rilegge anche
+        // quando la quantita dell'ordine, un domani, sara cambiata.
+        qta_pz: +Number(x.qta).toFixed(6),
+        qta: +Number(x.qta * pezzi).toFixed(4),
+      };
+    })
     .sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true, sensitivity: 'base' }));
 }
 
@@ -4055,7 +4049,7 @@ async function renderFabbisognoCalcolato(root) {
     return;
   }
   if (mySeq !== _fabbCalcSeq || !root.isConnected) return;
-  const { vive, righeDist, figliDi, conLocale, perCodice } = calcolo;
+  const { vive, anag, figliDi, conLocale, perCodice } = calcolo;
   const conDistinta = vive.filter(c => figliDi.has(c.codiceArticolo));
   const senzaDistinta = vive.filter(c => !figliDi.has(c.codiceArticolo));
 
@@ -4083,9 +4077,11 @@ async function renderFabbisognoCalcolato(root) {
     const scoperto = rip.esito.reduce((a, e) => a + e.scoperto, 0);
     return {
       codice: cod, richiesto, giacenza,
-      descrizione: (man && man.descrizione) || (righeDist.find(r => r.figlio === cod) || {}).figlio_descrizione || '',
-      um: (righeDist.find(r => r.figlio === cod) || {}).um || (man && man.um) || '',
-      tipo_parte: (man && man.tipo_parte) || (righeDist.find(r => r.figlio === cod) || {}).tipo_parte || '',
+      // La riga dei mancanti e piu fresca dell'anagrafica: viene
+      // dall'ultima estrazione, quindi vince quando c'e.
+      descrizione: (man && man.descrizione) || (anag.get(cod) || {}).descrizione || '',
+      um: (man && man.um) || (anag.get(cod) || {}).um || '',
+      tipo_parte: (man && man.tipo_parte) || (anag.get(cod) || {}).tipo_parte || '',
       scoperto, righe, esito: rip.esito, giacenzaNota: giacenza != null,
     };
   });
@@ -4196,7 +4192,7 @@ async function renderFabbisognoCalcolato(root) {
               + (x.m.um ? ' ' + x.m.um : '')).join('\n') + (s.length > 20 ? '\n… e altri ' + (s.length - 20) : '') },
             s.length ? String(s.length) : (figliDi.has(c.codiceArticolo) ? '0' : 'no distinta')),
           el('td', { style:'font-size:11px;color:var(--mut);' },
-            conLocale.has(c.codiceArticolo) ? '✎ qui' : (figliDi.has(c.codiceArticolo) ? 'Alnus' : '—')),
+            conLocale.has(c.codiceArticolo) ? '✎ sì' : '—'),
         ));
       });
     tbl.append(body);

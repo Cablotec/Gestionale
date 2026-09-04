@@ -93,6 +93,14 @@ function fabbisognoPerCodice(commesse, figliDi) {
   const perCodice = new Map();
   (commesse || []).forEach(c => {
     if (!c || !c.codiceArticolo) return;
+    // ⚠ UN PRODOTTO SENZA DISTINTA NON E UN MATERIALE. Nell esplosione una
+    // foglia e un pezzo da comprare, ma la RADICE e il prodotto: senza
+    // questa guardia un articolo di cui non si conosce la distinta finiva
+    // nella lista dei fabbisogni come se fosse un componente da ordinare —
+    // 65 codici su 807, tutti prodotti finiti. Chiedersi cosa manca per
+    // costruirlo e rispondere "lui stesso" e peggio di non rispondere.
+    const suoiFigli = figliDi.get(c.codiceArticolo);
+    if (!suoiFigli || !suoiFigli.length) return;
     const e = esplodiDistinta(c.codiceArticolo, c.quantita, figliDi);
     e.materiali.forEach((q, cod) => {
       if (!perCodice.has(cod)) perCodice.set(cod, []);
