@@ -23,7 +23,14 @@
 //
 //   node strumenti/materializza-distinte.js .
 //   node strumenti/materializza-distinte.js . --sql migrazione-distinte-materializzate.sql
-//   node strumenti/materializza-distinte.js . --scrivi
+//   node strumenti/materializza-distinte.js . --scrivi            (account kiosk)
+//   node strumenti/materializza-distinte.js . --scrivi --come-ai  (account AI)
+//
+// ⚠ --scrivi da solo NON basta: l'account kiosk non puo scrivere su
+// `articoli` (ed e giusto cosi, e condiviso da tutte le postazioni di
+// reparto). Serve --come-ai, che entra con l'utente dedicato leggendo la
+// password dal file locale fuori dal repo, piu la policy di
+// `strumenti/accesso-claude-articoli.sql` eseguita dal pannello.
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
@@ -32,6 +39,8 @@ const SCRIVI = process.argv.includes('--scrivi');
 const iSql = process.argv.indexOf('--sql');
 const FILE_SQL = iSql >= 0 ? (process.argv[iSql + 1] || 'migrazione-distinte-materializzate.sql') : null;
 const M = require(path.resolve(G, 'domain/materiali.js'));
+const COME_AI = process.argv.includes('--come-ai');
+const CRED = require(path.resolve(G, 'strumenti/credenziali.js'));
 
 const db = fs.readFileSync(G + '/core/db.js', 'utf8');
 const URLB = db.match(/SUPABASE_URL\s*=\s*"([^"]+)"/)[1];
@@ -65,7 +74,15 @@ const T = v => String(v == null ? '' : v).trim();
 const q = v => "'" + String(v).replace(/'/g, "''") + "'";
 
 (async () => {
-  const a = await req('/auth/v1/token?grant_type=password', 'POST', { email: EMAIL, password: PASS });
+  // Con --come-ai si entra con l'utente dedicato: e l'unico che le policy
+  // lasciano scrivere. Senza, si entra col kiosk e si legge soltanto.
+  let email = EMAIL, pw = PASS;
+  if (COME_AI) {
+    const c = CRED.leggiCredenziali('ai@cablotec.local', { radice: G });
+    email = c.email; pw = c.password;
+    console.log('entro come ' + email + ' (password dal file locale)');
+  }
+  const a = await req('/auth/v1/token?grant_type=password', 'POST', { email, password: pw });
   const tok = a.corpo && a.corpo.access_token;
   if (!tok) { console.error('login fallito'); process.exit(1); }
 
