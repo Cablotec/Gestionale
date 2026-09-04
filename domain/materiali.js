@@ -150,6 +150,11 @@ function fabbisognoDaListe(commesse) {
     c.materiali.forEach(m => {
       const cod = String((m && m.codice) || '').trim();
       const q = Number(m && m.qta) || 0;
+      // ⚠ QUI il segnaposto si toglie, ed e l unico posto dove si toglie.
+      // Dal 4 set resta nella lista della commessa — chi lavora lo vede —
+      // ma non deve entrare nella domanda: `COMP GENERICO` compare in 3.409
+      // distinte e sommandolo diventava il primo fabbisogno dell azienda con
+      // 27.577 pezzi, contro i 21 che ne dichiarava Alnus.
       if (!cod || !(q > 0) || eSegnaposto(cod)) return;
       if (!perCodice.has(cod)) perCodice.set(cod, []);
       perCodice.get(cod).push({ commessa: c, qta: q });

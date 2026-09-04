@@ -3991,7 +3991,13 @@ async function generaMaterialiCommessa(codiceArticolo, pezzi) {
     const cod = String((r && r.codice) || '').trim();
     const q = Number(r && r.qta) || 0;
     if (!cod || !(q > 0)) return;
-    if (typeof eSegnaposto === 'function' && eSegnaposto(cod)) return;
+    // ⚠ I SEGNAPOSTO (COMP GENERICO, VARIE) ENTRANO NELLA LISTA (4 set,
+    // deciso da Nico: "le riportiamo anche nelle commesse, ma le nascondiamo
+    // dal fabbisogno"). Sono righe che il progettista ha messo apposta e chi
+    // lavora deve vederle; quello che non devono fare e' FARE NUMERO — un
+    // COMP GENERICO da 27.577 pezzi in cima alla classifica dei fabbisogni
+    // non vuol dire niente. Il filtro sta quindi solo nel conto
+    // (`fabbisognoDaListe`, `esplodiDistinta`), non qui.
     const gia = per.get(cod);
     if (gia) { gia.qta += q; if (!gia.um && r.um) gia.um = r.um; return; }
     per.set(cod, { qta: q, um: r.um || null, descrizione: r.descrizione || null });
@@ -9645,6 +9651,15 @@ function openOperazioneModal(o, opts) {
         // La differenza che conta e che COPERTO E FRAGILE: dipende dall'ordine
         // di ripartizione, e una commessa piu urgente che entra domani se lo
         // porta via. Per questo dice anche quante altre se lo contendono.
+        // Un segnaposto non e un pezzo: dire "disponibile" vorrebbe dire
+        // che in magazzino ce n'e, e in magazzino COMP GENERICO non esiste.
+        // Si dichiara che non fa numero, invece di far finta che sia a posto.
+        if (typeof eSegnaposto === 'function' && eSegnaposto(codice)) {
+          cella.textContent = 'non conteggiato'; cella.style.color = 'var(--mut)';
+          cella.title = 'Voce generica della distinta, non un materiale da prelevare: '
+            + 'resta in lista perché sta nella distinta, ma non entra nel fabbisogno.';
+          return;
+        }
         if (!m) {
           cella.textContent = 'disponibile'; cella.style.color = 'var(--mut)';
           cella.title = "Non compare fra i sotto scorta dell'ultima estrazione di Alnus: "
