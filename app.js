@@ -5268,28 +5268,25 @@ function openArticoloModal(a, opts) {
   // materiali. Erano l'unica meta mancante (richiesta Nico, 2 set:
   // "voglio semplicita e immediatezza" — quindi nessuna scheda a parte).
   //
-  // DUE ORIGINI, UNA SOLA VERITA:
-  //   mai adottata  -> vale la distinta di ALNUS, e i reimport la aggiornano
-  //   adottata      -> vale QUESTA, per intero, e Alnus non la tocca piu
-  // Mai una fusione: un fabbisogno meta di qua e meta di la e un numero che
-  // nessuno riesce piu a spiegare.
+  // UNA SOLA ORIGINE (4 set, deciso da Nico: "non voglio piu cache Alnus,
+  // le distinte sono importate e basta"). La distinta di un prodotto e
+  // `articoli.distinta` e nient'altro: si scrive qui, si importa da Excel,
+  // e i reimport dell'estrazione non la toccano piu.
   //
-  // ⚠⚠ L'ADOZIONE E' A SENSO UNICO (4 set, deciso da Nico: "quelle inserite
-  // con Alnus sono un fatto finito, se dovro' modificarle lo faro'
-  // manualmente"). Prima svuotare le righe rimetteva in gioco quella di
-  // Alnus: era un ritorno indietro che non chiedeva niente a nessuno e non
-  // si vedeva da nessuna parte. Ora una distinta adottata resta adottata
-  // anche se la si svuota, e svuotata vuol dire DAVVERO senza materiali.
-  // Per questo la memoria non e' piu' `distinta.length > 0` ma un flag suo:
-  // una lista vuota e una lista mai toccata sono due cose diverse.
+  // Prima la tabella `distinta` faceva da fondo: se qui non c'era niente,
+  // la scheda mostrava quella di Alnus. Il 4 set le 155 distinte che
+  // stavano solo li sono state travasate dentro i prodotti
+  // (`strumenti/materializza-distinte.js`, 3.822 righe) e il fondo e stato
+  // tolto. I 186 prodotti rimasti senza non hanno perso niente: 113 in
+  // Alnus non ce l'avevano proprio, 73 avevano SOLO segnaposto
+  // (COMP GENERICO / VARIE), che non sono materiali e il fabbisogno gia
+  // scartava.
   //
-  // ⚠ La colonna `articoli.distinta` il caricatore delle distinte NON la
-  // tocca mai. La tabella `distinta` invece e una fotografia e viene
-  // svuotata a ogni reimport: una correzione scritta li sparirebbe in
-  // silenzio. Qui sopravvive per costruzione.
+  // ⚠ `null` e `[]` restano due cose diverse: `null` = mai dichiarata,
+  // `[]` = dichiarata vuota, cioe "questo prodotto non ha materiali".
+  // A schermo si vedono uguali, ma `applicaDistinteLocali` le distingue.
   const distinta = Array.isArray(a.distinta) ? a.distinta.map(r => ({ ...r })) : [];
   let distintaAdottata = Array.isArray(a.distinta);
-  let distintaAlnus = null;            // null = non ancora caricata
   const distWrap = el('div', {});
   const distNota = el('div', { class:'sub', style:'font-size:11px;margin-top:8px;line-height:1.6;' });
   const distintaLocale = () => distintaAdottata;
@@ -5326,65 +5323,29 @@ function openArticoloModal(a, opts) {
   function renderDistinta() {
     distWrap.innerHTML = '';
 
-    if (!distintaLocale() && distintaAlnus === null) {
-      distWrap.append(el('div', { class:'sub' }, 'Carico la distinta…'));
-      return;
-    }
-    const daAlnus = !distintaLocale();
-    // Il calco: righe finte che disegnano quelle di Alnus. `_descr` arriva
-    // dall'estrazione, cosi non si interroga l'anagrafica riga per riga —
-    // su una distinta da settanta componenti sarebbero settanta chiamate a
-    // ogni apertura del prodotto.
-    const righe = daAlnus
-      ? (distintaAlnus || []).map(r => ({ codice: r.figlio, qta: r.qta, um: r.um, _descr: r.figlio_descrizione }))
-      : distinta;
-
-    if (!righe.length) {
-      // Vuota e adottata non e la stessa cosa di vuota e basta: la prima e
-      // una dichiarazione, e va letta come tale da chi la guarda.
-      distWrap.append(el('div', { class:'sub' }, daAlnus
-        ? 'Nessuna distinta, né dall\'estrazione Alnus né scritta qui.'
-        : 'Nessuna riga: questo prodotto risulta senza materiali. Gli ordini nuovi nasceranno senza lista.'));
+    if (!distinta.length) {
+      // Vuota e DICHIARATA non e la stessa cosa di vuota e basta: la prima
+      // e una scelta di qualcuno, e va letta come tale da chi la guarda.
+      distWrap.append(el('div', { class:'sub' }, distintaLocale()
+        ? 'Nessuna riga: questo prodotto risulta senza materiali. Gli ordini nuovi nasceranno senza lista.'
+        : 'Nessuna distinta. Scrivila a mano qui sotto, o importala da Excel.'));
       return;
     }
 
-    if (daAlnus) {
-      distWrap.append(el('div', { class:'sub', style:'font-size:11px;margin-bottom:6px;' },
-        righe.length + (righe.length === 1 ? ' materiale' : ' materiali') + ' · dall\'estrazione Alnus'));
-    }
     distWrap.append(intestazioneDist());
     // Oltre una dozzina di righe la scheda diventerebbe un rotolo: si
     // scorre dentro il riquadro invece che dentro la modale.
-    const lista = el('div', righe.length > 12
+    const lista = el('div', distinta.length > 12
       ? { style:'max-height:340px;overflow-y:auto;padding-right:4px;' } : {});
+    const daCercare = [];
 
-    // Le righe di Alnus entrano in `distinta` TUTTE INSIEME e nello stesso
-    // ordine: cosi l'indice della riga a schermo e anche il suo indice
-    // nell'array, e chi sta scrivendo continua a scrivere nella riga giusta
-    // senza che si debba ridisegnare. Ridisegnare gli toglierebbe il fuoco
-    // di sotto alle dita a meta parola.
-    const adotta = () => {
-      if (distintaLocale()) return false;
-      // Si copia QUELLO CHE E A SCHERMO, non distintaAlnus: se cercando il
-      // codice l anagrafica ha riempito una UM che nell estrazione mancava,
-      // quella UM si vede nel campo e deve finire nel salvataggio. Copiando
-      // dalla sorgente si perderebbe restando visibile: il modo peggiore.
-      righe.forEach(x => distinta.push({ codice: x.codice, qta: x.qta, um: x.um }));
-      distintaAdottata = true;
-      return true;
-    };
-
-    righe.forEach((r, i) => {
+    distinta.forEach((r, i) => {
       const inCod = el('input', { type:'text', value: r.codice || '', placeholder:'codice materiale',
         style:'font-family:JetBrains Mono,monospace;font-size:11px;min-width:0;' });
       const inQta = el('input', { type:'number', step:'0.001', min:'0', value: String(r.qta ?? ''),
         placeholder:'0', style:'text-align:right;' });
       const inUm = el('input', { type:'text', value: r.um || '', placeholder:'um' });
       [inCod, inQta, inUm].forEach(x => { x.disabled = readonly; });
-      // La riga su cui scrivere: quella vera se si e gia adottato, il calco
-      // altrimenti. Si rilegge ogni volta, perche l'adozione puo essere
-      // avvenuta un carattere fa.
-      const riga = () => (daAlnus && distintaLocale()) ? distinta[i] : r;
       // Il codice si riconosce chiedendolo all'anagrafica, UNA riga alla
       // volta e solo quando si e finito di scriverlo. Tenersi in memoria i
       // 9.327 materiali per un suggerimento sarebbe egress buttato a ogni
@@ -5400,72 +5361,79 @@ function openArticoloModal(a, opts) {
           const m = (data || [])[0];
           if (m) {
             hint.textContent = m.descrizione || '';
-            if (!riga().um && m.um) { riga().um = m.um; inUm.value = m.um; }
+            if (!r.um && m.um) { r.um = m.um; inUm.value = m.um; }
           } else {
-            // UN CODICE CHE NON C'E NON E UN ERRORE: e un materiale NUOVO
-            // (richiesta Nico, 4 set). Dirlo con questa parola distingue i
-            // due casi che prima si confondevano: "l'ho scritto male", che
-            // si scopre subito perche il simile in anagrafica esiste, e
+            // UN CODICE CHE NON C'E NON E UN ERRORE: e un materiale NUOVO.
+            // Dirlo con questa parola distingue "l'ho scritto male", che si
+            // scopre subito perche il simile in anagrafica esiste, da
             // "questo pezzo in anagrafica non c'e ancora".
             hint.textContent = '✱ NUOVO · non è in anagrafica materiali';
             hint.style.color = 'var(--yel)'; hint.style.fontWeight = '700';
           }
         } catch (e) { /* l'anagrafica puo non esserci ancora: si tace */ }
       };
-      const scrivi = (campo, val) => {
-        const primo = adotta();
-        riga()[campo] = val;
-        if (primo) {
-          aggiornaNotaDistinta();
-          if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
-        }
-      };
-      inCod.oninput = () => { scrivi('codice', inCod.value.trim()); hint.textContent = ''; };
+      inCod.oninput = () => { r.codice = inCod.value.trim(); hint.textContent = ''; };
       inCod.onblur = cerca;
-      inQta.oninput = () => { scrivi('qta', inQta.value === '' ? null : Number(inQta.value)); };
-      inUm.oninput = () => { scrivi('um', inUm.value.trim() || null); };
+      inQta.oninput = () => { r.qta = inQta.value === '' ? null : Number(inQta.value); };
+      inUm.oninput = () => { r.um = inUm.value.trim() || null; };
       lista.append(el('div', { style: COL_DIST },
         el('span', { class:'sub', style:'font-size:11px;' }, '#' + (i + 1)),
         inCod, hint, inQta, inUm,
         readonly ? el('span', {}) : el('button', { type:'button', class:'btnsm', style:'padding:4px 6px;',
           onclick: () => {
-            adotta();
             distinta.splice(i, 1);
             renderDistinta(); aggiornaNotaDistinta();
             if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
           } }, '✕')));
-      // La descrizione che arriva dall'estrazione si mostra e basta:
-      // all'anagrafica si chiede solo per le righe che non ce l'hanno.
-      if (r._descr) hint.textContent = r._descr;
-      else if (r.codice) cerca();
+      // La descrizione che la riga si porta dietro si mostra subito; per le
+      // altre ci pensa la chiamata unica qui sotto.
+      if (r.descrizione) hint.textContent = r.descrizione;
+      else if (r.codice) daCercare.push({ codice: r.codice, hint, riga: r, inUm });
     });
     distWrap.append(lista);
+
+    // ⚠ UNA chiamata per tutta la distinta, non una per riga. Le righe
+    // salvate portano solo codice, quantita e unita di misura: chiedendo la
+    // descrizione riga per riga, aprire un prodotto da 82 componenti
+    // sarebbe 82 richieste, ogni volta. Con `in()` e una sola.
+    // Il `cerca()` per riga resta, ma solo al blur: li si e appena scritto
+    // un codice e la risposta serve per quello.
+    if (daCercare.length) {
+      const codici = [...new Set(daCercare.map(x => x.codice))];
+      sb.from('materiali').select('codice,descrizione,um').in('codice', codici)
+        .then(({ data, error }) => {
+          if (error) return;                     // l'anagrafica puo non esserci: si tace
+          const per = new Map((data || []).map(m => [String(m.codice).trim(), m]));
+          daCercare.forEach(x => {
+            const m = per.get(x.codice);
+            if (m) {
+              x.hint.textContent = m.descrizione || '';
+              if (!x.riga.um && m.um) { x.riga.um = m.um; x.inUm.value = m.um; }
+              return;
+            }
+            x.hint.textContent = '✱ NUOVO · non è in anagrafica materiali';
+            x.hint.style.color = 'var(--yel)'; x.hint.style.fontWeight = '700';
+          });
+        });
+    }
   }
 
   function aggiornaNotaDistinta() {
     distNota.innerHTML = '';
-    if (distintaLocale()) {
-      distNota.append(
-        el('span', { style:'color:var(--acc);font-weight:600;' }, '✎ Scritta qui'),
-        document.createTextNode(' — vale questa, e i reimport da Alnus non la toccano.'));
+    if (!distintaLocale()) {
+      distNota.textContent = 'Scrivi le righe qui sotto, oppure importa il foglio Excel della distinta.';
       return;
     }
-    if (distintaAlnus === null) return;
-    distNota.textContent = distintaAlnus.length
-      ? 'Viene da Alnus e i reimport la aggiornano. I campi sono aperti: al primo che modifichi diventa la tua, e da quel momento Alnus non la tocca più.'
-      : 'Scrivila a mano: è il caso degli articoli che in Alnus una distinta non ce l\'hanno.';
+    distNota.append(
+      el('span', { style:'color:var(--acc);font-weight:600;' }, '✎ Distinta del prodotto'),
+      document.createTextNode(' — vale questa, e i reimport da Alnus non la toccano.'));
   }
 
   const btnDistAdd = readonly ? null : el('button', {
     type:'button', class:'btnsm',
     onclick: () => {
-      // Le righe di Alnus sono gia' a schermo nei campi aperti: aggiungerne
-      // una vuol dire tenersi quelle e metterne un'altra in fondo, non
-      // scegliere fra le due. Prima il bottone chiedeva se partire da
-      // quelle di Alnus, e la domanda aveva senso finche' non si vedevano.
-      if (!distintaLocale() && distintaAlnus && distintaAlnus.length) {
-        distintaAlnus.forEach(r => distinta.push({ codice: r.figlio, qta: r.qta, um: r.um }));
-      }
+      // Non c'e piu niente da ricopiare: la distinta di questo prodotto
+      // e quella che si vede. La prima riga scritta la dichiara sua.
       distintaAdottata = true;
       distinta.push({ codice:'', qta:null, um:null });
       renderDistinta(); aggiornaNotaDistinta();
@@ -5528,20 +5496,9 @@ function openArticoloModal(a, opts) {
     { style:'display:flex;gap:8px;margin-top:8px;align-self:flex-start;align-items:center;flex-wrap:wrap;' },
     btnDistAdd, btnDistImport);
 
+  // Niente da scaricare: la distinta arriva con l'articolo.
   renderDistinta();
   aggiornaNotaDistinta();
-
-  // La distinta di Alnus si chiede solo se l'articolo esiste: su uno nuovo
-  // non c'e niente da cercare.
-  if (a.id && a.codice) {
-    sb.from('distinta').select('figlio,qta,um,figlio_descrizione').eq('padre', a.codice).order('figlio')
-      .then(({ data, error }) => {
-        distintaAlnus = error ? [] : (data || []);
-        if (error) { distNota.textContent = 'Distinte non disponibili: ' + (error.message || ''); return; }
-        renderDistinta(); aggiornaNotaDistinta();
-        if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
-      });
-  } else { distintaAlnus = []; renderDistinta(); aggiornaNotaDistinta(); }
 
   // --- Listino: ultimo prezzo per cliente, DERIVATO dagli ordini (mai una
   // tabella). Sola lettura: si aggiorna da solo a ogni ordine con €/pz.
@@ -5622,7 +5579,7 @@ function openArticoloModal(a, opts) {
   // di la e dirti se di la c'e qualcosa. Senza, per sapere se un articolo ha
   // una distinta bisogna aprirla.
   function aggiornaEtichette() {
-    const nMat = distintaLocale() ? distinta.length : (distintaAlnus ? distintaAlnus.length : null);
+    const nMat = distinta.length;
     linguette.materiali.textContent = 'Materiali' + (nMat ? ' · ' + nMat : '');
     linguette.lavoro.textContent = 'Lavorazioni e tempo' + (fasi.length ? ' · ' + fasi.length : '');
     linguette.prezzi.textContent = 'Prezzi' + (listinoRighe.length ? ' · ' + listinoRighe.length : '');
