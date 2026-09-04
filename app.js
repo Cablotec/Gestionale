@@ -5462,7 +5462,13 @@ function openArticoloModal(a, opts) {
           + 'Le righe attuali vanno perse.')) return;
       distinta.length = 0;
       distintaAdottata = true;
-      esito.righe.forEach(r => distinta.push({ codice: r.codice, qta: r.qta, um: r.um }));
+      // ⚠ La DESCRIZIONE del file si tiene (4 set, trovato da Nico). Per un
+      // codice gia in anagrafica buttarla via non si vedeva — la scheda la
+      // ripescava da li. Per un codice NUOVO il file e l'unica fonte che
+      // esista: buttandola, quel materiale resta senza nome per sempre, ed e
+      // proprio il caso in cui serve di piu.
+      esito.righe.forEach(r => distinta.push({
+        codice: r.codice, qta: r.qta, um: r.um, descrizione: r.descrizione || null }));
       renderDistinta(); aggiornaNotaDistinta();
       if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
       let msg = esito.righe.length + (esito.righe.length === 1 ? ' riga importata' : ' righe importate');
@@ -5668,7 +5674,11 @@ function openArticoloModal(a, opts) {
           if (!distintaAdottata) return null;
           return distinta
             .filter(r => r && String(r.codice || '').trim() && Number(r.qta) > 0)
-            .map(r => ({ codice: String(r.codice).trim(), qta: Number(r.qta), um: r.um || null }));
+            .map(r => ({ codice: String(r.codice).trim(), qta: Number(r.qta),
+              um: r.um || null,
+              // Senza questa, la descrizione entrava nella scheda e moriva al
+              // primo salvataggio: si vedeva finche il modal era aperto.
+              descrizione: (r.descrizione || '').trim() || null }));
         })(),
       };
       if (!payload.codice) return toast('Codice obbligatorio', 'err');
