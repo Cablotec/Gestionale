@@ -8779,23 +8779,37 @@ function openOperazioneModal(o, opts) {
 
   const modal = el('div', { class:'modal', style:'max-width:720px;' });
   ['input', 'change'].forEach(ev => modal.addEventListener(ev, () => { modificato = true; }, true));
-  const chiudiCommessa = async () => {
-    if (!modificato) return closeModal();
+  // ⚠ LASCIARE LA SCHEDA E' SEMPRE LO STESSO GESTO, che si esca del tutto o
+  // si vada in un'altra scheda: la domanda dev'essere una sola, o quella che
+  // manca diventa la scorciatoia per perdere il lavoro senza accorgersene.
+  // `poi` e cosa fare una volta deciso di andare.
+  const lasciaCommessa = async (poi, etichettaSalva) => {
+    if (!modificato) return poi();
     const bottoni = [{ id:'esci', etichetta:'Esci senza salvare', tipo:'pericolo' },
       { id:'annulla', etichetta:'Annulla' }];
-    // "Salva ed esci" e l'ultimo e l'unico pieno: e la strada consigliata,
+    // Il salvataggio e l'ultimo e l'unico pieno: e la strada consigliata,
     // ed e dove va il pollice. Stesso posto del Salva nelle altre schede.
-    if (salvaOra) bottoni.push({ id:'salva', etichetta:'Salva ed esci', tipo:'primario' });
+    if (salvaOra) bottoni.push({ id:'salva', etichetta: etichettaSalva || 'Salva ed esci', tipo:'primario' });
     const scelta = await chiediConferma({
       titolo: 'Modifiche non salvate',
       testo: 'Su questa commessa ci sono modifiche che non hai ancora salvato.\n'
         + 'Uscendo adesso vanno perse.',
       bottoni,
     });
-    if (scelta === 'esci') return closeModal();
-    if (scelta === 'salva') return salvaOra();
+    if (scelta === 'esci') return poi();
+    if (scelta === 'salva') {
+      // Si salva SENZA chiudere, poi si va. ⚠ Il salvataggio puo fermarsi su
+      // una validazione (numero ordine, fornitori): in quel caso `modificato`
+      // e ancora alzato, l'errore e a schermo e si deve restare qui —
+      // andarsene lo stesso vorrebbe dire buttare via proprio le modifiche
+      // che si era chiesto di salvare.
+      await salvaOra(false);
+      if (modificato) return;
+      return poi();
+    }
     // 'annulla': non si fa niente e si resta dove si era.
   };
+  const chiudiCommessa = () => lasciaCommessa(closeModal);
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, isNew ? 'Nuova Operazione' : (isAdmin ? 'Modifica Operazione' : 'Operazione')),
     el('button', { class:'mclose', onclick:chiudiCommessa }, '✕'),
@@ -9970,9 +9984,12 @@ function openOperazioneModal(o, opts) {
     return el('div', { style:'margin-top:6px;' },
       el('button', { type:'button', class:'btnsm',
         title:'Apre la scheda articolo: le fasi si modificano lì. Valgono per questa commessa (al salvataggio) e per le future.',
-        onclick: () => openArticoloModal(art, {
+        // Anche di qui si lascia la scheda: `openArticoloModal` passa da
+        // `openModal`, che svuota la radice dei modal e si porta via questa
+        // commessa con tutto quello che c'e scritto dentro. Prima si chiede.
+        onclick: () => lasciaCommessa(() => openArticoloModal(art, {
           dopoChiusura: () => openOperazioneModal(state.operazioni.find(x => x.id === o.id) || o),
-        }),
+        }), 'Salva e vai in anagrafica'),
       }, '✎ Modifica in anagrafica'));
   })();
   pLav.append(
@@ -11168,8 +11185,8 @@ function openOperazioneModal(o, opts) {
     // Il flag si abbassa SEMPRE: se il salvataggio si ferma su un errore la
     // scheda resta aperta, e un Salva premuto a mano dopo non deve
     // ritrovarsi addosso un ordine di chiusura vecchio.
-    salvaOra = async () => {
-      chiudiDopoSalva = true;
+    salvaOra = async (chiudiAllaFine) => {
+      chiudiDopoSalva = !!chiudiAllaFine;
       try { await btnSave.onclick(); } finally { chiudiDopoSalva = false; }
     };
     btnSave.onclick = async () => {
