@@ -9091,7 +9091,12 @@ function openOperazioneModal(o, opts) {
   // salvataggio non va in errore su una colonna inesistente.
   const prezzoAttivo = (state.operazioni || []).some(x => 'prezzo_unitario' in x);
 
-  const modal = el('div', { class:'modal', style:'max-width:720px;' });
+  // 720 -> 1080: mezza volta piu larga (7 set, chiesto da Nico). La scheda
+  // e cresciuta parecchio — materiali con la provenienza, fasi, tempi — e a
+  // 720 le colonne della lista materiali si pestavano i piedi.
+  // `width:95vw` perche 1080 fissi su uno schermo stretto uscirebbero dallo
+  // schermo: si prende il minore dei due, come fa gia la scheda dell import.
+  const modal = el('div', { class:'modal', style:'max-width:1080px;width:95vw;' });
   ['input', 'change'].forEach(ev => modal.addEventListener(ev, () => { modificato = true; }, true));
   // ⚠ LASCIARE LA SCHEDA E' SEMPRE LO STESSO GESTO, che si esca del tutto o
   // si vada in un'altra scheda: la domanda dev'essere una sola, o quella che
