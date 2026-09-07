@@ -4002,6 +4002,11 @@ async function generaMaterialiCommessa(codiceArticolo, pezzi) {
   // quello si occupa `fabbisognoDaListe`, che li salta.
   const tutte = new Map(e.materiali);
   (e.segnaposto || new Map()).forEach((q, cod) => tutte.set(cod, (tutte.get(cod) || 0) + q));
+  // Il CONSUMO (MAC) rientra per la stessa ragione dei segnaposto: chi
+  // lavora la minuteria la deve vedere nella lista. Quello che non deve
+  // fare e' FARE FABBISOGNO, e di quello si occupa `fabbisognoDaListe`,
+  // che salta le righe col tipo MAC.
+  (e.consumo || new Map()).forEach((q, cod) => tutte.set(cod, (tutte.get(cod) || 0) + q));
   if (!tutte.size) return [];
 
   // Descrizione e UM: prima da una riga di distinta che le porti (l'import da
@@ -4030,6 +4035,10 @@ async function generaMaterialiCommessa(codiceArticolo, pezzi) {
         // quando la quantita dell'ordine, un domani, sara cambiata.
         qta_pz: +Number(qta / pezzi).toFixed(6),
         qta: +Number(qta).toFixed(4),
+        // Il tipo viaggia CON la riga salvata: `fabbisognoDaListe` legge la
+        // lista della commessa, non la distinta, quindi se il MAC non e'
+        // qui non c'e' modo di riconoscerlo piu' tardi.
+        tipo: (e.consumo && e.consumo.has(codice)) ? 'MAC' : null,
       };
     })
     .sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true, sensitivity: 'base' }));
@@ -5662,11 +5671,14 @@ function openArticoloModal(a, opts) {
       // esista: buttandola, quel materiale resta senza nome per sempre, ed e
       // proprio il caso in cui serve di piu.
       esito.righe.forEach(r => distinta.push({
-        codice: r.codice, qta: r.qta, um: r.um, descrizione: r.descrizione || null }));
+        codice: r.codice, qta: r.qta, um: r.um, descrizione: r.descrizione || null,
+        tipo: r.tipo || null }));
       renderDistinta(); aggiornaNotaDistinta();
       if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
       let msg = esito.righe.length + (esito.righe.length === 1 ? ' riga importata' : ' righe importate');
       if (esito.scartate.length) msg += ' \u00b7 ' + esito.scartate.length + ' senza quantita, scartate';
+      if (esito.consumo) msg += ' · ' + esito.consumo + ' di consumo (MAC), fuori dal fabbisogno';
+      else if (!esito.colonnaTipo) msg += ' · nessuna colonna Tip Par: niente consumo riconosciuto';
       toast(msg + ' \u2014 premi Salva per confermare');
     } catch (e) {
       toast('Errore lettura file: ' + (e.message || e), 'err');
@@ -5872,7 +5884,11 @@ function openArticoloModal(a, opts) {
               um: r.um || null,
               // Senza questa, la descrizione entrava nella scheda e moriva al
               // primo salvataggio: si vedeva finche il modal era aperto.
-              descrizione: (r.descrizione || '').trim() || null }));
+              descrizione: (r.descrizione || '').trim() || null,
+              // Stessa trappola della descrizione, un gradino piu' in la':
+              // senza questa riga il MAC letto dal file muore al primo
+              // salvataggio e la minuteria torna a fare fabbisogno.
+              tipo: r.tipo || null }));
         })(),
       };
       if (!payload.codice) return toast('Codice obbligatorio', 'err');
@@ -5950,6 +5966,17 @@ const DIST_COLONNE = {
   qta:         ['Quantita Impiego', 'Qta Impiego', 'Quantita'],
   um:          ['UM', 'U.M.', 'Unita di Misura'],
   descrizione: ['Descrizione Articolo', 'Descrizione'],
+  // TIPO PARTE. Sull'estrazione Alnus la colonna si chiama `Tip Par`,
+  // abbreviata, e porta gli stessi tre valori del fabbisogno: ACQ, C/L, MAC.
+  // Qui serve solo MAC = materiale di consumo, la minuteria (occhielli,
+  // faston): sta nella lista della commessa perche' chi lavora la deve
+  // vedere, ma NON fa fabbisogno (7 set, detto da Nico).
+  // ⚠ NON e' `T.P D.B`, che pure porta MAC: sull'estrazione del 7 set ce
+  // l'ha su tutte e 46 le righe C/L, cioe' sui SOTTOASSIEMI, che a
+  // fabbisogno ci vanno eccome. Due domande diverse con dentro le stesse
+  // tre lettere: leggere quella sbagliata toglierebbe dal conto proprio i
+  // pezzi grossi.
+  tipo:        ['Tip Par', 'Tipo Parte', 'Tipo parte'],
 };
 
 function distNorm(v) {
@@ -5995,7 +6022,8 @@ function leggiDistintaExcel(griglia) {
       testa = i;
       col = { codice: cCod, qta: cQta,
         um: trovaCol(riga, DIST_COLONNE.um),
-        descrizione: trovaCol(riga, DIST_COLONNE.descrizione) };
+        descrizione: trovaCol(riga, DIST_COLONNE.descrizione),
+        tipo: trovaCol(riga, DIST_COLONNE.tipo) };
       break;
     }
   }
@@ -6020,9 +6048,16 @@ function leggiDistintaExcel(griglia) {
       qta: q,
       um: col.um >= 0 ? (String(r[col.um] || '').trim() || null) : null,
       descrizione: col.descrizione >= 0 ? (String(r[col.descrizione] || '').trim() || null) : null,
+      tipo: col.tipo >= 0 ? (String(r[col.tipo] || '').trim().toUpperCase() || null) : null,
     });
   }
-  return { righe, scartate, intestazione: testa };
+  return { righe, scartate, intestazione: testa,
+    // Si DICHIARA se la colonna c'era e quante righe sono di consumo. Una
+    // colonna che cambia nome e sparisce in silenzio e' il modo piu' facile
+    // per rimettere la minuteria nel fabbisogno senza che nessuno se ne
+    // accorga: meglio un numero sotto gli occhi a ogni import.
+    colonnaTipo: col.tipo >= 0,
+    consumo: righe.filter(r => r.tipo === 'MAC').length };
 }
 
 async function articoliImportExcel(file) {
@@ -9773,6 +9808,9 @@ function openOperazioneModal(o, opts) {
       et('Necessari', 'text-align:right;'), et('UM'), et('Stato')));
 
     const celleStato = new Map();
+    // Il tipo sta sulla RIGA salvata, non sul codice: qui sotto si gira per
+    // codice, quindi serve poterlo ritrovare.
+    const tipoDi = new Map(righe.map(r => [r.codice, String(r.tipo || '').toUpperCase()]));
     righe.forEach(r => {
       const stato = el('span', { class:'sub', style:'font-size:11px;' }, '…');
       celleStato.set(r.codice, stato);
@@ -9846,6 +9884,16 @@ function openOperazioneModal(o, opts) {
         // Un segnaposto non e un pezzo: dire "disponibile" vorrebbe dire
         // che in magazzino ce n'e, e in magazzino COMP GENERICO non esiste.
         // Si dichiara che non fa numero, invece di far finta che sia a posto.
+        // Il CONSUMO (MAC) non si cerca in magazzino: e' minuteria, c'e'
+        // sempre. Scrivere "da ordinare" su un faston manderebbe qualcuno a
+        // emettere un ordine che non serve — ed e' la stessa ragione per cui
+        // non entra nel fabbisogno.
+        if (tipoDi.get(codice) === 'MAC') {
+          cella.textContent = 'consumo'; cella.style.color = 'var(--mut)';
+          cella.title = 'Materiale di consumo (MAC): resta in lista perché serve a chi '
+            + 'lavora, ma non entra nel fabbisogno e non si ordina per commessa.';
+          return;
+        }
         if (typeof eSegnaposto === 'function' && eSegnaposto(codice)) {
           cella.textContent = 'non conteggiato'; cella.style.color = 'var(--mut)';
           cella.title = 'Voce generica della distinta, non un materiale da prelevare: '

@@ -55,13 +55,21 @@ function eLavorazione(codice) {
 // LAVORAZIONE (`_K`, `_KF`: "va ordinata a Botturi") come foglie invece che
 // come distinte mancanti — non hanno figli perche non devono averne.
 function esplodiDistinta(codice, qta, figliDi, acc) {
-  const out = acc || { materiali: new Map(), segnaposto: new Map(), cicli: new Set(), tagliati: 0 };
-  scendi(codice, Number(qta) || 0, new Set(), 0);
+  const out = acc || { materiali: new Map(), segnaposto: new Map(), consumo: new Map(),
+    cicli: new Set(), tagliati: 0 };
+  if (!out.consumo) out.consumo = new Map();   // `acc` costruito da chi chiamava prima
+  scendi(codice, Number(qta) || 0, new Set(), 0, null);
   return out;
 
-  function scendi(cod, q, inCammino, prof) {
+  function scendi(cod, q, inCammino, prof, tipo) {
     if (!cod || !(q > 0)) return;
     if (prof > DISTINTA_PROFONDITA_MAX) { out.tagliati++; return; }
+    // CONSUMO (MAC): si ferma qui come il segnaposto e per la stessa
+    // ragione — non e' una domanda da girare al magazzino. Si conta a
+    // parte, cosi' non sparisce in silenzio e la commessa se lo ritrova.
+    // Non si scende nemmeno: la minuteria non ha sottodistinta, e se un
+    // domani l'avesse resterebbe comunque minuteria.
+    if (tipo === 'MAC') { out.consumo.set(cod, (out.consumo.get(cod) || 0) + q); return; }
     const figli = figliDi.get(cod);
     if (!figli || !figli.length) {
       // Il segnaposto si ferma qui: non e un materiale, non diventa
@@ -75,7 +83,7 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     // diversi senza che sia un anello — e succede, e legittimo.
     if (inCammino.has(cod)) { out.cicli.add(cod); return; }
     inCammino.add(cod);
-    figli.forEach(f => scendi(f.figlio, q * (Number(f.qta) || 0), inCammino, prof + 1));
+    figli.forEach(f => scendi(f.figlio, q * (Number(f.qta) || 0), inCammino, prof + 1, f.tipo));
     inCammino.delete(cod);
   }
 }
@@ -156,6 +164,10 @@ function fabbisognoDaListe(commesse) {
       // distinte e sommandolo diventava il primo fabbisogno dell azienda con
       // 27.577 pezzi, contro i 21 che ne dichiarava Alnus.
       if (!cod || !(q > 0) || eSegnaposto(cod)) return;
+      // Il CONSUMO esce QUI, accanto al segnaposto e per la stessa ragione:
+      // resta nella lista della commessa perche' chi lavora lo vede, ma la
+      // minuteria non e' una domanda da girare al magazzino (7 set).
+      if (String((m && m.tipo) || '').trim().toUpperCase() === 'MAC') return;
       if (!perCodice.has(cod)) perCodice.set(cod, []);
       perCodice.get(cod).push({ commessa: c, qta: q });
     });
@@ -232,7 +244,10 @@ function applicaDistinteProdotti(figliDi, articoli) {
     if (!a || !a.codice || !Array.isArray(d)) return;
     figliDi.set(a.codice, d
       .filter(r => r && r.codice)
-      .map(r => ({ figlio: String(r.codice).trim(), qta: Number(r.qta) || 0, um: r.um || null })));
+      .map(r => ({ figlio: String(r.codice).trim(), qta: Number(r.qta) || 0, um: r.um || null,
+        // Il tipo sta sull'ARCO, non sul codice: e' la riga di distinta a
+        // dire che quel componente li' e' di consumo.
+        tipo: r.tipo || null })));
     locali.add(a.codice);
   });
   return locali;
