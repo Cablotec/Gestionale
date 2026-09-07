@@ -1945,6 +1945,15 @@ const IMPORT_ORDINI_COLONNE = {
   cliente:    ['ragione sociale', 'cliente', 'nome cliente'],
   residua:    ['quantita residua', 'qta residua', 'residua'],
   rif:        ['riferimento cliente', 'rifer. cliente', 'riferimento'],
+  // La SECONDA casella del riferimento, che l'ERP tiene in una colonna sua.
+  // Non e' un doppione di 'rif': su questo foglio Elcotec scrive il suo ODP
+  // SOLO qui e lascia vuota l'altra, quindi senza questa colonna i suoi
+  // riferimenti (40 commesse su un import solo) entravano vuoti.
+  // ⚠ Serve come RIPIEGO, mai come sostituto: dove tutte e due sono piene
+  // vince 'rif'. Sacmi ci mette la posizione del SUO ordine (POS0040), che
+  // non e' il riferimento; JMA ci ricopia lo stesso numero. Prendere questa
+  // quando l'altra c'e' peggiorerebbe il dato invece di completarlo.
+  rif2:       ['rifer. cliente'],
   prezzo:     ['prezzo netto riga', 'prezzo'],
   imponibile: ['impon. totale riga', 'imponibile'],
 };
@@ -2123,6 +2132,12 @@ function analizzaImportOrdini(righe, ctx) {
     const v = r[col];
     return (v === null || v === undefined) ? '' : String(v).trim();
   };
+  // Il riferimento, con il ripiego sulla seconda colonna: si guarda RIGA PER
+  // RIGA, non colonna per colonna. La scelta della colonna e' globale, ma
+  // quale delle due sia piena cambia da cliente a cliente dentro lo stesso
+  // foglio — Senzani sta solo nella prima, Elcotec solo nella seconda.
+  const valRif = (r) => val(r, 'rif') || val(r, 'rif2');
+
   const scarta = (nRiga, motivo) => {
     out.scartate.push({ riga: nRiga, motivo });
     out.scartatePerMotivo[motivo] = (out.scartatePerMotivo[motivo] || 0) + 1;
@@ -2162,7 +2177,7 @@ function analizzaImportOrdini(righe, ctx) {
     // i kit piu' vecchi hanno riferimenti di altra forma (A09102, D34807) e
     // vanno confrontati con la stessa domanda.
     if (/senzani/i.test(clienteNome)) {
-      const rifSenz = String(val(r, 'rif') || '').trim().toUpperCase();
+      const rifSenz = String(valRif(r) || '').trim().toUpperCase();
       if (rifSenz) rifSenzaniFile.add(rifSenz);
     }
 
@@ -2174,7 +2189,7 @@ function analizzaImportOrdini(righe, ctx) {
 
     const prezzo     = Number(val(r, 'prezzo')) || 0;
     const imponibile = Number(val(r, 'imponibile')) || (prezzo * qta);
-    const rif        = val(r, 'rif');
+    const rif        = valRif(r);
 
     const base = {
       nRiga, numeroOrdine, pos, clienteNome, scadenza, qta, prezzo, imponibile,
