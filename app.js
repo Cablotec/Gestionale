@@ -5586,8 +5586,12 @@ function openArticoloModal(a, opts) {
       // riga era di consumo era rileggere il file Excel.
       if (String(r.tipo || '').toUpperCase() === 'MAC') {
         hint.append(el('span', {
-          style:'color:var(--mut);font-weight:700;white-space:nowrap;'
-            + 'border:1px solid var(--brd);border-radius:3px;padding:0 4px;font-size:10px;',
+          // Stesso giallo del badge dei sottoassiemi (7 set, chiesto da Nico:
+          // "fallo giallo come i sottoinsiemi, non si vede bene altrimenti").
+          // In grigio spariva, ed e' l'etichetta che dice perche' quella riga
+          // non entra nel fabbisogno: se non si legge, tanto vale non scriverla.
+          style:'color:var(--acc);font-weight:700;white-space:nowrap;'
+            + 'border:1px solid var(--acc);border-radius:3px;padding:0 4px;font-size:10px;',
           title: 'MAC = materiale di consumo (minuteria).\nResta nella lista della commessa, perché chi lavora lo deve vedere, '
             + 'ma NON entra nel fabbisogno e non si ordina per commessa.\n\n'
             + 'Arriva dalla colonna `Tip Par` dell\'estrazione Alnus.',
