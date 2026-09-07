@@ -5486,6 +5486,14 @@ function openArticoloModal(a, opts) {
     const sottoDi = (cod) => (state.articoli || []).find(x => x.codice === cod
       && Array.isArray(x.distinta) && x.distinta.length);
     const conSotto = distinta.filter(r => r && r.codice && sottoDi(String(r.codice).trim()));
+    // Quante righe sono di consumo: e' il numero che spiega perche' la
+    // lista della commessa e il fabbisogno non tornano mai uguali.
+    const nConsumo = distinta.filter(r => String(r && r.tipo || '').toUpperCase() === 'MAC').length;
+    if (nConsumo) {
+      distWrap.append(el('div', { class:'sub', style:'font-size:11px;margin-bottom:6px;' },
+        nConsumo + (nConsumo === 1 ? ' riga è di consumo (MAC)' : ' righe sono di consumo (MAC)')
+        + ': restano in lista ma non fanno fabbisogno.'));
+    }
     if (conSotto.length && typeof applicaDistinteProdotti === 'function') {
       // Quanti materiali VERI vengono fuori una volta scesi tutti i rami.
       // E il numero che conta: la lista della commessa sara lunga cosi, non
@@ -5570,6 +5578,21 @@ function openArticoloModal(a, opts) {
       else if (r.codice) daCercare.push({ codice: r.codice, hint: hintTxt, riga: r, inUm });
       // Se questo codice e a sua volta un prodotto con distinta, la riga lo
       // dice e ci si entra. Il ramo si apre dove sta, non in un'altra vista.
+      // CONSUMO (MAC): si DICE sulla riga. Il campo arriva dall'import e
+      // decide se quel materiale fa fabbisogno o no — una cosa che cambia
+      // il conto di tutta l'azienda non puo' stare scritta solo dentro il
+      // database (7 set, chiesto da Nico: "devo vedere nella distinta il
+      // campo MAC?"). Finche' non si vedeva, l'unico modo di sapere se una
+      // riga era di consumo era rileggere il file Excel.
+      if (String(r.tipo || '').toUpperCase() === 'MAC') {
+        hint.append(el('span', {
+          style:'color:var(--mut);font-weight:700;white-space:nowrap;'
+            + 'border:1px solid var(--brd);border-radius:3px;padding:0 4px;font-size:10px;',
+          title: 'MAC = materiale di consumo (minuteria).\nResta nella lista della commessa, perché chi lavora lo deve vedere, '
+            + 'ma NON entra nel fabbisogno e non si ordina per commessa.\n\n'
+            + 'Arriva dalla colonna `Tip Par` dell\'estrazione Alnus.',
+        }, 'MAC'));
+      }
       const sub = r.codice ? sottoDi(String(r.codice).trim()) : null;
       if (sub) {
         hint.append(el('span', {
