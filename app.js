@@ -4176,51 +4176,8 @@ async function renderFabbisognoCalcolato(root) {
   ));
 
 
-  // ── LISTE MATERIALI MANCANTI: il recupero in blocco ──────────────────
-  // La lista nasce con la commessa dalle tre porte (import, "+ Nuovo ordine",
-  // modal). Quando una di quelle porte si rompe le commesse nascono lo stesso
-  // — e' voluto, best-effort — ma restano senza lista, e nessuno se ne
-  // accorge finche' non apre la singola commessa. Il 7 set e' successo:
-  // `creaMaterialiPerCommesse` non era mai stata definita e l'import si e'
-  // fermato al passo 7, DOPO aver creato le commesse.
-  // Qui si dichiara quante sono e si rimedia in un colpo, invece di aprirle
-  // una per una col bottone "Crea dalla distinta".
-  // ⚠ Solo quelle che una distinta CE L'HANNO: le altre non sono un problema
-  // da risolvere, sono articoli senza distinta e lo dice gia' la riga sopra.
-  const senzaLista = conDistinta.filter(c =>
-    !(Array.isArray(c.op.materiali) && c.op.materiali.length));
-  if (senzaLista.length && state.profile?.ruolo === 'admin') {
-    const box = el('div', { style:'border:1px solid var(--ylw);border-radius:5px;'
-      + 'padding:12px 14px;margin:0 0 14px;' });
-    box.append(el('div', { style:'font-size:12px;line-height:1.7;' },
-      '⚠ ' + senzaLista.length + (senzaLista.length === 1
-        ? ' commessa ha la distinta ma non la sua lista materiali.'
-        : ' commesse hanno la distinta ma non la loro lista materiali.')
-      + ' Di solito nasce con l\'ordine: se ne mancano tante, una delle porte '
-      + 'che le creano si e\' fermata.'));
-    const btn = el('button', { type:'button', class:'btnsm', style:'margin-top:10px;' },
-      '⚙ Crea le ' + senzaLista.length + ' liste mancanti');
-    btn.onclick = async () => {
-      btn.disabled = true;
-      const tot = senzaLista.length;
-      btn.textContent = 'Calcolo… 0/' + tot;
-      let fatte = 0, viste = 0;
-      // Una per volta e non in blocco: cosi' il numero avanza sotto gli occhi
-      // e una distinta che manca ferma quella riga soltanto.
-      for (const c of senzaLista) {
-        try { fatte += await creaMaterialiPerCommesse([c.op]); } catch (e) {}
-        viste++;
-        btn.textContent = 'Calcolo… ' + viste + '/' + tot;
-      }
-      svuotaCacheFabbisogno();        // le liste sono cambiate: il calcolo si rifa
-      toast(fatte + (fatte === 1 ? ' lista creata' : ' liste create')
-        + (fatte < tot ? ', ' + (tot - fatte) + ' senza distinta utile' : ''),
-        fatte ? 'ok' : 'err');
-      renderTab('fabbisogno');
-    };
-    box.append(btn);
-    root.append(box);
-  }
+  const avviso = riquadroListeMaterialiMancanti();
+  if (avviso) root.append(avviso);
 
   const nf = (n) => n == null ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
   const tw = el('div', { class:'tw' });
@@ -4300,6 +4257,75 @@ async function renderFabbisognoCalcolato(root) {
 
 // Quale delle due fonti si sta guardando. Si ricorda fra un giro e l'altro:
 // chi lavora sul calcolato non vuole ritrovarsi su Alnus a ogni ritorno.
+// ── LISTE MATERIALI MANCANTI: il recupero in blocco ────────────────────
+// La lista nasce con la commessa dalle tre porte (import, "+ Nuovo ordine",
+// modal). Quando una di quelle porte si rompe le commesse nascono lo stesso
+// — e' voluto, best-effort — ma restano senza lista, e nessuno se ne accorge
+// finche' non apre la singola commessa. Il 7 set e' successo:
+// `creaMaterialiPerCommesse` non era mai stata definita e l'import si e'
+// fermato al passo 7, DOPO aver creato le commesse.
+//
+// ⚠ SI MOSTRA IN TUTTE E DUE LE VISTE della scheda Materiali (7 set,
+// segnalato da Nico: *"non vedo vista calcolata in materiali"*). La prima
+// versione stava solo nella vista calcolata, che e' dietro un toggle e non
+// e' quella di partenza: un avviso che dice "qui ci sono commesse rotte"
+// nascosto dietro un bottone che nessuno ha motivo di premere non e' un
+// avviso. Per questo si calcola da solo da `state` invece di appoggiarsi al
+// fabbisogno: cosi' vale anche nella vista Alnus, che e' sincrona.
+//
+// Solo le commesse che una distinta CE L'HANNO: le altre non sono un
+// problema da risolvere, sono articoli senza distinta.
+// Ritorna null quando non c'e' niente da dire: il silenzio e' la norma.
+function riquadroListeMaterialiMancanti() {
+  if (state.profile?.ruolo !== 'admin') return null;
+  if (typeof applicaDistinteProdotti !== 'function') return null;
+  const figliDi = new Map();
+  applicaDistinteProdotti(figliDi, state.articoli);
+  // Sull'ORDINATO, non sul residuo: e' la quantita' con cui la lista viene
+  // scritta (`creaMaterialiPerCommesse`), quindi e' quella che decide se una
+  // lista si puo' fare. Una commessa gia' tutta prodotta ma ancora aperta la
+  // sua lista deve averla come le altre.
+  const senzaLista = (state.operazioni || []).filter(o => {
+    if (o.stato !== 'aperta' && o.stato !== 'sospesa') return false;
+    if (Array.isArray(o.materiali) && o.materiali.length) return false;
+    if (!(Number(o.quantita) > 0)) return false;
+    const art = (state.articoli || []).find(a => a.id === o.articolo_id);
+    return !!(art && art.codice && figliDi.has(art.codice));
+  });
+  if (!senzaLista.length) return null;
+
+  const box = el('div', { style:'border:1px solid var(--ylw);border-radius:5px;'
+    + 'padding:12px 14px;margin:0 0 14px;' });
+  box.append(el('div', { style:'font-size:12px;line-height:1.7;' },
+    '⚠ ' + senzaLista.length + (senzaLista.length === 1
+      ? ' commessa ha la distinta ma non la sua lista materiali.'
+      : ' commesse hanno la distinta ma non la loro lista materiali.')
+    + ' Di solito nasce con l\'ordine: se ne mancano tante, una delle porte '
+    + 'che le creano si e\' fermata.'));
+  const btn = el('button', { type:'button', class:'btnsm', style:'margin-top:10px;' },
+    '⚙ Crea le ' + senzaLista.length + ' liste mancanti');
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const tot = senzaLista.length;
+    btn.textContent = 'Calcolo… 0/' + tot;
+    let fatte = 0, viste = 0;
+    // Una per volta e non in blocco: cosi' il numero avanza sotto gli occhi
+    // e una distinta che manca ferma quella riga soltanto.
+    for (const o of senzaLista) {
+      try { fatte += await creaMaterialiPerCommesse([o]); } catch (e) {}
+      viste++;
+      btn.textContent = 'Calcolo… ' + viste + '/' + tot;
+    }
+    svuotaCacheFabbisogno();        // le liste sono cambiate: il calcolo si rifa
+    toast(fatte + (fatte === 1 ? ' lista creata' : ' liste create')
+      + (fatte < tot ? ', ' + (tot - fatte) + ' senza distinta utile' : ''),
+      fatte ? 'ok' : 'err');
+    renderTab('fabbisogno');
+  };
+  box.append(btn);
+  return box;
+}
+
 let materialiVista = 'alnus';        // 'alnus' | 'calcolato'
 function bottoneVistaMateriali() {
   return el('button', { class:'btng', onclick: () => {
@@ -4476,6 +4502,8 @@ function renderFabbisogno(root) {
   // Arrivando dal triangolino la domanda non e "quali codici mancano" — quella
   // e la tabella piu sotto — ma "posso finire questa commessa, e se no di chi
   // e la mossa". Il riquadro risponde a quella, e il resto viene dopo.
+  const avvisoListe = riquadroListeMaterialiMancanti();
+  if (avvisoListe) root.append(avvisoListe);
   const risposta = mancantiFiltroOp ? riquadroMaterialiCommessa(mancantiFiltroOp) : null;
   if (risposta) root.append(risposta);
   root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
