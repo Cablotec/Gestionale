@@ -4175,6 +4175,53 @@ async function renderFabbisognoCalcolato(root) {
       + ': sugli altri il fabbisogno si vede, la copertura no.'),
   ));
 
+
+  // ── LISTE MATERIALI MANCANTI: il recupero in blocco ──────────────────
+  // La lista nasce con la commessa dalle tre porte (import, "+ Nuovo ordine",
+  // modal). Quando una di quelle porte si rompe le commesse nascono lo stesso
+  // — e' voluto, best-effort — ma restano senza lista, e nessuno se ne
+  // accorge finche' non apre la singola commessa. Il 7 set e' successo:
+  // `creaMaterialiPerCommesse` non era mai stata definita e l'import si e'
+  // fermato al passo 7, DOPO aver creato le commesse.
+  // Qui si dichiara quante sono e si rimedia in un colpo, invece di aprirle
+  // una per una col bottone "Crea dalla distinta".
+  // ⚠ Solo quelle che una distinta CE L'HANNO: le altre non sono un problema
+  // da risolvere, sono articoli senza distinta e lo dice gia' la riga sopra.
+  const senzaLista = conDistinta.filter(c =>
+    !(Array.isArray(c.op.materiali) && c.op.materiali.length));
+  if (senzaLista.length && state.profile?.ruolo === 'admin') {
+    const box = el('div', { style:'border:1px solid var(--ylw);border-radius:5px;'
+      + 'padding:12px 14px;margin:0 0 14px;' });
+    box.append(el('div', { style:'font-size:12px;line-height:1.7;' },
+      '⚠ ' + senzaLista.length + (senzaLista.length === 1
+        ? ' commessa ha la distinta ma non la sua lista materiali.'
+        : ' commesse hanno la distinta ma non la loro lista materiali.')
+      + ' Di solito nasce con l\'ordine: se ne mancano tante, una delle porte '
+      + 'che le creano si e\' fermata.'));
+    const btn = el('button', { type:'button', class:'btnsm', style:'margin-top:10px;' },
+      '⚙ Crea le ' + senzaLista.length + ' liste mancanti');
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const tot = senzaLista.length;
+      btn.textContent = 'Calcolo… 0/' + tot;
+      let fatte = 0, viste = 0;
+      // Una per volta e non in blocco: cosi' il numero avanza sotto gli occhi
+      // e una distinta che manca ferma quella riga soltanto.
+      for (const c of senzaLista) {
+        try { fatte += await creaMaterialiPerCommesse([c.op]); } catch (e) {}
+        viste++;
+        btn.textContent = 'Calcolo… ' + viste + '/' + tot;
+      }
+      svuotaCacheFabbisogno();        // le liste sono cambiate: il calcolo si rifa
+      toast(fatte + (fatte === 1 ? ' lista creata' : ' liste create')
+        + (fatte < tot ? ', ' + (tot - fatte) + ' senza distinta utile' : ''),
+        fatte ? 'ok' : 'err');
+      renderTab('fabbisogno');
+    };
+    box.append(btn);
+    root.append(box);
+  }
+
   const nf = (n) => n == null ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
   const tw = el('div', { class:'tw' });
   const tbl = el('table', { class:'rt op-table' });
