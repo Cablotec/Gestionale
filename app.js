@@ -4039,6 +4039,12 @@ async function generaMaterialiCommessa(codiceArticolo, pezzi) {
         // lista della commessa, non la distinta, quindi se il MAC non e'
         // qui non c'e' modo di riconoscerlo piu' tardi.
         tipo: (e.consumo && e.consumo.has(codice)) ? 'MAC' : null,
+        // DA DOVE VIENE. Chi sta gia' nella distinta di primo livello non ha
+        // niente da dichiarare e resta `null`: l'indicazione serve proprio
+        // per quelli che nella distinta NON si vedono.
+        da: (e.origini && e.origini.has(codice))
+          ? [...e.origini.get(codice)].sort((x, y) => x.localeCompare(y, 'it', { numeric: true }))
+          : null,
       };
     })
     .sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true, sensitivity: 'base' }));
@@ -9838,7 +9844,13 @@ function openOperazioneModal(o, opts) {
     sezMateriali.append(intestazione);
 
     const COL = 'display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(140px,1.4fr) '
-      + '70px 90px 44px minmax(160px,auto);gap:10px;align-items:baseline;';
+      // ⚠ L'ultima colonna sta in `fr` e non in `auto`. Ogni riga e' una
+      // griglia a se: con `auto` la riga che aveva lo stato lungo ("mancano 5 ·
+      // in ritardo dal ... · OF ...") si allargava l'ultima colonna e
+      // stringeva le prime, e le colonne non stavano in colonna — si vedeva
+      // sulle righe di lavorazione, che hanno lo stato piu' lungo di tutti.
+      // Con `fr` ogni riga risolve alla stessa larghezza e la tabella e' dritta.
+      + '70px 90px 44px minmax(160px,1.2fr);gap:10px;align-items:baseline;';
     const et = (t, alt) => el('span', { class:'sub',
       style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (alt || '') }, t);
     sezMateriali.append(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);' },
@@ -9852,8 +9864,24 @@ function openOperazioneModal(o, opts) {
     righe.forEach(r => {
       const stato = el('span', { class:'sub', style:'font-size:11px;' }, '…');
       celleStato.set(r.codice, stato);
+      // Sotto il codice, DA DOVE VIENE: senza, un materiale che nella
+      // distinta non compare sembra spuntato dal nulla (7 set, segnalato da
+      // Nico su `83010FILO00101042GVM`). La distinta mostra un livello, la
+      // lista mostra le foglie: questa riga e' il filo fra le due.
+      const origini = Array.isArray(r.da) ? r.da.filter(Boolean) : [];
+      const cellaCod = el('div', { style:'min-width:0;display:flex;flex-direction:column;gap:1px;' },
+        el('span', { class:'mono', style:'font-size:11px;' }, r.codice));
+      if (origini.length) {
+        cellaCod.append(el('span', { class:'sub',
+          style:'font-size:10px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+          title: origini.length === 1
+            ? 'Non e nella distinta di questo prodotto: arriva dal sottoassieme '
+              + origini[0] + ', che invece ci sta.'
+            : 'Arriva da piu sottoassiemi: ' + origini.join(', ') },
+          '◂ da ' + origini[0] + (origini.length > 1 ? '  +' + (origini.length - 1) : '')));
+      }
       sezMateriali.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
-        el('span', { class:'mono', style:'font-size:11px;' }, r.codice),
+        cellaCod,
         el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
           title: r.descrizione || '' }, r.descrizione || '—'),
         el('span', { class:'mono', style:'font-size:11px;text-align:right;color:var(--mut);' },

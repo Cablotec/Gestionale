@@ -56,12 +56,30 @@ function eLavorazione(codice) {
 // come distinte mancanti — non hanno figli perche non devono averne.
 function esplodiDistinta(codice, qta, figliDi, acc) {
   const out = acc || { materiali: new Map(), segnaposto: new Map(), consumo: new Map(),
-    cicli: new Set(), tagliati: 0 };
+    origini: new Map(), cicli: new Set(), tagliati: 0 };
   if (!out.consumo) out.consumo = new Map();   // `acc` costruito da chi chiamava prima
-  scendi(codice, Number(qta) || 0, new Set(), 0, null);
+  if (!out.origini) out.origini = new Map();
+  const radice = codice;
+  scendi(codice, Number(qta) || 0, new Set(), 0, null, null);
   return out;
 
-  function scendi(cod, q, inCammino, prof, tipo) {
+  // DA DOVE VIENE questo materiale: il sottoassieme che lo contiene (7 set,
+  // chiesto da Nico dopo essersi trovato in commessa un codice che nella
+  // distinta non c'era). Nella distinta si vede UN livello; nella lista
+  // della commessa ci sono le foglie, e fra le due cose mancava il filo.
+  //
+  // ⚠ Un INSIEME, non un nome solo: lo stesso codice puo' stare sotto due
+  // sottoassiemi diversi, ed e' legittimo. Dirne uno solo sarebbe mandare
+  // a cercarlo nel posto sbagliato meta' delle volte.
+  // Chi sta gia' nella distinta di primo livello non ha origine da
+  // dichiarare: e' li' dove lo si e' scritto.
+  function daPadre(cod, padre) {
+    if (!padre || padre === radice) return;
+    if (!out.origini.has(cod)) out.origini.set(cod, new Set());
+    out.origini.get(cod).add(padre);
+  }
+
+  function scendi(cod, q, inCammino, prof, tipo, padre) {
     if (!cod || !(q > 0)) return;
     if (prof > DISTINTA_PROFONDITA_MAX) { out.tagliati++; return; }
     // CONSUMO (MAC): si ferma qui come il segnaposto e per la stessa
@@ -69,12 +87,13 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     // parte, cosi' non sparisce in silenzio e la commessa se lo ritrova.
     // Non si scende nemmeno: la minuteria non ha sottodistinta, e se un
     // domani l'avesse resterebbe comunque minuteria.
-    if (tipo === 'MAC') { out.consumo.set(cod, (out.consumo.get(cod) || 0) + q); return; }
+    if (tipo === 'MAC') { daPadre(cod, padre); out.consumo.set(cod, (out.consumo.get(cod) || 0) + q); return; }
     const figli = figliDi.get(cod);
     if (!figli || !figli.length) {
       // Il segnaposto si ferma qui: non e un materiale, non diventa
       // fabbisogno. Si conta a parte, cosi non sparisce in silenzio.
-      if (eSegnaposto(cod)) { out.segnaposto.set(cod, (out.segnaposto.get(cod) || 0) + q); return; }
+      if (eSegnaposto(cod)) { daPadre(cod, padre); out.segnaposto.set(cod, (out.segnaposto.get(cod) || 0) + q); return; }
+      daPadre(cod, padre);
       out.materiali.set(cod, (out.materiali.get(cod) || 0) + q);
       return;
     }
@@ -83,7 +102,7 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     // diversi senza che sia un anello — e succede, e legittimo.
     if (inCammino.has(cod)) { out.cicli.add(cod); return; }
     inCammino.add(cod);
-    figli.forEach(f => scendi(f.figlio, q * (Number(f.qta) || 0), inCammino, prof + 1, f.tipo));
+    figli.forEach(f => scendi(f.figlio, q * (Number(f.qta) || 0), inCammino, prof + 1, f.tipo, cod));
     inCammino.delete(cod);
   }
 }
