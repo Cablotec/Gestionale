@@ -4048,6 +4048,32 @@ async function salvaMaterialiCommessa(op, righe) {
   return righe;
 }
 
+// La stessa cosa che fa il bottone "⚙ Crea dalla distinta", ma per un mazzo di
+// commesse appena nate: le tre porte da cui un ordine puo entrare (import,
+// griglia "+ Nuovo ordine", modal commessa) devono lasciare la stessa lista
+// materiali, altrimenti da dove sei entrato cambia quello che vedi dentro.
+// BEST-EFFORT, sempre: un articolo senza distinta non deve far fallire la
+// creazione dell'ordine, che e il fatto importante. Ritorna quante liste sono
+// state scritte, per chi voglia dirlo nel riepilogo.
+async function creaMaterialiPerCommesse(righe) {
+  let scritte = 0;
+  for (const r of (righe || [])) {
+    try {
+      if (!r || !r.id) continue;
+      // La lista si crea solo se non c'e gia: qui si nasce, non si rigenera.
+      if (Array.isArray(r.materiali) && r.materiali.length) continue;
+      const art = (state.articoli || []).find(x => x.id === r.articolo_id);
+      const pezzi = Number(r.quantita) || 0;
+      if (!art || !art.codice || !(pezzi > 0)) continue;
+      const nuove = await generaMaterialiCommessa(art.codice, pezzi);
+      if (!nuove.length) continue;
+      await salvaMaterialiCommessa(r, nuove);
+      scritte++;
+    } catch (e) {}
+  }
+  return scritte;
+}
+
 async function renderFabbisognoCalcolato(root) {
   const mySeq = ++_fabbCalcSeq;
   root.innerHTML = '';
