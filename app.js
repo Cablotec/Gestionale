@@ -4463,20 +4463,31 @@ function riquadroMaterialiCommessa(numeroOp, opts) {
       });
     };
 
-    gruppo(v => !v.lavorazione && v.st.stato === 'in_ritardo', 'var(--red)', '⏰ In ritardo',
+    // ⚠ Le LAVORAZIONI stanno nei gruppi dello stato come tutto il resto
+    // (7 set). Prima venivano tolte da ogni gruppo e raccolte tutte insieme
+    // sotto "da ordinare", anche quelle con l'OF emesso e la data passata:
+    // la domanda "di chi e' la mossa" e' proprio quella a cui il riquadro
+    // deve rispondere, e per una lavorazione in ritardo la mossa e'
+    // sollecitare, non ordinare. Resta un gruppo loro per quelle che
+    // davvero nessuno ha ancora ordinato.
+    gruppo(v => gruppoMateriale(v) === 'in_ritardo', 'var(--red)', '⏰ In ritardo',
       x => 'doveva arrivare il ' + fmtIT(x.st.data)
         + (x.st.of ? '  ·  OF ' + x.st.of : '  ·  OF non indicato')
-        + (x.st.fornitore ? '  ·  ' + x.st.fornitore : ''));
-    gruppo(v => !v.lavorazione && v.st.stato === 'da_ordinare', 'var(--red)', '⛔ Manca l\'ordine',
+        + (x.st.fornitore ? '  ·  ' + x.st.fornitore : '')
+        + (x.lavorazione ? '  ·  lavorazione' : ''));
+    gruppo(v => gruppoMateriale(v) === 'da_ordinare', 'var(--red)', '⛔ Manca l\'ordine',
       () => 'nessuno l\'ha ancora comprato');
-    gruppo(v => !v.lavorazione && v.st.stato === 'in_arrivo', 'var(--blu)', '📦 In arrivo',
+    gruppo(v => gruppoMateriale(v) === 'in_arrivo', 'var(--blu)', '📦 In arrivo',
       x => (x.st.data ? 'arriva il ' + fmtIT(x.st.data) : 'ordinato, senza data')
-        + (x.st.of ? '  ·  OF ' + x.st.of : '') + (x.st.fornitore ? '  ·  ' + x.st.fornitore : ''));
-    gruppo(v => !v.lavorazione && v.st.stato === 'attesa_cliente', 'var(--or)', '⏳ Lo manda il cliente',
+        + (x.st.of ? '  ·  OF ' + x.st.of : '') + (x.st.fornitore ? '  ·  ' + x.st.fornitore : '')
+        + (x.lavorazione ? '  ·  lavorazione' : ''));
+    gruppo(v => gruppoMateriale(v) === 'attesa_cliente', 'var(--or)', '⏳ Lo manda il cliente',
       () => 'conto lavoro: non si ordina');
-    gruppo(v => v.lavorazione, 'var(--vio)', '🔧 Lavorazioni da ordinare',
+    // Quelle che nessuno ha ancora ordinato: qui la mossa e' emettere l'OF.
+    // Le altre sono gia' salite nei gruppi "in ritardo" e "in arrivo".
+    gruppo(v => gruppoMateriale(v) === 'lavorazione', 'var(--vio)', '🔧 Lavorazioni da ordinare',
       () => 'si ordina a un terzista, non sta in magazzino');
-    gruppo(v => !v.lavorazione && v.st.stato === 'consumo', 'var(--mut)', '· Di consumo',
+    gruppo(v => gruppoMateriale(v) === 'consumo', 'var(--mut)', '· Di consumo',
       () => 'non ferma la commessa');
 
     // I coperti si dicono, ma su una riga sola: sapere che gli altri quattro
@@ -9948,12 +9959,24 @@ function openOperazioneModal(o, opts) {
           return;
         }
         nMancano++;
+        // ⚠ ESSERE UNA LAVORAZIONE NON VUOL DIRE CHE NESSUNO L'HA ORDINATA
+        // (7 set, trovato da Nico: "perche' mi dice che TS-342010003_K e' da
+        // ordinare al terzista, quando vedi che c'e' gia' un ordine
+        // fornitore? al massimo e' in ritardo").
+        // Erano due domande diverse trattate come una: `_K` dice DOVE si
+        // prende (da un terzista, non dallo scaffale), lo stato dice SE e'
+        // gia' stata comprata. Il controllo su `lav` stava per primo e
+        // mangiava l'altro: una lavorazione con l'OF gia' emesso e la data
+        // passata si dichiarava da ordinare, e qualcuno andava a ordinarla
+        // due volte invece di sollecitare quella che c'era.
+        // Adesso comanda lo STATO, e `lav` aggiunge solo la parola giusta.
         let t = 'mancano ' + nf(q.manca), c = 'var(--red)';
-        if (lav) { t += ' · da ordinare a terzista'; c = 'var(--vio)'; }
-        else if (st.stato === 'in_ritardo') t += ' · in ritardo dal ' + fmtIT(st.data) + (st.of ? ' · OF ' + st.of : '');
+        if (st.stato === 'in_ritardo') { t += ' · in ritardo dal ' + fmtIT(st.data)
+          + (st.of ? ' · OF ' + st.of : ''); if (lav) t += ' · lavorazione'; }
         else if (st.stato === 'in_arrivo') { t += st.data ? ' · arriva il ' + fmtIT(st.data) : ' · ordinato';
-          if (st.of) t += ' · OF ' + st.of; c = 'var(--blu)'; }
+          if (st.of) t += ' · OF ' + st.of; if (lav) t += ' · lavorazione'; c = 'var(--blu)'; }
         else if (st.stato === 'attesa_cliente') { t += ' · lo manda il cliente'; c = 'var(--or)'; }
+        else if (lav) { t += ' · da ordinare a terzista'; c = 'var(--vio)'; }
         else t += ' · da ordinare';
         cella.textContent = t; cella.style.color = c;
         cella.title = st.fornitore || '';

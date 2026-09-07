@@ -1518,6 +1518,29 @@ function mancanteConsegne(m) {
 //   in_arrivo      -> ordinato, con una data davanti
 //   attesa_cliente -> conto lavoro: lo manda il cliente, non si ordina
 //   consumo        -> non ferma niente
+// In quale gruppo va una voce mancante del riquadro: UNO e UN SOLO gruppo.
+// `v` = { st: statoMateriale(...), lavorazione: bool }.
+//
+// ⚠ LA REGOLA STA QUI E NON NELLA UI perche' e' esattamente il punto in cui
+// si e' sbagliato (7 set, trovato da Nico): la UI toglieva le lavorazioni da
+// ogni gruppo e le raccoglieva tutte sotto "da ordinare", anche quelle con
+// l'OF gia' emesso. Due domande diverse schiacciate in una:
+//   `lavorazione` dice DOVE si prende — da un terzista, non dallo scaffale
+//   `st.stato`    dice SE e' gia' stata comprata
+// Comanda lo STATO: per una lavorazione in ritardo la mossa e' sollecitare,
+// non emettere un secondo ordine. Il gruppo delle lavorazioni resta per
+// quelle che nessuno ha davvero ancora ordinato.
+function gruppoMateriale(v) {
+  const st = (v && v.st && v.st.stato) || 'da_ordinare';
+  const lav = !!(v && v.lavorazione);
+  if (st === 'in_ritardo') return 'in_ritardo';
+  if (st === 'in_arrivo')  return 'in_arrivo';
+  if (lav) return 'lavorazione';
+  if (st === 'attesa_cliente') return 'attesa_cliente';
+  if (st === 'consumo') return 'consumo';
+  return 'da_ordinare';
+}
+
 function statoMateriale(m, oggiIso) {
   const cat = mancanteCategoria(m);
   if (cat === 'consumo' || cat === 'attesa_cliente' || cat === 'da_ordinare') {
