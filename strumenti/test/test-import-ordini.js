@@ -183,9 +183,15 @@ sez('FOTOGRAFIA: cosa succede a una commessa che c e gia');
   t('non la duplica', p.nuove.length === 0);
   t('la mette fra gli aggiornamenti', p.aggiornamenti.length === 1);
   const campi = p.aggiornamenti[0].campi.map(c => c.campo).sort();
-  t('tocca solo quantita, scadenza e prezzo',
-    JSON.stringify(campi) === JSON.stringify(['prezzo','quantita','scadenza']));
+  // Dal 7 set la SCADENZA non e' piu' in questa lista: nasce da Alnus e da
+  // li' in poi la decide chi pianifica qui dentro.
+  t('tocca solo quantita e prezzo',
+    JSON.stringify(campi) === JSON.stringify(['prezzo','quantita']));
   t('dichiara il valore di prima', p.aggiornamenti[0].campi.find(c=>c.campo==='quantita').da === 1);
+  t('la data diversa si dichiara invece di imporla',
+    p.scadenzeDiscordanti.length === 1
+    && p.scadenzeDiscordanti[0].qui === '2026-01-01'
+    && p.scadenzeDiscordanti[0].file === '2025-12-09');
 }
 {
   const ctx = Object.assign({}, CTX, { operazioni: [{
@@ -193,6 +199,54 @@ sez('FOTOGRAFIA: cosa succede a una commessa che c e gia');
     scadenza:'2025-12-09', prezzo_unitario: 10, stato:'aperta' }] });
   const p = analizza([R({})], ctx);
   t('identica: nessun aggiornamento inutile', p.aggiornamenti.length === 0 && p.invariate === 1);
+}
+
+sez('LA SCADENZA NON SI RIALLINEA: nasce da Alnus, poi la decidete voi');
+// 7 set, deciso da Nico: "quando importiamo ordini da Alnus, niente
+// allineamento date di consegne. valgono solo se importazione iniziale, poi
+// se vengono modificate su app si lasciano cosi'".
+// La data si sposta guardando il carico e le priorita': una fotografia
+// dell'ERP non deve poter scavalcare quella decisione, e soprattutto non
+// deve poterlo fare in silenzio — chi aveva spostato la data non se ne
+// accorgeva, e indietro non tornava da sola.
+{
+  const conData = (scad) => Object.assign({}, CTX, { operazioni: [{
+    id:'o1', numero_ordine:'2026/OC/00400', pos:'0010', quantita: 3,
+    scadenza: scad, prezzo_unitario: 10, stato:'aperta' }] });
+  // R() porta 2025-12-09.
+  const post = analizza([R({})], conData('2026-03-01'));
+  t('data spostata avanti qui: nessun aggiornamento',
+    post.aggiornamenti.length === 0 && post.invariate === 1);
+  t('ma la divergenza si dichiara', post.scadenzeDiscordanti.length === 1);
+  t('e si dice da che parte pende', post.scadenzeDiscordanti[0].verso === 'anticipata');
+
+  const ant = analizza([R({})], conData('2025-10-01'));
+  t('data qui piu vicina di quella Alnus: posticipata',
+    ant.scadenzeDiscordanti[0].verso === 'posticipata');
+
+  const uguale = analizza([R({})], conData('2025-12-09'));
+  t('date uguali: niente da dichiarare', uguale.scadenzeDiscordanti.length === 0);
+
+  const senza = analizza([R({})], conData(null));
+  t('commessa senza data: si dichiara comunque',
+    senza.scadenzeDiscordanti.length === 1 && senza.scadenzeDiscordanti[0].qui === null);
+  t('e non la si riempie di nascosto', senza.aggiornamenti.length === 0);
+}
+{
+  // Una commessa NUOVA la data da Alnus la prende eccome: e' l'unica volta
+  // che vale, ed e' esattamente quello che Nico ha chiesto.
+  const p = analizza([R({})], CTX);
+  t('la commessa nuova nasce con la data di Alnus',
+    p.nuove.length === 1 && p.nuove[0].scadenza === '2025-12-09');
+  t('e non finisce fra le divergenze', p.scadenzeDiscordanti.length === 0);
+}
+{
+  // Una commessa CHIUSA non si tocca e non si commenta: e' gia' finita.
+  const ctx = Object.assign({}, CTX, { operazioni: [{
+    id:'o1', numero_ordine:'2026/OC/00400', pos:'0010', quantita: 3,
+    scadenza:'2026-06-01', prezzo_unitario: 10, stato:'spedita' }] });
+  const p = analizza([R({})], ctx);
+  t('commessa spedita: nessuna divergenza di data', p.scadenzeDiscordanti.length === 0);
 }
 
 sez('POSIZIONE SENZA GLI ZERI: e la stessa commessa, non una nuova');

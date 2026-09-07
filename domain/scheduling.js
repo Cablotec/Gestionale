@@ -2076,6 +2076,7 @@ function analizzaImportOrdini(righe, ctx) {
     box: [], nuove: [], aggiornamenti: [], bloccate: [], invariate: 0,
     clientiDaCreare: [], articoliDaCreare: [], clientiRiconosciuti: [],
     clientiDaRinominare: [], rinomineImpossibili: [], residuiDiscordanti: [],
+    scadenzeDiscordanti: [],
     senzaCodice: [], statiDiscordanti: { chiuseQui: [], viveQui: [], prodotteNonSpedite: [] },
   };
   if (!righe.length) return out;
@@ -2317,7 +2318,28 @@ function analizzaImportOrdini(righe, ctx) {
     // Solo i campi che vengono davvero dall'ERP.
     const campi = [];
     if (Number(op.quantita) !== v.qta) campi.push({ campo: 'quantita', da: op.quantita, a: v.qta });
-    if ((op.scadenza || null) !== v.scadenza) campi.push({ campo: 'scadenza', da: op.scadenza, a: v.scadenza });
+    // ⚠ LA SCADENZA NON SI RIALLINEA (7 set, deciso da Nico: "quando
+    // importiamo ordini da Alnus, niente allineamento date di consegne...
+    // valgono solo se importazione iniziale, poi se vengono modificate su
+    // app si lasciano cosi'").
+    // La data con cui una commessa NASCE viene da Alnus; da li' in poi e'
+    // una decisione di pianificazione presa qui dentro — si sposta guardando
+    // il carico, i fermi, le priorita' — e una fotografia dell'ERP non deve
+    // poterla scavalcare. Era il caso peggiore di tutti: la data non torna
+    // indietro da sola, e chi l'aveva spostata non se ne accorgeva.
+    // Si DICHIARA la divergenza invece di imporla, come gia' si fa per le
+    // residue: chi guarda decide, e la mossa la fa a mano.
+    if ((op.scadenza || null) !== v.scadenza) {
+      out.scadenzeDiscordanti.push({
+        numeroOrdine: v.numeroOrdine, pos: v.pos, cliente: v.clienteNome,
+        qui: op.scadenza || null, file: v.scadenza,
+        // Il VERSO conta: una consegna anticipata stringe i tempi e va
+        // guardata subito, una posticipata libera spazio. La mossa che
+        // chiedono e' diversa, e metterle nello stesso mucchio le nasconde.
+        verso: !op.scadenza ? 'qui non c e'
+          : (String(v.scadenza) < String(op.scadenza) ? 'anticipata' : 'posticipata'),
+      });
+    }
     const prezzoNuovo   = v.prezzo > 0 ? v.prezzo : null;
     const prezzoVecchio = (op.prezzo_unitario === null || op.prezzo_unitario === undefined)
       ? null : Number(op.prezzo_unitario);
@@ -2473,6 +2495,11 @@ function analizzaImportOrdini(righe, ctx) {
   out.statiDiscordanti.prodotteNonSpedite.sort(perOrdinePos);
   out.statiDiscordanti.viveQui.sort(perOrdinePos);
 
+  // Prima le ANTICIPATE, e fra quelle la piu' vicina: e' l'ordine in cui
+  // conviene guardarle, perche' e' l'ordine in cui fanno male.
+  out.scadenzeDiscordanti.sort((a, b) =>
+    (a.verso === 'anticipata' ? 0 : 1) - (b.verso === 'anticipata' ? 0 : 1)
+    || String(a.file || '9999').localeCompare(String(b.file || '9999')));
   out.residuiDiscordanti.sort((a, b) =>
     String(a.numeroOrdine).localeCompare(String(b.numeroOrdine)) || Number(a.pos) - Number(b.pos));
 

@@ -6651,9 +6651,11 @@ function openOperazioniImportPreviewModal(rows) {
     if (piano.aggiornamenti.length > 40) ag.append(el('div', { style:'color:var(--mut);' },
       '... e altre ' + (piano.aggiornamenti.length - 40)));
     dest.append(ag);
-    dest.append(nota('Si toccano solo quantità, scadenza, prezzo e riferimento cliente — '
+    dest.append(nota('Si toccano solo quantità, prezzo e riferimento cliente — '
       + 'i campi che vengono dall\'ERP. Il riferimento si riallinea solo dove il file '
       + 'ce l\'ha: una riga senza riferimento non cancella quello già scritto. '
+      + 'La SCADENZA no: nasce da Alnus, ma da lì in poi è una decisione di '
+      + 'pianificazione presa qui, e resta quella che avete messo voi. '
       + 'Stato, fasi, addetti, note, gruppi e ore restano come sono.'));
   }
 
@@ -6676,6 +6678,31 @@ function openOperazioniImportPreviewModal(rows) {
   // residua qui si ricalcola da ordinato − spedito, e dove non torna con
   // quella di Alnus vuol dire che una spedizione manca da una delle due parti.
   // L'import non tocca niente di tutto questo: lo dichiara e basta.
+  // ── Date di consegna: si DICHIARANO, non si toccano ────────────────
+  // La scadenza non si riallinea piu' (7 set). Ma non allinearla non vuol
+  // dire nascondere che i due archivi dicono cose diverse: senza questa
+  // sezione una consegna anticipata da Alnus resterebbe invisibile fino al
+  // giorno in cui il cliente la reclama.
+  if ((piano.scadenzeDiscordanti || []).length) {
+    const ant = piano.scadenzeDiscordanti.filter(s => s.verso === 'anticipata').length;
+    dest.append(sezione('Date di consegna: ' + piano.scadenzeDiscordanti.length
+      + (piano.scadenzeDiscordanti.length === 1 ? ' riga con una data diversa da Alnus'
+                                                : ' righe con una data diversa da Alnus')));
+    const sd = riquadro('var(--ylw)');
+    piano.scadenzeDiscordanti.slice(0, 40).forEach(s => sd.append(el('div', {},
+      s.numeroOrdine + '/' + s.pos + '  ' + (s.cliente || '')
+      + '  ·  qui ' + (s.qui ? fmtIT(s.qui) : '(nessuna)')
+      + '  ·  Alnus ' + (s.file ? fmtIT(s.file) : '(nessuna)')
+      + '  →  ' + s.verso)));
+    if (piano.scadenzeDiscordanti.length > 40) sd.append(el('div', { style:'color:var(--mut);' },
+      '... e altre ' + (piano.scadenzeDiscordanti.length - 40)));
+    dest.append(sd);
+    dest.append(nota('Nessuna di queste date viene importata: la scadenza la decidete voi qui, '
+      + 'e da adesso non viene più toccata. Sono elencate perché una consegna ANTICIPATA '
+      + 'da Alnus stringe i tempi e va guardata — qui ce ne sono ' + ant + '. '
+      + 'Per allinearne una si apre la commessa e si cambia la data a mano.', 'var(--ylw)'));
+  }
+
   if (piano.residuiDiscordanti.length) {
     const nAlnus = piano.residuiDiscordanti.filter(r => r.chiIndietro === 'alnus').length;
     dest.append(sezione('Spedizioni: ' + piano.residuiDiscordanti.length
@@ -6921,7 +6948,6 @@ async function operazioniImportEsegui(piano) {
       const patch = {};
       a.campi.forEach(c => {
         if (c.campo === 'quantita') patch.quantita = c.a;
-        if (c.campo === 'scadenza') patch.scadenza = c.a;
         if (c.campo === 'prezzo')   patch.prezzo_unitario = c.a;
         if (c.campo === 'riferimento') patch.riferimento_cliente = c.a;
       });
