@@ -6497,8 +6497,10 @@ function openOperazioniImportPreviewModal(rows) {
     if (piano.aggiornamenti.length > 40) ag.append(el('div', { style:'color:var(--mut);' },
       '... e altre ' + (piano.aggiornamenti.length - 40)));
     dest.append(ag);
-    dest.append(nota('Si toccano solo quantità, scadenza e prezzo — i campi che vengono '
-      + 'dall\'ERP. Stato, fasi, addetti, note, gruppi e ore restano come sono.'));
+    dest.append(nota('Si toccano solo quantità, scadenza, prezzo e riferimento cliente — '
+      + 'i campi che vengono dall\'ERP. Il riferimento si riallinea solo dove il file '
+      + 'ce l\'ha: una riga senza riferimento non cancella quello già scritto. '
+      + 'Stato, fasi, addetti, note, gruppi e ore restano come sono.'));
   }
 
   dest = bScrive;
@@ -6760,13 +6762,14 @@ async function operazioniImportEsegui(piano) {
       inseriti += (data || []).length;
     }
 
-    // 5) Aggiornamenti: SOLO i tre campi che vengono dall'ERP.
+    // 5) Aggiornamenti: SOLO i campi che vengono dall'ERP.
     for (const a of piano.aggiornamenti) {
       const patch = {};
       a.campi.forEach(c => {
         if (c.campo === 'quantita') patch.quantita = c.a;
         if (c.campo === 'scadenza') patch.scadenza = c.a;
         if (c.campo === 'prezzo')   patch.prezzo_unitario = c.a;
+        if (c.campo === 'riferimento') patch.riferimento_cliente = c.a;
       });
       if (!Object.keys(patch).length) continue;
       const { data, error } = await eseguiConRetry(

@@ -2291,7 +2291,7 @@ function analizzaImportOrdini(righe, ctx) {
     if (!op) { out.nuove.push(v); return; }
     if (op.stato === 'completata' || op.stato === 'spedita') { out.bloccate.push(v); return; }
 
-    // Solo i tre campi che vengono davvero dall'ERP.
+    // Solo i campi che vengono davvero dall'ERP.
     const campi = [];
     if (Number(op.quantita) !== v.qta) campi.push({ campo: 'quantita', da: op.quantita, a: v.qta });
     if ((op.scadenza || null) !== v.scadenza) campi.push({ campo: 'scadenza', da: op.scadenza, a: v.scadenza });
@@ -2301,6 +2301,20 @@ function analizzaImportOrdini(righe, ctx) {
     const prezzoCambia = (prezzoVecchio === null) !== (prezzoNuovo === null)
       || (prezzoVecchio !== null && prezzoNuovo !== null && Math.abs(prezzoVecchio - prezzoNuovo) > 0.005);
     if (prezzoCambia) campi.push({ campo: 'prezzo', da: prezzoVecchio, a: prezzoNuovo });
+
+    // Il RIFERIMENTO si riallinea come gli altri: nasce in Alnus, non e'
+    // lavoro fatto qui dentro. Finche' restava fuori, una commessa importata
+    // prima che si leggesse la seconda colonna teneva il riferimento vuoto
+    // PER SEMPRE — rimportare non lo riempiva (le 40 Elcotec del 7 set).
+    // ⚠ Solo DOVE IL FILE CE L'HA. Un foglio che su quella riga non porta
+    // niente non cancella quello che c'e' gia': allineare vuol dire portare
+    // quello che l'ERP SA, non svuotare in base a quello che non sa. Il
+    // campo si scrive anche a mano dalla scheda commessa, e un'estrazione
+    // parziale non deve poter azzerare quel lavoro.
+    const rifVecchio = String(op.riferimento_cliente || '').trim();
+    if (v.riferimento && v.riferimento !== rifVecchio) {
+      campi.push({ campo: 'riferimento', da: op.riferimento_cliente || null, a: v.riferimento });
+    }
 
     if (!campi.length) { out.invariate++; return; }
     out.aggiornamenti.push({ voce: v, op, campi });

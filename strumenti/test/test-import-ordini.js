@@ -104,6 +104,75 @@ sez('INTESTAZIONI DOPPIE: vince quella che ha i dati');
   t('legge la colonna piena, non la prima omonima', p.box.length === 1);
 }
 
+sez('DUE CASELLE PER IL RIFERIMENTO: la seconda e un RIPIEGO');
+// L'estrazione ERP ha due colonne e i clienti non usano la stessa: Senzani e
+// Sacmi stanno in "Riferimento Cliente", Elcotec SOLO in "Rifer. Cliente".
+// Leggendo la prima e basta, il 7 set sono entrate 40 commesse Elcotec col
+// riferimento vuoto.
+{
+  const p = analizza([R({ 'Ragione Sociale ':'Elcotec S.r.l.',
+    'Riferimento Cliente _1':'', 'Rifer. Cliente ':'ODP.26/03109' })], CTX);
+  t('riga senza la prima colonna: ripiega sulla seconda',
+    p.nuove.length === 1 && p.nuove[0].riferimento === 'ODP.26/03109');
+}
+{
+  // Sacmi ha entrambe piene, ma nella seconda mette la POSIZIONE del suo
+  // ordine: preferirla peggiorerebbe il dato invece di completarlo.
+  const p = analizza([R({ 'Ragione Sociale ':'Cliente Uno',
+    'Riferimento Cliente _1':'808164189', 'Rifer. Cliente ':'POS0040' })], CTX);
+  t('piene tutte e due: vince la prima', p.nuove[0].riferimento === '808164189');
+}
+{
+  // Il ripiego vale anche per la regola Senzani, che si regge sul riferimento.
+  const p = analizza([R({ 'Ragione Sociale ':'SENZANI BREVETTI S.p.a.',
+    'Riferimento Cliente _1':'', 'Rifer. Cliente ':'EL000999' })], CTX);
+  t('la fusione BOX scatta anche col riferimento di ripiego', p.box.length === 1);
+}
+
+sez('RIFERIMENTO: si RIALLINEA all ERP, ma non si svuota');
+{
+  // Il caso Elcotec del 7 set: la commessa c e gia, col riferimento vuoto.
+  // Prima restava vuota per sempre, perche l aggiornamento non lo guardava.
+  const ctx = Object.assign({}, CTX, { operazioni: [{
+    id:'o1', numero_ordine:'2026/OC/00400', pos:'0010', quantita: 3,
+    scadenza:'2025-12-09', prezzo_unitario: 10, riferimento_cliente: null,
+    stato:'aperta' }] });
+  const p = analizza([R({ 'Riferimento Cliente _1':'ODP.26/03109' })], ctx);
+  t('vuoto in commessa e pieno nel file: si riallinea',
+    p.aggiornamenti.length === 1
+    && p.aggiornamenti[0].campi.some(c => c.campo === 'riferimento'
+      && c.a === 'ODP.26/03109'));
+}
+{
+  const ctx = Object.assign({}, CTX, { operazioni: [{
+    id:'o1', numero_ordine:'2026/OC/00400', pos:'0010', quantita: 3,
+    scadenza:'2025-12-09', prezzo_unitario: 10, riferimento_cliente: 'VECCHIO',
+    stato:'aperta' }] });
+  const p = analizza([R({ 'Riferimento Cliente _1':'NUOVO' })], ctx);
+  t('diverso nel file: comanda l ERP',
+    p.aggiornamenti[0].campi.find(c => c.campo === 'riferimento').a === 'NUOVO');
+}
+{
+  // LA GUARDIA. Il campo si scrive anche a mano dalla scheda commessa, e
+  // un estrazione parziale non deve poter azzerare quel lavoro.
+  const ctx = Object.assign({}, CTX, { operazioni: [{
+    id:'o1', numero_ordine:'2026/OC/00400', pos:'0010', quantita: 3,
+    scadenza:'2025-12-09', prezzo_unitario: 10, riferimento_cliente: 'SCRITTO A MANO',
+    stato:'aperta' }] });
+  const p = analizza([R({})], ctx);   // la riga base non ha riferimento
+  t('vuoto nel file: NON cancella quello che c e',
+    p.aggiornamenti.length === 0 && p.invariate === 1);
+}
+{
+  const ctx = Object.assign({}, CTX, { operazioni: [{
+    id:'o1', numero_ordine:'2026/OC/00400', pos:'0010', quantita: 3,
+    scadenza:'2025-12-09', prezzo_unitario: 10, riferimento_cliente: 'UGUALE',
+    stato:'aperta' }] });
+  const p = analizza([R({ 'Riferimento Cliente _1':'UGUALE' })], ctx);
+  t('identico: nessun aggiornamento inutile',
+    p.aggiornamenti.length === 0 && p.invariate === 1);
+}
+
 sez('FOTOGRAFIA: cosa succede a una commessa che c e gia');
 {
   const ctx = Object.assign({}, CTX, { operazioni: [{
