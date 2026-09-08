@@ -10811,6 +10811,42 @@ function openOperazioneModal(o, opts) {
     const spedBox = el('div', { style:'margin-top:8px;' });
     pProd.append(spedBox);
 
+    // Lo stato al 100% si SCRIVE, non si propone (27 ago). Sta qui fuori
+    // perche la chiamano in due: chi registra una spedizione e chi conferma
+    // una PREPARATA. Duplicarla vorrebbe dire che un domani una delle due
+    // strade smette di aggiornare lo stato e nessuno se ne accorge.
+    const sincronizzaSpedita = async (dataSped) => {
+      const qtaOrd = Number(o.quantita || 0);
+      // Prima cambiava solo il campo nel form dicendo "salva per confermare":
+      // chi chiudeva il modal senza salvare si ritrovava la spedizione
+      // registrata e lo stato indietro. Le due meta dello stesso gesto devono
+      // avere la stessa sorte, o restano scoperte a meta — e successo su
+      // 2026/OC/00107/0020, 4 su 4 spediti e ancora "completata".
+      const nuovoTotSped = quantitaSpedita(o.id);
+      if (nuovoTotSped >= qtaOrd && o.stato !== 'spedita') {
+        const patch = { stato: 'spedita' };
+        if (!o.consegnato_il) patch.consegnato_il = dataSped;
+        const { data: agg, error: errSt } = await eseguiConRetry(
+          () => sb.from('operazioni').update(patch).eq('id', o.id).select().single(),
+          { label: 'stato spedita' });
+        if (errSt) {
+          // La spedizione c'e comunque: lo stato si puo correggere a mano.
+          toast('Spedizione salvata, ma lo stato non si è aggiornato: ' + errSt.message, 'err');
+          return;
+        }
+        Object.assign(o, agg);
+        const idx = state.operazioni.findIndex(x => x.id === agg.id);
+        if (idx >= 0) state.operazioni[idx] = agg;
+        // Il form si allinea a quello che e gia scritto, cosi salvando dopo
+        // non si rimanda indietro lo stato appena messo.
+        const sel = form.querySelector('[name="stato"]');
+        if (sel) sel.value = 'spedita';
+        const inCons = form.querySelector('[name="consegnato_il"]');
+        if (inCons && !inCons.value && patch.consegnato_il) inCons.value = patch.consegnato_il;
+        toast('Tutto spedito · stato impostato a "spedita"');
+      }
+    };
+
     const renderSpedizioni = () => {
       spedBox.innerHTML = '';
 
@@ -10846,13 +10882,27 @@ function openOperazioneModal(o, opts) {
           'Nessuna spedizione registrata.'));
       } else {
         const listWrap = el('div', { style:'display:flex;flex-direction:column;gap:4px;margin-bottom:10px;' });
+        const oggiSped = toLocalISO(new Date());
         lista.forEach(s => {
+          // PREPARATA: il foglio c'e, la merce no. Si vede subito che e'
+          // diversa da una spedizione vera, altrimenti chi guarda la lista
+          // crede di aver gia spedito.
+          const prep = typeof spedizionePreparata === 'function' && spedizionePreparata(s);
+          // Una preparata la cui data e passata e una dimenticata: e il solo
+          // modo in cui questa funzione puo fare danno, quindi si dichiara.
+          const scaduta = prep && s.data && String(s.data) < oggiSped;
           const row = el('div', {
-            style:'display:grid;grid-template-columns:90px 70px 1fr 1fr auto;gap:10px;align-items:center;padding:6px 8px;background:var(--sur);border:1px solid var(--brd);border-radius:3px;font-family:monospace;font-size:11px;',
+            style:'display:grid;grid-template-columns:90px 70px 1fr 1fr auto;gap:10px;align-items:center;'
+              + 'padding:6px 8px;background:var(--sur);border-radius:3px;font-family:monospace;font-size:11px;'
+              + 'border:1px solid ' + (prep ? 'var(--ylw)' : 'var(--brd)') + ';',
+            title: scaduta ? 'Preparata il ' + fmtIT(s.data) + ' e mai confermata.' : '',
           },
             el('div', {}, fmtIT(s.data)),
-            el('div', { style:'text-align:right;font-weight:600;' }, s.quantita + ' pz'),
-            el('div', { style:'color:var(--mut);' }, s.ddt ? ('DDT ' + s.ddt) : '—'),
+            el('div', { style:'text-align:right;font-weight:600;'
+              + (prep ? 'color:var(--ylw);' : '') },
+              prep ? 'preparata' : (s.quantita + ' pz')),
+            el('div', { style:'color:' + (prep ? 'var(--ylw)' : 'var(--mut)') + ';' },
+              s.ddt ? ('DDT ' + s.ddt) : '—'),
             el('div', { style:'color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: (s.destinatario||'') + (s.note?(' · '+s.note):'') },
               (s.destinatario || '') + (s.note?(' · '+s.note):'') || '—'),
             isAdmin ? el('button', {
@@ -10860,7 +10910,10 @@ function openOperazioneModal(o, opts) {
               style:'padding:2px 6px;font-size:11px;background:transparent;border:1px solid var(--red);color:var(--red);',
               title:'Elimina questa spedizione',
               onclick: async () => {
-                if (!confirm(`Eliminare la spedizione del ${fmtIT(s.data)} (${s.quantita} pz)?`)) return;
+                if (!confirm(prep
+                  ? `Eliminare la spedizione preparata del ${fmtIT(s.data)}`
+                    + `${s.ddt ? ' (DDT ' + s.ddt + ')' : ''}?`
+                  : `Eliminare la spedizione del ${fmtIT(s.data)} (${s.quantita} pz)?`)) return;
                 const { error } = await sb.from('spedizioni').delete().eq('id', s.id);
                 if (error) return toast('Errore eliminazione: '+error.message, 'err');
                 state.spedizioni = state.spedizioni.filter(x => x.id !== s.id);
@@ -10883,6 +10936,43 @@ function openOperazioneModal(o, opts) {
             }, '✕') : null,
           );
           listWrap.append(row);
+
+          // CONFERMA: la merce parte, si scrive quanta. Da qui in poi la riga
+          // e una spedizione come le altre e comincia a contare.
+          if (prep && isAdmin) {
+            const qtaConf = el('input', { type:'number', min:'1', placeholder:'quantità',
+              style:'width:90px;' });
+            const btnConf = el('button', { type:'button', class:'btnsm',
+              style:'padding:2px 8px;font-size:11px;' }, '✓ Conferma spedizione');
+            btnConf.onclick = async () => {
+              const q = parseInt(qtaConf.value, 10);
+              if (!Number.isFinite(q) || q <= 0) return toast('Quantità deve essere > 0', 'err');
+              // Gli stessi due paletti di una spedizione normale, ricontati
+              // ADESSO: fra il giorno in cui il foglio e stato preparato e
+              // oggi puo essere cambiato tutto.
+              const totOra = quantitaSpedita(o.id);
+              const restaOra = Number(o.quantita || 0) - totOra;
+              if (q > restaOra) return toast(`Da spedire: ${restaOra} pz. Non puoi spedirne ${q}.`, 'err');
+              const prontiOra = Math.max(0, quantitaConsegnata(o.id) - totOra);
+              if (q > prontiOra) return toast(`In magazzino: ${prontiOra} pz pronti. Prima registra la produzione mancante.`, 'err');
+              btnConf.disabled = true; btnConf.textContent = 'Salvataggio…';
+              const { data: agg, error } = await sb.from('spedizioni')
+                .update({ quantita: q }).eq('id', s.id).select().single();
+              btnConf.disabled = false; btnConf.textContent = '✓ Conferma spedizione';
+              if (error) return toast('Errore: ' + error.message, 'err');
+              state.spedizioni = state.spedizioni.map(x => x.id === agg.id ? agg : x);
+              toast('Spedizione confermata: ' + q + ' pz');
+              await sincronizzaSpedita(agg.data || toLocalISO(new Date()));
+              renderSpedizioni();
+            };
+            listWrap.append(el('div', {
+              style:'display:flex;gap:8px;align-items:center;padding:2px 8px 8px 8px;font-size:11px;'
+                + 'color:var(--mut);' },
+              el('span', {}, scaduta
+                ? '⚠ preparata il ' + fmtIT(s.data) + ' e non ancora partita — quando parte:'
+                : 'Quando la merce parte, scrivi quanta:'),
+              qtaConf, btnConf));
+          }
         });
         spedBox.append(listWrap);
       }
@@ -10890,7 +10980,14 @@ function openOperazioneModal(o, opts) {
       // Form per aggiungere nuova spedizione (solo admin, se c'è qualcosa da spedire)
       if (isAdmin && daSpedire > 0) {
         const dataInputS = el('input', { type:'date', value: toLocalISO(new Date()) });
-        const qtaInputS = el('input', { type:'number', min:'1', max:String(Math.max(pronti, 1)), value:String(Math.max(1, pronti)) });
+        // ⚠ QUANTITA FACOLTATIVA. Vuota = spedizione PREPARATA: si riporta il
+        // numero di DDT che Alnus ha gia assegnato, prima che la merce parta
+        // (8 set). Quando non c'e niente di pronto la casella nasce vuota,
+        // perche preparare e l'unica cosa che si puo fare.
+        const qtaInputS = el('input', { type:'number', min:'1',
+          max: pronti > 0 ? String(pronti) : '',
+          value: pronti > 0 ? String(pronti) : '',
+          placeholder: 'vuota = solo DDT' });
         const ddtInputS = el('input', { type:'text', placeholder:'numero DDT al cliente (opzionale)' });
         const destInputS = el('input', { type:'text', placeholder:'destinatario / luogo (opzionale)' });
         const noteInputS = el('input', { type:'text', placeholder:'note (opzionale)' });
@@ -10899,6 +10996,15 @@ function openOperazioneModal(o, opts) {
           type:'button', class:'btnp',
           style:'padding:6px 12px;font-size:11px;height:fit-content;',
         }, '+ Registra spedizione');
+        // Il bottone dice quale dei due gesti sta per fare: registrare una
+        // spedizione e preparare un foglio non sono la stessa cosa, e il
+        // bottone e l'ultimo posto in cui chiarirlo prima che sia fatta.
+        const etichettaBtn = () => {
+          btnAddS.textContent = (qtaInputS.value || '').trim()
+            ? '+ Registra spedizione' : '+ Prepara DDT';
+        };
+        qtaInputS.addEventListener('input', etichettaBtn);
+        etichettaBtn();
 
         btnAddS.onclick = async () => {
           const data = dataInputS.value;
@@ -10908,24 +11014,37 @@ function openOperazioneModal(o, opts) {
           const note = (noteInputS.value || '').trim();
 
           if (!data) return toast('Data obbligatoria', 'err');
-          if (!Number.isFinite(qta) || qta <= 0) return toast('Quantità deve essere > 0', 'err');
-
-          // Validazione doppia: 1) non superare totale ordinato 2) non superare pronto in magazzino
-          const totSpedOra = quantitaSpedita(o.id);
-          const daSpedireOra = qtaOrd - totSpedOra;
-          if (qta > daSpedireOra) {
-            return toast(`Da spedire: ${daSpedireOra} pz. Non puoi spedire ${qta} pz.`, 'err');
+          // Quantita vuota = si PREPARA. Il DDT allora e obbligatorio: una riga
+          // senza quantita e senza DDT non direbbe niente a nessuno, e
+          // resterebbe li a sporcare la lista delle spedizioni.
+          const soloDDT = (qtaInputS.value || '').trim() === '';
+          if (soloDDT && !ddt) {
+            return toast('Per preparare una spedizione serve il numero di DDT', 'err');
           }
-          const prontiOra = Math.max(0, quantitaConsegnata(o.id) - totSpedOra);
-          if (qta > prontiOra) {
-            return toast(`In magazzino: ${prontiOra} pz pronti. Prima registra la produzione mancante.`, 'err');
+          if (!soloDDT && (!Number.isFinite(qta) || qta <= 0)) {
+            return toast('Quantità deve essere > 0 — lasciala vuota per preparare solo il DDT', 'err');
+          }
+
+          // I due paletti valgono su quello che ESCE: se non esce niente non
+          // c'e niente da controllare. Preparare il DDT di merce ancora da
+          // produrre e esattamente il caso per cui questa strada esiste.
+          if (!soloDDT) {
+            const totSpedOra = quantitaSpedita(o.id);
+            const daSpedireOra = qtaOrd - totSpedOra;
+            if (qta > daSpedireOra) {
+              return toast(`Da spedire: ${daSpedireOra} pz. Non puoi spedire ${qta} pz.`, 'err');
+            }
+            const prontiOra = Math.max(0, quantitaConsegnata(o.id) - totSpedOra);
+            if (qta > prontiOra) {
+              return toast(`In magazzino: ${prontiOra} pz pronti. Prima registra la produzione mancante.`, 'err');
+            }
           }
 
           btnAddS.disabled = true; btnAddS.textContent = 'Salvataggio…';
           const payload = {
             operazione_id: o.id,
             data,
-            quantita: qta,
+            quantita: soloDDT ? null : qta,
             ddt: ddt || null,
             destinatario: dest || null,
             note: note || null,
@@ -10938,39 +11057,14 @@ function openOperazioneModal(o, opts) {
 
           // Aggiorno cache locale
           if (!state.spedizioni.find(x => x.id === nuova.id)) state.spedizioni.push(nuova);
-          toast('Spedizione registrata');
+          toast(soloDDT ? 'DDT preparato · conferma la quantità quando la merce parte'
+                        : 'Spedizione registrata');
 
-          // Sincronizzazione automatica stato: se ora siamo al 100%, marca
-          // 'spedita' — e lo SCRIVE, non lo propone soltanto (27 ago).
-          // Prima cambiava solo il campo nel form dicendo "salva per
-          // confermare": chi chiudeva il modal senza salvare si ritrovava la
-          // spedizione registrata e lo stato indietro. Le due metà dello
-          // stesso gesto devono avere la stessa sorte, o restano scoperte a
-          // metà — è successo su 2026/OC/00107/0020, 4 su 4 spediti e ancora
-          // "completata".
-          const nuovoTotSped = quantitaSpedita(o.id);
-          if (nuovoTotSped >= qtaOrd && o.stato !== 'spedita') {
-            const patch = { stato: 'spedita' };
-            if (!o.consegnato_il) patch.consegnato_il = data;
-            const { data: agg, error: errSt } = await eseguiConRetry(
-              () => sb.from('operazioni').update(patch).eq('id', o.id).select().single(),
-              { label: 'stato spedita' });
-            if (errSt) {
-              // La spedizione c'è comunque: lo stato si può correggere a mano.
-              toast('Spedizione salvata, ma lo stato non si è aggiornato: ' + errSt.message, 'err');
-            } else {
-              Object.assign(o, agg);
-              const idx = state.operazioni.findIndex(x => x.id === agg.id);
-              if (idx >= 0) state.operazioni[idx] = agg;
-              // Il form si allinea a quello che è già scritto, così salvando
-              // dopo non si rimanda indietro lo stato appena messo.
-              const sel = form.querySelector('[name="stato"]');
-              if (sel) sel.value = 'spedita';
-              const inCons = form.querySelector('[name="consegnato_il"]');
-              if (inCons && !inCons.value && patch.consegnato_il) inCons.value = patch.consegnato_il;
-              toast('Tutto spedito · stato impostato a "spedita"');
-            }
-          }
+          // Una PREPARATA non chiude niente: conta zero, quindi la chiamata
+          // sarebbe innocua lo stesso. Si salta comunque, perche leggere
+          // 'sincronizza spedita' dopo aver solo preparato un foglio farebbe
+          // dubitare di cosa e appena successo.
+          if (!soloDDT) await sincronizzaSpedita(data);
 
           renderSpedizioni();
         };

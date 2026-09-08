@@ -2578,10 +2578,28 @@ const GIORNI_SPEDITE_IN_ORDINI = 30;
 
 // L'ultima spedizione registrata di una commessa, o null se non ce n'è.
 // `spedizioni` si passa esplicitamente: il domain non legge lo stato globale.
+// SPEDIZIONE PREPARATA: la riga esiste, col DDT e il destinatario, ma la
+// quantita' non c'e' ancora (8 set, chiesto da un collega di Nico: poter
+// riportare il numero di DDT che Alnus ha gia' assegnato PRIMA che la merce
+// parta). Non e' una spedizione: e' il foglio pronto.
+//
+// ⚠ Vale ZERO in ogni conto, e non per una guardia sparsa in giro: tutti i
+// punti che sommano lo spedito fanno gia' `Number(s.quantita || 0)`, quindi
+// `null` fa zero da solo. Questa funzione serve a DIRLO — chi legge il
+// codice deve poter capire che quelle righe esistono — e a filtrarle dove
+// il conto non e' una somma ma una data.
+function spedizionePreparata(s) {
+  return !!s && (s.quantita === null || s.quantita === undefined || Number(s.quantita) === 0);
+}
+
 function ultimaSpedizione(opId, spedizioni) {
   let ultima = null;
   (spedizioni || []).forEach(s => {
     if (!s || s.operazione_id !== opId) return;
+    // Una preparata non e' mai "l'ultima spedizione": non e' partito niente.
+    // Senza questa riga una bozza con data futura terrebbe una commessa
+    // spedita fuori dallo Storico finche' qualcuno non se ne accorgeva.
+    if (spedizionePreparata(s)) return;
     const d = String(s.data || '').slice(0, 10);
     if (d && (!ultima || d > ultima)) ultima = d;
   });
