@@ -10417,9 +10417,11 @@ function openOperazioneModal(o, opts) {
 
   // ─── Sezione: sessioni di lavoro ───
   if (!isNew) {
-    const sessOp = state.sessioni
+    // Ricalcolata a ogni disegno, non presa una volta sola: da quando le ore
+    // si possono aggiungere a mano, la lista cambia mentre la scheda e aperta.
+    const sessioniDiQui = () => state.sessioni
       .filter(s => s.operazione_id === o.id)
-      .sort((a,b) => (b.inizio||'').localeCompare(a.inizio||''));
+      .sort((a, b) => (b.inizio || '').localeCompare(a.inizio || ''));
 
     const orePrev = opCalcOre(o);
     const orePrevInt = opCalcOreInterne(o);
@@ -10487,103 +10489,194 @@ function openOperazioneModal(o, opts) {
     // monte ore che il riepilogo qui sopra spacca per fase.
     pCons.append(wrapOreEsterne);
 
-    if (sessOp.length === 0) {
-      pCons.append(el('div', { style:'color:var(--mut);font-size:11px;padding:8px 0;' },
-        'Nessuna sessione registrata. Le sessioni si creano dal kiosk quando un operatore inizia un lavoro.'));
-    } else {
-      // Riepilogo totali — RIDISEGNABILE: aggiungere o togliere una riga di ore
-      // esterne cambia questi numeri, e devono muoversi subito. Prima erano
-      // costruiti una volta sola all'apertura del modal: la sezione si
-      // aggiornava e i totali no, così sembrava che non fosse cambiato niente
-      // finché non si salvava e riapriva (segnalato da Nico).
-      const boxTotali = el('div');
-      const renderTotali = () => {
-      boxTotali.innerHTML = '';
-      const cons = (typeof consuntivoCommessa === 'function') ? consuntivoCommessa(o) : null;
-      const oreReali = opCalcOreReali(o);
-      const perc = cons ? cons.perc : (orePrevInt > 0 ? Math.round((oreReali / orePrevInt) * 100) : 0);
-      const overBudget = cons ? cons.sforo
-        : (orePrevInt > 0 && oreReali > orePrevInt + tolleranzaOre(orePrevInt));
-      boxTotali.append(el('div', {
-        style: 'background:var(--sur2);border:1px solid '+(overBudget?'var(--red)':'var(--brd)')+';border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;',
-      },
-        el('div', { style:'display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;' },
-          el('div', {},
-            el('span', { style:'color:var(--mut)' },
-              'Ore previste' + (cons && cons.baseTotale ? ' (totali): ' : ' (interne): ')),
-            el('span', { style:'color:var(--txt);font-weight:600;' },
-              (cons ? cons.base : orePrevInt).toFixed(2) + 'h'),
-            (!cons || !cons.baseTotale) && prevEsterno > 0.05
-              ? el('span', { style:'color:var(--mut);font-size:11px;' }, ' + ' + prevEsterno.toFixed(1) + 'h esterne')
-              : null),
-          el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Ore consuntivate: '),
-            el('span', { style:'color:'+(overBudget?'var(--red)':'var(--grn)')+';font-weight:600;' },
-              (cons ? cons.oreTot : oreReali).toFixed(2) + 'h')),
-          el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Avanzamento: '),
-            el('span', { style:'color:'+(overBudget?'var(--red)':'var(--txt)')+';font-weight:700;' },
-              (cons ? cons.base : orePrevInt) > 0 ? perc + '%' : '—'))
-        ),
-        // "di cui esterne": il totale resta il complessivo, ma non deve
-        // sembrare tutto lavoro tuo. Timbrate e dichiarate distinte.
-        (cons && cons.oreEsterne > 0.05)
-          ? el('div', { style:'margin-top:6px;color:var(--mut);font-size:11px;' },
-              'di cui ' + cons.oreEsterne.toFixed(2) + 'h esterne ('
-              + [cons.oreEsterneTimbrate > 0.005 ? '⏱ ' + cons.oreEsterneTimbrate.toFixed(2) + 'h timbrate qui' : null,
-                 cons.oreEsterneDichiarate > 0.005 ? '📄 ' + cons.oreEsterneDichiarate.toFixed(2) + 'h da rapportino' : null]
-                .filter(Boolean).join(' · ')
-              + ') · interne ' + cons.oreInterne.toFixed(2) + 'h'
-              + (cons.baseTotale
-                  ? ' — il previsto qui sopra è quello TOTALE (comprende le fasi esternalizzate), '
-                    + 'perché il consuntivo comprende ore esterne'
-                  : ''))
-          : null,
-        overBudget
-          ? el('div', { style:'margin-top:6px;color:var(--red);font-size:11px;' },
-              '⚠ Ore consuntivate oltre il previsto')
-          : null,
-      ));
-      };
-      renderTotali();
-      // La sezione ore esterne ora sa ridisegnare anche i totali: aggiungere o
-      // togliere un rapportino li muove all'istante, senza salvare e riaprire.
-      aggiornaTotaliCons = renderTotali;
-      pCons.append(boxTotali);
-
-      // Lista sessioni
-      const sessList = el('div', { style:'max-height:240px;overflow-y:auto;font-family:monospace;font-size:11px;' });
-      sessOp.forEach(s => {
-        const oper = state.utenti.find(u => u.id === s.utente_id);
-        const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
-        const ini = new Date(s.inizio);
-        const fin = s.fine ? new Date(s.fine) : null;
-        const durSec = s.fine
-          ? (s.durata_secondi || 0)
-          : Math.floor((Date.now() - ini.getTime()) / 1000);
-
-        const row = el('div', {
-          class: 'sess-row-clic',
-          style: 'display:grid;grid-template-columns:14px 1fr 1fr auto auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--brd);'
-            + (isAdmin ? 'cursor:pointer;' : '')
-            + (s.fine?'':'background:rgba(78,255,163,.04);'),
-          title: isAdmin ? 'Clic per modificare questa timbratura' : '',
-          onclick: isAdmin
-            ? () => { if (typeof openSessioneModal === 'function') openSessioneModal(s); }
-            : null,
+    // Tutta la parte che dipende dalle sessioni sta in una funzione: le ore
+    // aggiunte a mano devono comparire subito, senza salvare e riaprire.
+    const boxSessioni = el('div');
+    pCons.append(boxSessioni);
+    const renderSessioni = () => {
+      boxSessioni.innerHTML = '';
+      const sessOp = sessioniDiQui();
+      if (sessOp.length === 0) {
+        boxSessioni.append(el('div', { style:'color:var(--mut);font-size:11px;padding:8px 0;' },
+          'Nessuna sessione registrata. Le sessioni si creano dal kiosk quando un operatore inizia un lavoro.'));
+      } else {
+        // Riepilogo totali — RIDISEGNABILE: aggiungere o togliere una riga di ore
+        // esterne cambia questi numeri, e devono muoversi subito. Prima erano
+        // costruiti una volta sola all'apertura del modal: la sezione si
+        // aggiornava e i totali no, così sembrava che non fosse cambiato niente
+        // finché non si salvava e riapriva (segnalato da Nico).
+        const boxTotali = el('div');
+        const renderTotali = () => {
+        boxTotali.innerHTML = '';
+        const cons = (typeof consuntivoCommessa === 'function') ? consuntivoCommessa(o) : null;
+        const oreReali = opCalcOreReali(o);
+        const perc = cons ? cons.perc : (orePrevInt > 0 ? Math.round((oreReali / orePrevInt) * 100) : 0);
+        const overBudget = cons ? cons.sforo
+          : (orePrevInt > 0 && oreReali > orePrevInt + tolleranzaOre(orePrevInt));
+        boxTotali.append(el('div', {
+          style: 'background:var(--sur2);border:1px solid '+(overBudget?'var(--red)':'var(--brd)')+';border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;',
         },
-          el('div', { style:'width:6px;height:6px;border-radius:50%;background:'+(tipo?.colore||'#6b6b64')+';' }),
-          el('div', {}, oper?.nome || '—'),
-          el('div', { style:'color:var(--mut);font-size:11px;' }, tipo?.nome || '—'),
-          el('div', { style:'color:var(--mut);font-size:11px;' },
-            fmtIT(toLocalISO(ini)) + ' ' + z(ini.getHours()) + ':' + z(ini.getMinutes())
-              + (fin ? ' → '+z(fin.getHours())+':'+z(fin.getMinutes()) : ' → in corso')),
-          el('div', { style:'font-weight:700;color:'+(s.fine?'var(--txt)':'var(--grn)')+';min-width:60px;text-align:right;' },
-            formatSecondsHuman(durSec)),
-        );
-        sessList.append(row);
-      });
-      pCons.append(sessList);
+          el('div', { style:'display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;' },
+            el('div', {},
+              el('span', { style:'color:var(--mut)' },
+                'Ore previste' + (cons && cons.baseTotale ? ' (totali): ' : ' (interne): ')),
+              el('span', { style:'color:var(--txt);font-weight:600;' },
+                (cons ? cons.base : orePrevInt).toFixed(2) + 'h'),
+              (!cons || !cons.baseTotale) && prevEsterno > 0.05
+                ? el('span', { style:'color:var(--mut);font-size:11px;' }, ' + ' + prevEsterno.toFixed(1) + 'h esterne')
+                : null),
+            el('div', {},
+              el('span', { style:'color:var(--mut)' }, 'Ore consuntivate: '),
+              el('span', { style:'color:'+(overBudget?'var(--red)':'var(--grn)')+';font-weight:600;' },
+                (cons ? cons.oreTot : oreReali).toFixed(2) + 'h')),
+            el('div', {},
+              el('span', { style:'color:var(--mut)' }, 'Avanzamento: '),
+              el('span', { style:'color:'+(overBudget?'var(--red)':'var(--txt)')+';font-weight:700;' },
+                (cons ? cons.base : orePrevInt) > 0 ? perc + '%' : '—'))
+          ),
+          // "di cui esterne": il totale resta il complessivo, ma non deve
+          // sembrare tutto lavoro tuo. Timbrate e dichiarate distinte.
+          (cons && cons.oreEsterne > 0.05)
+            ? el('div', { style:'margin-top:6px;color:var(--mut);font-size:11px;' },
+                'di cui ' + cons.oreEsterne.toFixed(2) + 'h esterne ('
+                + [cons.oreEsterneTimbrate > 0.005 ? '⏱ ' + cons.oreEsterneTimbrate.toFixed(2) + 'h timbrate qui' : null,
+                   cons.oreEsterneDichiarate > 0.005 ? '📄 ' + cons.oreEsterneDichiarate.toFixed(2) + 'h da rapportino' : null]
+                  .filter(Boolean).join(' · ')
+                + ') · interne ' + cons.oreInterne.toFixed(2) + 'h'
+                + (cons.baseTotale
+                    ? ' — il previsto qui sopra è quello TOTALE (comprende le fasi esternalizzate), '
+                      + 'perché il consuntivo comprende ore esterne'
+                    : ''))
+            : null,
+          overBudget
+            ? el('div', { style:'margin-top:6px;color:var(--red);font-size:11px;' },
+                '⚠ Ore consuntivate oltre il previsto')
+            : null,
+        ));
+        };
+        renderTotali();
+        // La sezione ore esterne ora sa ridisegnare anche i totali: aggiungere o
+        // togliere un rapportino li muove all'istante, senza salvare e riaprire.
+        aggiornaTotaliCons = renderTotali;
+        boxSessioni.append(boxTotali);
+
+        // Lista sessioni
+        const sessList = el('div', { style:'max-height:240px;overflow-y:auto;font-family:monospace;font-size:11px;' });
+        sessOp.forEach(s => {
+          const oper = state.utenti.find(u => u.id === s.utente_id);
+          const tipo = state.tipiLav.find(t => t.id === s.tipo_lavorazione_id);
+          const ini = new Date(s.inizio);
+          const fin = s.fine ? new Date(s.fine) : null;
+          const durSec = s.fine
+            ? (s.durata_secondi || 0)
+            : Math.floor((Date.now() - ini.getTime()) / 1000);
+
+          const row = el('div', {
+            class: 'sess-row-clic',
+            style: 'display:grid;grid-template-columns:14px 1fr 1fr auto auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--brd);'
+              + (isAdmin ? 'cursor:pointer;' : '')
+              + (s.fine?'':'background:rgba(78,255,163,.04);'),
+            title: isAdmin ? 'Clic per modificare questa timbratura' : '',
+            onclick: isAdmin
+              ? () => { if (typeof openSessioneModal === 'function') openSessioneModal(s); }
+              : null,
+          },
+            el('div', { style:'width:6px;height:6px;border-radius:50%;background:'+(tipo?.colore||'#6b6b64')+';' }),
+          // A MANO: si dichiara. Una riga scritta da un admin e una timbratura
+          // vera valgono le stesse ore, ma non sono la stessa cosa, e chi
+          // legge un consuntivo ha il diritto di sapere quale sta guardando.
+          el('div', {},
+            oper?.nome || '—',
+            s.sede === 'manuale'
+              ? el('span', { style:'margin-left:6px;color:var(--ylw);font-size:10px;'
+                  + 'border:1px solid var(--ylw);border-radius:3px;padding:0 4px;',
+                  title:'Ore inserite a mano da un amministratore, non timbrate.' }, 'a mano')
+              : null),
+            el('div', { style:'color:var(--mut);font-size:11px;' }, tipo?.nome || '—'),
+            el('div', { style:'color:var(--mut);font-size:11px;' },
+              fmtIT(toLocalISO(ini)) + ' ' + z(ini.getHours()) + ':' + z(ini.getMinutes())
+                + (fin ? ' → '+z(fin.getHours())+':'+z(fin.getMinutes()) : ' → in corso')),
+            el('div', { style:'font-weight:700;color:'+(s.fine?'var(--txt)':'var(--grn)')+';min-width:60px;text-align:right;' },
+              formatSecondsHuman(durSec)),
+          );
+          sessList.append(row);
+        });
+        boxSessioni.append(sessList);
+    };
+    renderSessioni();
+
+    // ── ORE A MANO ──────────────────────────────────────────────────
+    // Chiesto da Nico l'8 set: poter mettere a consuntivo le ore di un
+    // operatore quando la timbratura non c'e — dimenticata, kiosk fermo,
+    // lavoro fatto altrove. Non e la strada normale, ed e per questo che
+    // la riga resta marcata 'a mano' per sempre.
+    //
+    // ⚠ SI SCRIVE UNA SESSIONE, non una tabella nuova. Le ore interne le
+    // conta `opCalcOreReali` sommando `sessioni_lavoro`, e da li passano al
+    // consuntivo, al per-fase, al per-operatore, agli export. Una tabella a
+    // parte avrebbe voluto dire insegnare a ognuno di quei posti che esiste,
+    // e il primo che se ne dimentica fa sparire le ore senza dirlo.
+    if (isAdmin) {
+      const selOpr = el('select', { style:'min-width:150px;' },
+        el('option', { value:'' }, 'operatore…'),
+        ...(state.utenti || [])
+          // Niente pseudo-utenti kiosk fra gli operatori: e un account
+          // di postazione, non una persona a cui attribuire ore.
+          .filter(u => u.attivo !== false && !isKioskRecord(u))
+          .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || '')))
+          .map(u => el('option', { value:u.id }, u.nome || '—')));
+      const selTipoM = el('select', { style:'min-width:140px;' },
+        el('option', { value:'' }, 'tipo lavorazione…'),
+        ...(state.tipiLav || []).map(t => el('option', { value:t.id }, t.nome)));
+      const inDataM = el('input', { type:'date', value: toLocalISO(new Date()), style:'width:140px;' });
+      const inOreM = el('input', { type:'number', step:'0.25', min:'0', placeholder:'ore',
+        style:'width:80px;' });
+      const inNoteM = el('input', { type:'text', placeholder:'perché (consigliato)', style:'min-width:170px;' });
+      const btnOreM = el('button', { type:'button', class:'btnsm' }, '+ Aggiungi ore a mano');
+
+      btnOreM.onclick = async () => {
+        const ore = parseFloat((inOreM.value || '').replace(',', '.')) || 0;
+        if (!selOpr.value) return toast('Scegli l operatore', 'err');
+        if (!(ore > 0)) return toast('Ore: serve un numero maggiore di zero', 'err');
+        if (!inDataM.value) return toast('Data obbligatoria', 'err');
+        // La sessione vuole un intervallo, non un numero: si scrive un
+        // intervallo CONVENZIONALE che parte dalle 8 del mattino. Le ore sono
+        // quelle vere — l orario no, e la riga lo dichiara col suo marchio.
+        const inizio = new Date(inDataM.value + 'T08:00:00');
+        const fine = new Date(inizio.getTime() + Math.round(ore * 3600) * 1000);
+        btnOreM.disabled = true; btnOreM.textContent = 'Salvataggio…';
+        const riga = {
+          operazione_id: o.id,
+          utente_id: selOpr.value,
+          tipo_lavorazione_id: selTipoM.value || null,
+          sede: 'manuale',
+          inizio: inizio.toISOString(),
+          fine: fine.toISOString(),
+          note: (inNoteM.value || '').trim() || null,
+        };
+        const { data: nuova, error } = await eseguiConRetry(
+          () => sb.from('sessioni_lavoro').insert(riga).select().single(),
+          { label: 'ore a mano' });
+        btnOreM.disabled = false; btnOreM.textContent = '+ Aggiungi ore a mano';
+        if (error) return toast(error.message, 'err');
+        if (!state.sessioni.find(x => x.id === nuova.id)) state.sessioni.unshift(nuova);
+        inOreM.value = ''; inNoteM.value = '';
+        toast(ore.toString().replace('.', ',') + 'h aggiunte a mano');
+        // Tutto quello che dipende dalle ore si rifa subito: la lista, i
+        // totali del consuntivo, la barra in intestazione, il margine.
+        renderSessioni();
+        if (typeof aggiornaTotaliCons === 'function') aggiornaTotaliCons();
+        if (typeof aggiornaBarraOre === 'function') aggiornaBarraOre();
+        if (typeof aggiornaMargineRiga === 'function') aggiornaMargineRiga();
+      };
+
+      pCons.append(el('div', { style:'display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap;' },
+        selOpr, selTipoM, inDataM, inOreM, inNoteM, btnOreM));
+      pCons.append(el('div', { class:'sub', style:'margin-top:4px;font-size:11px;' },
+        'Da usare quando la timbratura manca: le ore entrano nel consuntivo come le altre, '
+        + 'ma la riga resta marcata «a mano». L orario di inizio è convenzionale (8:00), '
+        + 'contano le ore.'));
+    }
     }
   }
 
