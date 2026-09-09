@@ -2077,6 +2077,7 @@ function analizzaImportOrdini(righe, ctx) {
     clientiDaCreare: [], articoliDaCreare: [], clientiRiconosciuti: [],
     clientiDaRinominare: [], rinomineImpossibili: [], residuiDiscordanti: [],
     scadenzeDiscordanti: [],
+    prezziDiscordanti: [],
     senzaCodice: [], statiDiscordanti: { chiuseQui: [], viveQui: [], prodotteNonSpedite: [] },
   };
   if (!righe.length) return out;
@@ -2345,7 +2346,29 @@ function analizzaImportOrdini(righe, ctx) {
       ? null : Number(op.prezzo_unitario);
     const prezzoCambia = (prezzoVecchio === null) !== (prezzoNuovo === null)
       || (prezzoVecchio !== null && prezzoNuovo !== null && Math.abs(prezzoVecchio - prezzoNuovo) > 0.005);
-    if (prezzoCambia) campi.push({ campo: 'prezzo', da: prezzoVecchio, a: prezzoNuovo });
+    // ⚠ IL PREZZO NON SI RIALLINEA (9 set, confermato da Nico: funziona come
+    // la data di scadenza — import la prima volta, poi le modifiche fatte in
+    // app non devono essere riallineate).
+    // Il prezzo con cui una commessa NASCE viene da Alnus. Da li in poi e una
+    // decisione commerciale presa qui, e una fotografia dell'ERP non deve
+    // poterla scavalcare in silenzio: sono soldi, e chi l'aveva corretto non
+    // se ne accorgeva.
+    // Si DICHIARA la divergenza invece di imporla, come per le scadenze e per
+    // le residue: chi guarda decide, e la mossa la fa a mano.
+    if (prezzoCambia) {
+      const qta = Number(v.qta) || 0;
+      out.prezziDiscordanti.push({
+        numeroOrdine: v.numeroOrdine, pos: v.pos, cliente: v.clienteNome,
+        codArt: v.codArt, qui: prezzoVecchio, file: prezzoNuovo, qta,
+        // Lo scostamento in EURO sulla riga: e il numero con cui si decide se
+        // vale la pena guardare. Un centesimo su un pezzo e rumore, lo stesso
+        // centesimo su mille pezzi no.
+        impatto: ((prezzoNuovo || 0) - (prezzoVecchio || 0)) * qta,
+        verso: prezzoVecchio === null ? 'qui non c e'
+          : prezzoNuovo === null ? 'Alnus non ce l ha'
+          : (prezzoNuovo > prezzoVecchio ? 'in aumento' : 'in calo'),
+      });
+    }
 
     // Il RIFERIMENTO si riallinea come gli altri: nasce in Alnus, non e'
     // lavoro fatto qui dentro. Finche' restava fuori, una commessa importata
@@ -2497,6 +2520,9 @@ function analizzaImportOrdini(righe, ctx) {
 
   // Prima le ANTICIPATE, e fra quelle la piu' vicina: e' l'ordine in cui
   // conviene guardarle, perche' e' l'ordine in cui fanno male.
+  // Prima quelle che PESANO di piu, in valore assoluto: e l'ordine in cui
+  // conviene guardarle, perche e l'ordine in cui costano.
+  out.prezziDiscordanti.sort((a, b) => Math.abs(b.impatto) - Math.abs(a.impatto));
   out.scadenzeDiscordanti.sort((a, b) =>
     (a.verso === 'anticipata' ? 0 : 1) - (b.verso === 'anticipata' ? 0 : 1)
     || String(a.file || '9999').localeCompare(String(b.file || '9999')));

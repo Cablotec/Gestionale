@@ -6651,11 +6651,11 @@ function openOperazioniImportPreviewModal(rows) {
     if (piano.aggiornamenti.length > 40) ag.append(el('div', { style:'color:var(--mut);' },
       '... e altre ' + (piano.aggiornamenti.length - 40)));
     dest.append(ag);
-    dest.append(nota('Si toccano solo quantità, prezzo e riferimento cliente — '
+    dest.append(nota('Si tocca solo la quantità e il riferimento cliente — '
       + 'i campi che vengono dall\'ERP. Il riferimento si riallinea solo dove il file '
       + 'ce l\'ha: una riga senza riferimento non cancella quello già scritto. '
-      + 'La SCADENZA no: nasce da Alnus, ma da lì in poi è una decisione di '
-      + 'pianificazione presa qui, e resta quella che avete messo voi. '
+      + 'La SCADENZA e il PREZZO no: nascono da Alnus, ma da lì in poi sono '
+      + 'decisioni prese qui, e restano quelle che avete messo voi. '
       + 'Stato, fasi, addetti, note, gruppi e ore restano come sono.'));
   }
 
@@ -6683,6 +6683,35 @@ function openOperazioniImportPreviewModal(rows) {
   // dire nascondere che i due archivi dicono cose diverse: senza questa
   // sezione una consegna anticipata da Alnus resterebbe invisibile fino al
   // giorno in cui il cliente la reclama.
+  // ── Prezzi: si DICHIARANO, non si toccano ──────────────────────────
+  // Il prezzo non si riallinea piu (9 set). Ma non allinearlo non vuol dire
+  // nascondere che i due archivi dicono cose diverse: sono soldi, e un
+  // prezzo cambiato in Alnus va visto. Sui dati veri un prodotto ha sempre
+  // UN prezzo solo, quindi un prezzo diverso non e mai una variante
+  // legittima: e sempre un cambiamento, e merita di essere guardato.
+  if ((piano.prezziDiscordanti || []).length) {
+    const somma = piano.prezziDiscordanti.reduce((n, p) => n + (p.impatto || 0), 0);
+    dest.append(sezione('Prezzi: ' + piano.prezziDiscordanti.length
+      + (piano.prezziDiscordanti.length === 1 ? ' riga con un prezzo diverso da Alnus'
+                                              : ' righe con un prezzo diverso da Alnus')));
+    const pd = riquadro('var(--ylw)');
+    piano.prezziDiscordanti.slice(0, 40).forEach(p => pd.append(el('div', {},
+      p.numeroOrdine + '/' + p.pos + '  ' + (p.cliente || '')
+      + '  ·  ' + (p.codArt || '')
+      + '  ·  qui ' + (p.qui == null ? '(nessuno)' : fmtE(p.qui))
+      + '  ·  Alnus ' + (p.file == null ? '(nessuno)' : fmtE(p.file))
+      + '  →  ' + p.verso
+      + (p.qta ? '  ·  ' + (p.impatto > 0 ? '+' : '') + fmtE(p.impatto)
+                 + ' su ' + p.qta + ' pz' : ''))));
+    if (piano.prezziDiscordanti.length > 40) pd.append(el('div', { style:'color:var(--mut);' },
+      '... e altre ' + (piano.prezziDiscordanti.length - 40)));
+    dest.append(pd);
+    dest.append(nota('Nessuno di questi prezzi viene importato: il prezzo lo decidete voi qui, '
+      + 'e da adesso non viene più toccato. In tutto le righe qui sopra valgono '
+      + (somma > 0 ? '+' : '') + fmtE(somma) + ' di scostamento rispetto ad Alnus. '
+      + 'Per allinearne uno si apre la commessa e si cambia il prezzo a mano.', 'var(--ylw)'));
+  }
+
   if ((piano.scadenzeDiscordanti || []).length) {
     const ant = piano.scadenzeDiscordanti.filter(s => s.verso === 'anticipata').length;
     dest.append(sezione('Date di consegna: ' + piano.scadenzeDiscordanti.length
@@ -6948,7 +6977,6 @@ async function operazioniImportEsegui(piano) {
       const patch = {};
       a.campi.forEach(c => {
         if (c.campo === 'quantita') patch.quantita = c.a;
-        if (c.campo === 'prezzo')   patch.prezzo_unitario = c.a;
         if (c.campo === 'riferimento') patch.riferimento_cliente = c.a;
       });
       if (!Object.keys(patch).length) continue;

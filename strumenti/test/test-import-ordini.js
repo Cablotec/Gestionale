@@ -183,10 +183,10 @@ sez('FOTOGRAFIA: cosa succede a una commessa che c e gia');
   t('non la duplica', p.nuove.length === 0);
   t('la mette fra gli aggiornamenti', p.aggiornamenti.length === 1);
   const campi = p.aggiornamenti[0].campi.map(c => c.campo).sort();
-  // Dal 7 set la SCADENZA non e' piu' in questa lista: nasce da Alnus e da
-  // li' in poi la decide chi pianifica qui dentro.
-  t('tocca solo quantita e prezzo',
-    JSON.stringify(campi) === JSON.stringify(['prezzo','quantita']));
+  // Dal 7 set la SCADENZA non e piu in questa lista, dal 9 set nemmeno il
+  // PREZZO: nascono da Alnus e da li in poi li decide chi lavora qui.
+  t('tocca solo la quantita',
+    JSON.stringify(campi) === JSON.stringify(['quantita']));
   t('dichiara il valore di prima', p.aggiornamenti[0].campi.find(c=>c.campo==='quantita').da === 1);
   t('la data diversa si dichiara invece di imporla',
     p.scadenzeDiscordanti.length === 1
@@ -199,6 +199,59 @@ sez('FOTOGRAFIA: cosa succede a una commessa che c e gia');
     scadenza:'2025-12-09', prezzo_unitario: 10, stato:'aperta' }] });
   const p = analizza([R({})], ctx);
   t('identica: nessun aggiornamento inutile', p.aggiornamenti.length === 0 && p.invariate === 1);
+}
+
+sez('IL PREZZO NON SI RIALLINEA: nasce da Alnus, poi lo decidete voi');
+// 9 set, confermato da Nico: "anche prezzo funziona come la data di scadenza.
+// Import la prima volta, poi eventuali modifiche sull'app nel prezzo non
+// devono essere riallineate".
+// Sui dati veri un prodotto ha sempre UN prezzo solo: un prezzo diverso non e
+// mai una variante legittima, e sempre un cambiamento — e sono soldi, quindi
+// si dichiara invece di scriverlo di nascosto.
+{
+  const conPrezzo = (pz) => Object.assign({}, CTX, { operazioni: [{
+    id:'o1', numero_ordine:'2026/OC/00400', pos:'0010', quantita: 3,
+    scadenza:'2025-12-09', prezzo_unitario: pz, stato:'aperta' }] });
+  // R() porta prezzo 10 e quantita 3.
+  const su = analizza([R({})], conPrezzo(8));
+  t('prezzo diverso: nessun aggiornamento',
+    su.aggiornamenti.length === 0 && su.invariate === 1);
+  t('ma la divergenza si dichiara', su.prezziDiscordanti.length === 1);
+  t('con il verso giusto', su.prezziDiscordanti[0].verso === 'in aumento');
+  t('e lo scostamento in euro sulla riga', su.prezziDiscordanti[0].impatto === 6);
+
+  const giu = analizza([R({})], conPrezzo(12));
+  t('prezzo piu alto qui: in calo', giu.prezziDiscordanti[0].verso === 'in calo');
+  t('impatto negativo', giu.prezziDiscordanti[0].impatto === -6);
+
+  const uguale = analizza([R({})], conPrezzo(10));
+  t('prezzi uguali: niente da dichiarare', uguale.prezziDiscordanti.length === 0);
+
+  // Mezzo centesimo e rumore di arrotondamento, non un cambio di prezzo.
+  const quasi = analizza([R({})], conPrezzo(10.004));
+  t('scarto sotto il mezzo centesimo: si tace', quasi.prezziDiscordanti.length === 0);
+
+  const senza = analizza([R({})], conPrezzo(null));
+  t('commessa senza prezzo: si dichiara comunque',
+    senza.prezziDiscordanti.length === 1 && senza.prezziDiscordanti[0].qui === null);
+  t('e non lo si riempie di nascosto', senza.aggiornamenti.length === 0);
+}
+{
+  const p = analizza([R({})], CTX);
+  t('la commessa nuova nasce col prezzo di Alnus',
+    p.nuove.length === 1 && p.nuove[0].prezzo === 10);
+  t('e non finisce fra le divergenze', p.prezziDiscordanti.length === 0);
+}
+{
+  // Prima quelle che pesano di piu: e l'ordine in cui costano.
+  const ctx = Object.assign({}, CTX, { operazioni: [
+    { id:'o1', numero_ordine:'2026/OC/00400', pos:'0010', quantita: 3,
+      scadenza:'2025-12-09', prezzo_unitario: 9, stato:'aperta' },
+    { id:'o2', numero_ordine:'2026/OC/00400', pos:'0020', quantita: 3,
+      scadenza:'2025-12-09', prezzo_unitario: 1, stato:'aperta' }] });
+  const p = analizza([R({}), R({ 'Riga ':'20' })], ctx);
+  t('la divergenza piu pesante viene per prima',
+    p.prezziDiscordanti.length === 2 && p.prezziDiscordanti[0].pos === '0020');
 }
 
 sez('LA SCADENZA NON SI RIALLINEA: nasce da Alnus, poi la decidete voi');
