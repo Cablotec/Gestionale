@@ -9928,8 +9928,34 @@ function openOperazioneModal(o, opts) {
         ' × ', el('span', { style:'color:var(--txt);font-weight:700;' }, String(ordinati)), ' pz.',
         ' Le quantità sono fissate su questa commessa; disponibilità e consegne sono di oggi.')));
 
-    const intestazione = el('div', { class:'sub', style:'font-size:11px;margin-bottom:8px;' },
-      righe.length + (righe.length === 1 ? ' componente' : ' componenti'));
+    // ⟳ RIGENERA STA IN ALTO (9 set, chiesto da Nico: "per rapidità").
+    // Stava in fondo alla tabella: su una distinta da 80 componenti voleva
+    // dire scorrere tutto per premerlo, e lo si preme spesso — ogni volta che
+    // la distinta cambia. Sulla riga del conteggio, a destra: e la stessa
+    // riga che dice quanti componenti ci sono, cioe il numero che cambia
+    // quando lo premi.
+    const intestazione = el('div', { class:'sub',
+      style:'font-size:11px;margin-bottom:8px;display:flex;align-items:center;gap:10px;' },
+      el('span', {}, righe.length + (righe.length === 1 ? ' componente' : ' componenti')));
+    if (isAdmin && art) {
+      const btnRi = el('button', { type:'button', class:'btnsm',
+        style:'margin-left:auto;' }, '⟳ Rigenera dalla distinta');
+      btnRi.onclick = async () => {
+        if (!confirm('Rifare la lista dalla distinta di ' + art.codice + ' per ' + ordinati + ' pz?\n\n'
+          + 'Le quantità attuali di questa commessa vengono sostituite.')) return;
+        btnRi.disabled = true; btnRi.textContent = 'Calcolo…';
+        try {
+          const nuove = await generaMaterialiCommessa(art.codice, ordinati);
+          await salvaMaterialiCommessa(o, nuove);
+          toast('Lista rifatta: ' + nuove.length + ' materiali', 'ok');
+          renderMancanti();
+        } catch (e) {
+          btnRi.disabled = false; btnRi.textContent = '⟳ Rigenera dalla distinta';
+          toast('Errore: ' + (e.message || e), 'err');
+        }
+      };
+      intestazione.append(btnRi);
+    }
     sezMateriali.append(intestazione);
 
     const COL = 'display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(140px,1.4fr) '
@@ -9980,25 +10006,6 @@ function openOperazioneModal(o, opts) {
         stato));
     });
 
-    if (isAdmin && art) {
-      const btnRi = el('button', { type:'button', class:'btnsm',
-        style:'margin-top:10px;align-self:flex-start;' }, '⟳ Rigenera dalla distinta');
-      btnRi.onclick = async () => {
-        if (!confirm('Rifare la lista dalla distinta di ' + art.codice + ' per ' + ordinati + ' pz?\n\n'
-          + 'Le quantità attuali di questa commessa vengono sostituite.')) return;
-        btnRi.disabled = true; btnRi.textContent = 'Calcolo…';
-        try {
-          const nuove = await generaMaterialiCommessa(art.codice, ordinati);
-          await salvaMaterialiCommessa(o, nuove);
-          toast('Lista rifatta: ' + nuove.length + ' materiali', 'ok');
-          renderMancanti();
-        } catch (e) {
-          btnRi.disabled = false; btnRi.textContent = '⟳ Rigenera dalla distinta';
-          toast('Errore: ' + (e.message || e), 'err');
-        }
-      };
-      sezMateriali.append(btnRi);
-    }
 
     // Lo stato di OGGI, appoggiato sopra le quantita fisse.
     // ⚠⚠ NIENTE `async` E NIENTE GUARDIA `isConnected` QUI (3 set, difetto
