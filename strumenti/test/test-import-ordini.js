@@ -201,6 +201,66 @@ sez('FOTOGRAFIA: cosa succede a una commessa che c e gia');
   t('identica: nessun aggiornamento inutile', p.aggiornamenti.length === 0 && p.invariate === 1);
 }
 
+sez('ALLERTA: prezzo nuovo diverso dall ultimo dello storico');
+// 9 set, chiesto da Nico. L'altra allerta guarda le commesse che ci sono
+// gia; questa guarda le NUOVE, che non hanno un prima: il metro e l'ultima
+// volta che quel prodotto e stato ordinato.
+{
+  // Storico: ART-1 venduto a 10 nel maggio 2026.
+  const storico = (pz, quando) => Object.assign({}, CTX, { operazioni: [{
+    id:'vecchia', numero_ordine:'2026/OC/00100', pos:'0010', articolo_id:'a1',
+    cliente_id:'c1', quantita: 5, prezzo_unitario: pz, stato:'spedita',
+    created_at: quando || '2026-05-01T10:00:00Z' }] });
+  // R() e 2026/OC/00400 riga 10, prezzo 10, qta 3: commessa NUOVA.
+  const uguale = analizza([R({})], storico(10));
+  t('stesso prezzo dell ultima volta: nessuna allerta',
+    uguale.nuove.length === 1 && uguale.prezziFuoriStorico.length === 0);
+
+  const diverso = analizza([R({})], storico(8));
+  t('prezzo diverso: allerta', diverso.prezziFuoriStorico.length === 1);
+  const a = diverso.prezziFuoriStorico[0];
+  t('dice l ultimo prezzo e quello nuovo', a.ultimo === 8 && a.file === 10);
+  t('dice di che ordine era l ultimo', a.ultimoOrdine === '2026/OC/00100');
+  t('dice lo scarto in percentuale', a.scartoPerc === 25);
+  t('e quanto pesa sulla riga', a.impatto === 6);
+  t('la commessa nasce lo stesso, non si blocca niente', diverso.nuove.length === 1);
+
+  // Mezzo centesimo e rumore, non un prezzo nuovo.
+  const quasi = analizza([R({})], storico(10.004));
+  t('scarto sotto il mezzo centesimo: si tace', quasi.prezziFuoriStorico.length === 0);
+
+  // Un prodotto mai ordinato prima non ha un metro: niente allerta.
+  const mai = analizza([R({})], CTX);
+  t('prodotto senza storico: nessuna allerta', mai.prezziFuoriStorico.length === 0);
+}
+{
+  // ⚠ LE DUE ALLERTE NON SI SOVRAPPONGONO. Una commessa che c'e' gia' finisce
+  // in `prezziDiscordanti`; solo le NUOVE guardano lo storico. Altrimenti la
+  // stessa riga comparirebbe due volte, in due sezioni, e chi guarda
+  // crederebbe che i problemi siano il doppio.
+  const ctx = Object.assign({}, CTX, { operazioni: [{
+    id:'o1', numero_ordine:'2026/OC/00400', pos:'0010', articolo_id:'a1',
+    cliente_id:'c1', quantita: 3, scadenza:'2025-12-09', prezzo_unitario: 7,
+    stato:'aperta', created_at:'2026-05-01T10:00:00Z' }] });
+  const p = analizza([R({})], ctx);
+  t('commessa esistente: sta in prezziDiscordanti', p.prezziDiscordanti.length === 1);
+  t('e NON anche fra i prezzi fuori storico', p.prezziFuoriStorico.length === 0);
+}
+{
+  // Le piu grosse in percentuale in cima: e l'ordine in cui si guardano.
+  const ctx = Object.assign({}, CTX, { operazioni: [
+    { id:'v1', numero_ordine:'2026/OC/00100', pos:'0010', articolo_id:'a1',
+      cliente_id:'c1', quantita: 5, prezzo_unitario: 9.5, stato:'spedita',
+      created_at:'2026-05-01T10:00:00Z' },
+    { id:'v2', numero_ordine:'2026/OC/00101', pos:'0010', articolo_id:'abox',
+      cliente_id:'c1', quantita: 5, prezzo_unitario: 2, stato:'spedita',
+      created_at:'2026-05-01T10:00:00Z' }] });
+  const p = analizza([R({}), R({ 'Riga ':'20', 'Codice Articolo ':'BOX_EL000999' })], ctx);
+  const perc = p.prezziFuoriStorico.map(x => Math.abs(x.scartoPerc));
+  t('ordinate per scarto percentuale, la piu grossa in cima',
+    perc.length === 2 && perc[0] >= perc[1]);
+}
+
 sez('IL PREZZO NON SI RIALLINEA: nasce da Alnus, poi lo decidete voi');
 // 9 set, confermato da Nico: "anche prezzo funziona come la data di scadenza.
 // Import la prima volta, poi eventuali modifiche sull'app nel prezzo non

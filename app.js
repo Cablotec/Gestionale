@@ -6689,6 +6689,36 @@ function openOperazioniImportPreviewModal(rows) {
   // prezzo cambiato in Alnus va visto. Sui dati veri un prodotto ha sempre
   // UN prezzo solo, quindi un prezzo diverso non e mai una variante
   // legittima: e sempre un cambiamento, e merita di essere guardato.
+  // ── Prezzi nuovi fuori dallo storico ───────────────────────────────
+  // Chiesto da Nico il 9 set. L'altra sezione guarda le commesse che ci
+  // sono gia; questa guarda le NUOVE, che non hanno un prima e finora
+  // entravano col prezzo del file senza che nessuno lo confrontasse con
+  // niente. Il metro e l'ultima volta che quel prodotto e stato ordinato —
+  // lo stesso listino che si vede nella scheda prodotto.
+  if ((piano.prezziFuoriStorico || []).length) {
+    const n = piano.prezziFuoriStorico.length;
+    dest.append(sezione('Prezzi nuovi: ' + n
+      + (n === 1 ? ' riga a un prezzo diverso dall ultima volta'
+                 : ' righe a un prezzo diverso dall ultima volta')));
+    const fs_ = riquadro('var(--ylw)');
+    piano.prezziFuoriStorico.slice(0, 40).forEach(p => fs_.append(el('div', {},
+      p.numeroOrdine + '/' + p.pos + '  ' + (p.cliente || '')
+      + '  ·  ' + (p.codArt || '')
+      + '  ·  ultimo ' + fmtE(p.ultimo)
+      + (p.ultimoOrdine ? ' (' + p.ultimoOrdine + ')' : '')
+      + '  →  ora ' + fmtE(p.file)
+      + (p.scartoPerc === null ? '' : '  ·  ' + (p.scartoPerc > 0 ? '+' : '') + p.scartoPerc + '%')
+      + (p.qta ? '  ·  ' + (p.impatto > 0 ? '+' : '') + fmtE(p.impatto) + ' su ' + p.qta + ' pz' : '')
+      + (p.altroCliente ? '   ⚠ ultimo prezzo di un ALTRO cliente' : ''))));
+    if (n > 40) fs_.append(el('div', { style:'color:var(--mut);' }, '... e altre ' + (n - 40)));
+    dest.append(fs_);
+    dest.append(nota('Queste commesse NASCONO col prezzo del file, come sempre: qui non si '
+      + 'blocca niente. Sono elencate perché un prodotto di solito ha un prezzo solo, '
+      + 'quindi uno scarto è o una rinegoziazione o un errore di battitura in Alnus — '
+      + 'e le più grosse in percentuale stanno in cima. Se il prezzo giusto è quello '
+      + 'vecchio, si corregge in Alnus e si rimporta.', 'var(--ylw)'));
+  }
+
   if ((piano.prezziDiscordanti || []).length) {
     const somma = piano.prezziDiscordanti.reduce((n, p) => n + (p.impatto || 0), 0);
     dest.append(sezione('Prezzi: ' + piano.prezziDiscordanti.length

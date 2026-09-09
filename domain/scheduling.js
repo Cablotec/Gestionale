@@ -2078,6 +2078,7 @@ function analizzaImportOrdini(righe, ctx) {
     clientiDaRinominare: [], rinomineImpossibili: [], residuiDiscordanti: [],
     scadenzeDiscordanti: [],
     prezziDiscordanti: [],
+    prezziFuoriStorico: [],
     senzaCodice: [], statiDiscordanti: { chiuseQui: [], viveQui: [], prodotteNonSpedite: [] },
   };
   if (!righe.length) return out;
@@ -2115,6 +2116,27 @@ function analizzaImportOrdini(righe, ctx) {
   // Indici sulle anagrafiche
   const artByCod = {};
   articoli.forEach(a => { if (a.codice) artByCod[norm(a.codice)] = a; });
+
+  // ── ULTIMO PREZZO CONOSCIUTO DI OGNI ARTICOLO ────────────────────────
+  // Serve all'allerta sui prezzi delle commesse NUOVE (9 set, chiesto da
+  // Nico): su quelle esistenti si confronta il prezzo con quello della
+  // commessa stessa, ma una commessa nuova non ha un prima — e allora il
+  // metro e' l'ultima volta che quel prodotto e' stato ordinato.
+  // Stessa fonte e stesso ordine di `storicoPrezziArticolo`, che e' il
+  // listino mostrato nella scheda prodotto: se le due cose divergessero, il
+  // gestionale direbbe due cose diverse sullo stesso prezzo.
+  const ultimoPrezzoArt = {};
+  operazioni.forEach(o => {
+    if (!o || !o.articolo_id || !(Number(o.prezzo_unitario) > 0)) return;
+    const quando = String(o.created_at || o.scadenza || '');
+    const gia = ultimoPrezzoArt[o.articolo_id];
+    if (!gia || quando > gia.quando) {
+      ultimoPrezzoArt[o.articolo_id] = {
+        prezzo: Number(o.prezzo_unitario), quando,
+        numeroOrdine: o.numero_ordine || null, clienteId: o.cliente_id || null,
+      };
+    }
+  });
   // Un indice solo sui clienti, per chiave (la stessa ditta comunque scritta).
   // Se la stessa ditta compare piu' volte vince la scheda PIU' VECCHIA: e'
   // quella con le commesse e lo storico attaccati. Non e' teoria — finche' i
@@ -2313,7 +2335,38 @@ function analizzaImportOrdini(righe, ctx) {
 
     const op = opByChiave[chiaveOp(v.numeroOrdine, v.pos)] || null;
     v.esistente = op;
-    if (!op) { out.nuove.push(v); return; }
+    if (!op) {
+      // ── ALLERTA PREZZO SULLO STORICO ────────────────────────────────
+      // Una commessa esistente il prezzo ce l'ha gia, e il confronto lo fa
+      // `prezziDiscordanti`. Una NUOVA non ha un prima: finora entrava col
+      // prezzo del file e nessuno guardava se fosse quello di sempre.
+      // ⚠ I BOX restano fuori: il loro prezzo e la SOMMA degli imponibili
+      // delle righe fuse, quindi cambia col contenuto ed e giusto che cambi.
+      // Confrontarlo con l'ultima volta darebbe un allarme a ogni import.
+      const ultimo = (art && v.origine !== 'box') ? ultimoPrezzoArt[art.id] : null;
+      const pNuovo = v.prezzo > 0 ? v.prezzo : null;
+      if (ultimo && pNuovo !== null && Math.abs(ultimo.prezzo - pNuovo) > 0.005) {
+        const qta = Number(v.qta) || 0;
+        out.prezziFuoriStorico.push({
+          numeroOrdine: v.numeroOrdine, pos: v.pos, cliente: v.clienteNome,
+          codArt: v.codArt, file: pNuovo, ultimo: ultimo.prezzo,
+          ultimoOrdine: ultimo.numeroOrdine,
+          ultimoQuando: ultimo.quando ? String(ultimo.quando).slice(0, 10) : null,
+          // Lo stesso prodotto a un cliente diverso e un caso a se: sui dati
+          // veri non succede mai (ogni codice e di un cliente solo), ma se
+          // succedesse due prezzi diversi sarebbero legittimi, e chi guarda
+          // deve poterlo capire dalla riga invece di dedurlo.
+          altroCliente: !!(cli && ultimo.clienteId && cli.id !== ultimo.clienteId),
+          qta,
+          scarto: pNuovo - ultimo.prezzo,
+          scartoPerc: ultimo.prezzo > 0
+            ? Math.round((pNuovo - ultimo.prezzo) / ultimo.prezzo * 100) : null,
+          impatto: (pNuovo - ultimo.prezzo) * qta,
+        });
+      }
+      out.nuove.push(v);
+      return;
+    }
     if (op.stato === 'completata' || op.stato === 'spedita') { out.bloccate.push(v); return; }
 
     // Solo i campi che vengono davvero dall'ERP.
@@ -2523,6 +2576,12 @@ function analizzaImportOrdini(righe, ctx) {
   // Prima quelle che PESANO di piu, in valore assoluto: e l'ordine in cui
   // conviene guardarle, perche e l'ordine in cui costano.
   out.prezziDiscordanti.sort((a, b) => Math.abs(b.impatto) - Math.abs(a.impatto));
+  // Qui comanda la PERCENTUALE, non gli euro: su una commessa nuova la
+  // domanda e se il prezzo e sbagliato, e un errore di battitura si vede dal
+  // salto percentuale, non dal valore della riga.
+  out.prezziFuoriStorico.sort((a, b) =>
+    Math.abs(b.scartoPerc || 0) - Math.abs(a.scartoPerc || 0)
+    || Math.abs(b.impatto) - Math.abs(a.impatto));
   out.scadenzeDiscordanti.sort((a, b) =>
     (a.verso === 'anticipata' ? 0 : 1) - (b.verso === 'anticipata' ? 0 : 1)
     || String(a.file || '9999').localeCompare(String(b.file || '9999')));
