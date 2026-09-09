@@ -10602,6 +10602,7 @@ function openOperazioneModal(o, opts) {
           sessList.append(row);
         });
         boxSessioni.append(sessList);
+      }
     };
     renderSessioni();
 
@@ -10676,7 +10677,6 @@ function openOperazioneModal(o, opts) {
         'Da usare quando la timbratura manca: le ore entrano nel consuntivo come le altre, '
         + 'ma la riga resta marcata «a mano». L orario di inizio è convenzionale (8:00), '
         + 'contano le ore.'));
-    }
     }
   }
 
