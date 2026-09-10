@@ -192,6 +192,12 @@ const toLocalISO = d => `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate()
 const parseISODate = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d); };
 const monthName = d => d.toLocaleDateString('it-IT', { month:'long', year:'numeric' });
 const fmtIT = iso => { const d = parseISODate(iso); return `${z(d.getDate())}/${z(d.getMonth()+1)}/${d.getFullYear()}`; };
+// Euro formattati all italiana. Sta QUI, al livello del file, e non dentro una
+// funzione: era definita quattro volte in quattro schede diverse, e la quinta
+// che l ha usata — l anteprima import, 9 set — e esplosa con "fmtE is not
+// defined" bloccando tutto l import. Un formattatore non e roba di una scheda.
+const fmtE = (n) => '€ ' + Number(n || 0).toLocaleString('it-IT',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtT = d => `${z(d.getHours())}:${z(d.getMinutes())}`;
 
 function toast(msg, kind='ok') {
