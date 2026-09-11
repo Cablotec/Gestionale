@@ -14,15 +14,20 @@ if (i < 0) { console.error('KO: filtro non trovato in mobile.html'); process.exi
 const j = src.indexOf('if (tipi.length === 0)', i);
 const filtro = src.slice(i, j);
 
-const sandbox = { console, state: {} };
+// Il filtro chiede chi e esente: si stubba, cosi la prova e sul FILTRO e non
+// sulla lettura delle impostazioni.
+let GRUPPI_ESENTI = [];
+const sandbox = { console, state: {},
+  getGruppiEsentiAssenze: () => GRUPPI_ESENTI };
 vm.createContext(sandbox);
 
 let ok = 0, ko = 0;
 const sez = t => console.log('\n' + t);
 const t = (nome, cond) => { if (cond) { ok++; console.log('  ok   ' + nome); }
   else { ko++; console.log('  KO   ' + nome); } };
-const offerti = (tipiAssenza) => {
-  sandbox.state = { tipiAssenza };
+const offerti = (tipiAssenza, gruppo, esenti) => {
+  GRUPPI_ESENTI = esenti || [];
+  sandbox.state = { tipiAssenza, operatore: { gruppo: gruppo || 'cablotec_1' } };
   // avvolto in un blocco: le const del filtro non devono restare
   // nel contesto fra una prova e l altra.
   vm.runInContext('{' + filtro + '; RIS = tipi.map(x => x.nome); }', sandbox);
@@ -73,6 +78,28 @@ sez('DOPO la migrazione');
   t('nessun tipo configurato: non esplode', Array.isArray(r) && r.length === 0);
 }
 
+sez('I GRUPPI ESENTI METTONO ANCHE I PERMESSI');
+{
+  // 11 set, precisato da Nico: "l esenzione dei gruppi pero possono mettere
+  // anche i permessi". L esenzione vale su COSA si inserisce, non solo su
+  // QUANDO: distinguere le due cose avrebbe voluto dire spiegare a qualcuno
+  // perche puo scegliere la data ma non il tipo.
+  const TIPI = [con(F, true), con(P, false), con(M, false)];
+  t('chi non e esente vede solo le ferie',
+    JSON.stringify(offerti(TIPI, 'cablotec_1', ['laboratorio']))
+      === JSON.stringify(['Ferie']));
+  t('chi e esente vede tutto',
+    JSON.stringify(offerti(TIPI, 'laboratorio', ['laboratorio']))
+      === JSON.stringify(['Ferie', 'Permesso', 'Malattia']));
+  t('piu gruppi esenti: valgono tutti',
+    offerti(TIPI, 'ufficio', ['laboratorio', 'ufficio']).length === 3);
+  t('nessun gruppo esente: solo ferie per tutti',
+    offerti(TIPI, 'laboratorio', []).length === 1);
+  t('un esente non vede comunque i tipi DISATTIVATI',
+    offerti([con(F, true), con(Object.assign({}, P, { attivo:false }), false)],
+      'laboratorio', ['laboratorio']).length === 1);
+}
+
 sez('TUTTE LE PORTE, NON UNA SOLA');
 {
   // Il filtro era stato messo solo sul telefono. Ma dal BROWSER un operatore
@@ -80,7 +107,7 @@ sez('TUTTE LE PORTE, NON UNA SOLA');
   // stesso gesto: togliere il permesso da una parte lasciandolo aperto
   // dall altra e il modo piu sicuro di non accorgersene.
   const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8');
-  t('il telefono filtra', src.includes('!dichiarato || t.richiedibile'));
+  t('il telefono filtra', src.includes('!dichiarato || esente || t.richiedibile'));
   t('il gestionale filtra', app.includes('!soloRichiedibili || t.richiedibile'));
   t('e il kiosk non chiede assenze',
     !fs.readFileSync(path.resolve(G, 'kiosk.html'), 'utf8').includes('tipi_assenza'));

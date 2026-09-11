@@ -18709,7 +18709,12 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
   // dall'altra parte, che e il modo piu sicuro di non accorgersene.
   // ⚠ L'ADMIN VEDE TUTTO, sempre: la malattia si registra da qui, e
   // toglierla renderebbe impossibile segnarla.
-  const soloRichiedibili = state.profile?.ruolo !== 'admin'
+  // ⚠ I GRUPPI ESENTI VEDONO TUTTO, come sul telefono (11 set): l esenzione
+  // vale su COSA si inserisce, non solo su QUANDO. Stessa fonte
+  // (`getGruppiEsentiAssenze`) e stessa regola nelle due porte, o si
+  // ritroverebbero a raccontare due storie diverse alla stessa persona.
+  const esenteQui = (getGruppiEsentiAssenze() || []).includes(utente?.gruppo);
+  const soloRichiedibili = state.profile?.ruolo !== 'admin' && !esenteQui
     && (state.tipiAssenza || []).some(x => x && ('richiedibile' in x));
   const tipiOfferti = state.tipiAssenza
     .filter(t => t.attivo && (!soloRichiedibili || t.richiedibile))
@@ -19208,7 +19213,7 @@ function renderImpostazioni(root) {
 
   // ── Esenzioni per gruppo ───────────────────────────────────
   // I gruppi spuntati sono esenti da TUTTI i vincoli di inserimento assenze
-  // (finestra di apertura + blocco date passate). Configurazione globale,
+  // (finestra di apertura, blocco date passate E scelta del tipo). Globale,
   // letta da getGruppiEsentiAssenze() in verificaAccessoAssenza().
   const esentiAttuali = new Set(getGruppiEsentiAssenze());
   const checkboxEsenti = {};
@@ -19216,7 +19221,9 @@ function renderImpostazioni(root) {
   blocchiEsenti.append(el('div', { style:'font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--txt);margin-bottom:6px;' },
     '⊘ Esenzioni gruppi'));
   blocchiEsenti.append(el('div', { style:'font-size:11px;color:var(--mut);margin-bottom:12px;line-height:1.6;' },
-    'I gruppi spuntati possono inserire/modificare le proprie assenze in qualsiasi data, ignorando le finestre di apertura e il blocco sulle date passate.'));
+    'I gruppi spuntati gestiscono le proprie assenze per intero: qualsiasi DATA, ignorando '
+    + 'le finestre di apertura e il blocco sulle date passate, e qualsiasi TIPO, anche quelli '
+    + 'che agli altri non compaiono (permessi e simili).'));
   GRUPPI_UTENTI.forEach(g => {
     const row = el('label', {
       style:'display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:3px;cursor:pointer;font-family:JetBrains Mono,monospace;font-size:11px;',
@@ -19448,8 +19455,8 @@ function openTipoAssenzaModal(t) {
     el('div', { class:'field' }, el('label', {}, 'Chi lo inserisce'), selRichiedibile,
       el('div', { class:'sub', style:'margin-top:4px;' },
         richiedibileDisponibile
-          ? 'Solo i tipi «lo chiede l operatore» compaiono nella finestra ferie del telefono. '
-            + 'Gli altri restano all ufficio, dal calendario assenze.'
+          ? 'Solo i tipi «lo chiede l operatore» compaiono a chi non e admin, sul telefono e '
+            + 'nel calendario del gestionale. Admin e gruppi esenti vedono tutto lo stesso.'
           : 'richiede la colonna tipi_assenza.richiedibile (migrazione dal pannello Supabase)')),
     el('div', { class:'field' }, el('label', {}, 'Colore'), palette),
   );
