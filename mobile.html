@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-11.05"></script>
+<script src="core/db.js?v=2026-09-11.06"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -1052,11 +1052,25 @@ function getGruppiEsentiAssenze() {
 }
 // Regola finestre: niente date passate, solo dentro la finestra di apertura
 // del periodo, salvo gruppi esenti. Identica al gestionale.
+// CHI puo inserire un tipo: 'tutti' (ferie), 'esenti' (permessi), 'ufficio'
+// (malattia). Stessa funzione del gestionale, parola per parola: due
+// versioni che divergono sono il modo in cui il telefono e il browser
+// finiscono per dire cose diverse alla stessa persona.
+function tipoInseribileDa(tipo, esente) {
+  const chi = String((tipo && tipo.chi_inserisce) || '').toLowerCase();
+  if (chi === 'tutti') return true;
+  if (chi === 'esenti') return !!esente;
+  return false;
+}
+
 function verificaAccessoAssenza(iso, utente) {
-  const esenti = getGruppiEsentiAssenze();
-  if (utente?.gruppo && esenti.includes(utente.gruppo)) return { ok:true, esenzione:utente.gruppo };
+  // ⚠ Il passato PRIMA dell'esenzione: l'esenzione salta la finestra, non
+  // le date passate (11 set). Stesso ordine del gestionale, o le due porte
+  // direbbero due cose diverse.
   const oggiIso = todayISO();
   if (iso < oggiIso) return { ok:false, motivo:'le date passate non sono inseribili' };
+  const esenti = getGruppiEsentiAssenze();
+  if (utente?.gruppo && esenti.includes(utente.gruppo)) return { ok:true, esenzione:utente.gruppo };
   const finestre = getFinestreAssenze();
   const finestra = finestre.find(f => isoDentroIntervallo(iso, f.periodoDa, f.periodoA));
   if (!finestra) return { ok:false, motivo:'questa data non rientra in nessuna finestra di apertura' };
@@ -1223,13 +1237,13 @@ function renderFerieForm() {
   // ferie"). Un permesso si chiede per giovedi prossimo, non si pianifica; la
   // malattia non si programma per definizione. Lasciarli qui voleva dire
   // offrire un gesto che non esiste.
-  // ⚠ La scelta e un DATO sul tipo (`richiedibile`), non un codice scritto
+  // ⚠ La scelta e un DATO sul tipo (`chi_inserisce`), non un codice scritto
   // qui: domani nasce "Ferie a ore" e la spunta la mette l ufficio, senza
   // passare da una modifica al telefono.
   // ⚠ Finche la colonna non esiste si comporta come prima — tutti i tipi
   // attivi — invece di mostrare una finestra vuota: una funzione che sparisce
   // e peggio di una che chiede troppo.
-  const dichiarato = (state.tipiAssenza || []).some(t => t && ('richiedibile' in t));
+  const dichiarato = (state.tipiAssenza || []).some(t => t && ('chi_inserisce' in t));
   // ⚠ I GRUPPI ESENTI VEDONO TUTTO (11 set, precisato da Nico: "l esenzione
   // dei gruppi pero possono mettere anche i permessi"). L esenzione non
   // riguarda solo QUANDO si inserisce ma anche COSA: chi ne fa parte
@@ -1238,10 +1252,10 @@ function renderFerieForm() {
   // non il tipo.
   const esente = (getGruppiEsentiAssenze() || []).includes(state.operatore?.gruppo);
   const tipi = (state.tipiAssenza || [])
-    .filter(t => t.attivo && (!dichiarato || esente || t.richiedibile))
+    .filter(t => t.attivo && (!dichiarato || tipoInseribileDa(t, esente)))
     .sort((a, b) => (a.ordine||0) - (b.ordine||0));
   if (tipi.length === 0) {
-    root.append(elx('div', { class:'empty' }, 'Da qui si programmano solo le ferie, e al momento non e configurato nessun tipo richiedibile. Per permessi e malattia parla con l ufficio.'));
+    root.append(elx('div', { class:'empty' }, 'Da qui non c e niente che tu possa inserire: parla con l ufficio.'));
     return;
   }
 

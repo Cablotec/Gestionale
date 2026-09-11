@@ -20,6 +20,12 @@ let GRUPPI_ESENTI = [];
 const sandbox = { console, state: {},
   getGruppiEsentiAssenze: () => GRUPPI_ESENTI };
 vm.createContext(sandbox);
+// La funzione vera, presa da mobile.html: il test prova QUELLA, non una copia.
+{
+  const a = src.indexOf('function tipoInseribileDa(tipo, esente) {');
+  if (a < 0) { console.error('KO: tipoInseribileDa non trovata in mobile.html'); process.exit(1); }
+  vm.runInContext(src.slice(a, src.indexOf('\n}\n', a) + 3), sandbox);
+}
 
 let ok = 0, ko = 0;
 const sez = t => console.log('\n' + t);
@@ -34,97 +40,93 @@ const offerti = (tipiAssenza, gruppo, esenti) => {
   return sandbox.RIS;
 };
 
-const F = { id:'f', nome:'Ferie',    codice:'F', attivo:true,  ordine:1 };
-const P = { id:'p', nome:'Permesso', codice:'P', attivo:true,  ordine:2 };
-const M = { id:'m', nome:'Malattia', codice:'M', attivo:true,  ordine:3 };
-const X = { id:'x', nome:'Vecchio',  codice:'V', attivo:false, ordine:4 };
-const con = (o, v) => Object.assign({}, o, { richiedibile: v });
+const T = (nome, chi, attivo) => ({ id:nome, nome, attivo: attivo !== false, ordine:1, chi_inserisce: chi });
+const FERIE    = T('Ferie',    'tutti');
+const PERMESSO = T('Permesso', 'esenti');
+const MALATTIA = T('Malattia', 'ufficio');
 
 sez('PRIMA della migrazione: si comporta come sempre');
 {
   // Una funzione che sparisce e peggio di una che chiede troppo.
-  const r = offerti([F, P, M, X]);
+  const senzaColonna = [{ id:'f', nome:'Ferie', attivo:true, ordine:1 },
+                        { id:'p', nome:'Permesso', attivo:true, ordine:2 }];
   t('senza la colonna restano tutti i tipi attivi',
-    JSON.stringify(r) === JSON.stringify(['Ferie', 'Permesso', 'Malattia']));
+    offerti(senzaColonna, 'cablotec_1', ['laboratorio']).length === 2);
 }
 
-sez('DOPO la migrazione');
+sez('CHI NON E ESENTE: solo ferie');
 {
-  const r = offerti([con(F, true), con(P, false), con(M, false)]);
-  t('solo le ferie', JSON.stringify(r) === JSON.stringify(['Ferie']));
-}
-{
-  const r = offerti([con(F, true), con(P, true), con(M, false)]);
-  t('se l ufficio apre anche i permessi, compaiono',
-    JSON.stringify(r) === JSON.stringify(['Ferie', 'Permesso']));
-}
-{
-  // Domani nasce "Ferie a ore": basta la spunta, nessuna modifica al codice.
-  const FO = { id:'fo', nome:'Ferie a ore', codice:'FO', attivo:true, ordine:5, richiedibile:true };
-  const r = offerti([con(F, true), con(M, false), FO]);
-  t('un tipo NUOVO entra senza toccare il telefono',
-    JSON.stringify(r) === JSON.stringify(['Ferie', 'Ferie a ore']));
-}
-{
-  const r = offerti([con(Object.assign({}, F, { attivo:false }), true), con(P, false)]);
-  t('un tipo disattivato resta fuori anche se richiedibile', r.length === 0);
-}
-{
-  const r = offerti([con(F, false), con(P, false), con(M, false)]);
-  t('nessuno richiedibile: finestra vuota, e lo dice', r.length === 0);
-}
-{
-  const r = offerti([]);
-  t('nessun tipo configurato: non esplode', Array.isArray(r) && r.length === 0);
+  const TIPI = [FERIE, PERMESSO, MALATTIA];
+  const r = offerti(TIPI, 'cablotec_1', ['laboratorio']);
+  t('niente permessi', JSON.stringify(r) === JSON.stringify(['Ferie']));
 }
 
-sez('I GRUPPI ESENTI METTONO ANCHE I PERMESSI');
+sez('GRUPPI ESENTI: ferie e permessi, NON la malattia');
 {
-  // 11 set, precisato da Nico: "l esenzione dei gruppi pero possono mettere
-  // anche i permessi". L esenzione vale su COSA si inserisce, non solo su
-  // QUANDO: distinguere le due cose avrebbe voluto dire spiegare a qualcuno
-  // perche puo scegliere la data ma non il tipo.
-  const TIPI = [con(F, true), con(P, false), con(M, false)];
-  t('chi non e esente vede solo le ferie',
-    JSON.stringify(offerti(TIPI, 'cablotec_1', ['laboratorio']))
-      === JSON.stringify(['Ferie']));
-  t('chi e esente vede tutto',
-    JSON.stringify(offerti(TIPI, 'laboratorio', ['laboratorio']))
-      === JSON.stringify(['Ferie', 'Permesso', 'Malattia']));
-  t('piu gruppi esenti: valgono tutti',
-    offerti(TIPI, 'ufficio', ['laboratorio', 'ufficio']).length === 3);
-  t('nessun gruppo esente: solo ferie per tutti',
-    offerti(TIPI, 'laboratorio', []).length === 1);
-  t('un esente non vede comunque i tipi DISATTIVATI',
-    offerti([con(F, true), con(Object.assign({}, P, { attivo:false }), false)],
-      'laboratorio', ['laboratorio']).length === 1);
+  // 11 set, corretto da Nico: "i gruppi esenti possono solo ferie e
+  // permessi". Con due soli valori gli esenti avrebbero visto TUTTO, e
+  // quindi anche la malattia: e il motivo per cui i valori sono tre.
+  const TIPI = [FERIE, PERMESSO, MALATTIA];
+  const r = offerti(TIPI, 'laboratorio', ['laboratorio']);
+  t('ferie e permessi', JSON.stringify(r) === JSON.stringify(['Ferie', 'Permesso']));
+  t('la malattia resta all ufficio', !r.includes('Malattia'));
+}
+{
+  const r = offerti([FERIE, PERMESSO, MALATTIA], 'ufficio', ['laboratorio', 'ufficio']);
+  t('piu gruppi esenti: valgono tutti', r.length === 2);
+}
+{
+  const r = offerti([FERIE, PERMESSO], 'laboratorio', []);
+  t('nessun gruppo esente configurato: solo ferie', r.length === 1);
+}
+{
+  const r = offerti([FERIE, T('Permesso', 'esenti', false)], 'laboratorio', ['laboratorio']);
+  t('un tipo DISATTIVATO resta fuori anche per un esente', r.length === 1);
+}
+{
+  const r = offerti([T('Senza valore', ''), FERIE], 'laboratorio', ['laboratorio']);
+  t('un tipo senza dichiarazione non si offre a nessuno',
+    JSON.stringify(r) === JSON.stringify(['Ferie']));
 }
 
 sez('TUTTE LE PORTE, NON UNA SOLA');
 {
-  // Il filtro era stato messo solo sul telefono. Ma dal BROWSER un operatore
-  // puo cliccare la propria riga del calendario assenze e arrivare allo
-  // stesso gesto: togliere il permesso da una parte lasciandolo aperto
-  // dall altra e il modo piu sicuro di non accorgersene.
-  const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8');
-  t('il telefono filtra', src.includes('!dichiarato || esente || t.richiedibile'));
-  t('il gestionale filtra', app.includes('!soloRichiedibili || t.richiedibile'));
+  // Togliere un tipo da una parte lasciandolo aperto dall altra e il modo
+  // piu sicuro di non accorgersene.
+  const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  t('il telefono filtra', src.includes('tipoInseribileDa(t, esente)'));
+  t('il gestionale filtra', app.includes('tipoInseribileDa(t, esenteQui)'));
+  t('la regola e la STESSA funzione nelle due porte',
+    src.includes("if (chi === 'esenti') return !!esente;") &&
+    app.includes("if (chi === 'esenti') return !!esente;"));
   t('e il kiosk non chiede assenze',
     !fs.readFileSync(path.resolve(G, 'kiosk.html'), 'utf8').includes('tipi_assenza'));
 }
 
-sez('LA MALATTIA NON SPARISCE PER L UFFICIO');
+sez('LE DATE PASSATE NON LE INSERISCE NESSUNO');
 {
-  // Il filtro del gestionale vale SOLO per chi non e admin. L ufficio deve
-  // continuare a vedere tutti i tipi, o non si potrebbe piu registrare una
-  // malattia — che e il caso per cui quel calendario esiste.
-  const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8');
+  // 11 set: "le date passate no!". L esenzione salta la finestra, non il
+  // passato — e a farlo e l ORDINE dei controlli.
+  const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  const posizione = (s, testo) => s.indexOf(testo);
+  const bloccoApp = app.slice(app.indexOf('function verificaAccessoAssenza'),
+                              app.indexOf('const finestre = getFinestreAssenze();',
+                                app.indexOf('function verificaAccessoAssenza')));
+  t('nel gestionale il passato si controlla PRIMA dell esenzione',
+    posizione(bloccoApp, 'iso < oggiIso') < posizione(bloccoApp, 'esenti.includes'));
+  const bloccoMob = src.slice(src.indexOf('function verificaAccessoAssenza'),
+                              src.indexOf('const finestre = getFinestreAssenze();',
+                                src.indexOf('function verificaAccessoAssenza')));
+  t('e sul telefono pure',
+    posizione(bloccoMob, 'iso < oggiIso') < posizione(bloccoMob, 'esenti.includes'));
+}
+
+sez('L UFFICIO VEDE TUTTO');
+{
+  const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
   t('il filtro si spegne per l admin',
-    app.includes("state.profile?.ruolo !== 'admin'") &&
-    app.includes('const soloRichiedibili'));
-  // Le viste (legenda, statistiche, riepilogo) non devono filtrare nulla:
-  // un totale che nasconde la malattia sarebbe un totale sbagliato.
-  t('le viste continuano a mostrare tutti i tipi',
+    app.includes("state.profile?.ruolo !== 'admin' && chiInserisceDichiarato()"));
+  t('le viste mostrano tutti i tipi',
     app.split('state.tipiAssenza.filter(t => t.attivo)').length - 1 >= 3);
 }
 

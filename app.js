@@ -476,18 +476,42 @@ function getGruppiEsentiAssenze() {
 // Decide se un utente non-admin può oggi inserire/modificare un'assenza sulla
 // data 'iso'. Regola: oggi deve cadere nella finestra di apertura associata
 // al periodo a cui appartiene 'iso'. Restituisce { ok, motivo, finestra }.
+// CHI puo inserire un tipo di assenza. Tre risposte, non due (11 set,
+// corretto da Nico: "i gruppi esenti possono solo ferie e permessi"):
+//   'tutti'   -> chiunque, dentro la finestra        (ferie)
+//   'esenti'  -> solo i gruppi esenti                (permessi)
+//   'ufficio' -> nessun operatore, solo un admin     (malattia)
+// ⚠ Con due valori sarebbe servito un nome proprio da qualche parte: o il
+// codice del permesso nel codice, o gli esenti che vedono TUTTO e quindi
+// anche la malattia. Tre valori tengono la regola dentro il dato.
+function tipoInseribileDa(tipo, esente) {
+  const chi = String((tipo && tipo.chi_inserisce) || '').toLowerCase();
+  if (chi === 'tutti') return true;
+  if (chi === 'esenti') return !!esente;
+  return false;
+}
+// Finche la colonna non esiste non si filtra niente: una funzione che
+// sparisce e peggio di una che chiede troppo.
+function chiInserisceDichiarato() {
+  return (state.tipiAssenza || []).some(t => t && ('chi_inserisce' in t));
+}
+
 function verificaAccessoAssenza(iso, utente) {
-  // Eccezione: i gruppi configurati come esenti hanno inserimento libero
-  // (nessun vincolo di finestra né di data passata). Configurabile da
+  // ⚠ LE DATE PASSATE NON LE INSERISCE NESSUNO (11 set, corretto da Nico:
+  // "le date passate no!"). Il controllo sta PRIMA dell'esenzione, ed e
+  // l'ordine a fare la regola: l'esenzione salta la FINESTRA, non il
+  // passato. Segnare ferie la settimana scorsa non e una comodita, e un
+  // modo di far tornare i conti a posteriori.
+  const oggiIso = toLocalISO(new Date());
+  if (iso < oggiIso) {
+    return { ok: false, motivo: 'date passate non modificabili dagli utenti' };
+  }
+  // I gruppi esenti scavalcano solo la finestra di apertura: possono
+  // programmare quando vogliono, purche' avanti. Configurabile da
   // Impostazioni → Calendari.
   const esenti = getGruppiEsentiAssenze();
   if (utente?.gruppo && esenti.includes(utente.gruppo)) {
     return { ok: true, esenzione: utente.gruppo };
-  }
-  const oggiIso = toLocalISO(new Date());
-  // Le date passate non sono mai accessibili agli utenti
-  if (iso < oggiIso) {
-    return { ok: false, motivo: 'date passate non modificabili dagli utenti' };
   }
   const finestre = getFinestreAssenze();
   // A quale finestra appartiene 'iso'?
@@ -18714,10 +18738,9 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
   // (`getGruppiEsentiAssenze`) e stessa regola nelle due porte, o si
   // ritroverebbero a raccontare due storie diverse alla stessa persona.
   const esenteQui = (getGruppiEsentiAssenze() || []).includes(utente?.gruppo);
-  const soloRichiedibili = state.profile?.ruolo !== 'admin' && !esenteQui
-    && (state.tipiAssenza || []).some(x => x && ('richiedibile' in x));
+  const filtraTipi = state.profile?.ruolo !== 'admin' && chiInserisceDichiarato();
   const tipiOfferti = state.tipiAssenza
-    .filter(t => t.attivo && (!soloRichiedibili || t.richiedibile))
+    .filter(t => t.attivo && (!filtraTipi || tipoInseribileDa(t, esenteQui)))
     .sort((a,b)=>(a.ordine||0)-(b.ordine||0));
   const chipsTipo = el('div', { class:'assv2-chips' });
   tipiOfferti
@@ -19418,12 +19441,14 @@ function openTipoAssenzaModal(t) {
   // legge la dichiarazione.
   // ⚠ La malattia non sparisce: l'ufficio la registra come sempre dal
   // calendario assenze. Quello che non si puo piu fare e PROGRAMMARLA.
-  const richiedibileDisponibile = (state.tipiAssenza || []).some(x => x && ('richiedibile' in x));
-  const selRichiedibile = el('select', { name:'richiedibile' },
-    el('option', { value:'false' }, 'Solo l ufficio'),
-    el('option', { value:'true' }, 'Lo chiede l operatore'));
-  selRichiedibile.value = String(!!t.richiedibile);
-  if (!richiedibileDisponibile) selRichiedibile.disabled = true;
+  const chiInserisceColonnaOk = (state.tipiAssenza || []).some(x => x && ('chi_inserisce' in x));
+  const selRichiedibile = el('select', { name:'chi_inserisce' },
+    el('option', { value:'ufficio' }, 'Solo l ufficio'),
+    el('option', { value:'tutti' },   'Tutti gli operatori'),
+    el('option', { value:'esenti' },  'Solo i gruppi esenti'));
+  selRichiedibile.value = ['tutti','esenti'].includes(String(t.chi_inserisce || ''))
+    ? t.chi_inserisce : 'ufficio';
+  if (!chiInserisceColonnaOk) selRichiedibile.disabled = true;
 
   let coloreScelto = t.colore || TIPI_ASSENZA_COLORI[0];
   const palette = el('div', { style:'display:flex;flex-wrap:wrap;gap:6px;padding:6px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;' });
@@ -19454,10 +19479,10 @@ function openTipoAssenzaModal(t) {
     ),
     el('div', { class:'field' }, el('label', {}, 'Chi lo inserisce'), selRichiedibile,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        richiedibileDisponibile
-          ? 'Solo i tipi «lo chiede l operatore» compaiono a chi non e admin, sul telefono e '
-            + 'nel calendario del gestionale. Admin e gruppi esenti vedono tutto lo stesso.'
-          : 'richiede la colonna tipi_assenza.richiedibile (migrazione dal pannello Supabase)')),
+        chiInserisceColonnaOk
+          ? 'Vale sul telefono e nel calendario del gestionale, per chi non e admin. '
+            + 'L admin vede sempre tutti i tipi, qualunque cosa dica questa tendina.'
+          : 'richiede la colonna tipi_assenza.chi_inserisce (migrazione dal pannello Supabase)')),
     el('div', { class:'field' }, el('label', {}, 'Colore'), palette),
   );
 
@@ -19476,8 +19501,8 @@ function openTipoAssenzaModal(t) {
       ordine: parseInt(fd.get('ordine')) || 0,
       colore: coloreScelto,
       attivo: fd.get('attivo') === 'true',
-      ...(richiedibileDisponibile
-        ? { richiedibile: fd.get('richiedibile') === 'true' } : {}),
+      ...(chiInserisceColonnaOk
+        ? { chi_inserisce: fd.get('chi_inserisce') || 'ufficio' } : {}),
     };
     if (!payload.nome) return toast('Nome obbligatorio', 'err');
     btnSave.disabled = true;
