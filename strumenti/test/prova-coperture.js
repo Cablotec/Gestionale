@@ -3,7 +3,7 @@
 // e nessun doppione (una commessa in tutte e due sarebbe altrettanto sbagliato).
 const https = require('https'), fs = require('fs'), vm = require('vm');
 const G = process.argv[2];
-const db = fs.readFileSync(G + '/core/db.js', 'utf8');
+const db = fs.readFileSync(G + '/core/db.js', 'utf8').replace(/\r\n/g, '\n');
 const URL = db.match(/SUPABASE_URL\s*=\s*"([^"]+)"/)[1];
 const KEY = db.match(/SUPABASE_ANON_KEY\s*=\s*"([^"]+)"/)[1];
 const EMAIL = db.match(/APP_EMAIL\s*=\s*'([^']+)'/)[1];
@@ -36,7 +36,7 @@ const tutte = async (tab, tok) => {
   const sped = await tutte('spedizioni', tok);
 
   const s = vm.createContext({ state: {}, console });
-  vm.runInContext(fs.readFileSync(G + '/domain/scheduling.js', 'utf8'), s);
+  vm.runInContext(fs.readFileSync(G + '/domain/scheduling.js', 'utf8').replace(/\r\n/g, '\n'), s);
   const OGGI = new Date().toISOString().slice(0, 10);
 
   // le due schede, con le stesse regole del codice

@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-11.02"></script>
+<script src="core/db.js?v=2026-09-11.03"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -1218,9 +1218,23 @@ function renderFerieForm() {
   root.innerHTML = '';
   root.append(elx('button', { class:'back-link', onclick: () => renderFerie() }, '‹ Indietro'));
 
-  const tipi = (state.tipiAssenza || []).filter(t => t.attivo).sort((a, b) => (a.ordine||0) - (b.ordine||0));
+  // SOLO QUELLO CHE HA SENSO PROGRAMMARE (11 set, chiesto da Nico: "togliere
+  // permessi, malattia e altro; non ha senso programmare quelli, ma solo
+  // ferie"). Un permesso si chiede per giovedi prossimo, non si pianifica; la
+  // malattia non si programma per definizione. Lasciarli qui voleva dire
+  // offrire un gesto che non esiste.
+  // ⚠ La scelta e un DATO sul tipo (`richiedibile`), non un codice scritto
+  // qui: domani nasce "Ferie a ore" e la spunta la mette l ufficio, senza
+  // passare da una modifica al telefono.
+  // ⚠ Finche la colonna non esiste si comporta come prima — tutti i tipi
+  // attivi — invece di mostrare una finestra vuota: una funzione che sparisce
+  // e peggio di una che chiede troppo.
+  const dichiarato = (state.tipiAssenza || []).some(t => t && ('richiedibile' in t));
+  const tipi = (state.tipiAssenza || [])
+    .filter(t => t.attivo && (!dichiarato || t.richiedibile))
+    .sort((a, b) => (a.ordine||0) - (b.ordine||0));
   if (tipi.length === 0) {
-    root.append(elx('div', { class:'empty' }, 'Nessun tipo di assenza configurato. Chiedi all\'ufficio.'));
+    root.append(elx('div', { class:'empty' }, 'Da qui si programmano solo le ferie, e al momento non e configurato nessun tipo richiedibile. Per permessi e malattia parla con l ufficio.'));
     return;
   }
 

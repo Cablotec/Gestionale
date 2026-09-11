@@ -10,7 +10,7 @@
 //   node strumenti/test/prova-mancanti-riflessi.js .
 const https = require('https'), fs = require('fs'), vm = require('vm');
 const G = process.argv[2] || '.';
-const db = fs.readFileSync(G + '/core/db.js', 'utf8');
+const db = fs.readFileSync(G + '/core/db.js', 'utf8').replace(/\r\n/g, '\n');
 const URL = db.match(/SUPABASE_URL\s*=\s*"([^"]+)"/)[1];
 const KEY = db.match(/SUPABASE_ANON_KEY\s*=\s*"([^"]+)"/)[1];
 const EMAIL = db.match(/APP_EMAIL\s*=\s*'([^']+)'/)[1];
@@ -45,7 +45,7 @@ const tutte = async (tab, tok) => {
   const artById = {}; articoli.forEach(a => artById[a.id] = a);
 
   const s = vm.createContext({ state: { operazioni: ops, mancanti }, console });
-  vm.runInContext(fs.readFileSync(G + '/domain/scheduling.js', 'utf8'), s);
+  vm.runInContext(fs.readFileSync(G + '/domain/scheduling.js', 'utf8').replace(/\r\n/g, '\n'), s);
 
   const vive = ops.filter(o => o.stato === 'aperta' || o.stato === 'sospesa');
   const conRighe = vive.filter(o => s.mancantiCommessa(o).nCodici > 0);

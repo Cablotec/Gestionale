@@ -12,7 +12,7 @@ const M = require(require('path').resolve(G, 'domain/materiali.js'));
 
 // `leggiDistintaExcel` e le sue compagne vivono in app.js, che e' un guscio
 // da browser: si estraggono le quattro funzioni pure e si provano da sole.
-const src = fs.readFileSync(G + '/app.js', 'utf8');
+const src = fs.readFileSync(G + '/app.js', 'utf8').replace(/\r\n/g, '\n');
 const sandbox = { console };
 vm.createContext(sandbox);
 vm.runInContext(['const DIST_COLONNE', 'function distNorm', 'function distNum',

@@ -7,7 +7,7 @@
 // avrebbe acceso 22 falsi allarmi il giorno stesso.
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const G = process.argv[2] || '.';
-const src = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8');
+const src = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
 
 const sandbox = { console, state: {} };
 vm.createContext(sandbox);

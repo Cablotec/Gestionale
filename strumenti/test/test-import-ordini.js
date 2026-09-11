@@ -5,7 +5,7 @@ const fs = require('fs'), vm = require('vm');
 const G = process.argv[2] || '.';
 const sandbox = { state: { sessioni: [] }, console };
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(G + '/domain/scheduling.js', 'utf8'), sandbox);
+vm.runInContext(fs.readFileSync(G + '/domain/scheduling.js', 'utf8').replace(/\r\n/g, '\n'), sandbox);
 const analizza = sandbox.analizzaImportOrdini;
 const impData = sandbox.importOrdiniData;
 

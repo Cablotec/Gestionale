@@ -19389,6 +19389,21 @@ function openTipoAssenzaModal(t) {
     el('option', { value:'false' }, 'Disattivato'));
   selAttivo.value = String(!!t.attivo);
 
+  // RICHIEDIBILE DALL'OPERATORE (11 set, chiesto da Nico: "non ha senso
+  // programmare permessi e malattia, solo ferie").
+  // ⚠ Non e un `if codice === 'F'` nel codice: sarebbe un nome proprio, e i
+  // nomi cambiano — domani nasce "Ferie a ore" e resta fuori senza che
+  // nessuno capisca perche. Si dichiara TIPO PER TIPO, e la finestra ferie
+  // legge la dichiarazione.
+  // ⚠ La malattia non sparisce: l'ufficio la registra come sempre dal
+  // calendario assenze. Quello che non si puo piu fare e PROGRAMMARLA.
+  const richiedibileDisponibile = (state.tipiAssenza || []).some(x => x && ('richiedibile' in x));
+  const selRichiedibile = el('select', { name:'richiedibile' },
+    el('option', { value:'false' }, 'Solo l ufficio'),
+    el('option', { value:'true' }, 'Lo chiede l operatore'));
+  selRichiedibile.value = String(!!t.richiedibile);
+  if (!richiedibileDisponibile) selRichiedibile.disabled = true;
+
   let coloreScelto = t.colore || TIPI_ASSENZA_COLORI[0];
   const palette = el('div', { style:'display:flex;flex-wrap:wrap;gap:6px;padding:6px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;' });
   const refreshPalette = () => {
@@ -19416,6 +19431,12 @@ function openTipoAssenzaModal(t) {
       el('div', { class:'field' }, el('label', {}, 'Ordine'), inOrdine),
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
     ),
+    el('div', { class:'field' }, el('label', {}, 'Chi lo inserisce'), selRichiedibile,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        richiedibileDisponibile
+          ? 'Solo i tipi «lo chiede l operatore» compaiono nella finestra ferie del telefono. '
+            + 'Gli altri restano all ufficio, dal calendario assenze.'
+          : 'richiede la colonna tipi_assenza.richiedibile (migrazione dal pannello Supabase)')),
     el('div', { class:'field' }, el('label', {}, 'Colore'), palette),
   );
 
@@ -19434,6 +19455,8 @@ function openTipoAssenzaModal(t) {
       ordine: parseInt(fd.get('ordine')) || 0,
       colore: coloreScelto,
       attivo: fd.get('attivo') === 'true',
+      ...(richiedibileDisponibile
+        ? { richiedibile: fd.get('richiedibile') === 'true' } : {}),
     };
     if (!payload.nome) return toast('Nome obbligatorio', 'err');
     btnSave.disabled = true;

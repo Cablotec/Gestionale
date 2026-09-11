@@ -11,7 +11,7 @@
 // OGNI sezione. Non verifica come e fatta la schermata: verifica che ci sia.
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const G = process.argv[2] || '.';
-const src = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8');
+const src = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
 
 // La funzione dell anteprima, estratta dal guscio: app.js intero fuori dal
 // browser non si carica (Supabase, listener, DOM vero).
@@ -46,7 +46,7 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 // Il motore vero: il piano non e finto, lo calcola `analizzaImportOrdini`.
-vm.runInContext(fs.readFileSync(path.resolve(G, 'domain/scheduling.js'), 'utf8'), sandbox);
+vm.runInContext(fs.readFileSync(path.resolve(G, 'domain/scheduling.js'), 'utf8').replace(/\r\n/g, '\n'), sandbox);
 // I formattatori veri, presi dal file: se uno sparisse, il test cade.
 ['const z =', 'const parseISODate', 'const fmtIT', 'const fmtE'].forEach(m => {
   const i = src.indexOf(m);
