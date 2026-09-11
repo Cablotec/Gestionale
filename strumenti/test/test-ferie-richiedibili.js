@@ -73,15 +73,32 @@ sez('DOPO la migrazione');
   t('nessun tipo configurato: non esplode', Array.isArray(r) && r.length === 0);
 }
 
-sez('LA MALATTIA NON SPARISCE DAL GESTIONALE');
+sez('TUTTE LE PORTE, NON UNA SOLA');
 {
-  // Il filtro vale SOLO sulla finestra del telefono. Il calendario assenze
-  // dell ufficio deve continuare a vedere tutti i tipi, o non si potrebbe
-  // piu registrare una malattia.
-  const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
-  const quante = app.split('state.tipiAssenza.filter(t => t.attivo)').length - 1;
-  t('il calendario assenze non filtra per richiedibile', quante >= 1);
-  t('il filtro sta solo in mobile.html', !app.includes('!dichiarato || t.richiedibile'));
+  // Il filtro era stato messo solo sul telefono. Ma dal BROWSER un operatore
+  // puo cliccare la propria riga del calendario assenze e arrivare allo
+  // stesso gesto: togliere il permesso da una parte lasciandolo aperto
+  // dall altra e il modo piu sicuro di non accorgersene.
+  const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8');
+  t('il telefono filtra', src.includes('!dichiarato || t.richiedibile'));
+  t('il gestionale filtra', app.includes('!soloRichiedibili || t.richiedibile'));
+  t('e il kiosk non chiede assenze',
+    !fs.readFileSync(path.resolve(G, 'kiosk.html'), 'utf8').includes('tipi_assenza'));
+}
+
+sez('LA MALATTIA NON SPARISCE PER L UFFICIO');
+{
+  // Il filtro del gestionale vale SOLO per chi non e admin. L ufficio deve
+  // continuare a vedere tutti i tipi, o non si potrebbe piu registrare una
+  // malattia — che e il caso per cui quel calendario esiste.
+  const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8');
+  t('il filtro si spegne per l admin',
+    app.includes("state.profile?.ruolo !== 'admin'") &&
+    app.includes('const soloRichiedibili'));
+  // Le viste (legenda, statistiche, riepilogo) non devono filtrare nulla:
+  // un totale che nasconde la malattia sarebbe un totale sbagliato.
+  t('le viste continuano a mostrare tutti i tipi',
+    app.split('state.tipiAssenza.filter(t => t.attivo)').length - 1 >= 3);
 }
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');

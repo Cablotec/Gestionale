@@ -18702,9 +18702,20 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     return 'presets';
   }
 
+  // CHI NON E ADMIN VEDE SOLO I TIPI RICHIEDIBILI, la stessa regola della
+  // finestra ferie sul telefono (11 set). Dal browser un operatore puo
+  // cliccare la PROPRIA riga del calendario e arrivare qui: senza questo
+  // filtro si sarebbe tolto il permesso dal telefono lasciandolo aperto
+  // dall'altra parte, che e il modo piu sicuro di non accorgersene.
+  // ⚠ L'ADMIN VEDE TUTTO, sempre: la malattia si registra da qui, e
+  // toglierla renderebbe impossibile segnarla.
+  const soloRichiedibili = state.profile?.ruolo !== 'admin'
+    && (state.tipiAssenza || []).some(x => x && ('richiedibile' in x));
+  const tipiOfferti = state.tipiAssenza
+    .filter(t => t.attivo && (!soloRichiedibili || t.richiedibile))
+    .sort((a,b)=>(a.ordine||0)-(b.ordine||0));
   const chipsTipo = el('div', { class:'assv2-chips' });
-  state.tipiAssenza.filter(t => t.attivo)
-    .sort((a,b)=>(a.ordine||0)-(b.ordine||0))
+  tipiOfferti
     .forEach(t => {
       const chip = el('div', {
         class: 'assv2-chip' + (tipoSel === t.id ? ' sel' : ''),
@@ -18997,7 +19008,10 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
 
   function refresh() {
     // Aggiorna chips tipo
-    const tipiAttivi = state.tipiAssenza.filter(x => x.attivo).sort((a,b)=>(a.ordine||0)-(b.ordine||0));
+    // ⚠ LA STESSA LISTA di sopra, non una ricalcolata a modo suo: qui si va
+    // per INDICE sulle chip gia disegnate, e due liste diverse vorrebbero
+    // dire colorare la chip sbagliata.
+    const tipiAttivi = tipiOfferti;
     chipsTipo.querySelectorAll('.assv2-chip').forEach((c, i) => {
       const t = tipiAttivi[i];
       if (!t) return;
