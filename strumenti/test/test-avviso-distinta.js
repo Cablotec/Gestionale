@@ -84,5 +84,26 @@ const conColonna = (materiale_dal_cliente, distinta) => {
   t('prodotto che non esiste: nessun avviso inventato', !haDistinta(avvisi(OP)));
 }
 
+sez('LE DUE SCHERMATE DICONO LA STESSA COSA');
+{
+  // Il riquadro che si apre dal triangolo e la scheda Materiali dentro la
+  // commessa sono due posti diversi che rispondono alla stessa domanda.
+  // L 11 set ne era stato corretto solo uno, e Nico guardava l altro.
+  // Qui si controlla che la dichiarazione governi TUTTI E DUE.
+  const quante = (t) => src.split(t).length - 1;
+  t('la dichiarazione e letta in entrambe le schermate',
+    quante('materialeDalCliente(o.cliente_id)') >= 2);
+  t('il riquadro dal triangolo dice la frase giusta',
+    src.includes('Materiale fornito dal cliente: per '));
+  t('la scheda Materiali dice la frase giusta',
+    src.includes('Materiale fornito dal cliente: questa commessa'));
+  // Un bottone che offre di creare una lista da una distinta che non esiste
+  // e peggio di un messaggio sbagliato: e un invito a premerlo.
+  t('niente bottone Crea dalla distinta sul conto lavoro',
+    src.includes('if (!isNew && !dalCliente && isAdmin && art)'));
+  t('niente bottone Scrivi la distinta sul conto lavoro',
+    src.includes('if (art && !materialeDalCliente(o.cliente_id) && state.profile'));
+}
+
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);

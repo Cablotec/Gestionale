@@ -9968,11 +9968,21 @@ function openOperazioneModal(o, opts) {
 
     // ── Non c'e ancora: si genera, e si dice da cosa ──
     if (!righe || !righe.length) {
+      // ⚠ LA STESSA DICHIARAZIONE, LA STESSA FRASE. Il riquadro che si apre
+      // dal triangolo diceva gia "materiale fornito dal cliente"; questa
+      // scheda no, ed era quella che Nico guardava. Due schermate che
+      // raccontano la stessa cosa in due modi sono il difetto che questo
+      // progetto paga da mesi: la seconda e sempre quella che poi dice
+      // un'altra storia.
+      const dalCliente = !isNew && materialeDalCliente(o.cliente_id);
       sezMateriali.append(el('div', { class:'sub', style:'font-size:11px;line-height:1.7;' },
         isNew
           ? 'La lista dei materiali si crea insieme all\'ordine, dalla distinta dell\'articolo.'
-          : 'Questa commessa non ha ancora la sua lista materiali.'));
-      if (!isNew && isAdmin && art) {
+          : dalCliente
+            ? 'Materiale fornito dal cliente: questa commessa non ha una lista perché non c\'è '
+              + 'niente da prelevare. Non manca nulla.'
+            : 'Questa commessa non ha ancora la sua lista materiali.'));
+      if (!isNew && !dalCliente && isAdmin && art) {
         const btn = el('button', { type:'button', class:'btnsm',
           style:'margin-top:8px;align-self:flex-start;' }, '⚙ Crea dalla distinta di ' + art.codice);
         btn.onclick = async () => {
