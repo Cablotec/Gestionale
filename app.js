@@ -1113,6 +1113,21 @@ function quantitaConsegnata(opId) {
 // NOTA (7 lug 2026): tolta la voce "fase con minuti a zero" — con le fasi
 // effettive il valore arriva da solo (media/template) e, dove ancora manca,
 // la pianificazione ricade sul budget pagato: non è più un gesto in sospeso.
+// Il cliente manda lui il materiale? (conto lavoro). Dichiarato in anagrafica,
+// mai dedotto: si deduceva dalla tariffa, che e un indizio e non una
+// dichiarazione — e un indizio non basta per tacere un avviso.
+// ⚠ Finche la colonna non esiste la risposta e SEMPRE 'non so', e chi non sa
+// non accusa: l'avviso sulla distinta resta spento del tutto. Acceso a meta
+// darebbe 39 falsi allarmi su Elcotec e 22 su Senzani il giorno stesso.
+function contoLavoroDichiarato() {
+  return (state.aziende || []).some(a => a && ('materiale_dal_cliente' in a));
+}
+function materialeDalCliente(clienteId) {
+  if (!contoLavoroDichiarato()) return true;   // non si sa: non si accusa
+  const c = (state.aziende || []).find(a => a.id === clienteId);
+  return !!(c && c.materiale_dal_cliente);
+}
+
 function opCampiMancanti(op) {
   if (!op) return [];
   const mancanti = [];
@@ -1134,6 +1149,20 @@ function opCampiMancanti(op) {
     const nAddetti = (typeof getOperazioneAddetti === 'function') ? getOperazioneAddetti(op.id).length : 0;
     const nFornitori = (typeof getOperazioneFornitori === 'function') ? getOperazioneFornitori(op.id).length : 0;
     if (nAddetti === 0 && nFornitori === 0) mancanti.push('Addetto o fornitore');
+  }
+
+  // DISTINTA MANCANTE (11 set, chiesto da Nico). Non e un campo della
+  // commessa ma del prodotto, e sta qui lo stesso perche e la stessa domanda
+  // che fa il triangolo: questa riga e pronta per andare in produzione?
+  // Senza distinta la lista materiali non nasce, e nessuno se ne accorge
+  // finche non apre la commessa.
+  // ⚠ TRANNE DOVE IL MATERIALE LO MANDA IL CLIENTE: li la distinta non manca,
+  // non c'e proprio niente da comprare, e l'avviso sarebbe rumore fisso.
+  if (!materialeDalCliente(op.cliente_id)) {
+    const art = (state.articoli || []).find(a => a.id === op.articolo_id);
+    if (art && !(Array.isArray(art.distinta) && art.distinta.length)) {
+      mancanti.push('Distinta di ' + art.codice + ': senza, la lista materiali non nasce');
+    }
   }
   return mancanti;
 }
@@ -2873,6 +2902,10 @@ function openOperatoreModal(u) {
       if (aziendaAttiva) {
         payload.azienda_id = payload.esterno ? (fd.get('azienda_id') || null) : null;
       }
+      // Conto lavoro: vale solo per i clienti, come la tariffa.
+      if (contoLavoroDisponibile) {
+        payload.materiale_dal_cliente = isCliente ? chkContoLav.checked : false;
+      }
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
       const { data, error } = await eseguiConRetry(
         () => isNew ? sb.from('utenti').insert(payload).select().single() : sb.from('utenti').update(payload).eq('id', u.id).select().single(),
@@ -3146,11 +3179,40 @@ function openClienteModal(c) {
           : 'richiede la colonna aziende.tariffa_cliente (migrazione dal pannello Supabase)'),
     ),
   );
+  // MATERIALE FORNITO DAL CLIENTE (conto lavoro). Stesso pattern della
+  // tariffa: la regola vive QUI come dato d'anagrafica, mai hardcode nel
+  // codice — e il campo resta spento finche la colonna non esiste.
+  //
+  // ⚠ Dichiara un FATTO, non un effetto: non 'niente avviso distinta' ma
+  // 'il materiale lo manda il cliente'. Da li discende tutto il resto — la
+  // distinta non manca, non c'e proprio niente da comprare — e il giorno che
+  // servira per un'altra schermata la frase e gia quella giusta.
+  // Chiude un filo lasciato aperto il 4 set: Elcotec 39 commesse su 39 senza
+  // distinta, Senzani 22 su 22, contro Sacmi 0 su 36. Un dato che manca
+  // SEMPRE per certi clienti e MAI per altri non e una lacuna, e un modo di
+  // lavorare — e finora lo si deduceva dalla tariffa, che e un indizio.
+  const contoLavoroDisponibile = (state.aziende || []).some(a => a && ('materiale_dal_cliente' in a));
+  const chkContoLav = el('input', { type:'checkbox', name:'materiale_dal_cliente',
+    checked: !!c.materiale_dal_cliente });
+  if (!contoLavoroDisponibile) chkContoLav.disabled = true;
+  const contoLavRow = el('div', { class:'field' },
+    el('label', {}, 'Materiale fornito dal cliente (conto lavoro)'),
+    el('div', { style:'display:flex;align-items:center;gap:10px;' },
+      chkContoLav,
+      el('span', { style:'font-size:11px;color:var(--mut);' },
+        contoLavoroDisponibile
+          ? 'Per questo cliente i prodotti non hanno distinta: il materiale arriva da lui. '
+            + 'Le sue commesse non vengono segnalate come incomplete.'
+          : 'richiede la colonna aziende.materiale_dal_cliente (migrazione dal pannello Supabase)'),
+    ),
+  );
+
   // Visibilità dei campi legata ai checkbox ruolo
   const aggiornaCoeff = () => {
     coeffRow.style.display = chkFornitore.checked ? '' : 'none';
     tariffaRow.style.display = chkFornitore.checked ? '' : 'none';
     tariffaCliRow.style.display = chkCliente.checked ? '' : 'none';
+    contoLavRow.style.display = chkCliente.checked ? '' : 'none';
   };
   aggiornaCoeff();
   chkFornitore.addEventListener('change', aggiornaCoeff);
@@ -3177,6 +3239,7 @@ function openClienteModal(c) {
     coeffRow,
     tariffaRow,
     tariffaCliRow,
+    contoLavRow,
     el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
       '── Indirizzo ──'),
     el('div', { class:'field' }, el('label', {}, 'Via e civico'), inVia),
@@ -4419,11 +4482,18 @@ function riquadroMaterialiCommessa(numeroOp, opts) {
     if (!mio || !mio.size) {
       if (!suoi.length) {
         corpo.append(el('div', { class:'sub', style:'font-size:11px;' },
-          art ? 'L\'articolo ' + art.codice + ' non ha una distinta: senza, i materiali '
-            + 'di questa commessa non si possono sapere.'
+          // ⚠ "Non ha una distinta" si legge come "manca un dato" — filo
+          // lasciato aperto il 4 set. Dove il materiale lo manda il cliente
+          // non manca niente, e ora il campo in anagrafica lo sa DIRE invece
+          // di farlo dedurre dalla tariffa.
+          art && materialeDalCliente(o.cliente_id)
+            ? 'Materiale fornito dal cliente: per ' + art.codice + ' non c\'e una distinta '
+              + 'perché non c\'e niente da comprare. Non manca nulla.'
+            : art ? 'L\'articolo ' + art.codice + ' non ha una distinta: senza, i materiali '
+              + 'di questa commessa non si possono sapere.'
             : 'Nessun materiale segnalato per questa commessa.'));
         // Non basta dire che manca: si porta dove si scrive.
-        if (art && state.profile?.ruolo === 'admin') {
+        if (art && !materialeDalCliente(o.cliente_id) && state.profile?.ruolo === 'admin') {
           corpo.append(el('button', { type:'button', class:'btnsm', style:'margin-top:8px;',
             onclick: () => openArticoloModal(art) }, '✎ Scrivi la distinta di ' + art.codice));
         }

@@ -159,6 +159,17 @@
 - **Prova indipendente**: Elcotec e l'unico cliente con `tariffa_cliente` (27,3 €/h), cioe l'unico a cui si fattura **solo manodopera**. Fatturare solo manodopera *e* il conto lavoro: il materiale lo manda il cliente, e in Alnus una distinta non c'e perche non c'e niente da comprare.
 - **Quindi non c'e niente da riempire** e lo strumento in blocco non serve. Resta aperto solo il **significato**: la scheda dice "Nessuna distinta", che si legge come "manca un dato", mentre la frase giusta sarebbe "materiale fornito dal cliente". Oggi nessun campo dichiara quali clienti lavorano cosi — lo si deduce dalla tariffa, che e un indizio, non una dichiarazione.
 
+- **CHIUSO l 11 set: `aziende.materiale_dal_cliente`.** Il campo che mancava adesso c e, e la regola e diventata un DATO invece di un elenco di nomi nel codice. Nella scheda cliente: *Materiale fornito dal cliente (conto lavoro)*.
+  - Da li discendono tre cose, tutte dalla stessa dichiarazione: il **triangolo ⚠** in Ordini cliente non segnala la distinta mancante · la scheda commessa scrive *"Materiale fornito dal cliente: non manca nulla"* invece di *"non ha una distinta"* · sparisce il bottone *Scrivi la distinta*, che li non ha senso.
+  - ⚠ **Finche la colonna non esiste l avviso resta SPENTO del tutto** (stesso pattern inerte di `tariffa_cliente`). Acceso a meta darebbe 39 falsi allarmi su Elcotec e 22 su Senzani il giorno stesso: **chi non sa non accusa**.
+  - ⚠ **Non e "tranne Elcotec".** L eccezione non e su un nome ma su un modo di lavorare, e i nomi cambiano: Senzani e 22 su 22, Tema Sinergie 10 su 16. Scrivere il nome nel codice sarebbe stato giusto per un giorno.
+
+### Dove vivono le ECCEZIONI (11 set, domanda di Nico: *"se cominciano a diventare tante?"*)
+- **Regola di casa: un eccezione che riguarda UN cliente o UN prodotto non si scrive nel codice, si dichiara in anagrafica.** Il codice legge il campo e si comporta di conseguenza, senza sapere chi sia Elcotec. Cosi l eccezione la si vede dove la si cerca — nella scheda di quel cliente — la cambia Nico senza passare da qui, e non esiste una lista da ricordare a memoria.
+  - Precedenti che gia funzionano cosi: `aziende.tariffa_cliente` (prezzo → tempo pagato), `aziende.materiale_dal_cliente` (niente distinta), `articoli.distinta` con `tipo: MAC` (niente fabbisogno).
+- **Restano nel codice solo le regole STRUTTURALI**, quelle che dicono come funziona il sistema e non riguardano un nome: solo sezionale OC · Senzani + riferimento `EL` → fusione BOX · `_K`/`_KF` sono lavorazioni · `COMP GENERICO`/`VARIE` sono segnaposto · scadenza e prezzo si allineano solo alla nascita. Queste stanno qui in CLAUDE.md, una riga ciascuna, ed e giusto che siano poche.
+- **La prova del nove**: se per spiegare una regola devi dire un nome proprio, quella regola e un dato, non codice.
+
 ### Uscire da una scheda senza perdere il lavoro
 - **Salvando una MODIFICA la finestra resta aperta** (si apre un ordine per correggere due campi). ⚠ Su una commessa NUOVA si chiude: `isNew` resta vero dopo l'insert e un secondo Salva creerebbe un doppione. ⚠ Dopo l'update si riallinea `o` alla riga scritta, o un secondo Salva su una commessa appena completata riproporrebbe di creare il lotto.
 - **`chiediConferma({titolo, testo, bottoni})`** — finestra vera al posto del `confirm()` del browser, ritorna l'id del bottone. ⚠⚠ **NON passa da `openModal`**: quello svuota `#modal-root` e si porterebbe via la scheda che si sta proteggendo. Appende un **secondo velo**. Esc annulla la conferma e non tocca il modal sotto.
