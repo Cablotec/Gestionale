@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-11.06"></script>
+<script src="core/db.js?v=2026-09-11.07"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -1052,10 +1052,11 @@ function getGruppiEsentiAssenze() {
 }
 // Regola finestre: niente date passate, solo dentro la finestra di apertura
 // del periodo, salvo gruppi esenti. Identica al gestionale.
-// CHI puo inserire un tipo: 'tutti' (ferie), 'esenti' (permessi), 'ufficio'
-// (malattia). Stessa funzione del gestionale, parola per parola: due
-// versioni che divergono sono il modo in cui il telefono e il browser
-// finiscono per dire cose diverse alla stessa persona.
+// CHI puo inserire un tipo: 'tutti' (ferie), 'esenti' (permessi), 'admin'
+// (malattia). ⚠ 'admin' e il RUOLO, non il gruppo Ufficio — che e una
+// chiave di gruppo e si confonderebbe. Stessa funzione del gestionale,
+// parola per parola: due versioni che divergono sono il modo in cui il
+// telefono e il browser dicono cose diverse alla stessa persona.
 function tipoInseribileDa(tipo, esente) {
   const chi = String((tipo && tipo.chi_inserisce) || '').toLowerCase();
   if (chi === 'tutti') return true;

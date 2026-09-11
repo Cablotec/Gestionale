@@ -480,10 +480,18 @@ function getGruppiEsentiAssenze() {
 // corretto da Nico: "i gruppi esenti possono solo ferie e permessi"):
 //   'tutti'   -> chiunque, dentro la finestra        (ferie)
 //   'esenti'  -> solo i gruppi esenti                (permessi)
-//   'ufficio' -> nessun operatore, solo un admin     (malattia)
+//   'admin'   -> nessun operatore, solo un amministratore  (malattia)
 // ⚠ Con due valori sarebbe servito un nome proprio da qualche parte: o il
 // codice del permesso nel codice, o gli esenti che vedono TUTTO e quindi
 // anche la malattia. Tre valori tengono la regola dentro il dato.
+// ⚠ IL VALORE E 'admin' E NON 'ufficio' (11 set, corretto da Nico:
+// "hai messo ufficio invece degli admin, dando per scontato che chi fosse
+// in ufficio fosse autorizzato"). Aveva ragione: `ufficio` e anche una
+// CHIAVE DI GRUPPO (GRUPPI_UTENTI), quindi quel valore si leggeva come "lo
+// puo mettere il gruppo Ufficio" — mentre il controllo vero e sul RUOLO.
+// Stare in ufficio e essere amministratore sono due cose diverse, e un nome
+// che ne confonde due e una trappola che scatta la prima volta che qualcuno
+// configura da solo.
 function tipoInseribileDa(tipo, esente) {
   const chi = String((tipo && tipo.chi_inserisce) || '').toLowerCase();
   if (chi === 'tutti') return true;
@@ -19443,11 +19451,11 @@ function openTipoAssenzaModal(t) {
   // calendario assenze. Quello che non si puo piu fare e PROGRAMMARLA.
   const chiInserisceColonnaOk = (state.tipiAssenza || []).some(x => x && ('chi_inserisce' in x));
   const selRichiedibile = el('select', { name:'chi_inserisce' },
-    el('option', { value:'ufficio' }, 'Solo l ufficio'),
+    el('option', { value:'admin' }, 'Solo gli amministratori'),
     el('option', { value:'tutti' },   'Tutti gli operatori'),
     el('option', { value:'esenti' },  'Solo i gruppi esenti'));
   selRichiedibile.value = ['tutti','esenti'].includes(String(t.chi_inserisce || ''))
-    ? t.chi_inserisce : 'ufficio';
+    ? t.chi_inserisce : 'admin';
   if (!chiInserisceColonnaOk) selRichiedibile.disabled = true;
 
   let coloreScelto = t.colore || TIPI_ASSENZA_COLORI[0];
@@ -19480,8 +19488,9 @@ function openTipoAssenzaModal(t) {
     el('div', { class:'field' }, el('label', {}, 'Chi lo inserisce'), selRichiedibile,
       el('div', { class:'sub', style:'margin-top:4px;' },
         chiInserisceColonnaOk
-          ? 'Vale sul telefono e nel calendario del gestionale, per chi non e admin. '
-            + 'L admin vede sempre tutti i tipi, qualunque cosa dica questa tendina.'
+          ? 'Vale sul telefono e nel calendario del gestionale. «Amministratori» è il '
+            + 'RUOLO, non il gruppo Ufficio: chi lavora in ufficio senza essere admin '
+            + 'segue la regola come tutti gli altri.'
           : 'richiede la colonna tipi_assenza.chi_inserisce (migrazione dal pannello Supabase)')),
     el('div', { class:'field' }, el('label', {}, 'Colore'), palette),
   );
@@ -19502,7 +19511,7 @@ function openTipoAssenzaModal(t) {
       colore: coloreScelto,
       attivo: fd.get('attivo') === 'true',
       ...(chiInserisceColonnaOk
-        ? { chi_inserisce: fd.get('chi_inserisce') || 'ufficio' } : {}),
+        ? { chi_inserisce: fd.get('chi_inserisce') || 'admin' } : {}),
     };
     if (!payload.nome) return toast('Nome obbligatorio', 'err');
     btnSave.disabled = true;

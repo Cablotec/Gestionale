@@ -43,7 +43,7 @@ const offerti = (tipiAssenza, gruppo, esenti) => {
 const T = (nome, chi, attivo) => ({ id:nome, nome, attivo: attivo !== false, ordine:1, chi_inserisce: chi });
 const FERIE    = T('Ferie',    'tutti');
 const PERMESSO = T('Permesso', 'esenti');
-const MALATTIA = T('Malattia', 'ufficio');
+const MALATTIA = T('Malattia', 'admin');
 
 sez('PRIMA della migrazione: si comporta come sempre');
 {
@@ -89,6 +89,36 @@ sez('GRUPPI ESENTI: ferie e permessi, NON la malattia');
     JSON.stringify(r) === JSON.stringify(['Ferie']));
 }
 
+sez('IL VALORE E UN RUOLO, NON UN GRUPPO');
+{
+  // 11 set, corretto da Nico: avevo chiamato 'ufficio' il valore che vuol
+  // dire "solo un amministratore". Ma `ufficio` e anche una CHIAVE DI
+  // GRUPPO, quindi si leggeva come "lo puo mettere il gruppo Ufficio":
+  // stare in ufficio e essere admin sono due cose diverse.
+  const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8');
+  // Le chiavi dei gruppi, prese dal codice vero.
+  const blocco = app.slice(app.indexOf('const GRUPPI_UTENTI = ['),
+                           app.indexOf('];', app.indexOf('const GRUPPI_UTENTI = [')));
+  const chiavi = (blocco.match(/key: '([a-z_0-9]+)'/g) || [])
+    .map(s => s.replace(/.*'([a-z_0-9]+)'.*/, '$1'));
+  t('le chiavi dei gruppi si leggono', chiavi.length >= 3);
+  // ⚠ LA GUARDIA: nessun valore di `chi_inserisce` puo essere anche il nome
+  // di un gruppo, o si torna a confondere un ruolo con un reparto.
+  const valori = ['tutti', 'esenti', 'admin'];
+  t('nessun valore coincide con una chiave di gruppo',
+    valori.every(v => !chiavi.includes(v)));
+  t('la tendina offre «Solo gli amministratori»',
+    app.includes("'Solo gli amministratori'"));
+  t('e non parla piu di ufficio', !app.includes("value:'ufficio'"));
+}
+{
+  // Un valore vecchio rimasto in database non deve APRIRE niente: tutto
+  // quello che non e dichiarato resta chiuso.
+  const r = offerti([T('Vecchio', 'ufficio'), FERIE], 'laboratorio', ['laboratorio']);
+  t('un valore sconosciuto non offre il tipo a nessuno',
+    JSON.stringify(r) === JSON.stringify(['Ferie']));
+}
+
 sez('TUTTE LE PORTE, NON UNA SOLA');
 {
   // Togliere un tipo da una parte lasciandolo aperto dall altra e il modo
@@ -121,7 +151,7 @@ sez('LE DATE PASSATE NON LE INSERISCE NESSUNO');
     posizione(bloccoMob, 'iso < oggiIso') < posizione(bloccoMob, 'esenti.includes'));
 }
 
-sez('L UFFICIO VEDE TUTTO');
+sez('L AMMINISTRATORE VEDE TUTTO');
 {
   const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
   t('il filtro si spegne per l admin',
