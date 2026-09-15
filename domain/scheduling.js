@@ -1482,7 +1482,30 @@ function mancanteTipo(m) {
 // comporta esattamente come prima: da ordinare se la quantita' e' > 0. Un
 // dato vecchio non deve cambiare significato solo perche' e' arrivata una
 // colonna nuova.
+// ⚠⚠ DAL 15 SET L'ARCHIVIO CONTIENE ANCHE I CODICI CHE STANNO BENE.
+// Fino a ieri l'import scartava le righe sane (`Qta da ord <= 0` e
+// `giacenza >= impegno`): in `mancanti` entrava solo cio' che era gia' un
+// problema, e "esserci" bastava come diagnosi. Adesso entra tutto il file,
+// perche' la scheda Materiali e' una lista di materiali e la giacenza di un
+// codice sano e' proprio il dato che mancava.
+// Quindi la domanda "questa riga e' un problema?" non si risponde piu'
+// guardando SE la riga c'e': si risponde qui, con gli stessi due numeri che
+// prima decidevano l'import. La regola non e' cambiata, e' solo passata
+// dall'import alla lettura — cosi' un archivio importato prima e uno
+// importato dopo si comportano allo stesso modo.
+function mancanteSottoScorta(m) {
+  if (!m) return false;
+  if (Number(m.qta_da_ordinare) > 0) return true;
+  const g = Number(m.giacenza), i = Number(m.impegno);
+  return Number.isFinite(g) && Number.isFinite(i) && (g - i) < 0;
+}
+
 function mancanteCategoria(m) {
+  // 'coperto' sta PRIMA di tutto: e' l'unica risposta che si legge sui numeri
+  // invece che sul tipo parte, ed e' la piu' forte. Metterla dopo avrebbe
+  // fatto chiamare "di consumo" un faston che non manca, e "in arrivo" un
+  // codice che nessuno ha mai ordinato perche' non serviva ordinarlo.
+  if (!mancanteSottoScorta(m)) return 'coperto';
   const tipo = mancanteTipo(m);
   if (tipo === MANC_CONSUMO) return 'consumo';
   if (!(Number(m && m.qta_da_ordinare) > 0)) return 'in_arrivo';
@@ -1543,7 +1566,7 @@ function gruppoMateriale(v) {
 
 function statoMateriale(m, oggiIso) {
   const cat = mancanteCategoria(m);
-  if (cat === 'consumo' || cat === 'attesa_cliente' || cat === 'da_ordinare') {
+  if (cat === 'coperto' || cat === 'consumo' || cat === 'attesa_cliente' || cat === 'da_ordinare') {
     return { stato: cat, data: null, of: null, fornitore: null, qta: null };
   }
   const oggi = oggiIso || new Date().toISOString().slice(0, 10);
@@ -1568,7 +1591,11 @@ function mancantiCommessa(op, oggiIso) {
     prossima: null, nRitardo: 0, incoerente: false, dataImport: null };
   if (!op || !op.numero_op) return vuoto;
   const righe = (state.mancanti || [])
-    .filter(m => m.numero_op === op.numero_op)
+    // ⚠ Non basta piu' `m.numero_op`: da quando l'archivio contiene tutto
+    // il file, le righe di un OP sono i suoi MATERIALI, non i suoi problemi.
+    // Senza questo filtro il triangolino in Ordini cliente avrebbe cominciato
+    // a scrivere "⚠83" su una commessa a posto.
+    .filter(m => m.numero_op === op.numero_op && mancanteSottoScorta(m))
     .slice()
     // Bloccanti in cima: sono quelle su cui bisogna agire.
     .sort((a, b) => (mancanteBloccante(b) ? 1 : 0) - (mancanteBloccante(a) ? 1 : 0)
@@ -1608,6 +1635,10 @@ function mancantiCommessa(op, oggiIso) {
 // arrivate — è il segnale più utile dell'intero file, e prima non si vedeva.
 // Ritorna { prossime, scadute } con righe { data, qta, codice, descrizione,
 //   numero_op, ordine, fornitore, mancante }.
+// ⚠ Si guardano TUTTE le righe, anche quelle che non sono sotto scorta: un
+// ordine fornitore in arrivo e' un fatto per conto suo, e nasconderlo perche'
+// nel frattempo la giacenza basta vorrebbe dire smettere di vedere arrivare
+// la merce che si e' comprata.
 function consegnePreviste(oggiIso) {
   const oggi = oggiIso || new Date().toISOString().slice(0, 10);
   const prossime = [], scadute = [];

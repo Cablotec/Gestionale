@@ -11,6 +11,14 @@
 //   esplodiDistinta   -> di questo articolo, quali materiali servono?
 //   fabbisognoPerCodice -> di questo materiale, CHI ne vuole e quanto?
 //   ripartisciGiacenza  -> a chi tocca quello che c e?
+//
+// ⚠ `fabbisognoPerCodice` (dalla DISTINTA di oggi) NON la chiama piu' nessuno
+// dal 15 set: la usava solo la vista "fabbisogno calcolato", tolta perche' non
+// la usava nessuno. Quella VIVA e' `fabbisognoDaListe`, che parte dalle liste
+// congelate delle commesse. Le due rispondono alla stessa domanda su due basi
+// diverse, e il giorno che tornassero a convivere vanno guardate insieme:
+// contare sulla distinta di oggi mentre la commessa mostra le quantita'
+// congelate ieri fa dire due cose diverse alle due schermate.
 // ═══════════════════════════════════════════════════════════════════
 
 // Profondita massima dell esplosione. Sul file del 2 set il piu profondo

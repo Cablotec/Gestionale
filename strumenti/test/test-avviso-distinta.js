@@ -84,25 +84,36 @@ const conColonna = (materiale_dal_cliente, distinta) => {
   t('prodotto che non esiste: nessun avviso inventato', !haDistinta(avvisi(OP)));
 }
 
-sez('LE DUE SCHERMATE DICONO LA STESSA COSA');
+sez('ADESSO LA SCHERMATA E UNA SOLA');
 {
-  // Il riquadro che si apre dal triangolo e la scheda Materiali dentro la
-  // commessa sono due posti diversi che rispondono alla stessa domanda.
-  // L 11 set ne era stato corretto solo uno, e Nico guardava l altro.
-  // Qui si controlla che la dichiarazione governi TUTTI E DUE.
+  // Fino al 15 set erano DUE i posti che rispondevano a "cosa manca a questa
+  // commessa": la scheda Materiali dentro la commessa e un riquadro gemello
+  // nella scheda Materiali generale (`riquadroMaterialiCommessa`), raggiunto
+  // dal triangolino. L 11 set la frase sul conto lavoro era stata corretta in
+  // uno solo dei due, e Nico guardava l altro: questa sezione nasceva da li.
+  //
+  // Il riquadro gemello adesso NON C E PIU. La prova piu forte non e che le
+  // due schermate dicano la stessa cosa: e che di schermata ce ne sia una,
+  // perche una copia che non esiste non puo tornare a divergere.
+  // ⚠ Quel riquadro aveva anche un difetto mai visto: leggeva `o.cliente_id`
+  // dove la variabile si chiamava `op`. Sul conto lavoro tirava un
+  // ReferenceError invece della frase. Due copie della stessa risposta non si
+  // limitano a divergere: la seconda si rompe senza che nessuno se ne accorga.
   const quante = (t) => src.split(t).length - 1;
-  t('la dichiarazione e letta in entrambe le schermate',
-    quante('materialeDalCliente(o.cliente_id)') >= 2);
-  t('il riquadro dal triangolo dice la frase giusta',
-    src.includes('Materiale fornito dal cliente: per '));
-  t('la scheda Materiali dice la frase giusta',
+  t('il riquadro gemello non esiste piu',
+    !src.includes('function riquadroMaterialiCommessa'));
+  // UNA sola: quella dentro openOperazioneModal, dove `o` E la commessa.
+  // Se ne comparisse una seconda vorrebbe dire che e rinato un gemello.
+  t('un solo posto legge la dichiarazione sulla commessa',
+    quante('materialeDalCliente(o.cliente_id)') === 1);
+  t('la dichiarazione si legge anche altrove (avvisi, anagrafica)',
+    quante('materialeDalCliente(') >= 2);
+  t('la scheda Materiali della commessa dice la frase giusta',
     src.includes('Materiale fornito dal cliente: questa commessa'));
   // Un bottone che offre di creare una lista da una distinta che non esiste
   // e peggio di un messaggio sbagliato: e un invito a premerlo.
   t('niente bottone Crea dalla distinta sul conto lavoro',
     src.includes('if (!isNew && !dalCliente && isAdmin && art)'));
-  t('niente bottone Scrivi la distinta sul conto lavoro',
-    src.includes('if (art && !materialeDalCliente(o.cliente_id) && state.profile'));
 }
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
