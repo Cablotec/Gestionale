@@ -504,6 +504,36 @@ function chiInserisceDichiarato() {
   return (state.tipiAssenza || []).some(t => t && ('chi_inserisce' in t));
 }
 
+// ⚠⚠ SI DICE SEMPRE ANCHE COSA SI PUO' FARE (16 set, segnalato da Nico:
+// *"avviso errato nel mobile su ferie estive"*).
+// Il difetto: il form si apre sulla data di oggi, e a settembre oggi cade nel
+// periodo ESTIVO, che si prenota a febbraio. Quindi la prima cosa che si
+// leggeva era un rosso sulle ferie estive **proprio nel mese in cui le ferie
+// si prenotano davvero** — perche' a settembre e' aperta la finestra
+// INVERNALE. Il messaggio era vero sulla data e sbagliato sulla domanda.
+// **Un avviso che dice solo di no, quando un si' esiste, e' un avviso
+// sbagliato anche quando la frase e' esatta.**
+function finestraApertaOra(oggiIso) {
+  return getFinestreAssenze()
+    .find(f => isoDentroIntervallo(oggiIso, f.aperturaDa, f.aperturaA)) || null;
+}
+// "01-02" e' GG-MM: si scrive 01/02, come tutte le date dell'app. Col trattino
+// "dal 01-02 al 28-02" sembra un intervallo di numeri, non due date.
+function ggmmIT(s) { return String(s || '').replace('-', '/'); }
+// La meta' positiva dell'avviso, una frase sola. Sta in una funzione perche'
+// la usano quattro punti diversi fra telefono e gestionale, e devono dirla
+// con le stesse parole.
+function frasePeriodoAperto(oggiIso) {
+  const aperta = finestraApertaOra(oggiIso);
+  if (aperta) {
+    return 'Adesso e aperta la finestra ' + aperta.nome + ': puoi chiedere dal '
+      + ggmmIT(aperta.periodoDa) + ' al ' + ggmmIT(aperta.periodoA) + '.';
+  }
+  const prossime = getFinestreAssenze()
+    .map(x => x.nome + ' dal ' + ggmmIT(x.aperturaDa) + ' al ' + ggmmIT(x.aperturaA)).join(' · ');
+  return 'Oggi non e aperta nessuna finestra. Si prenota: ' + prossime + '.';
+}
+
 function verificaAccessoAssenza(iso, utente) {
   // ⚠ LE DATE PASSATE NON LE INSERISCE NESSUNO (11 set, corretto da Nico:
   // "le date passate no!"). Il controllo sta PRIMA dell'esenzione, ed e
@@ -532,7 +562,9 @@ function verificaAccessoAssenza(iso, utente) {
   if (!aperta) {
     return {
       ok: false,
-      motivo: `le assenze per il periodo ${finestra.nome} si possono inserire dal ${finestra.aperturaDa} al ${finestra.aperturaA}`,
+      // ⚠ "finestra estiva", non "periodo estiva": i nomi sono femminili
+      // perche' nati per accordarsi a "finestra". Stessa frase di mobile.html.
+      motivo: `questa data sta nella finestra ${finestra.nome} (${ggmmIT(finestra.periodoDa)} – ${ggmmIT(finestra.periodoA)}), che si prenota dal ${ggmmIT(finestra.aperturaDa)} al ${ggmmIT(finestra.aperturaA)}`,
       finestra,
     };
   }
@@ -18782,7 +18814,8 @@ function renderCalendarioMese(root, anno, mese, isAdmin) {
       const td = el('td', {
         class: cls.join(' '),
         title: bloccatoFinestra
-          ? 'Bloccato: ' + motivoBlocco + '. Per modifiche contatta un amministratore.'
+          ? 'Bloccato: ' + motivoBlocco + '.\n' + frasePeriodoAperto(toLocalISO(new Date()))
+            + '\nPer modifiche contatta un amministratore.'
           : (ass ? `${ass.ore}h - ${state.tipiAssenza.find(t=>t.id===ass.tipo_assenza_id)?.nome || ''}${ass.note ? '\nNote: '+ass.note : ''}` : ''),
       });
       const span = el('span', {}, label);
@@ -19066,7 +19099,8 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
         if (!sonoAdmin && perMeStesso) {
           const verifica = verificaAccessoAssenza(iso, utente);
           if (!verifica.ok) {
-            return toast('Eliminazione non consentita: ' + verifica.motivo + '.', 'err');
+            return toast('Eliminazione non consentita: ' + verifica.motivo + '. '
+              + frasePeriodoAperto(toLocalISO(new Date())), 'err');
           }
         }
         if (!confirm(`Eliminare l'assenza di ${utente.nome} del ${fmtIT(iso)}?`)) return;
@@ -19088,7 +19122,8 @@ function openCellaAssenzaModal(utente, iso, assEsistente) {
     if (assEsistente) {
       if (!sonoAdmin && perMeStesso) {
         const verifica = verificaAccessoAssenza(iso, utente);
-        if (!verifica.ok) return toast('Inserimento non consentito: ' + verifica.motivo + '.', 'err');
+        if (!verifica.ok) return toast('Inserimento non consentito: ' + verifica.motivo + '. '
+          + frasePeriodoAperto(toLocalISO(new Date())), 'err');
       }
       btnSave.disabled = true; btnSave.textContent = 'Salvataggio…';
       try {

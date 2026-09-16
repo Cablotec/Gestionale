@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.03`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.04`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -235,6 +235,7 @@
 - Il messaggio era **vero sulla data proposta e sbagliato sulla domanda**: diceva "non puoi" a qualcuno che in quel momento puo', solo per un'altra parte dell'anno. **Un avviso che dice solo di no, quando un si' esiste, e' un avviso sbagliato anche quando la frase e' esatta.**
 - Tre correzioni: **1)** il form si apre sul **primo giorno chiedibile** (`primoGiornoInseribile`: dentro la finestra aperta E lavorativo — oggi propone 01/10/2026), **2)** il riquadro dice **sempre** cosa si puo' fare adesso (`finestraApertaOra`), non solo cosa no, **3)** le date si scrivono `01/02` e non `01-02`, e si nomina la **finestra** e non il "periodo" (i nomi sono femminili: *"il periodo estiva"* non si puo' leggere).
 - ⚠ `primoGiornoInseribile` cerca **in avanti giorno per giorno** invece di calcolare: i periodi scavallano l'anno (01/10 → 28/02) e l'aritmetica sugli intervalli circolari e' il posto dove si sbaglia. 400 giri di una funzione che costa niente, una volta all'apertura del form.
+- ⚠⚠ **LE STESSE FRASI NEL GESTIONALE**: il calendario Assenze e `adminOnly: false`, quindi un non-admin ci arriva e leggeva ancora la versione vecchia. `finestraApertaOra`, `ggmmIT` e `frasePeriodoAperto` stanno adesso **identiche** nei due file, e il test `test-tabelle-coerenti.js` le confronta carattere per carattere (commenti esclusi: quelli parlano a chi legge quel file). `mobile.html` non carica `app.js` — la copia e dichiarata e accettata, ma **una copia che deriva e il modo in cui il telefono e il browser dicono cose diverse alla stessa persona**.
 
 ### Da chiudere
 - **Le 5 assenze sui giorni di chiusura** (24, 28, 29, 30, 31 dicembre 2026) sono ancora a database: vanno tolte, ma la DELETE su `assenze` non passa dall'account tecnico — serve SQL dal pannello, e serve l'ok di Nico.

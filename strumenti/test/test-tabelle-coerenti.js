@@ -70,5 +70,46 @@ const noteApp = new Set([...app, ...core]);
   });
 });
 
+sez('LE REGOLE COPIATE DEVONO RESTARE COPIE, NON VARIANTI');
+// `mobile.html` e autonomo: non carica `app.js`, quindi le regole delle
+// finestre ferie ci stanno dentro COPIATE. E una duplicazione accettata e
+// dichiarata — ma una copia che deriva e il modo in cui il telefono e il
+// browser dicono cose diverse alla stessa persona, sulla stessa domanda,
+// nello stesso giorno. Qui si confrontano carattere per carattere.
+const srcApp = leggi('app.js'), srcMob = leggi('mobile.html');
+// Si confronta il CODICE, non i commenti: quelli possono e devono essere
+// diversi, perche parlano a chi legge quel file. Si tolgono le righe di
+// commento e si appiattiscono gli spazi.
+// ⚠ Lo spogliatore e ingenuo (taglia da `//` a fine riga) e andrebbe in
+// confusione su una stringa che contenesse `//`. In queste cinque funzioni
+// non ce ne sono; se un domani ce ne fossero, questo controllo va rifatto
+// meglio invece che disattivato.
+const corpo = (src, firma) => {
+  const i = src.indexOf(firma);
+  if (i < 0) return null;
+  const j = src.indexOf('\n}\n', i);
+  if (j < 0) return null;
+  return src.slice(i, j + 2)
+    .split('\n').map(r => r.replace(/\/\/.*$/, '')).join(' ')
+    .replace(/\s+/g, ' ').trim();
+};
+[
+  'function finestraApertaOra(oggiIso) {',
+  'function ggmmIT(s) {',
+  'function frasePeriodoAperto(oggiIso) {',
+  'function isoDentroIntervallo(iso, ggmmDa, ggmmA) {',
+  'function tipoInseribileDa(tipo, esente) {',
+].forEach(firma => {
+  const a = corpo(srcApp, firma), b = corpo(srcMob, firma);
+  const nome = firma.replace('function ', '').split('(')[0];
+  if (!a || !b) { ko++; console.log('  KO   ' + nome + ' — manca in ' + (!a ? 'app.js' : 'mobile.html')); return; }
+  t(nome + ' identica nei due frontend', a === b);
+});
+// La frase del rifiuto non sta in una funzione a se: si confronta il testo.
+const frase = 'che si prenota dal ';
+t('la frase del rifiuto e la stessa',
+  srcApp.includes(frase) && srcMob.includes(frase)
+  && srcApp.includes('questa data sta nella finestra') && srcMob.includes('questa data sta nella finestra'));
+
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);

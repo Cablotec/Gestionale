@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-16.03"></script>
+<script src="core/db.js?v=2026-09-16.04"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -1123,26 +1123,35 @@ function tipoInseribileDa(tipo, esente) {
   return false;
 }
 
-// ⚠⚠ QUAL E' IL PERIODO CHE SI PUO' PRENOTARE ADESSO (16 set).
-// Il difetto segnalato da Nico: il form si apre sulla data di OGGI, e oggi
-// (16 settembre) cade nel periodo ESTIVO, che si prenota a febbraio. Quindi
-// la prima cosa che l'operatore leggeva era un rosso
-//   "⚠ le assenze per il periodo estiva si possono inserire dal 01-02 al 28-02"
-// proprio nel mese in cui le ferie si prenotano davvero — perche' a settembre
-// e' aperta la finestra INVERNALE (01-09 → 30-09) per il periodo 01-10 → 28-02.
-// Il messaggio era vero sulla data proposta e **sbagliato sulla domanda**:
-// diceva "non puoi" a qualcuno che in quel momento puo', solo per un'altra
-// parte dell'anno.
+// ⚠⚠ SI DICE SEMPRE ANCHE COSA SI PUO' FARE (16 set, segnalato da Nico:
+// *"avviso errato nel mobile su ferie estive"*).
+// Il difetto: il form si apre sulla data di oggi, e a settembre oggi cade nel
+// periodo ESTIVO, che si prenota a febbraio. Quindi la prima cosa che si
+// leggeva era un rosso sulle ferie estive **proprio nel mese in cui le ferie
+// si prenotano davvero** — perche' a settembre e' aperta la finestra
+// INVERNALE. Il messaggio era vero sulla data e sbagliato sulla domanda.
 // **Un avviso che dice solo di no, quando un si' esiste, e' un avviso
 // sbagliato anche quando la frase e' esatta.**
 function finestraApertaOra(oggiIso) {
   return getFinestreAssenze()
     .find(f => isoDentroIntervallo(oggiIso, f.aperturaDa, f.aperturaA)) || null;
 }
-// "01-02" e' GG-MM: si scrive 01/02, come tutte le date dell'app. Lasciato
-// col trattino si leggeva come un formato a se', e in mezzo a una frase
-// "dal 01-02 al 28-02" sembra un intervallo di numeri.
+// "01-02" e' GG-MM: si scrive 01/02, come tutte le date dell'app. Col trattino
+// "dal 01-02 al 28-02" sembra un intervallo di numeri, non due date.
 function ggmmIT(s) { return String(s || '').replace('-', '/'); }
+// La meta' positiva dell'avviso, una frase sola. Sta in una funzione perche'
+// la usano quattro punti diversi fra telefono e gestionale, e devono dirla
+// con le stesse parole.
+function frasePeriodoAperto(oggiIso) {
+  const aperta = finestraApertaOra(oggiIso);
+  if (aperta) {
+    return 'Adesso e aperta la finestra ' + aperta.nome + ': puoi chiedere dal '
+      + ggmmIT(aperta.periodoDa) + ' al ' + ggmmIT(aperta.periodoA) + '.';
+  }
+  const prossime = getFinestreAssenze()
+    .map(x => x.nome + ' dal ' + ggmmIT(x.aperturaDa) + ' al ' + ggmmIT(x.aperturaA)).join(' · ');
+  return 'Oggi non e aperta nessuna finestra. Si prenota: ' + prossime + '.';
+}
 
 // Il primo giorno che questa persona puo' davvero chiedere: dentro la
 // finestra aperta E lavorativo. Si cerca in avanti giorno per giorno invece
@@ -1499,7 +1508,6 @@ function renderFerieForm() {
   function renderHint() {
     hintBox.innerHTML = '';
     const v = verificaAccessoAssenza(f.dataIn, state.operatore);
-    const aperta = finestraApertaOra(todayISO());
     if (v.ok) {
       hintBox.append(elx('div', { class:'ok' }, '✅ Inseribile' + (v.esenzione ? ' (gruppo esente)' : '')));
     } else {
@@ -1508,16 +1516,8 @@ function renderFerieForm() {
     // La riga verde vale in tutti e due i casi: anche chi ha scelto una data
     // buona ha diritto di sapere fin dove puo' arrivare.
     if (!v.esenzione) {
-      if (aperta) {
-        hintBox.append(elx('div', { style:'margin-top:6px;color:var(--txt);' },
-          'Adesso e aperta la finestra ' + aperta.nome + ': puoi chiedere dal '
-          + ggmmIT(aperta.periodoDa) + ' al ' + ggmmIT(aperta.periodoA) + '.'));
-      } else {
-        const prossime = getFinestreAssenze()
-          .map(x => x.nome + ' dal ' + ggmmIT(x.aperturaDa) + ' al ' + ggmmIT(x.aperturaA)).join(' · ');
-        hintBox.append(elx('div', { style:'margin-top:6px;color:var(--txt);' },
-          'Oggi non e aperta nessuna finestra. Si prenota: ' + prossime + '.'));
-      }
+      hintBox.append(elx('div', { style:'margin-top:6px;color:var(--txt);' },
+        frasePeriodoAperto(todayISO())));
     }
   }
   renderHint();
