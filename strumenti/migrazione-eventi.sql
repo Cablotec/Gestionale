@@ -27,7 +27,11 @@ create table if not exists eventi (
   ora         text,            -- '12:30' · null = tutto il giorno
   titolo      text not null,   -- 'Pranzo aziendale'
   descrizione text,
-  luogo       text,
+  luogo       text,            -- ⚠ NON PIU USATA dal 16 set, come icona: un
+                               -- evento deve dire QUANDO e COSA; il dove, se
+                               -- serve, sta nella descrizione. Un campo che
+                               -- quasi sempre resta vuoto non e un campo
+                               -- facoltativo, e un campo di troppo.
   icona       text,            -- ⚠ NON PIU USATA dal 16 set: il campo e stato
                                -- tolto dal form il giorno dopo averlo messo
                                -- (scegliere un emoji e un gesto in piu a ogni

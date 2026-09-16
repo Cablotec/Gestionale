@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.08`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.09`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -46,7 +46,7 @@
 4. **Gantt**: fatti A+B+D (ritardi ancorati a oggi `⚠ RIT. Ng`, barre = quota operatore coi suoi timbri, fornitori dichiarati, legenda in alto, buchi su ferie). Restano **C** (dieta chips stati) ed **E** (riga REPARTO).
 4b. ~~Materiali: le commesse senza distinta~~ **CHIUSO il 4 set**: non sono un buco, sono **conto lavoro**. Il dettaglio nella sezione del 4 settembre. Resta aperto solo il **significato**: la scheda dice "Nessuna distinta" dove dovrebbe dire "materiale fornito dal cliente", e nessun campo dichiara quali clienti lavorano cosi.
 4c. **Residui da decidere**: resta il badge `⚠↗` dei riflessi con `mancantiRiflessi`/`riflessiTooltip` — terza fonte di una scala che parte dalla lista congelata, quindi serve solo alle commesse senza lista. ~~la vista "per commessa" della scheda Materiali~~ **CHIUSO il 15 set**: tolta insieme a tutto il fabbisogno calcolato, vedi la sezione del 15 settembre.
-4d. **RIORDINARE I MENU** (11 set, chiesto da Nico: *"i menu prima o poi saranno da riordinare; essendo sempre tutto in sviluppo, vanno aggiornati"*). Non urgente, ma da non perdere.
+4d. ~~**RIORDINARE I MENU**~~ **FATTO il 16 set.** Il dettaglio nella sezione del 16 settembre; qui sotto resta la storia, perche' il criterio serve ancora al prossimo giro.
    - **Il sintomo del giorno**: cercando la tendina «Chi lo inserisce» ne' io ne' Nico abbiamo trovato la scheda. Sta in **Gestione → Tipi assenza**, mentre le finestre ferie e i gruppi esenti stanno in **Impostazioni → Calendari**: due meta della stessa regola in due macro-aree diverse. Se non la trova chi l'ha appena fatta, il problema non e la memoria.
    - **Perche succede**: le schede si sono spostate una alla volta, ognuna per una buona ragione del suo giorno — Mancanti e Prodotti da Gestione a Produzione (5 ago, 4 set), Storico attaccato a Ordini cliente (31 ago). Ogni spostamento era giusto da solo; nessuno ha mai riguardato l'insieme.
    - **Il criterio, quando si fara**: quello gia usato per gli spostamenti riusciti — **si sta dove si lavora, non dove si configura**. Le anagrafiche che si aprono mentre si lavora (Prodotti, Materiali) sono uscite da Gestione ed e stato giusto. Da riguardare con la stessa domanda: **Tipi assenza** e **Chiusure aziendali** stanno accanto alle finestre ferie in Impostazioni, o restano fra le anagrafiche?
@@ -212,6 +212,30 @@
 - ⚠ **Il conto e SINCRONO**, ed e il vero regalo del dato fisso: da quando ogni commessa porta la sua lista, la domanda di ogni codice si ricostruisce **tutta in memoria** (`fabbisognoDaListe` + `materialiCommessa`). Le due mappe (`viveConLista`, `manPerCodice`) si costruiscono **una volta prima del ciclo**: dentro sarebbero rifatte a ogni riga. E servono TUTTE le commesse anche per calcolarne una: la giacenza si divide fra tutte quelle che vogliono lo stesso codice.
 - **TRE FONTI IN SCALA, sempre dichiarate**: lista congelata (esatta) → righe che Alnus attribuisce all'OP (globali) → riflesso da una commessa sorella. Ogni gradino e piu debole, ma meglio di un silenzio che si legge come "a posto".
 - **Strumenti**: `carica-distinte.js` (⚠ leggere il TESTO della cella, non il valore: 2.820 celle su 38.460 hanno il separatore decimale perso — `0,45` scritto `45`) · `copertura-distinte.js` · `genera-materiali-commesse.js` (⚠ `--sql`, non `--scrivi`: l RLS rifiuta le UPDATE su `operazioni` **in silenzio**, HTTP 200 e zero righe) · `prova-fabbisogno.js`.
+
+## 16 SETTEMBRE (sera): i menu riordinati (`2026-09-16.09`)
+Chiesto da Nico, ed era il filo aperto 4d da cinque giorni: *"sposta in impostazioni tipi lavorazione, anagrafica mezzi, utenti, chiusure aziendali, tipi assenza, attivita extra · anagrafica mezzi, chiusure aziendali, tipi assenza si fondono in Calendari"*.
+
+### Il criterio, che era gia' scritto: **si sta dove si lavora, non dove si configura**
+- In **Gestione** restano le tre schede che si aprono per lavorare su un dato commerciale: **Codifica · Aziende · Analisi clienti**. Erano nove.
+- In **Impostazioni**: **Calendari · Tipi lavorazione · Utenti · Attivita extra**. Era una sola.
+- Dentro **Impostazioni → Calendari**, quattro sezioni in una schermata: **chiusure ed eventi** (il calendario dell'azienda, quello che si tocca davvero) · **finestre ferie** · **tipi di assenza** · **anagrafica mezzi**.
+- ⚠⚠ **Le due meta' che erano separate adesso sono adiacenti.** Era il sintomo esatto scritto l'11 set: la tendina «Chi lo inserisce» stava in Gestione → Tipi assenza, le finestre ferie in Impostazioni → Calendari, e **non la trovava nemmeno chi l'aveva appena fatta**.
+
+### ⚠⚠ LA RETE DI SICUREZZA, MESSA PRIMA DI TOCCARE GLI ID
+Stava in CLAUDE.md da giorni come cosa da fare **prima**: la catena di `else if` in `renderTab` **non fallisce** su un id sconosciuto — cade in fondo e la scheda resta **BIANCA**, senza errore in console. Una stringa dimenticata in un rename non si vede: si scopre quando qualcuno apre quella scheda, fra due settimane.
+- Adesso c'e' un `else` finale che scrive *"⚠ Scheda sconosciuta: <id>"* e dice dove guardare. **Non toglierlo.**
+- E c'e' un test che lo trova prima del cartello: `node strumenti/test/test-schede-menu.js .` (55 controlli). Sorveglia i due versi — ogni id nei menu ha un ramo che lo disegna (o un alias che ce lo porta), e ogni ramo chiama una funzione che esiste — piu' i **rami orfani**, quelli che non stanno in nessun menu e non fanno piu' niente.
+
+### ⚠ GLI ALIAS, e perche' non si e' inseguita ogni chiamata
+`mezzi`, `chiusure` e `tipi_assenza` non sono piu' schede: sono sezioni. Ma **diciotto punti del codice** chiamano ancora `renderTab('mezzi')` o `renderTab('chiusure')` per ridisegnarsi dopo un salvataggio. Tre righe di alias in cima a `renderTab` li rimappano su `imp_calendari`; inseguire diciotto chiamate e' il modo di dimenticarne una — e quella dimenticata avrebbe cancellato le altre tre sezioni lasciando a schermo solo la sua.
+- ⚠ **Ogni sezione riceve il SUO contenitore**, non `root`: `renderChiusure`, `renderTipiAssenza` e `renderMezzi` fanno `root.innerHTML = ''` su quello che ricevono. Passandogli la pagina intera, ognuna avrebbe cancellato le altre.
+- **Verificato**: dopo `renderTab('mezzi')`, `renderTab('chiusure')` e `renderTab('tipi_assenza')` la pagina mostra sempre tutte e cinque le intestazioni.
+- `renderImpostazioni` → **`renderFinestreAssenze`**: si chiamava cosi' quando era l'unica cosa in Impostazioni. Adesso e' una sezione fra quattro, e il nome dice cosa fa invece di dove sta.
+
+### Il campo luogo, tolto come l'icona
+- Un evento in calendario deve dire **QUANDO** e **COSA**; il dove, quando serve, sta nella descrizione — che e' gia' li'. **Il criterio, ormai due volte di fila: un campo che quasi sempre resta vuoto non e' un campo facoltativo, e' un campo di troppo.**
+- `eventi.luogo` resta a database e non la legge piu' nessuno, come `eventi.icona`. Annotato nel codice e nel file della migrazione.
 
 ## 16 SETTEMBRE (pomeriggio): il calendario del telefono (`2026-09-16.03`)
 

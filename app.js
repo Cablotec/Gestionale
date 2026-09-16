@@ -1641,6 +1641,12 @@ const TAB_STRUCTURE = {
       { id: 'gantt_commesse', label: 'Gantt',          adminOnly: false },
     ],
   },
+  // ⚠⚠ RIORDINO DEL 16 SET (chiesto da Nico, era il filo aperto 4d).
+  // Il criterio e' quello gia' usato per gli spostamenti riusciti:
+  // **si sta dove si lavora, non dove si configura**. In Gestione restano le
+  // tre schede che si aprono per LAVORARE su un dato commerciale — codifica,
+  // aziende, analisi. Tutto il resto era anagrafica che si tocca una volta
+  // ogni tanto, e ora sta in Impostazioni.
   gestione: {
     label: 'Gestione',
     adminOnly: true,
@@ -1648,19 +1654,21 @@ const TAB_STRUCTURE = {
       { id: 'codifica',       label: 'Codifica',          adminOnly: true },
       { id: 'aziende',        label: 'Aziende',           adminOnly: true },
       { id: 'analisi_clienti', label: 'Analisi clienti',  adminOnly: true },
-      { id: 'tipi_lav',       label: 'Tipi lavorazione',  adminOnly: true },
-      { id: 'mezzi',          label: 'Anagrafica mezzi',  adminOnly: true },
-      { id: 'operatori',      label: 'Utenti',            adminOnly: true },
-      { id: 'chiusure',       label: 'Chiusure aziendali', adminOnly: true },
-      { id: 'tipi_assenza',   label: 'Tipi assenza',      adminOnly: true },
-      { id: 'attivita_extra', label: 'Attività extra',    adminOnly: true },
     ],
   },
   impostazioni: {
     label: 'Impostazioni',
     adminOnly: true,
     tabs: [
+      // ⚠ TRE SCHEDE FUSE IN UNA (mezzi, chiusure, tipi assenza) insieme
+      // alle finestre ferie che erano gia' qui. Era il sintomo scritto in
+      // CLAUDE.md: le finestre ferie stavano in Impostazioni e i tipi assenza
+      // in Gestione — **due meta' della stessa regola in due macro-aree
+      // diverse**, e non le trovava nemmeno chi le aveva appena fatte.
       { id: 'imp_calendari',  label: 'Calendari',         adminOnly: true },
+      { id: 'tipi_lav',       label: 'Tipi lavorazione',  adminOnly: true },
+      { id: 'operatori',      label: 'Utenti',            adminOnly: true },
+      { id: 'attivita_extra', label: 'Attività extra',    adminOnly: true },
     ],
   },
 };
@@ -1728,6 +1736,14 @@ function renderTab(name) {
   // Compatibilità: la vecchia tab 'impostazioni' dentro Gestione è ora la
   // sub-tab 'imp_calendari' dentro la nuova macro-area Impostazioni.
   if (name === 'impostazioni') name = 'imp_calendari';
+  // ⚠ 16 set: mezzi, chiusure e tipi assenza NON sono piu' schede a se' —
+  // sono tre sezioni dentro Impostazioni → Calendari. Gli alias servono
+  // perche' **diciotto punti del codice** chiamano ancora `renderTab('mezzi')`
+  // o `renderTab('chiusure')` per ridisegnarsi dopo un salvataggio: senza,
+  // ognuno di quei salvataggi avrebbe cancellato le altre tre sezioni
+  // lasciando a schermo solo la sua. Rimappare qui e' una riga; inseguire
+  // diciotto chiamate e' il modo di dimenticarne una.
+  if (name === 'mezzi' || name === 'chiusure' || name === 'tipi_assenza') name = 'imp_calendari';
   state.currentTab = name;
   const root = $('#tab-content');
   if (!state.loaded) { root.innerHTML = '<div class="empty">Caricamento…</div>'; return; }
@@ -1735,7 +1751,6 @@ function renderTab(name) {
     if (name === 'generale')          renderGenerale(root);
     else if (name === 'cal_mezzi')    renderCalMezzi(root);
     else if (name === 'cal_assenze')  renderAssenze(root);
-    else if (name === 'mezzi')        renderMezzi(root);
     else if (name === 'aziende')      renderAziende(root);
     else if (name === 'articoli')     renderArticoli(root);
     else if (name === 'tipi_lav')     renderTipiLavorazione(root);
@@ -1748,11 +1763,20 @@ function renderTab(name) {
     else if (name === 'analisi_clienti') renderAnalisiClienti(root);
     else if (name === 'codifica') renderCodifica(root);
     else if (name === 'fabbisogno') renderFabbisogno(root);
-    else if (name === 'chiusure') renderChiusure(root);
-    else if (name === 'tipi_assenza') renderTipiAssenza(root);
     else if (name === 'attivita_extra') renderAttivitaExtra(root);
     else if (name === 'timbri_extra') renderTimbriExtra(root);
-    else if (name === 'imp_calendari') renderImpostazioni(root);
+    else if (name === 'imp_calendari') renderImpCalendari(root);
+    // ⚠⚠ NON TOGLIERE QUESTO `else`. Senza, un id che non combacia non da'
+    // errore: cade in fondo alla catena e la scheda resta BIANCA. Un silenzio
+    // non si nota; un cartello si'.
+    else {
+      root.innerHTML = '';
+      root.append(el('div', { class:'empty', style:'color:var(--yel);' },
+        el('div', { style:'margin-bottom:8px;' }, '⚠ Scheda sconosciuta: ' + name),
+        el('div', { style:'font-size:11px;' },
+          'Nessuna funzione disegna questa scheda. Di solito vuol dire che un id '
+          + 'e stato rinominato in un posto solo: guardare TAB_STRUCTURE e la catena in renderTab.')));
+    }
   } catch (e) {
     console.error('Errore rendering tab '+name+':', e);
     root.innerHTML = '';
@@ -7400,6 +7424,13 @@ function isGiornoNonLavorativo(dateObj) {
 // azzurro attorno. La colonna `eventi.icona` resta a database ma **non la
 // legge e non la scrive piu' nessuno**: non si droppa una colonna per un
 // campo tolto, si smette di usarla e lo si scrive.
+// ⚠ Stessa sorte per il LUOGO, tolto poco dopo. Un evento in calendario deve
+// dire QUANDO e COSA; il dove, quando serve, sta nella descrizione — che e'
+// gia' li' e non costringe a riempire un campo in piu' per ogni riunione
+// fatta in sala riunioni. Anche `eventi.luogo` resta a database e non la
+// legge piu' nessuno.
+// **Il criterio, ormai due volte di fila: un campo che quasi sempre resta
+// vuoto non e' un campo facoltativo, e' un campo di troppo.**
 // ═══════════════════════════════════════════════════════════════════
 
 // Gli eventi che toccano questo giorno. `data_fine` null = un giorno solo.
@@ -7414,9 +7445,7 @@ function eventiDelGiorno(iso) {
 }
 // L'evento in una riga di testo: "🍝 12:30 — Pranzo aziendale · Trattoria X".
 function eventoEtichetta(e) {
-  return (e.ora ? e.ora + ' — ' : '')
-    + (e.titolo || 'Evento')
-    + (e.luogo ? ' · ' + e.luogo : '');
+  return (e.ora ? e.ora + ' — ' : '') + (e.titolo || 'Evento');
 }
 
 // La tabella esiste? Inerte finche' la migrazione non c'e' (stesso patto di
@@ -7473,7 +7502,6 @@ function sezioneEventi(root) {
         + (e.data_fine && e.data_fine !== e.data ? ' → ' + fmtIT(e.data_fine) : '')),
       el('td', { class:'mono' }, e.ora || 'tutto il giorno'),
       el('td', {}, e.titolo || '—'),
-      el('td', { class:'sub' }, e.luogo || '—'),
       el('td', { class:'sub', style:'max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
         title: e.descrizione || '' }, e.descrizione || '—'),
     ));
@@ -7482,7 +7510,7 @@ function sezioneEventi(root) {
   tw.append(el('table', { class:'rt' },
     el('thead', {}, el('tr', {},
       el('th', {}, 'Data'), el('th', {}, 'Ora'), el('th', {}, 'Titolo'),
-      el('th', {}, 'Luogo'), el('th', {}, 'Descrizione'))),
+      el('th', {}, 'Descrizione'))),
     tb));
   root.append(tw);
 }
@@ -7490,7 +7518,7 @@ function sezioneEventi(root) {
 function openEventoModal(e) {
   const isNew = !e;
   e = e || { data: toLocalISO(new Date()), data_fine:'', ora:'', titolo:'',
-    descrizione:'', luogo:'' };
+    descrizione:'' };
 
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
@@ -7509,10 +7537,8 @@ function openEventoModal(e) {
     placeholder:'12:30  —  vuoto = tutto il giorno' });
   const inTitolo = el('input', { type:'text', name:'titolo', value:e.titolo||'', required:'true',
     placeholder:'es. Pranzo aziendale, Riunione di reparto, Visita cliente…' });
-  const inLuogo = el('input', { type:'text', name:'luogo', value:e.luogo||'',
-    placeholder:'es. Trattoria da…, Sala riunioni' });
   const inDescr = el('textarea', { name:'descrizione', rows:'2',
-    placeholder:'Dettagli (facoltativo)' }, e.descrizione||'');
+    placeholder:'Dettagli: dove, chi, cosa portare… (facoltativo)' }, e.descrizione||'');
 
   form.append(
     el('div', { class:'frow' },
@@ -7520,7 +7546,6 @@ function openEventoModal(e) {
       el('div', { class:'field' }, el('label', {}, 'Al (se dura più giorni)'), inFine)),
     el('div', { class:'field' }, el('label', {}, 'Ora'), inOra),
     el('div', { class:'field' }, el('label', {}, 'Titolo *'), inTitolo),
-    el('div', { class:'field' }, el('label', {}, 'Luogo'), inLuogo),
     el('div', { class:'field' }, el('label', {}, 'Descrizione'), inDescr),
     el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
       'Lo vedranno tutti gli operatori nel calendario del telefono. '
@@ -7554,7 +7579,6 @@ function openEventoModal(e) {
       data, data_fine: fine,
       ora: (fd.get('ora') || '').toString().trim() || null,
       titolo,
-      luogo: (fd.get('luogo') || '').toString().trim() || null,
       descrizione: (fd.get('descrizione') || '').toString().trim() || null,
     };
     btnSave.disabled = true; btnSave.textContent = 'Salvataggio…';
@@ -19571,10 +19595,55 @@ function renderRiepilogoAssenze(root) {
 // IMPOSTAZIONI — configurazioni globali del gestionale
 // ═══════════════════════════════════════════════════════════
 
-function renderImpostazioni(root) {
+// ═══════════════════════════════════════════════════════════
+// IMPOSTAZIONI → CALENDARI — quattro sezioni, una schermata (16 set).
+//
+// ⚠⚠ Nasce dal sintomo scritto in CLAUDE.md: cercando la tendina «Chi lo
+// inserisce» non l'ha trovata ne' Nico ne' io. Stava in Gestione → Tipi
+// assenza, mentre le finestre ferie e i gruppi esenti stavano in
+// Impostazioni → Calendari: **due meta' della stessa regola in due
+// macro-aree diverse**. Se non la trova chi l'ha appena fatta, il problema
+// non e' la memoria.
+//
+// L'ordine delle sezioni non e' casuale: **chiusure ed eventi** per primi
+// (il calendario dell'azienda, quello che si tocca davvero), poi le due
+// meta' che erano separate — **finestre ferie** e **tipi di assenza**, ora
+// adiacenti — e in fondo l'**anagrafica mezzi**, che si apre due volte
+// l'anno.
+//
+// ⚠ Ogni sezione tiene la sua funzione di disegno e il suo contenitore:
+// `renderChiusure`, `renderTipiAssenza` e `renderMezzi` fanno
+// `root.innerHTML = ''` sul pezzo che ricevono, non sull'intera pagina.
+// Passargli `root` direttamente avrebbe fatto cancellare a ognuna le altre
+// tre. E siccome dopo un salvataggio si richiamano da sole con
+// `renderTab('mezzi')`, quegli id sono rimappati su `imp_calendari` in cima
+// a renderTab — cosi' si ridisegna la pagina intera e restano tutte.
+function renderImpCalendari(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   root.innerHTML = '';
-  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Impostazioni')));
+  if (!isAdmin) {
+    root.append(el('div', { class:'empty' },
+      'Solo gli amministratori possono modificare i calendari.'));
+    return;
+  }
+  const sezione = (fn) => {
+    const box = el('div', { style:'margin-bottom:34px;' });
+    root.append(box);
+    fn(box);
+  };
+  sezione(renderChiusure);
+  sezione(renderFinestreAssenze);
+  sezione(renderTipiAssenza);
+  sezione(renderMezzi);
+}
+
+// Le finestre di apertura delle assenze + i gruppi esenti. Si chiamava
+// `renderImpostazioni` quando era l'unica cosa in Impostazioni; adesso e'
+// una sezione fra quattro, e il nome dice cosa fa invece di dove sta.
+function renderFinestreAssenze(root) {
+  const isAdmin = state.profile?.ruolo === 'admin';
+  root.innerHTML = '';
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Finestre di inserimento assenze')));
 
   if (!isAdmin) {
     root.append(el('div', { class:'empty' }, 'Solo gli amministratori possono modificare le impostazioni.'));
@@ -19720,7 +19789,7 @@ function renderImpostazioni(root) {
       msgArea.textContent = '✓ Salvato.';
       toast('Impostazioni aggiornate', 'ok');
       // Ridisegno per aggiornare lo stato "aperto/chiuso"
-      setTimeout(() => renderImpostazioni(root), 800);
+      setTimeout(() => renderFinestreAssenze(root), 800);
     } catch (e) {
       msgArea.style.color = 'var(--red)';
       msgArea.textContent = '⚠ Errore: ' + (e.message || e);

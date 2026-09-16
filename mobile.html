@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-16.08"></script>
+<script src="core/db.js?v=2026-09-16.09"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -1288,6 +1288,13 @@ function festiviNazIsoSet(anno) {
 // azzurro attorno. La colonna `eventi.icona` resta a database ma **non la
 // legge e non la scrive piu' nessuno**: non si droppa una colonna per un
 // campo tolto, si smette di usarla e lo si scrive.
+// ⚠ Stessa sorte per il LUOGO, tolto poco dopo. Un evento in calendario deve
+// dire QUANDO e COSA; il dove, quando serve, sta nella descrizione — che e'
+// gia' li' e non costringe a riempire un campo in piu' per ogni riunione
+// fatta in sala riunioni. Anche `eventi.luogo` resta a database e non la
+// legge piu' nessuno.
+// **Il criterio, ormai due volte di fila: un campo che quasi sempre resta
+// vuoto non e' un campo facoltativo, e' un campo di troppo.**
 // ═══════════════════════════════════════════════════════════════════
 
 // Gli eventi che toccano questo giorno. `data_fine` null = un giorno solo.
@@ -1302,9 +1309,7 @@ function eventiDelGiorno(iso) {
 }
 // L'evento in una riga di testo: "🍝 12:30 — Pranzo aziendale · Trattoria X".
 function eventoEtichetta(e) {
-  return (e.ora ? e.ora + ' — ' : '')
-    + (e.titolo || 'Evento')
-    + (e.luogo ? ' · ' + e.luogo : '');
+  return (e.ora ? e.ora + ' — ' : '') + (e.titolo || 'Evento');
 }
 
 // La chiusura di questo giorno, o null. Ritorna la RIGA e non un booleano:
