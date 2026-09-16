@@ -472,9 +472,13 @@ async function loadFerieData() {
       sb.from('assenze').select('*').eq('stato', 'valida').gte('data', annoIso),
       sb.from('impostazioni').select('*'),
       sb.from('chiusure_aziendali').select('*').order('data'),
-      // Gli eventi da un mese fa in avanti: sul telefono si guarda avanti, e
-      // trascinarsi lo storico degli anni per un pallino in calendario sarebbe
-      // banda regalata.
+      // Gli eventi dall'inizio dell'anno, come le assenze: il calendario si
+      // sfoglia avanti e indietro dentro l'anno corrente, e trascinarsi lo
+      // storico di tutti gli anni per un pallino in cella sarebbe banda
+      // regalata. ⚠ Un evento COMINCIATO l'anno scorso e ancora in corso non
+      // arriva: caso che non esiste per un pranzo o una riunione, e se un
+      // giorno esistesse si vedrebbe subito (il pallino manca sui primi
+      // giorni di gennaio).
       sb.from('eventi').select('*').gte('data', annoIso).order('data'),
     ]);
     const segna = (nome, r) => { if (r.error) state.ferieNonLette.push(nome); };
