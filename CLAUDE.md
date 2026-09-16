@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.09`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.10`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -212,6 +212,23 @@
 - ⚠ **Il conto e SINCRONO**, ed e il vero regalo del dato fisso: da quando ogni commessa porta la sua lista, la domanda di ogni codice si ricostruisce **tutta in memoria** (`fabbisognoDaListe` + `materialiCommessa`). Le due mappe (`viveConLista`, `manPerCodice`) si costruiscono **una volta prima del ciclo**: dentro sarebbero rifatte a ogni riga. E servono TUTTE le commesse anche per calcolarne una: la giacenza si divide fra tutte quelle che vogliono lo stesso codice.
 - **TRE FONTI IN SCALA, sempre dichiarate**: lista congelata (esatta) → righe che Alnus attribuisce all'OP (globali) → riflesso da una commessa sorella. Ogni gradino e piu debole, ma meglio di un silenzio che si legge come "a posto".
 - **Strumenti**: `carica-distinte.js` (⚠ leggere il TESTO della cella, non il valore: 2.820 celle su 38.460 hanno il separatore decimale perso — `0,45` scritto `45`) · `copertura-distinte.js` · `genera-materiali-commesse.js` (⚠ `--sql`, non `--scrivi`: l RLS rifiuta le UPDATE su `operazioni` **in silenzio**, HTTP 200 e zero righe) · `prova-fabbisogno.js`.
+
+## 16 SETTEMBRE (sera): il Generale e il telefono sono lo stesso calendario
+Domanda di Nico: *"nel calendario generale del browser possiamo vedere quello che si vede in App? potrebbe/dovrebbe essere lo specchio no?"* — si, e mancava un pezzo solo.
+
+| | Generale (browser) | Ferie (telefono) |
+|---|---|---|
+| festivi nazionali | c era, **azzurro** | c era, **rosso** |
+| chiusure aziendali | c erano | aggiunte stamattina |
+| weekend | c erano | aggiunti oggi |
+| assenze | c erano | c erano |
+| **eventi aziendali** | **mancavano** | c erano |
+
+- **Il pezzo mancante erano gli eventi**, nati sul telefono qualche ora prima. ⚠ **Una cosa che si vede in un posto solo diventa in fretta una cosa che due persone raccontano diversamente.**
+- ⚠⚠ **Il festivo e passato dall azzurro al ROSSO anche nel browser**, e non e un ritocco estetico: era rosso di la e azzurro di qua, cioe **la stessa persona, lo stesso giorno, vedeva due colori per la stessa cosa**. E il difetto che questo progetto paga da mesi, applicato ai colori invece che alle parole. Il cambio libera l azzurro, che sul telefono e gia il colore degli eventi: adesso i due calendari usano lo stesso alfabeto — **rosso festivo · arancione chiusura · azzurro evento**.
+- ⚠ Gli eventi stanno con le "speciali" (festivi, chiusure) e **non nella lista che si tronca a "+N altri"**: un pranzo aziendale e un fatto del giorno come la chiusura, non una delle N assenze. Nascosto dietro un "+3" non servirebbe a niente.
+- `eventiDelGiorno` e la STESSA funzione del telefono (il test la confronta carattere per carattere), quindi un evento di piu giorni compare su tutti i giorni in tutti e due i calendari, senza che nessuno debba ricordarselo due volte.
+- **Resta diverso, e va bene**: le prenotazioni mezzi non si vedono nel Generale (di proposito, hanno la loro scheda) e il telefono non le mostra affatto. E le assenze sul telefono si aprono nel dettaglio del giorno invece che in cella: **stesso contenuto, forma diversa** — sono due schermi diversi, non due verita diverse.
 
 ## 16 SETTEMBRE (sera): i menu riordinati (`2026-09-16.09`)
 Chiesto da Nico, ed era il filo aperto 4d da cinque giorni: *"sposta in impostazioni tipi lavorazione, anagrafica mezzi, utenti, chiusure aziendali, tipi assenza, attivita extra · anagrafica mezzi, chiusure aziendali, tipi assenza si fondono in Calendari"*.

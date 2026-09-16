@@ -2155,7 +2155,9 @@ function renderCalendar(root) {
     legend.append(el('span', { class:'lg' },
       el('span', { class:'swatch', style:'background:rgba(255,107,53,.4);border-color:var(--or);' }), '🔒 Chiusura azienda'));
     legend.append(el('span', { class:'lg' },
-      el('span', { class:'swatch', style:'background:rgba(78,184,255,.4);border-color:var(--blu);' }), '🎉 Festività'));
+      el('span', { class:'swatch', style:'background:rgba(255,78,107,.4);border-color:var(--red);' }), '🎉 Festività'));
+    legend.append(el('span', { class:'lg' },
+      el('span', { class:'swatch', style:'background:rgba(78,184,255,.4);border-color:var(--blu);' }), '● Evento aziendale'));
   }
   root.append(legend);
 
@@ -2199,9 +2201,11 @@ function renderCalendar(root) {
         openPrenotazioneModal({ data_inizio: iso, data_fine: iso });
       }
     });
-    // Background tinto per festività/chiusure
+    // Background tinto per festività/chiusure.
+    // ⚠ Festivo = ROSSO, come sul telefono e come su qualsiasi calendario da
+    // muro. Era azzurro; l'azzurro adesso e' degli EVENTI, di qua e di la'.
     if (chiusura) cell.style.background = 'rgba(255,107,53,.10)';
-    else if (isFestivo) cell.style.background = 'rgba(78,184,255,.10)';
+    else if (isFestivo) cell.style.background = 'rgba(255,78,107,.08)';
 
     cell.append(el('div', { class:'cal-day-num' }, String(d.getDate())));
 
@@ -2209,7 +2213,7 @@ function renderCalendar(root) {
     if (isFestivo) {
       cell.append(el('div', {
         class: 'cal-evt',
-        style: 'border-left-color:var(--blu);background:rgba(78,184,255,.15);color:var(--blu);font-weight:600;',
+        style: 'border-left-color:var(--red);background:rgba(255,78,107,.14);color:var(--red);font-weight:600;',
         title: festivitaNomi[iso] || 'Festività',
       }, '🎉 ' + (festivitaNomi[iso] || 'Festivo')));
     }
@@ -2219,6 +2223,32 @@ function renderCalendar(root) {
         style: 'border-left-color:var(--or);background:rgba(255,107,53,.15);color:var(--or);font-weight:600;',
         title: chiusura.descrizione || 'Chiusura aziendale',
       }, '🔒 ' + (chiusura.descrizione || 'Chiusura')));
+    }
+    // ⚠⚠ GLI EVENTI AZIENDALI (16 set, chiesto da Nico: *"nel calendario
+    // generale del browser possiamo vedere quello che si vede in App?
+    // potrebbe/dovrebbe essere lo specchio no?"*). Aveva ragione: le altre
+    // quattro cose — festivi, chiusure, weekend, assenze — c'erano gia' in
+    // tutti e due. Gli eventi li vedeva solo il telefono, perche' sono nati
+    // li' qualche ora prima. **Una cosa che si vede in un posto solo diventa
+    // in fretta una cosa che due persone raccontano diversamente.**
+    //
+    // ⚠ Stanno con le "speciali" e NON nella lista sotto, che si tronca a
+    // "+N altri": un pranzo aziendale e' un fatto del giorno come la
+    // chiusura, non una delle N assenze. Nascosto dietro un "+3" non
+    // servirebbe a niente. E `eventiDelGiorno` e' la stessa funzione del
+    // telefono, quindi un evento di piu' giorni compare su tutti, qui come li'.
+    if (isGenerale && typeof eventiDelGiorno === 'function') {
+      eventiDelGiorno(iso).forEach(ev => {
+        const apribile = state.profile?.ruolo === 'admin';
+        cell.append(el('div', {
+          class: 'cal-evt',
+          style: 'border-left-color:var(--blu);background:rgba(78,184,255,.15);color:var(--blu);font-weight:600;'
+            + (apribile ? 'cursor:pointer;' : ''),
+          title: eventoEtichetta(ev) + (ev.descrizione ? '\n' + ev.descrizione : '')
+            + (apribile ? '\n\nClicca per modificare.' : ''),
+          onclick: apribile ? (e) => { e.stopPropagation(); openEventoModal(ev); } : null,
+        }, '● ' + eventoEtichetta(ev)));
+      });
     }
     const evs = byDay[iso] || [];
     // In vista settimanale c'è molto più spazio verticale: mostro più voci.
