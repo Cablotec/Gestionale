@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.05`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.06`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -224,8 +224,11 @@
 - ⚠⚠ **E c'e' un secondo modo di non sapere, che un `error` non cattura: l'RLS non rifiuta, FILTRA.** Una tabella che non ti fa vedere niente torna `[]` con `error: null`, identica a una tabella vuota — la versione in lettura del famoso "HTTP 200 e zero righe". Per questo si controlla anche il **contenuto**: `impostazioni` e `tipi_assenza` non possono essere vuote (le scrive l'ufficio), e se arrivano vuote si dichiara. Sulle **chiusure** lo stesso controllo NON si puo' fare: zero chiusure e' una risposta legittima.
 - 🔎 **Verificato che era l'unica**: tutte le altre tabelle interrogate da `mobile.html` e `prelievo.html` (17 + 5) esistono.
 
-### Le chiusure in calendario
-- Cella **tratteggiata col lucchetto 🔒** + legenda. ⚠ Si segna la CHIUSURA AZIENDALE, non il festivo nazionale: il festivo lo sanno tutti, la chiusura la decide l'azienda ed e' l'unica che sorprende. Segnarli entrambi avrebbe barrato mezzo dicembre senza distinguere cio' che va saputo da cio' che si sa gia'.
+### Le chiusure E i festivi in calendario
+- **Chiusura aziendale**: cella **tratteggiata col lucchetto 🔒**. **Festivo nazionale**: **numero in ROSSO** su fondo rosso tenue, come su qualsiasi calendario da muro. Legenda sotto la griglia.
+- ⚠ **La prima stesura segnava solo le chiusure**, col ragionamento *"il festivo lo sanno tutti, la chiusura e' l'unica che sorprende"*. Nico ha chiesto il contrario (*"anche i giorni festivi puoi renderli ben visibili?"*) e aveva ragione: **su un calendario che serve a dire quando NON si lavora, "tanto lo sai gia'" non e' un criterio.** Chi guarda deve vedere quali caselle sono vuote, non quali gia' sapeva. Restano distinti nel MODO, non nell'esserci.
+- ⚠ **Il festivo e' un COLORE e non un sesto segno**, e non e' un ripiego: la cella ha gia' cinque posti pieni e il glifo in piu' non ci sta (misurato, vedi sotto). Il colore non occupa spazio, e il rosso sul numero e' la convenzione che tutti leggono senza spiegazioni.
+- **Un giorno che e' tutti e due** (1 gennaio, 15 agosto…) prende tratteggio + lucchetto + numero rosso, e il titolo li nomina entrambi: *"Chiusura Natalizia · Natale"*. Provato a mano, perche' oggi nessuna chiusura vera coincide con un festivo — **il caso che non capita nei dati e' quello che si rompe per primo.**
 - Il giorno selezionato dice **PRIMA perche' non si lavora**, poi chi e' assente: su un giorno chiuso *"Nessuno assente"* e' una risposta che non risponde.
 - ⚠ La legenda usa il **segno vero** (il lucchetto), non un campione di colore: un quadratino con le righine a 12 px su un telefono e' un quadratino grigio qualunque. Misurato guardandolo.
 - **I giorni saltati adesso si DICHIARANO**, anche quando il salvataggio riesce: *"1 giorno inserito. Non contati: 5 giorni di chiusura aziendale, 2 festivi, 1 giorno di weekend"*. Prima sparivano in silenzio — e con le chiusure che non arrivavano nemmeno, il silenzio era doppio.

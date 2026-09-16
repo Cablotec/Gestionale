@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-16.05"></script>
+<script src="core/db.js?v=2026-09-16.06"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -120,6 +120,12 @@ button{font-family:inherit;}
 .cal-dow{text-align:center;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mut);padding-bottom:2px;}
 .cal-cell{position:relative;aspect-ratio:1;border:1px solid var(--brd);border-radius:8px;background:var(--sur);padding:4px;cursor:pointer;overflow:hidden;}
 .cal-cell.empty{border:none;background:transparent;cursor:default;}
+/* Festivo nazionale: numero ROSSO, come sul calendario da muro. Sta qui in
+   alto di proposito — `.mia` e `.chiusa` vengono dopo e vincono sullo
+   SFONDO, mentre il colore del numero lo si riprende piu' sotto con un
+   selettore piu' specifico. Cosi' un 25 dicembre che fosse anche chiusura
+   aziendale resta tratteggiato E rosso, senza che una regola mangi l'altra. */
+.cal-cell.festivo{background:rgba(255,78,107,.07);border-color:rgba(255,78,107,.35);}
 .cal-cell.has{border-color:var(--mut);}
 .cal-cell.mia{border-color:var(--acc);background:rgba(212,255,78,.10);}
 .cal-cell.sel{outline:2px solid var(--acc);outline-offset:-1px;}
@@ -133,6 +139,10 @@ button{font-family:inherit;}
    delle assenze — che su un giorno chiuso non dovrebbero esserci. */
 .cal-cell.chiusa{background:repeating-linear-gradient(135deg,var(--sur),var(--sur) 5px,var(--sur2) 5px,var(--sur2) 10px);border-color:var(--mut);}
 .cal-cell.chiusa .cal-num{color:var(--mut);}
+/* Il rosso del festivo vince su tutto, chiusura compresa: e' l'unica cosa
+   della cella che dice "oggi non si lavora" a chi guarda da lontano. */
+.cal-cell.festivo .cal-num span{color:var(--red);}
+.cal-cell.oggi.festivo .cal-num span{color:var(--red);}
 .cal-lock{font-size:10px;line-height:1;opacity:.85;}
 /* La cella ha DUE righe e cinque posti, tutti misurati a 375px:
      sopra  (flex)     numero a sinistra · lucchetto a destra
@@ -1387,15 +1397,23 @@ function renderFerie() {
     const iso = `${ferieCal.y}-${zp(ferieCal.m + 1)}-${zp(g)}`;
     const ass = (state.assenze || []).filter(a => a.data === iso);
     const mia = ass.find(a => a.utente_id === mioId);
-    // ⚠ La chiusura aziendale si vede, il festivo nazionale no: il festivo lo
-    // sanno tutti, la chiusura la decide l'azienda ed e' l'unica che
-    // sorprende. Segnarli tutti e due avrebbe barrato mezzo dicembre senza
-    // distinguere quello che va saputo da quello che si sa gia.
+    // ⚠ SI SEGNANO TUTTI E DUE (16 set, chiesto da Nico: *"anche i giorni
+    // festivi puoi renderli ben visibili?"*). La prima stesura marcava solo
+    // le chiusure, col ragionamento che "il festivo lo sanno tutti": vero in
+    // astratto, ma su un calendario che serve a dire QUANDO NON SI LAVORA e'
+    // una distinzione che non aiuta chi guarda — deve sapere quali caselle
+    // sono vuote, non quali gia' sapeva.
+    // Restano distinti nel MODO, non nell'esserci: la chiusura e' tratteggiata
+    // col lucchetto (la decide l'azienda, e' lei che sorprende), il festivo e'
+    // il numero in rosso — la convenzione di qualsiasi calendario da muro.
     const chiusa = chiusuraDelGiorno(iso);
+    const festivo = festivoDelGiorno(iso);
     const cls = 'cal-cell' + (mia ? ' mia' : (ass.length ? ' has' : '')) +
-      (chiusa ? ' chiusa' : '') +
+      (festivo ? ' festivo' : '') + (chiusa ? ' chiusa' : '') +
       (iso === oggiIso ? ' oggi' : '') + (iso === ferieCal.sel ? ' sel' : '');
-    const cell = elx('div', { class: cls, title: chiusa ? (chiusa.descrizione || 'Chiusura aziendale') : '',
+    const cell = elx('div', { class: cls,
+      title: [chiusa && (chiusa.descrizione || 'Chiusura aziendale'), festivo]
+        .filter(Boolean).join(' · '),
       onclick: () => { ferieCal.sel = iso; renderFerie(); } });
     const segni = elx('div', { class:'cal-segni' });
     const numEl = elx('div', { class:'cal-num' }, elx('span', {}, String(g)), segni);
@@ -1423,6 +1441,7 @@ function renderFerie() {
   // un telefono, e un quadratino con le righine diagonali a quella misura
   // diventa un quadratino grigio qualunque.
   const legenda = elx('div', { class:'cal-legenda' },
+    elx('span', {}, elx('b', { style:'color:var(--red);' }, '25'), 'Festivo'),
     elx('span', {}, elx('b', {}, '🔒'), 'Chiusura aziendale'),
     elx('span', {}, elx('i', { class:'mia' }), 'Una tua assenza'));
   // La voce evento compare SOLO se in questo mese ce n'e' uno: una legenda
