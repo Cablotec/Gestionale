@@ -28,7 +28,13 @@ create table if not exists eventi (
   titolo      text not null,   -- 'Pranzo aziendale'
   descrizione text,
   luogo       text,
-  icona       text,            -- '🍝' '👥' '🔧'
+  icona       text,            -- ⚠ NON PIU USATA dal 16 set: il campo e stato
+                               -- tolto dal form il giorno dopo averlo messo
+                               -- (scegliere un emoji e un gesto in piu a ogni
+                               -- evento, per un segno che dice solo "qui c e
+                               -- qualcosa"). La colonna resta: non si droppa
+                               -- una colonna per un campo tolto, si smette di
+                               -- usarla e lo si scrive.
   colore      text,
   creato_il   timestamptz default now()
 );

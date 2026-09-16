@@ -7389,10 +7389,17 @@ function isGiornoNonLavorativo(dateObj) {
 // CHIUSURA e si mette dove stanno le altre. Tenere fuori "blocca il lavoro"
 // e' esattamente cio' che rende sicuro avere due tabelle invece di una.
 //
-// ⚠ Niente colonna `tipo`: "pranzo" o "riunione" e' il TITOLO, e l'icona la
-// sceglie chi crea l'evento. Un elenco di tipi nel codice sarebbe la solita
-// regola scritta dove non si puo' cambiare — stessa ragione per cui
-// `materiale_dal_cliente` e' un dato e non un elenco di nomi.
+// ⚠ Niente colonna `tipo`: "pranzo" o "riunione" e' il TITOLO, e basta. Un
+// elenco di tipi nel codice sarebbe la solita regola scritta dove non si puo'
+// cambiare — stessa ragione per cui `materiale_dal_cliente` e' un dato e non
+// un elenco di nomi.
+// ⚠ L'ICONA E' STATA TOLTA il 16 set, il giorno dopo averla messa (chiesto da
+// Nico: *"puoi togliere il campo emoticon"*). Scegliere un'emoji e' un gesto
+// in piu' ogni volta, per una cella da 46 px in cui il segno dice solo
+// "qui c'e' qualcosa" — e quello lo dice gia' il pallino, con il contorno
+// azzurro attorno. La colonna `eventi.icona` resta a database ma **non la
+// legge e non la scrive piu' nessuno**: non si droppa una colonna per un
+// campo tolto, si smette di usarla e lo si scrive.
 // ═══════════════════════════════════════════════════════════════════
 
 // Gli eventi che toccano questo giorno. `data_fine` null = un giorno solo.
@@ -7407,8 +7414,7 @@ function eventiDelGiorno(iso) {
 }
 // L'evento in una riga di testo: "🍝 12:30 — Pranzo aziendale · Trattoria X".
 function eventoEtichetta(e) {
-  return (e.icona ? e.icona + ' ' : '')
-    + (e.ora ? e.ora + ' — ' : '')
+  return (e.ora ? e.ora + ' — ' : '')
     + (e.titolo || 'Evento')
     + (e.luogo ? ' · ' + e.luogo : '');
 }
@@ -7466,7 +7472,7 @@ function sezioneEventi(root) {
       el('td', { class:'mono' }, fmtIT(e.data)
         + (e.data_fine && e.data_fine !== e.data ? ' → ' + fmtIT(e.data_fine) : '')),
       el('td', { class:'mono' }, e.ora || 'tutto il giorno'),
-      el('td', {}, (e.icona ? e.icona + ' ' : '') + (e.titolo || '—')),
+      el('td', {}, e.titolo || '—'),
       el('td', { class:'sub' }, e.luogo || '—'),
       el('td', { class:'sub', style:'max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
         title: e.descrizione || '' }, e.descrizione || '—'),
@@ -7484,7 +7490,7 @@ function sezioneEventi(root) {
 function openEventoModal(e) {
   const isNew = !e;
   e = e || { data: toLocalISO(new Date()), data_fine:'', ora:'', titolo:'',
-    descrizione:'', luogo:'', icona:'' };
+    descrizione:'', luogo:'' };
 
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
@@ -7505,8 +7511,6 @@ function openEventoModal(e) {
     placeholder:'es. Pranzo aziendale, Riunione di reparto, Visita cliente…' });
   const inLuogo = el('input', { type:'text', name:'luogo', value:e.luogo||'',
     placeholder:'es. Trattoria da…, Sala riunioni' });
-  const inIcona = el('input', { type:'text', name:'icona', value:e.icona||'', maxlength:'4',
-    placeholder:'🍝' });
   const inDescr = el('textarea', { name:'descrizione', rows:'2',
     placeholder:'Dettagli (facoltativo)' }, e.descrizione||'');
 
@@ -7514,9 +7518,7 @@ function openEventoModal(e) {
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Dal *'), inData),
       el('div', { class:'field' }, el('label', {}, 'Al (se dura più giorni)'), inFine)),
-    el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Ora'), inOra),
-      el('div', { class:'field' }, el('label', {}, 'Icona'), inIcona)),
+    el('div', { class:'field' }, el('label', {}, 'Ora'), inOra),
     el('div', { class:'field' }, el('label', {}, 'Titolo *'), inTitolo),
     el('div', { class:'field' }, el('label', {}, 'Luogo'), inLuogo),
     el('div', { class:'field' }, el('label', {}, 'Descrizione'), inDescr),
@@ -7553,7 +7555,6 @@ function openEventoModal(e) {
       ora: (fd.get('ora') || '').toString().trim() || null,
       titolo,
       luogo: (fd.get('luogo') || '').toString().trim() || null,
-      icona: (fd.get('icona') || '').toString().trim() || null,
       descrizione: (fd.get('descrizione') || '').toString().trim() || null,
     };
     btnSave.disabled = true; btnSave.textContent = 'Salvataggio…';

@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-16.07"></script>
+<script src="core/db.js?v=2026-09-16.08"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -160,7 +160,7 @@ button{font-family:inherit;}
    ⚠ Non aggiungere un terzo segno alla riga di sopra: ci sta la riga ma non
    il glifo. Un emoji disegna ~12px dentro una casella da 9, e l ultimo esce
    dal bordo — successo, misurato, 3px fuori. */
-.cal-ev{position:absolute;left:50%;transform:translateX(-50%);bottom:3px;font-size:10px;line-height:1;}
+.cal-ev{position:absolute;left:50%;transform:translateX(-50%);bottom:3px;font-size:10px;line-height:1;color:var(--blu);}
 .day-evento{background:var(--sur2);border:1px solid var(--brd);border-left:4px solid var(--acc);border-radius:10px;padding:10px 13px;margin-top:8px;font-size:13px;}
 .day-evento b{color:var(--txt);}
 .day-evento .de-sub{color:var(--mut);margin-top:4px;}
@@ -1277,10 +1277,17 @@ function festiviNazIsoSet(anno) {
 // CHIUSURA e si mette dove stanno le altre. Tenere fuori "blocca il lavoro"
 // e' esattamente cio' che rende sicuro avere due tabelle invece di una.
 //
-// ⚠ Niente colonna `tipo`: "pranzo" o "riunione" e' il TITOLO, e l'icona la
-// sceglie chi crea l'evento. Un elenco di tipi nel codice sarebbe la solita
-// regola scritta dove non si puo' cambiare — stessa ragione per cui
-// `materiale_dal_cliente` e' un dato e non un elenco di nomi.
+// ⚠ Niente colonna `tipo`: "pranzo" o "riunione" e' il TITOLO, e basta. Un
+// elenco di tipi nel codice sarebbe la solita regola scritta dove non si puo'
+// cambiare — stessa ragione per cui `materiale_dal_cliente` e' un dato e non
+// un elenco di nomi.
+// ⚠ L'ICONA E' STATA TOLTA il 16 set, il giorno dopo averla messa (chiesto da
+// Nico: *"puoi togliere il campo emoticon"*). Scegliere un'emoji e' un gesto
+// in piu' ogni volta, per una cella da 46 px in cui il segno dice solo
+// "qui c'e' qualcosa" — e quello lo dice gia' il pallino, con il contorno
+// azzurro attorno. La colonna `eventi.icona` resta a database ma **non la
+// legge e non la scrive piu' nessuno**: non si droppa una colonna per un
+// campo tolto, si smette di usarla e lo si scrive.
 // ═══════════════════════════════════════════════════════════════════
 
 // Gli eventi che toccano questo giorno. `data_fine` null = un giorno solo.
@@ -1295,8 +1302,7 @@ function eventiDelGiorno(iso) {
 }
 // L'evento in una riga di testo: "🍝 12:30 — Pranzo aziendale · Trattoria X".
 function eventoEtichetta(e) {
-  return (e.icona ? e.icona + ' ' : '')
-    + (e.ora ? e.ora + ' — ' : '')
+  return (e.ora ? e.ora + ' — ' : '')
     + (e.titolo || 'Evento')
     + (e.luogo ? ' · ' + e.luogo : '');
 }
@@ -1440,7 +1446,7 @@ function renderFerie() {
     if (evs.length) {
       cell.append(elx('div', { class:'cal-ev',
         title: evs.map(eventoEtichetta).join('\n') },
-        evs[0].icona || '●'));
+        '●'));
     }
     if (mia) {
       const t = tipiById[mia.tipo_assenza_id];
