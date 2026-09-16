@@ -1219,20 +1219,39 @@ function opCampiMancanti(op) {
     if (nAddetti === 0 && nFornitori === 0) mancanti.push('Addetto o fornitore');
   }
 
-  // DISTINTA MANCANTE (11 set, chiesto da Nico). Non e un campo della
-  // commessa ma del prodotto, e sta qui lo stesso perche e la stessa domanda
-  // che fa il triangolo: questa riga e pronta per andare in produzione?
-  // Senza distinta la lista materiali non nasce, e nessuno se ne accorge
-  // finche non apre la commessa.
-  // ⚠ TRANNE DOVE IL MATERIALE LO MANDA IL CLIENTE: li la distinta non manca,
-  // non c'e proprio niente da comprare, e l'avviso sarebbe rumore fisso.
-  if (!materialeDalCliente(op.cliente_id)) {
-    const art = (state.articoli || []).find(a => a.id === op.articolo_id);
-    if (art && !(Array.isArray(art.distinta) && art.distinta.length)) {
-      mancanti.push('Distinta di ' + art.codice + ': senza, la lista materiali non nasce');
-    }
-  }
+  // ⚠ LA DISTINTA MANCANTE NON STA PIU' QUI (16 set, chiesto da Nico:
+  // *"puoi spostare l'avviso per la distinta mancante nella colonna Prep.
+  // Materiale?"*). Stava in questa lista dall'11 set, e finiva nel ⚠ giallo
+  // della colonna **Ordine** insieme a minuti unitari, scadenza e addetti —
+  // cioe' fra i campi della PIANIFICAZIONE. Ma la distinta e' una faccenda di
+  // MATERIALE: la sua casa e' la colonna Prep. Materiale, dove uno guarda
+  // quando si chiede se il materiale c'e'.
+  // Il guadagno non e' solo di ordine: prima, su una commessa senza distinta,
+  // quella colonna diceva *"Materiale: Vuoto"* e basta — muta sul perche',
+  // perche' il conto dei mancanti non esce (niente lista) e il motivo stava
+  // in un'altra colonna. Adesso causa ed effetto sono accanto.
+  // La regola vive in `distintaMancante()`, qui sotto.
   return mancanti;
+}
+
+// LA DISTINTA DEL PRODOTTO MANCA? Ritorna il CODICE articolo, o null.
+// ⚠ Ritorna il codice e non un booleano: chi lo mostra deve poter dire *quale*
+// prodotto — "manca la distinta" senza sapere di cosa manda a cercare.
+// ⚠⚠ TRANNE DOVE IL MATERIALE LO MANDA IL CLIENTE: li' la distinta non manca,
+// non c'e' proprio niente da comprare, e l'avviso sarebbe rumore fisso (39
+// falsi allarmi su Elcotec il giorno stesso). E finche' la colonna
+// `materiale_dal_cliente` non esiste, `materialeDalCliente` risponde true per
+// tutti e l'avviso resta spento del tutto: **chi non sa non accusa**.
+// ⚠ Una regola in UNA funzione sola: la stessa domanda la fanno la colonna
+// Prep. Materiale, la scheda della commessa e il test. Tre copie sarebbero
+// tre occasioni di correggerne due.
+function distintaMancante(op) {
+  if (!op) return null;
+  if (materialeDalCliente(op.cliente_id)) return null;
+  const art = (state.articoli || []).find(a => a.id === op.articolo_id);
+  if (!art) return null;
+  if (Array.isArray(art.distinta) && art.distinta.length) return null;
+  return art.codice || null;
 }
 
 // ============================================================
@@ -9120,6 +9139,22 @@ function renderPianificazione(root) {
     //   2. niente lista    -> le righe che Alnus attribuisce a questo OP
     //   3. niente nemmeno quelle -> il riflesso da una commessa sorella
     const apriMateriali = (e) => { e.stopPropagation(); openOperazioneModal(o, { scheda:'mat' }); };
+    // ⚠ LA DISTINTA MANCANTE VIENE PRIMA DI TUTTO, ed e' alternativa ai
+    // conteggi: senza distinta non c'e' lista, senza lista non c'e' niente da
+    // contare. Il badge ⚠N non uscirebbe comunque — ma prima non usciva
+    // nemmeno una spiegazione, e la colonna restava muta su una commessa che
+    // non puo' partire. Adesso dice la causa invece di tacere l'effetto.
+    const senzaDistinta = (typeof distintaMancante === 'function') ? distintaMancante(o) : null;
+    if (senzaDistinta) {
+      prepCell.append(el('span', {
+        style:'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;'
+          + 'cursor:pointer;color:var(--yel);',
+        title: 'Il prodotto ' + senzaDistinta + ' non ha una distinta.\n\n'
+          + 'Senza distinta la lista materiali della commessa non nasce, quindi qui '
+          + 'non si puo\' dire se manca qualcosa.\n\nClicca per aprire la commessa.',
+        onclick: apriMateriali,
+      }, '⚠ distinta'));
+    }
     let badgeFatto = false;
     if (Array.isArray(o.materiali) && o.materiali.length && typeof materialiCommessa === 'function') {
       const mm = materialiCommessa(o, viveConLista, manPerCodice);

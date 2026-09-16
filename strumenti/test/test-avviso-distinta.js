@@ -12,23 +12,24 @@ const src = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, 
 const sandbox = { console, state: {} };
 vm.createContext(sandbox);
 // Le tre funzioni pure, estratte dal guscio.
-['function contoLavoroDichiarato()', 'function materialeDalCliente(', 'function opCampiMancanti('].forEach(m => {
+// ⚠ Dal 16 set la regola vive in `distintaMancante` e non piu' dentro
+// `opCampiMancanti`: l'avviso e' passato dalla colonna Ordine (i campi della
+// PIANIFICAZIONE) alla colonna Prep. Materiale, dove uno guarda quando si
+// chiede se il materiale c'e'. Il test ci ha guadagnato: prova la regola
+// direttamente, invece che attraverso un aggregatore che fa altre otto cose.
+['function contoLavoroDichiarato()', 'function materialeDalCliente(', 'function distintaMancante('].forEach(m => {
   const i = src.indexOf(m);
   if (i < 0) { console.error('KO: manca ' + m); process.exit(1); }
   vm.runInContext(src.slice(i, src.indexOf('\n}\n', i) + 3), sandbox);
 });
-// Le dipendenze di opCampiMancanti, ridotte all'osso: qui si prova la regola
-// della distinta, non il resto.
-vm.runInContext('function opFasiOf(){return[];} function opMinutiEffettivi(o){return o.minuti||1;}'
-  + ' function getOperazioneAddetti(){return[{}];} function getOperazioneFornitori(){return[];}'
-  + ' function faseAssegnatari(){return{addetti:[],fornitori:[]};}', sandbox);
 
 let ok = 0, ko = 0;
 const sez = t => console.log('\n' + t);
 const t = (nome, cond) => { if (cond) { ok++; console.log('  ok   ' + nome); }
   else { ko++; console.log('  KO   ' + nome); } };
-const avvisi = (op) => sandbox.opCampiMancanti(op);
-const haDistinta = (m) => m.some(x => /Distinta di/.test(x));
+// Ritorna il CODICE del prodotto senza distinta, o null.
+const avvisi = (op) => sandbox.distintaMancante(op);
+const haDistinta = (codice) => !!codice;
 const OP = { id:'o1', cliente_id:'c1', articolo_id:'a1', scadenza:'2026-01-01', minuti:5 };
 
 sez('PRIMA della migrazione: chi non sa non accusa');
@@ -49,7 +50,7 @@ const conColonna = (materiale_dal_cliente, distinta) => {
 {
   conColonna(false, null);
   t('cliente normale senza distinta: avvisa', haDistinta(avvisi(OP)));
-  t('e dice quale prodotto', avvisi(OP).some(x => /ART-1/.test(x)));
+  t('e dice quale prodotto', avvisi(OP) === 'ART-1');
 }
 {
   conColonna(false, []);
@@ -120,6 +121,15 @@ sez('DUE SCHERMATE, UNA SOLA FONTE DELLE PAROLE');
   // e peggio di un messaggio sbagliato: e un invito a premerlo.
   t('niente bottone Crea dalla distinta sul conto lavoro',
     src.includes('if (!isNew && !dalCliente && isAdmin && art)'));
+  // ⚠ La regola sta in UNA funzione, e la colonna Prep. Materiale la chiama.
+  // Se qualcuno la ricopiasse nella cella, le due copie divergerebbero al
+  // primo cambio dell'eccezione conto lavoro.
+  t('la regola della distinta e in una funzione sola',
+    quante('function distintaMancante(') === 1);
+  t('e non e tornata dentro opCampiMancanti',
+    !/opCampiMancanti[\s\S]{0,1600}?art\.distinta/.test(src));
+  t('la colonna Prep. Materiale la usa',
+    src.includes('const senzaDistinta = (typeof distintaMancante'));
   // Il kiosk non scrive niente: e una schermata di sola lettura. Se manca un
   // pezzo la mossa e dell ufficio acquisti, non dell operatore, e un bottone
   // che promettesse il contrario sarebbe peggio del silenzio.

@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.11`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.12`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -175,6 +175,10 @@
 
 - **CHIUSO l 11 set: `aziende.materiale_dal_cliente`.** Il campo che mancava adesso c e, e la regola e diventata un DATO invece di un elenco di nomi nel codice. Nella scheda cliente: *Materiale fornito dal cliente (conto lavoro)*.
   - Da li discendono tre cose, tutte dalla stessa dichiarazione: il **triangolo ⚠** in Ordini cliente non segnala la distinta mancante · la scheda commessa scrive *"Materiale fornito dal cliente: non manca nulla"* invece di *"non ha una distinta"* · sparisce il bottone *Scrivi la distinta*, che li non ha senso.
+  - ⚠⚠ **DAL 16 SET L AVVISO STA NELLA COLONNA «PREP. MATERIALE»**, non piu nel ⚠ giallo della colonna Ordine (chiesto da Nico). Li stava insieme a minuti unitari, scadenza e addetti — i campi della PIANIFICAZIONE — mentre la distinta e una faccenda di MATERIALE.
+    - Il guadagno non e solo di ordine: prima, su una commessa senza distinta, quella colonna diceva *"Materiale: Vuoto"* e basta — **muta sul perche**, perche il conto dei mancanti non esce (niente lista) e il motivo stava in un altra colonna. Adesso si legge `● Completo ⚠ distinta`: lo stato dichiarato e, accanto, il motivo per cui non se ne puo essere sicuri.
+    - La regola e uscita da `opCampiMancanti` e vive in **`distintaMancante(op)`**, che ritorna il CODICE del prodotto (non un booleano: "manca la distinta" senza dire di cosa manda a cercare). Una funzione sola, con dentro la sua eccezione conto lavoro — la chiamano la colonna e il test.
+    - **Sui dati del 16 set: 45 righe col badge**, e zero avvisi di distinta rimasti nella colonna Ordine (che ne conserva 23, tutti di pianificazione).
   - ⚠ **Finche la colonna non esiste l avviso resta SPENTO del tutto** (stesso pattern inerte di `tariffa_cliente`). Acceso a meta darebbe 39 falsi allarmi su Elcotec e 22 su Senzani il giorno stesso: **chi non sa non accusa**.
   - ⚠ **Non e "tranne Elcotec".** L eccezione non e su un nome ma su un modo di lavorare, e i nomi cambiano: Senzani e 22 su 22, Tema Sinergie 10 su 16. Scrivere il nome nel codice sarebbe stato giusto per un giorno.
 
