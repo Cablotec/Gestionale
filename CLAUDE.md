@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -212,7 +212,7 @@
 - **TRE FONTI IN SCALA, sempre dichiarate**: lista congelata (esatta) → righe che Alnus attribuisce all'OP (globali) → riflesso da una commessa sorella. Ogni gradino e piu debole, ma meglio di un silenzio che si legge come "a posto".
 - **Strumenti**: `carica-distinte.js` (⚠ leggere il TESTO della cella, non il valore: 2.820 celle su 38.460 hanno il separatore decimale perso — `0,45` scritto `45`) · `copertura-distinte.js` · `genera-materiali-commesse.js` (⚠ `--sql`, non `--scrivi`: l RLS rifiuta le UPDATE su `operazioni` **in silenzio**, HTTP 200 e zero righe) · `prova-fabbisogno.js`.
 
-## 16 SETTEMBRE: i materiali arrivano al kiosk (`2026-09-16.01`)
+## 16 SETTEMBRE: i materiali arrivano al kiosk (`2026-09-16.02`)
 Chiesto dalla produzione: *"poter visualizzare dal kiosk la lista dei componenti disponibili per ordine, in modo da dare all'operatore la possibilita di vedere se manca qualche materiale nella lavorazione"*.
 
 - **Prima il kiosk diceva UNA cosa sola sul materiale**: `Materiale: Completo/Parziale/Vuoto`, cioe' la tendina impostata da qualcuno in ufficio. E' una DICHIARAZIONE, e puo' essere vecchia di giorni. Adesso accanto c'e' il conto vero, sugli stessi numeri del gestionale — e **quando i due si contraddicono lo si dice**, invece di scegliere quale credere: *"L'ufficio ha dichiarato la preparazione COMPLETA, ma dal magazzino risulta che N componenti mancano"*.
@@ -225,11 +225,23 @@ Chiesto dalla produzione: *"poter visualizzare dal kiosk la lista dei componenti
 - ⚠ Sta in `app.js` e non in domain perche' usa `el`/`fmtIT` e legge `state.operazioni`: e' UI, non motore. Ma **app.js e' lo STESSO file per gestionale e kiosk**, quindi condividerla li' e' condividerla davvero.
 - Il test `test-avviso-distinta.js` e' passato da *"le due schermate dicono la stessa cosa"* a *"la parola si scrive in un posto solo e la usano tutte e due"*: `materialeStatoRiga` definita una volta, chiamata almeno due, e la frase sul conto lavoro identica nei due punti.
 
-### ⚠⚠ L'ARCHIVIO DEL FABBISOGNO NON SI CARICA ALL'AVVIO DEL KIOSK
-- Dal 15 set `mancanti` contiene tutto il file (qualche migliaio di righe, con un jsonb di consegne per riga). Il kiosk e' un **mini-PC di reparto** che gia' scarica commesse, sessioni, addetti e fasi: aggiungerci l'intero magazzino a ogni avvio sarebbe banda buttata per una schermata che si apre qualche volta al giorno.
-- `kioskMancantiDi(op)` chiede **i soli codici di QUELLA commessa** (`.in('codice', …)` a blocchi di 80), presi dalla sua lista congelata che il kiosk ha gia' in memoria. Risultato in caldo 5 minuti. ⚠ `.in()` di supabase-js e non un filtro a mano: fra questi codici ce n'e' con la virgola dentro (`83010FILO0H05VK,25BI`) e in un `in.(a,b)` scritto a mano quella virgola spezzerebbe il valore **senza dare errore**.
-- **Perche' il conto viene identico**: `materialiCommessa` cerca nella mappa dei mancanti **solo i codici che la commessa vuole**; la domanda delle altre commesse (quella che divide la giacenza) arriva da `state.operazioni`, che il kiosk ha. **Verificato sui dati veri: 61 commesse vive con lista, 61 su 61 stesso numero di mancanti** fra il conto del gestionale (archivio intero in memoria) e quello del kiosk (righe scaricate per codice).
-- Se la query fallisce **non si scrive "disponibili"**: si dichiara che le giacenze non si sono lette e si mostra la lista senza stato. Senza le giacenze ogni riga direbbe "disponibile", che e' la bugia piu' costosa possibile qui dentro.
+### ⚠⚠ IL LIMITE CHE AVEVO DATO PER SCONTATO NON ESISTEVA
+La prima stesura della mattina scaricava l'archivio **per commessa, al momento**, per paura del peso — e da quella paura discendeva tutto: niente conto sulle card, una cache da cinque minuti, una schermata asincrona con lo spinner. Nico ha chiesto il conto anche sulle card (*"se la card mostra quello che mostra quando apro i materiali di un ordine sono a posto"*), e allora la paura si e' **MISURATA** invece di restare un'opinione:
+
+| | |
+|---|---|
+| `mancanti`, sole colonne che servono | **204 byte a riga** → 56 KB sull'archivio di oggi (273 righe) |
+| `state.operazioni`, che il kiosk gia' scarica a ogni avvio | **713 KB** |
+| caricamento dell'archivio | **109 ms** |
+| conto dei mancanti per tutte le 61 commesse vive | **135 ms** |
+
+Cioe': l'archivio intero pesa **meno di un decimo** di quello che il kiosk scarica gia', e il conto costa meno di due fotogrammi. Anche decuplicato sarebbe mezzo megabyte.
+- **Da qui in poi: prima di rinunciare a una cosa per il peso, pesare.** Un limite dato per scontato e' costato una struttura piu' complicata (cache, spinner, async) per difendere un costo che non c'era.
+- Effetto collaterale che vale da solo: **la schermata e' SINCRONA** come tutto il resto del kiosk. Niente attesa, niente spinner, niente cache da invalidare.
+- `kioskCaricaMancanti()` gira **dopo `kioskLoadAll` e fuori di essa**, di proposito: non deve poter far fallire l'avvio. Prende solo le colonne che servono (`id`, `numero_op`, `created_at`, `import_data`, `prima_consegna`, `data_arrivo`, `fornitore` qui non li legge nessuno: il conto si fa dalla lista congelata della commessa, non attribuendo le righe agli OdL).
+- ⚠⚠ **`null` NON e' `[]`, e qui la differenza e' tutta la scheda.** Caricamento fallito → `state.mancanti = null` → il kiosk **tace** sui materiali. Se fosse `[]` si leggerebbe "archivio vuoto" e ogni riga direbbe **"disponibile"**: la bugia piu' cara che questa schermata possa dire a un operatore. Un archivio genuinamente vuoto (nessuna estrazione importata) si comporta allo stesso modo — non si sa, quindi non si parla. Il test lo sorveglia.
+- **Perche' il conto viene identico a quello del gestionale**: `materialiCommessa` cerca nella mappa dei mancanti solo i codici che la commessa vuole, e la domanda delle altre commesse (quella che divide la giacenza) arriva da `state.operazioni`, che il kiosk ha. **Verificato sui dati veri due volte — con l'archivio per commessa e con l'archivio intero: 61 commesse su 61, stesso numero.**
+- ⚠ **Le due mappe fuori dal ciclo** (`materialiBase`): rifarle per ogni card voleva dire rileggere tutte le operazioni e tutto l'archivio 61 volte — 196 ms contro 135. E' la regola gia' scritta per la tabella Ordini cliente, dimenticata qui perche' la prima versione contava UNA commessa per volta. **Quando un conto passa da "uno" a "tutti", la prima cosa da guardare e' cosa c'e' dentro il ciclo che non dipende dall'elemento.**
 
 ### Le due liste da non dimenticare
 - ⚠ Una schermata nuova va **DICHIARATA in due elenchi**, o sparisce o blocca:
@@ -237,8 +249,12 @@ Chiesto dalla produzione: *"poter visualizzare dal kiosk la lista dei componenti
   - `kioskInSchermataAttiva` — senza, il timer di inattivita' non si azzera e **l'operatore che legge una distinta da 80 righe viene sbattuto fuori a meta'**. E' la schermata che si legge piu' a lungo di tutte.
 - ⚠ **Griglia CSS e auto-placement** (trovato misurando a 800px): dopo un elemento che occupa tutte le colonne, il flusso riparte dalla colonna 1 — la quantita' scivolava sotto il codice e la seconda colonna restava larga 0. Codice e quantita' vanno **piazzati a mano** (`grid-row:1`) nel ripiego stretto.
 
-### Filo aperto
-- **Sulle card dell'elenco commesse il conto NON c'e'**: resta la sola dichiarazione dell'ufficio. Metterlo vorrebbe dire una query per card all'apertura dell'elenco, oppure caricare l'archivio all'avvio — le due cose che si stanno evitando. Se servisse davvero, la strada giusta e' una vista/RPC che torni il solo conteggio per OP.
+### IL CONTO STA ANCHE SULLE CARD
+- Sulla riga che gia' diceva `Materiale: Completo/Parziale/Vuoto` adesso c'e' anche il conto vero, separato da una barretta: `● Materiale: Completo │ ⚠ 5 mancano`. **Due affermazioni diverse, non una frase sola** — la prima e' cosa qualcuno ha dichiarato, la seconda cosa risulta dal magazzino adesso. Quando si contraddicono si vede senza aprire niente, ed e' il caso piu' frequente: sui dati veri, 104 card, 56 col conto, **38 rosse**.
+- **La card e il bottone passano dalla stessa `kioskEsitoMateriali`**: se dicessero numeri diversi, l'operatore che vede "⚠ 2" in elenco e poi non lo ritrova smette di fidarsi di quello che legge.
+- Il **titolo** della card elenca i primi otto codici che mancano, con la loro riga (`· 4062046  mancano 35 · lo manda il cliente`): chi ci passa sopra vuole sapere QUALI, non solo quanti.
+- Sulle commesse **senza lista** (conto lavoro) la riga tace: direbbe una cosa che non riguarda chi deve lavorare, e la card e' gia' piena.
+- ⚠ Il conto si rifa' in `kioskRenderOpList` e `kioskRenderAttiva`, **prima del ciclo delle card** (`kioskRicalcolaMateriali`), e finisce in `kioskState.matPerOp` con dentro anche le `voci` gia' ordinate: aprire il dettaglio non ricalcola niente.
 
 ## 15 SETTEMBRE: la scheda Materiali diventa una lista (`2026-09-15.01`)
 Chiesto da Nico: *"lista materiali pura con colonne giacenza, mancanti ecc (colonne ordinabili) · avviso banner con ritardi e prossime consegne uniti, un banner da ordinare a parte"*, piu la constatazione che *"le altre schede tipo fabbisogno calcolato non lo stiamo usando, non e pratico per adesso"*.

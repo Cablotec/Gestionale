@@ -131,10 +131,21 @@ sez('DUE SCHERMATE, UNA SOLA FONTE DELLE PAROLE');
   t('il blocco kiosk dei materiali esiste ed e delimitato', bloccoKiosk.length > 500);
   t('e non contiene nessuna scrittura a database',
     !/\.(insert|update|delete|upsert)\s*\(/.test(bloccoKiosk));
-  // Le giacenze si chiedono per i codici di UNA commessa, non tutte: il kiosk
-  // e un mini-PC e `mancanti` dal 15 set contiene l intero file.
-  t('le giacenze si chiedono per codice, non in blocco',
-    /\.in\('codice'/.test(bloccoKiosk));
+  // ⚠ SENZA GIACENZE NON SI DICE "DISPONIBILE". L archivio si carica all avvio
+  // e puo non arrivare (tabella assente, RLS, rete): in quel caso
+  // `state.mancanti` resta null, e null NON e `[]`. Se qualcuno lo
+  // inizializzasse a lista vuota, ogni riga direbbe "disponibile" e il kiosk
+  // manderebbe l operatore a montare un pezzo che non c e.
+  t('il caricamento fallito lascia null, non una lista vuota',
+    /state\.mancanti = null/.test(bloccoKiosk));
+  t('e il conto si rifiuta di parlare senza archivio',
+    /!Array\.isArray\(state\.mancanti\)/.test(bloccoKiosk));
+  // Il conto per tutte le commesse si fa UNA volta, fuori dal ciclo delle
+  // card: dentro `materialiCommessa` c e `fabbisognoDaListe`, che ricostruisce
+  // la domanda di tutte. Chiamarla per card vorrebbe dire rifare quel giro
+  // cinquanta volte.
+  t('il conto delle card si fa una volta prima del ciclo',
+    (src.split('kioskRicalcolaMateriali()').length - 1) >= 2);
 }
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');

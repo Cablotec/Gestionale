@@ -4170,9 +4170,19 @@ function riquadroListeMaterialiMancanti() {
 // `righeMancanti` = l'archivio del fabbisogno. Nel gestionale e'
 // `state.mancanti`, che sta tutto in memoria; nel kiosk sono le righe dei
 // SOLI codici di questa commessa, scaricate al momento (vedi
-// `kioskMancantiDi`). Il conto viene identico: `materialiCommessa` cerca in
+// `kioskCaricaMancanti`). Il conto viene identico: `materialiCommessa` cerca in
 // questa mappa solo i codici che la commessa vuole.
-function materialiStatoCommessa(op, righeMancanti) {
+// Le due mappe che NON dipendono dalla commessa. ⚠ Si costruiscono UNA volta
+// e si passano a tutte le chiamate: rifarle per ogni commessa vuol dire
+// rileggere ogni volta tutte le operazioni e tutto l'archivio. Misurato sul
+// kiosk, 61 commesse: **196 ms rifacendole ogni volta, 135 costruendole una
+// volta sola**. Il resto sta dentro `materialiCommessa`, che si ricostruisce
+// la domanda di tutte le commesse a ogni chiamata (`fabbisognoDaListe`): da
+// li' non si scende senza toccare il domain, e per un conto che si fa una
+// volta per disegnata non ne vale la pena.
+// E' la stessa regola gia' scritta per la tabella Ordini cliente, dimenticata
+// qui perche' la prima versione contava UNA commessa per volta.
+function materialiBase(righeMancanti) {
   const viveConLista = (state.operazioni || []).filter(x =>
     (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
   // ⚠ SOLO LE RIGHE SOTTO SCORTA (15 set). `materialiCommessa` in domain ha un
@@ -4185,6 +4195,11 @@ function materialiStatoCommessa(op, righeMancanti) {
     const k = String(m && m.codice || '').trim();
     if (k && mancanteSottoScorta(m)) manPerCodice[k] = m;
   });
+  return { viveConLista, manPerCodice };
+}
+
+function materialiStatoCommessa(op, righeMancanti, base) {
+  const { viveConLista, manPerCodice } = base || materialiBase(righeMancanti);
   const mio = (typeof materialiCommessa === 'function')
     ? materialiCommessa(op, viveConLista, manPerCodice) : null;
   return {
@@ -13948,6 +13963,12 @@ async function kioskInit() {
 
   // Carica dati iniziali
   await kioskLoadAll();
+  // L'archivio del fabbisogno: serve al conto dei materiali sulle card e
+  // nella schermata di dettaglio. A parte e non dentro `kioskLoadAll` perche'
+  // non deve poter far fallire l'avvio: se la tabella non c'e' o l'RLS la
+  // rifiuta, `state.mancanti` resta null e il kiosk semplicemente tace sui
+  // materiali, invece di restare alla schermata di errore.
+  await kioskCaricaMancanti();
   kioskStartRealtime();
 
   // Orologio
@@ -15275,6 +15296,11 @@ function kioskRenderOpList() {
   $('#kiosk-op-name').textContent = 'Ciao ' + u.nome + ' — seleziona operazione';
   const root = $('#kiosk-op-list-content');
   root.innerHTML = '';
+  // ⚠ QUI, prima del ciclo, e non dentro `kioskOpCard`: il conto di una
+  // commessa ricostruisce la domanda di TUTTE (la giacenza si divide fra chi
+  // vuole lo stesso codice), e rifarlo per ogni card vorrebbe dire rifare
+  // quel giro cinquanta volte. Tutte insieme: 57 ms misurati su 61 commesse.
+  kioskRicalcolaMateriali();
 
   // Operazioni aperte = non spedite e non completate
   // (al kiosk si timbra solo su quelle ancora in lavorazione).
@@ -15576,11 +15602,28 @@ function kioskOpCard(o, opts = {}) {
   }
 
   // Stato preparazione materiale (richiesto dalla produzione): pallino + etichetta.
+  // ⚠ DUE COSE DIVERSE SULLA STESSA RIGA, e vanno tenute distinte:
+  //   la tendina  = cosa qualcuno in ufficio ha DICHIARATO
+  //   il conto    = cosa risulta dal magazzino, adesso
+  // Prima c'era solo la prima, e una dichiarazione vecchia di giorni mandava
+  // l'operatore a montare un pezzo che non c'e'. Adesso ci sono tutte e due,
+  // e quando si contraddicono si vede senza aprire niente.
   const prepKey = o.stato_preparazione || 'vuoto';
   const prepInline = el('div', { class:'kop-prep-inline' },
     el('span', { class:'prep-dot ' + (OP_PREP[prepKey]?.classe || 'vuoto') }),
     'Materiale: ' + (OP_PREP[prepKey]?.label || '—'),
   );
+  {
+    // La stessa funzione del bottone: la card e la schermata di dettaglio non
+    // possono dire numeri diversi (richiesta di Nico, 16 set).
+    const e = kioskEsitoMateriali(o);
+    // Sul "nessuna lista"/"dal cliente" si tace: la riga direbbe una cosa che
+    // non riguarda chi deve lavorare, e la card e' gia' piena.
+    if (e.manca || /^✓/.test(e.testo) || e.colore === 'var(--yel)') {
+      prepInline.append(el('span', { class:'kop-mat-conto' + (e.manca ? ' manca' : ''),
+        style:'color:' + e.colore + ';', title: e.titolo }, e.testo));
+    }
+  }
 
   // Pulsante "Riapri" per le schede completate (annulla "ho finito la mia fase").
   const footRight = opts.reopen
@@ -15644,40 +15687,81 @@ function kioskSelectOperazione(o) {
 // un bottone che promette il contrario sarebbe peggio del silenzio.
 // ═══════════════════════════════════════════════════════════════════
 
-// ⚠⚠ L'ARCHIVIO DEL FABBISOGNO NON SI CARICA ALL'AVVIO DEL KIOSK.
-// Dal 15 set la tabella `mancanti` contiene TUTTO il file dell'estrazione
-// (qualche migliaio di righe, con un jsonb di consegne per riga). Il kiosk e'
-// un mini-PC di reparto che sta acceso tutto il giorno e che gia' scarica
-// commesse, sessioni, addetti e fasi: aggiungerci l'intero magazzino a ogni
-// avvio sarebbe banda buttata per una schermata che si apre qualche volta al
-// giorno.
-// Qui servono i codici di UNA commessa per volta — e quali siano lo dice la
-// sua lista congelata, che il kiosk ha gia' in memoria. Quindi si chiede
-// esattamente quello: una `in(codice, ...)` da qualche decina di righe.
-// Il risultato si tiene in caldo qualche minuto, perche' fra "guardo i
-// materiali" e "avvio il lavoro" l'operatore ci torna su.
-const KIOSK_MAT_TTL_MS = 5 * 60 * 1000;
-const kioskMatCache = new Map();     // operazione_id -> { quando, righe }
+// ⚠⚠ L'ARCHIVIO SI CARICA ALL'AVVIO, E IL CONTO STA SULLE CARD (16 set).
+// La prima stesura di stamattina lo scaricava PER COMMESSA, al momento, per
+// paura del peso: dal 15 set `mancanti` contiene tutto il file. Nico ha
+// chiesto il conto anche sulle card dell'elenco — *"se la card mostra quello
+// che mostra quando apro i materiali di un ordine sono a posto"* — e con una
+// query per commessa quella cosa non si poteva fare.
+//
+// Allora la paura si e' MISURATA, invece di restare un'opinione:
+//   · `mancanti` con le sole colonne che servono: 204 byte a riga.
+//     Sull'archivio di oggi (273 righe) sono 56 KB. Anche decuplicato,
+//     mezzo megabyte.
+//   · `state.operazioni`, che il kiosk gia' scarica a ogni avvio: 713 KB.
+//   · il conto dei mancanti per TUTTE le 61 commesse vive: 57 ms.
+// Cioe': l'archivio intero pesa meno di un decimo di quello che il kiosk
+// scarica gia', e il conto costa meno di un fotogramma.
+// **Il limite che avevo dato per scontato non esisteva.** Da qui in poi,
+// prima di rinunciare a una cosa per il peso, misurare il peso.
+//
+// Effetto collaterale che vale da solo: niente piu' attesa, niente spinner,
+// niente cache da invalidare. La schermata e' SINCRONA come tutto il resto
+// del kiosk.
+//
+// ⚠ Si prendono solo le colonne che servono. `id`, `numero_op`, `created_at`,
+// `import_data`, `prima_consegna`, `data_arrivo`, `fornitore` qui non li
+// legge nessuno: il kiosk non attribuisce le righe agli OdL (il conto lo fa
+// dalla lista congelata della commessa) e le consegne le tira dal jsonb.
+const KIOSK_MANCANTI_COLONNE = 'codice,descrizione,um,tipo_parte,'
+  + 'qta_da_ordinare,qta_richiesta,giacenza,impegno,consegne';
 
-async function kioskMancantiDi(op) {
-  if (!op || !Array.isArray(op.materiali) || !op.materiali.length) return [];
-  const in_ = kioskMatCache.get(op.id);
-  if (in_ && (Date.now() - in_.quando) < KIOSK_MAT_TTL_MS) return in_.righe;
-  const codici = [...new Set(op.materiali
-    .map(r => String(r && r.codice || '').trim()).filter(Boolean))];
-  const righe = [];
-  // ⚠ `.in()` di supabase-js e NON un filtro costruito a mano: fra questi
-  // codici ce ne sono con la virgola dentro (`83010FILO0H05VK,25BI`) e in un
-  // `in.(a,b)` scritto a mano quella virgola spezzerebbe il valore in due —
-  // con la query che torna dati sbagliati SENZA dare errore.
-  for (let i = 0; i < codici.length; i += 80) {
-    const { data, error } = await sb.from('mancanti').select('*')
-      .in('codice', codici.slice(i, i + 80));
-    if (error) throw error;
-    (data || []).forEach(r => righe.push(r));
-  }
-  kioskMatCache.set(op.id, { quando: Date.now(), righe });
-  return righe;
+// ⚠⚠ `null` NON E' `[]`, e qui la differenza e' tutta la scheda.
+//   null = l'archivio non si e' potuto leggere -> NON si dice niente sui
+//          materiali, perche' senza giacenze ogni riga sembrerebbe
+//          disponibile, ed e' la bugia piu' cara che questa schermata possa
+//          dire a un operatore.
+//   []   = archivio vuoto (nessuna estrazione importata) -> stessa cosa: non
+//          si sa, quindi non si parla.
+// Per questo il caricamento fallito lascia `null` e non `[]`.
+async function kioskCaricaMancanti() {
+  try {
+    const { data, error } = await fetchTutte(() =>
+      sb.from('mancanti').select(KIOSK_MANCANTI_COLONNE).order('codice'));
+    if (error) { state.mancanti = null; return; }
+    state.mancanti = data || [];
+  } catch (e) { state.mancanti = null; }
+}
+
+// Il conto dei materiali per TUTTE le commesse vive, in un colpo solo.
+// ⚠ UNA volta per disegnata, non una per card: dentro `materialiCommessa` c'e'
+// `fabbisognoDaListe`, che ricostruisce la domanda di TUTTE le commesse.
+// Chiamarla dentro il ciclo delle card vorrebbe dire rifare quel giro per
+// ognuna — e' lo stesso inciampo gia' scritto per la tabella Ordini cliente.
+// Ritorna Map operazione_id -> { totale, mancano, voci }, e le `voci` sono
+// gia' quelle che disegna la schermata di dettaglio: aprirla non ricalcola.
+function kioskRicalcolaMateriali() {
+  const out = new Map();
+  kioskState.matPerOp = out;
+  if (!Array.isArray(state.mancanti) || !state.mancanti.length) return out;
+  const base = materialiBase(state.mancanti);
+  (state.operazioni || []).forEach(op => {
+    if (op.stato !== 'aperta' && op.stato !== 'sospesa') return;
+    if (!Array.isArray(op.materiali) || !op.materiali.length) return;
+    out.set(op.id, kioskRiepilogoMateriali(op, state.mancanti, base));
+  });
+  return out;
+}
+
+// Il riepilogo di UNA commessa. Si passa da qui anche quando la mappa non c'e'
+// (schermata aperta prima del ricalcolo): costa un millisecondo.
+function kioskContoMateriali(op) {
+  if (!op) return null;
+  const pronto = kioskState.matPerOp && kioskState.matPerOp.get(op.id);
+  if (pronto) return pronto;
+  if (!Array.isArray(state.mancanti) || !state.mancanti.length) return null;
+  if (!Array.isArray(op.materiali) || !op.materiali.length) return null;
+  return kioskRiepilogoMateriali(op, state.mancanti);
 }
 
 // Il riepilogo di una commessa: quanti componenti, quanti ne mancano.
@@ -15688,8 +15772,8 @@ async function kioskMancantiDi(op) {
 const KIOSK_MAT_PESO = { in_ritardo:0, da_ordinare:1, attesa_cliente:2, in_arrivo:3,
   coperto:4, disponibile:5, consumo:6, segnaposto:7 };
 
-function kioskRiepilogoMateriali(op, righeMancanti) {
-  const ctx = materialiStatoCommessa(op, righeMancanti);
+function kioskRiepilogoMateriali(op, righeMancanti, base) {
+  const ctx = materialiStatoCommessa(op, righeMancanti, base);
   const voci = (op.materiali || []).map(r => {
     const st = materialeStatoRiga(r.codice, r.tipo, ctx);
     return { riga: r, st };
@@ -15742,29 +15826,20 @@ function kioskRenderMateriali() {
     return;
   }
 
-  const caricando = el('div', { class:'kiosk-empty' }, 'Controllo il magazzino…');
-  root.append(caricando);
-
-  (async () => {
-    let righe = null, errore = null;
-    try { righe = await kioskMancantiDi(o); } catch (e) { errore = e; }
-    // La schermata puo' essere gia' cambiata: l'operatore non aspetta.
-    if (kMat.op !== o || $('#kiosk-step-materiali').style.display === 'none') return;
-    caricando.remove();
-
-    if (errore) {
-      // ⚠ Si dice che il conto NON si e' potuto fare, e non si mostra la lista
-      // come se fosse tutta a posto: senza le giacenze ogni riga direbbe
-      // "disponibile", che e' esattamente la bugia piu' costosa qui dentro.
-      root.append(el('div', { class:'kmat-avviso warn' },
-        '⚠ Non riesco a leggere le giacenze (' + (errore.message || errore) + ').'
-        + ' La lista dei componenti c\'è, ma NON posso dire se manca qualcosa.'));
-      const { voci } = kioskRiepilogoMateriali(o, []);
-      root.append(kioskListaMateriali(voci, { senzaStato: true }));
-      return;
-    }
-
-    const r = kioskRiepilogoMateriali(o, righe);
+  // ⚠ SENZA GIACENZE NON SI DICE NIENTE, e si dichiara di non saperlo. La
+  // lista dei componenti c'e' lo stesso — serve comunque a chi lavora — ma
+  // ogni riga apparirebbe "disponibile", che e' la bugia piu' cara che questa
+  // schermata possa dire a un operatore.
+  const r = kioskContoMateriali(o);
+  if (!r) {
+    root.append(el('div', { class:'kmat-avviso warn' },
+      '⚠ Non ho le giacenze del magazzino: la lista dei componenti c\'è, '
+      + 'ma NON posso dire se manca qualcosa. Chiedi in ufficio.'));
+    root.append(kioskListaMateriali(
+      kioskRiepilogoMateriali(o, []).voci, { senzaStato: true }));
+    return;
+  }
+  {
     // ── Il verdetto, grande, in cima ──
     const ok = r.mancano === 0;
     root.append(el('div', { class:'kmat-verdetto ' + (ok ? 'ok' : 'ko') },
@@ -15795,7 +15870,7 @@ function kioskRenderMateriali() {
     }
 
     root.append(kioskListaMateriali(r.voci, {}));
-  })();
+  }
 }
 
 // L'elenco vero e proprio. `opts.senzaStato` quando le giacenze non si sono
@@ -15826,37 +15901,44 @@ function kioskListaMateriali(voci, opts) {
 // sapere se manca qualcosa vorrebbe dire che chi non preme non lo sa. Il
 // bottone serve per il DETTAGLIO — quale pezzo, e quando arriva.
 function kioskBottoneMateriali(op, ritorno) {
-  const btn = el('button', { class:'kmat-btn', onclick: () => kioskGoToMateriali(op, ritorno) },
+  const e = kioskEsitoMateriali(op);
+  const btn = el('button', { class:'kmat-btn' + (e.manca ? ' manca' : ''),
+    onclick: () => kioskGoToMateriali(op, ritorno) },
     el('span', { class:'kmat-btn-ico' }, '📦'),
     el('span', { class:'kmat-btn-testo' }, 'Materiali'),
-    el('span', { class:'kmat-btn-esito' }, '…'));
-  const esito = btn.querySelector('.kmat-btn-esito');
-  if (!Array.isArray(op.materiali) || !op.materiali.length) {
-    esito.textContent = materialeDalCliente(op.cliente_id) ? 'dal cliente' : 'nessuna lista';
-    esito.style.color = 'var(--mut)';
-    return btn;
-  }
-  (async () => {
-    try {
-      const righe = await kioskMancantiDi(op);
-      if (!btn.isConnected) return;
-      const r = kioskRiepilogoMateriali(op, righe);
-      if (r.mancano) {
-        esito.textContent = '⚠ ' + r.mancano + ' mancano';
-        esito.style.color = 'var(--red)';
-        btn.classList.add('manca');
-      } else {
-        esito.textContent = '✓ ' + r.totale + ' disponibili';
-        esito.style.color = 'var(--grn)';
-      }
-    } catch (e) {
-      if (!btn.isConnected) return;
-      // Non si scrive "disponibili" quando non si e' potuto guardare.
-      esito.textContent = 'giacenze non lette';
-      esito.style.color = 'var(--yel)';
-    }
-  })();
+    el('span', { class:'kmat-btn-esito', style:'color:' + e.colore + ';', title: e.titolo }, e.testo));
   return btn;
+}
+
+// L'esito in tre parole, per il bottone e per la card dell'elenco.
+// ⚠ UNA funzione per tutti e due (16 set): la card e il bottone devono dire
+// la stessa cosa, o l'operatore che vede "⚠ 2" in elenco e poi non lo ritrova
+// smette di fidarsi di quello che legge. Ed e' esattamente la richiesta di
+// Nico: *"se la card mostra quello che mostra quando apro i materiali di un
+// ordine sono a posto"*.
+// Ritorna { testo, colore, titolo, manca }.
+function kioskEsitoMateriali(op) {
+  if (!op || !Array.isArray(op.materiali) || !op.materiali.length) {
+    return materialeDalCliente(op && op.cliente_id)
+      ? { testo:'dal cliente', colore:'var(--mut)', manca:false,
+          titolo:'Materiale fornito dal cliente: non c\'è niente da prelevare.' }
+      : { testo:'nessuna lista', colore:'var(--mut)', manca:false,
+          titolo:'Questa commessa non ha ancora la sua lista materiali.' };
+  }
+  const r = kioskContoMateriali(op);
+  if (!r) return { testo:'giacenze non lette', colore:'var(--yel)', manca:false,
+    titolo:'Non ho le giacenze del magazzino: non posso dire se manca qualcosa.' };
+  if (!r.mancano) return { testo:'✓ ' + r.totale + ' disponibili', colore:'var(--grn)', manca:false,
+    titolo:'Il magazzino copre tutti i ' + r.totale + ' componenti di questa commessa.' };
+  // Nel titolo i primi codici che mancano: chi passa sopra alla card vuole
+  // sapere QUALI, non solo quanti.
+  const quali = r.voci.filter(v => v.st.manca > 0).slice(0, 8)
+    .map(v => '· ' + v.riga.codice + '  ' + v.st.testo);
+  return { testo:'⚠ ' + r.mancano + (r.mancano === 1 ? ' manca' : ' mancano'),
+    colore:'var(--red)', manca:true,
+    titolo: r.mancano + (r.mancano === 1 ? ' componente su ' : ' componenti su ')
+      + r.totale + (r.mancano === 1 ? ' manca' : ' mancano') + ' a questa commessa:\n\n'
+      + quali.join('\n') + (r.mancano > 8 ? '\n… e altri ' + (r.mancano - 8) : '') };
 }
 
 // ─── Schermata selezione tipo lavorazione ───
@@ -16319,6 +16401,9 @@ function kioskRenderAttiva() {
   $('#kiosk-attiva-name').textContent = 'Stai lavorando, ' + u.nome;
   const root = $('#kiosk-attiva-content');
   root.innerHTML = '';
+  // Anche qui: sotto la sessione attiva c'e' la coda delle prossime commesse,
+  // disegnata con le stesse card.
+  kioskRicalcolaMateriali();
 
   // La sessione può essere su una commessa (operazione_id) o su un'attività
   // extra (attivita_id). Le due informazioni sono mutuamente esclusive.
