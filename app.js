@@ -8634,26 +8634,6 @@ function mancantiTooltip(mc, numeroOp, oggiIso) {
     + '\n\nClicca per aprire la scheda Materiali di questa commessa.';
 }
 
-// Testo del triangolo ⚠↗ (mancante contato su un'altra commessa dello stesso
-// articolo). Dice tre cose, in quest'ordine: che qui non c'è nessuna riga, che
-// questo NON vuol dire che il materiale ci sia, e dove sta scritto il conto.
-function riflessiTooltip(riflessi, op, art) {
-  const dove = riflessi.map(r => '· ' + (r.op.numero_ordine || '?') + '/' + (r.op.pos || '?')
-    + '  ' + (r.op.numero_op || '—')
-    + (r.op.scadenza ? '  (scad. ' + fmtIT(r.op.scadenza) + ')' : '')
-    + ' → ' + (r.mc.nBloccanti ? r.mc.nBloccanti + ' da ordinare su ' + r.mc.nCodici + ' codici'
-                               : r.mc.nCodici + ' codici, nessuno da ordinare'));
-  return '⚠ Su ' + (op.numero_op || 'questa commessa') + ' non c\'è nessuna riga di fabbisogno'
-    + ' — ma NON vuol dire che il materiale ci sia.\n\n'
-    + 'Il fabbisogno attribuisce ogni codice mancante a UNA SOLA commessa: quella che\n'
-    + 'lo consuma per prima ("OdL Prossimo Impegno"). Questa fa lo stesso articolo'
-    + (art ? ' ' + art : '') + '\ndi:\n\n'
-    + dove.join('\n')
-    + '\n\nStesso articolo = stessi materiali, e la carenza nel file è già calcolata\n'
-    + 'su tutti gli impegni, questo compreso.'
-    + '\n\nClicca per aprire i materiali di ' + (riflessi[0].op.numero_op || '') + '.';
-}
-
 function renderPianificazione(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.opSearch || '').toLowerCase();
@@ -9199,22 +9179,6 @@ function renderPianificazione(root) {
             + ', che è globale.\n\n' + mancantiTooltip(mc, o.numero_op),
           onclick: apriMateriali,
         }, '⚠' + etichetta));
-      } else if (typeof mancantiRiflessi === 'function') {
-        // Senza lista e senza righe proprie resta il riflesso: debole, ma
-        // meglio di un silenzio che si legge come 'a posto'.
-        const rifl = mancantiRiflessi(o);
-        if (rifl.length) {
-          const tBlocc = rifl.reduce((n, r) => n + r.mc.nBloccanti, 0);
-          const tAttesa = rifl.reduce((n, r) => n + r.mc.nAttesaCliente, 0);
-          const tCod = rifl.reduce((n, r) => n + r.mc.nCodici, 0);
-          prepCell.append(el('span', {
-            style: 'margin-left:6px;font-size:11px;font-family:JetBrains Mono,monospace;font-weight:700;'
-              + 'cursor:pointer;color:'
-              + (tBlocc ? 'var(--red)' : (tAttesa ? 'var(--or)' : 'var(--yel)')) + ';',
-            title: riflessiTooltip(rifl, o, (art && art.codice) || ''),
-            onclick: apriMateriali,
-          }, '⚠↗' + (tBlocc ? tBlocc + '/' + tCod : String(tCod))));
-        }
       }
     }
     tr.append(prepCell);

@@ -1414,46 +1414,29 @@ function opSoloPrefisso(v) {
 function prefissoOpCorrente() {
   return new Date().getFullYear() + '/OP/';
 }
-// ⚠⚠ IL FABBISOGNO ATTRIBUISCE UN MANCANTE A UNA COMMESSA SOLA (1 set,
-// trovato da Nico su 2026/OC/00385). La colonna dell'estrazione si chiama
-// `OdL Prossimo Impegno`: ogni riga del file è un CODICE, e l'OdL scritto
-// accanto è quello che quel codice lo consumerà PER PRIMO. Due commesse dello
-// stesso articolo vogliono gli stessi materiali, ma il mancante finisce tutto
-// sulla più vicina a scadere — e l'altra risulta pulita.
-//   pos 0010 · OP 01917 · 100 pz · 04/09 -> 6 codici mancanti
-//   pos 0020 · OP 01918 ·  50 pz · 03/11 -> nessuno
-// La riga `30 010 0510_K` sotto la prima diceva: richiesta 150, giacenza 0.
-// **150 = 100 + 50**, cioè il fabbisogno di TUTTE E DUE scritto sotto una sola.
+// ⚠⚠ QUI C'ERA `mancantiRiflessi`, ED E' STATA TOLTA IL 16 SET.
+// Rispondeva a una domanda vera dell'1 set: il fabbisogno di Alnus attribuisce
+// ogni codice mancante a UNA commessa sola (la colonna `OdL Prossimo Impegno`),
+// quindi una sorella dello stesso articolo poteva sembrare pulita mentre era
+// ferma. Allora trovava 19 casi veri su 116 commesse.
 //
-// Quindi "nessun codice mancante" NON vuol dire "il materiale c'è": può voler
-// dire "è già contato su un'altra commessa". Questa funzione trova quel caso.
+// ⚠ DUE GIORNI DOPO quella domanda e' sparita: il 3 set e' arrivata
+// `operazioni.materiali`, la lista congelata, e da quel momento ogni commessa
+// che ce l'ha calcola il SUO mancante esatto invece di dedurlo da una sorella.
+// Il riflesso e' rimasto acceso solo per chi la lista non ce l'ha.
 //
-// Perché lo stesso ARTICOLO e non altro: stesso articolo = stessa distinta =
-// stessi codici; e la carenza nel file è GLOBALE (impegno − giacenza su tutti
-// gli impegni, questa commessa compresa), quindi se manca per la sorella manca
-// anche per questa. È l'unico riflesso che si può affermare senza inventare.
-// ⚠ Il caso generale NON è risolvibile: per un componente condiviso fra
-// articoli DIVERSI il legame codice→OdL è già stato ridotto a uno solo prima
-// di arrivare a noi, e da questa estrazione non si ricostruisce. Chi un giorno
-// avrà la distinta base potrà farlo davvero; con il fabbisogno da solo, no.
+// ⚠⚠ E per quelle il riflesso e' IMPOSSIBILE PER COSTRUZIONE, non raro:
+// chi non ha la lista e' conto lavoro (46 dichiarato + 29 di fatto, sui dati
+// del 16 set), il suo articolo non ha distinta, e la sorella — stesso articolo
+// — non ha distinta nemmeno lei. Non c'e' niente da riflettere.
+// Misurato: **fonte 1 (lista congelata) 39 badge su 60 commesse · fonte 2
+// (righe Alnus sull'OP) 0 su 75 · fonte 3 (riflesso) 0**.
 //
-// Ritorna [] se la commessa ha già righe sue (il suo badge dice già il vero).
-function mancantiRiflessi(op, oggiIso) {
-  if (!op || !op.articolo_id) return [];
-  if (mancantiCommessa(op, oggiIso).nCodici > 0) return [];
-  return (state.operazioni || [])
-    .filter(x => x.id !== op.id
-      && x.articolo_id === op.articolo_id
-      && x.numero_op
-      // Solo commesse VIVE: su una già completata o spedita il materiale è
-      // stato consumato, e il mancante attribuito a lei non parla più di noi.
-      && (x.stato === 'aperta' || x.stato === 'sospesa'))
-    .map(x => ({ op: x, mc: mancantiCommessa(x, oggiIso) }))
-    .filter(r => r.mc.nCodici > 0)
-    // Prima quella che ferma di più, poi la più vicina a scadere.
-    .sort((a, b) => (b.mc.nBloccanti - a.mc.nBloccanti)
-      || String(a.op.scadenza || '9999').localeCompare(String(b.op.scadenza || '9999')));
-}
+// **Un allarme che non puo' suonare e' peggio di nessun allarme**: non costa
+// il codice che occupa, costa la casella mentale "se c'e' un problema lo vedo".
+// Se un domani le liste tornassero a mancare su commesse CON distinta, il caso
+// lo segnala gia' `riquadroListeMaterialiMancanti` — che invece di dedurre
+// offre il bottone per creare le liste. Sta nella storia git.
 
 // Una riga è BLOCCANTE se il pezzo è ancora da ordinare: nessuno l'ha
 // comprato, quindi non c'è né data né speranza a breve. Se invece è già
