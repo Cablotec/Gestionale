@@ -34,6 +34,7 @@
 - Tabella `mancanti` (fabbisogno materiale): **ESEGUITA** (31 lug, verificata via REST); primo import fatto: 314 codici su 33 commesse.
 - Tabella `materiali` (anagrafica componenti): **ESEGUITA** (2 set), 9.327 codici. ⚠ La tabella `distinta` **NON ESISTE PIU**: creata il 2 set con 38.461 righe, travasata dentro i prodotti e **droppata il 4 set**. Archivio in `backup-gestionale/distinta-archivio-2026-09-04.json`.
 - `articoli.distinta` jsonb (distinta scritta a mano, vince su Alnus): **ESEGUITA** (2 set).
+- Tabella `eventi` (eventi aziendali in calendario): **ESEGUITA** (16 set, verificata via REST). Primo evento inserito da Nico: *Pranzo Natalizio*, venerdi 18 dicembre 2026.
 - `operazioni.materiali` jsonb (lista materiali congelata sulla commessa): **ESEGUITA** (3 set). Generate in blocco: **68 commesse vive, 2.735 righe**, coerenza `qta = qta_pz × pezzi` verificata su 2735/2735.
 
 ## ▶ Fili aperti (priorità)
@@ -256,7 +257,9 @@ Su un telefono la cella e' **46 px**. Dentro ci stanno: numero, lucchetto di chi
 
 ### Da chiudere
 - **Le 5 assenze sui giorni di chiusura** (24, 28, 29, 30, 31 dicembre 2026) sono ancora a database: vanno tolte, ma la DELETE su `assenze` non passa dall'account tecnico — serve SQL dal pannello, e serve l'ok di Nico.
-- **Non verificato**: che un account OPERATORE (non admin) riesca davvero a leggere `chiusure_aziendali` e `impostazioni`. Il login del mobile e' personale e la password non la si chiede. Se l'RLS le riservasse agli admin, il telefono continuerebbe a non vedere le chiusure — ma adesso **lo direbbe**, invece di tacere.
+- ~~Non verificato: che un account OPERATORE legga `chiusure_aziendali` e `impostazioni`~~ **VERIFICATO il 16 set**: la sessione del gestionale gira con `kiosk@cablotec.local`, che in `profili` ha ruolo **`user`** — non admin. Da li' si leggono `chiusure_aziendali` (8), `impostazioni` (9), `tipi_assenza` (4) ed `eventi` (1). Le policy sono `authenticated`, non admin-only: **sul telefono dell'operatore le chiusure e gli eventi arrivano davvero.**
+  - ⚠ **Il modo in cui ci sono arrivato, perche' serve un account non-admin per provarlo**: non serviva chiedere la password a nessuno — l'account tecnico condiviso e' gia' loggato nel gestionale ed e' gia' un `user`. Prima di dichiarare "non verificabile", guardare con che ruolo sta girando la sessione che si ha davanti.
+  - ⚠⚠ **E un controllo fatto sullo stato in memoria del telefono NON e' una prova.** Provando a contare le assenze sui giorni di chiusura da `mobile.html` e' uscito **zero**, e sarebbe stata una conclusione falsa: nel frattempo il `loadFerieData` della pagina era ripartito da non autenticato e aveva svuotato `state`. **La domanda va fatta al database, non a una copia in RAM che qualcun altro puo' aver riscritto.** Rifatta come query: le 5 righe ci sono ancora.
 
 ## 16 SETTEMBRE: i materiali arrivano al kiosk (`2026-09-16.02`)
 Chiesto dalla produzione: *"poter visualizzare dal kiosk la lista dei componenti disponibili per ordine, in modo da dare all'operatore la possibilita di vedere se manca qualche materiale nella lavorazione"*.
