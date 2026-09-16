@@ -56,6 +56,7 @@ const state = {
   artSearch: '',
   tipiLav: [],             // anagrafica tipi di lavorazione
   chiusure: [],            // chiusure aziendali (festivi non nazionali)
+  eventi: [],              // eventi aziendali: si VEDONO, non tolgono lavoro
   operazioni: [],          // operazioni di pianificazione
   opFilter: 'all',      // 'all' | 'aperte' | 'sospese' | 'spedite'
   // Set degli ID cliente da NASCONDERE nella Pianificazione (filtro stile Excel)
@@ -847,6 +848,9 @@ async function loadAllData() {
   state.articoli = articoli.data || [];
   state.tipiLav = tipiLav.data || [];
   state.chiusure = chiusure.data || [];
+  // Gli eventi a parte e senza await bloccante: se la migrazione non c'e'
+  // ancora, il gestionale si apre lo stesso e la sezione si dichiara inerte.
+  caricaEventi();
   state.operazioni = operazioni.data || [];
   state.sessioni = sessioni.data || [];
   state.tipiAssenza = tipiAssenza.data || [];
@@ -7362,6 +7366,222 @@ function isGiornoNonLavorativo(dateObj) {
 // [→ domain/scheduling.js] calendario/capacità: indietroGiorniLavorativi…avantiOreCapacita
 
 
+// ═══════════════════════════════════════════════════════════════════
+// EVENTI AZIENDALI (16 set, chiesto da Nico: *"abbiamo un evento che in
+// questo caso e' un pranzo, ma domani potrebbe essere una riunione o
+// altro"*).
+//
+// ⚠⚠ PERCHE' UNA TABELLA NUOVA E NON UNA COLONNA SU `chiusure_aziendali`.
+// La tentazione era aggiungere un `tipo` alle chiusure: una colonna e via.
+// Ma OGNI lettore di quella tabella interpreta una riga come *"questo giorno
+// non si lavora"* — il motore di pianificazione, gli sfondi del Gantt, il
+// calendario, il telefono. Basta dimenticare un filtro in uno solo di quei
+// punti e **un pranzo diventa una chiusura aziendale in silenzio**, e il
+// pianificatore smette di programmare quel giorno.
+// Con una tabella separata il motore non la vede mai: rischio zero sulla
+// pianificazione, e il calendario le unisce solo per MOSTRARLE. Unire per
+// disegnare va bene; a non doversi mai confondere e' la REGOLA.
+// (E in piu' `chiusure_aziendali` avrebbe cominciato a mentire sul proprio
+// nome, come sta gia' facendo `mancanti`.)
+//
+// ⚠ UN EVENTO NON TOGLIE TEMPO DI LAVORO (deciso con Nico): e' un avviso in
+// calendario, niente di piu'. Se un giorno non si lavora, quello e' una
+// CHIUSURA e si mette dove stanno le altre. Tenere fuori "blocca il lavoro"
+// e' esattamente cio' che rende sicuro avere due tabelle invece di una.
+//
+// ⚠ Niente colonna `tipo`: "pranzo" o "riunione" e' il TITOLO, e l'icona la
+// sceglie chi crea l'evento. Un elenco di tipi nel codice sarebbe la solita
+// regola scritta dove non si puo' cambiare — stessa ragione per cui
+// `materiale_dal_cliente` e' un dato e non un elenco di nomi.
+// ═══════════════════════════════════════════════════════════════════
+
+// Gli eventi che toccano questo giorno. `data_fine` null = un giorno solo.
+// Ordinati: prima quelli di tutto il giorno (senza ora), poi per orario.
+function eventiDelGiorno(iso) {
+  return (state.eventi || []).filter(e => {
+    if (!e || !e.data) return false;
+    const fine = e.data_fine || e.data;
+    return iso >= e.data && iso <= fine;
+  }).sort((a, b) => String(a.ora || '').localeCompare(String(b.ora || ''))
+    || String(a.titolo || '').localeCompare(String(b.titolo || '')));
+}
+// L'evento in una riga di testo: "🍝 12:30 — Pranzo aziendale · Trattoria X".
+function eventoEtichetta(e) {
+  return (e.icona ? e.icona + ' ' : '')
+    + (e.ora ? e.ora + ' — ' : '')
+    + (e.titolo || 'Evento')
+    + (e.luogo ? ' · ' + e.luogo : '');
+}
+
+// La tabella esiste? Inerte finche' la migrazione non c'e' (stesso patto di
+// `mancanti` il 31 lug): nessuna sezione, nessun errore, niente che si rompe.
+let eventiTabellaOk = null;
+async function caricaEventi() {
+  if (eventiTabellaOk === false) return;
+  try {
+    const { data, error } = await sb.from('eventi').select('*').order('data');
+    if (error) { eventiTabellaOk = false; state.eventi = []; return; }
+    eventiTabellaOk = true;
+    state.eventi = data || [];
+  } catch (e) { eventiTabellaOk = false; state.eventi = []; }
+}
+
+// ── Eventi aziendali: la scheda di gestione ────────────────────────────
+// Sta dentro "Chiusure aziendali" e non in una scheda sua: sono le due cose
+// che qualcuno mette sul calendario dell'azienda, e cercarle in due posti
+// diversi vorrebbe dire ricordarsi quale sta dove. Restano due TABELLE
+// distinte — il motore vede solo le chiusure — ma una schermata sola.
+function sezioneEventi(root) {
+  root.append(el('h2', { style:'margin:30px 0 6px;' }, 'Eventi aziendali'));
+  // ⚠ Finche la migrazione non c'e', la sezione si dichiara INERTE invece di
+  // sparire o dare errore: e' lo stesso trattamento di `mancanti` il 31 lug.
+  // Una funzione che sparisce lascia chi la cerca a chiedersi se l'ha sognata.
+  if (eventiTabellaOk === false) {
+    root.append(el('div', { class:'sub', style:'max-width:900px;' },
+      'Manca la tabella `eventi` (migrazione dal pannello Supabase). '
+      + 'Gli eventi non sono ancora attivi; le chiusure qui sopra funzionano lo stesso.'));
+    return;
+  }
+  root.append(el('div', { class:'sub', style:'margin-bottom:12px;max-width:900px;' },
+    'Un pranzo, una riunione, una visita. ⚠ Un evento NON toglie tempo di lavoro: '
+    + 'si vede in calendario — anche sul telefono degli operatori — e basta. '
+    + 'Se in quel giorno non si lavora, quella è una chiusura e va messa qui sopra.'));
+  root.append(el('button', { class:'btnp', style:'margin-bottom:12px;',
+    onclick: () => openEventoModal(null) }, '+ Nuovo evento'));
+
+  const righe = (state.eventi || []).slice()
+    .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+  if (!righe.length) {
+    root.append(el('div', { class:'empty' }, 'Nessun evento in calendario.'));
+    return;
+  }
+  const tb = el('tbody');
+  const oggi = toLocalISO(new Date());
+  righe.forEach(e => {
+    const fine = e.data_fine || e.data;
+    const passato = fine < oggi;
+    tb.append(el('tr', { style: 'cursor:pointer;' + (passato ? 'opacity:.55;' : ''),
+      title: passato ? 'Evento passato' : 'Modifica',
+      onclick: () => openEventoModal(e) },
+      el('td', { class:'mono' }, fmtIT(e.data)
+        + (e.data_fine && e.data_fine !== e.data ? ' → ' + fmtIT(e.data_fine) : '')),
+      el('td', { class:'mono' }, e.ora || 'tutto il giorno'),
+      el('td', {}, (e.icona ? e.icona + ' ' : '') + (e.titolo || '—')),
+      el('td', { class:'sub' }, e.luogo || '—'),
+      el('td', { class:'sub', style:'max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+        title: e.descrizione || '' }, e.descrizione || '—'),
+    ));
+  });
+  const tw = el('div', { class:'tw' });
+  tw.append(el('table', { class:'rt' },
+    el('thead', {}, el('tr', {},
+      el('th', {}, 'Data'), el('th', {}, 'Ora'), el('th', {}, 'Titolo'),
+      el('th', {}, 'Luogo'), el('th', {}, 'Descrizione'))),
+    tb));
+  root.append(tw);
+}
+
+function openEventoModal(e) {
+  const isNew = !e;
+  e = e || { data: toLocalISO(new Date()), data_fine:'', ora:'', titolo:'',
+    descrizione:'', luogo:'', icona:'' };
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuovo evento' : 'Modifica evento'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+  ));
+  const body = el('div', { class:'mbody' });
+  const form = el('form');
+
+  const inData = el('input', { type:'date', name:'data', value:e.data||'', required:'true' });
+  const inFine = el('input', { type:'date', name:'data_fine', value:e.data_fine||'' });
+  // ⚠ L'ora e' TESTO e non `time`: un evento di tutto il giorno non ha un'ora,
+  // e su un campo `time` "vuoto" e' uno stato scomodo da raggiungere. Qui
+  // vuoto e' la norma, non l'eccezione.
+  const inOra = el('input', { type:'text', name:'ora', value:e.ora||'',
+    placeholder:'12:30  —  vuoto = tutto il giorno' });
+  const inTitolo = el('input', { type:'text', name:'titolo', value:e.titolo||'', required:'true',
+    placeholder:'es. Pranzo aziendale, Riunione di reparto, Visita cliente…' });
+  const inLuogo = el('input', { type:'text', name:'luogo', value:e.luogo||'',
+    placeholder:'es. Trattoria da…, Sala riunioni' });
+  const inIcona = el('input', { type:'text', name:'icona', value:e.icona||'', maxlength:'4',
+    placeholder:'🍝' });
+  const inDescr = el('textarea', { name:'descrizione', rows:'2',
+    placeholder:'Dettagli (facoltativo)' }, e.descrizione||'');
+
+  form.append(
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Dal *'), inData),
+      el('div', { class:'field' }, el('label', {}, 'Al (se dura più giorni)'), inFine)),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Ora'), inOra),
+      el('div', { class:'field' }, el('label', {}, 'Icona'), inIcona)),
+    el('div', { class:'field' }, el('label', {}, 'Titolo *'), inTitolo),
+    el('div', { class:'field' }, el('label', {}, 'Luogo'), inLuogo),
+    el('div', { class:'field' }, el('label', {}, 'Descrizione'), inDescr),
+    el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
+      'Lo vedranno tutti gli operatori nel calendario del telefono. '
+      + 'Non toglie tempo di lavoro e non tocca le ferie.'),
+  );
+  body.append(form);
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  if (!isNew) {
+    foot.append(el('button', { class:'btnd', onclick: async () => {
+      if (!confirm('Eliminare l\'evento "' + (e.titolo || '') + '" del ' + fmtIT(e.data) + '?')) return;
+      const { error } = await eseguiConRetry(() => sb.from('eventi').delete().eq('id', e.id),
+        { label: 'elimina evento' });
+      if (error) return toast(error.message, 'err');
+      state.eventi = (state.eventi || []).filter(x => x.id !== e.id);
+      toast('Evento eliminato'); closeModal(); renderTab('chiusure');
+    } }, '🗑 Elimina'));
+  }
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  const btnSave = el('button', { class:'btnp' }, 'Salva');
+  btnSave.onclick = async () => {
+    const fd = new FormData(form);
+    const data = (fd.get('data') || '').toString();
+    const titolo = (fd.get('titolo') || '').toString().trim();
+    const fine = (fd.get('data_fine') || '').toString() || null;
+    if (!data) return toast('Data obbligatoria', 'err');
+    if (!titolo) return toast('Titolo obbligatorio', 'err');
+    if (fine && fine < data) return toast('La data finale deve essere uguale o successiva a quella iniziale', 'err');
+    const payload = {
+      data, data_fine: fine,
+      ora: (fd.get('ora') || '').toString().trim() || null,
+      titolo,
+      luogo: (fd.get('luogo') || '').toString().trim() || null,
+      icona: (fd.get('icona') || '').toString().trim() || null,
+      descrizione: (fd.get('descrizione') || '').toString().trim() || null,
+    };
+    btnSave.disabled = true; btnSave.textContent = 'Salvataggio…';
+    try {
+      const { data: riga, error } = await eseguiConRetry(
+        () => isNew ? sb.from('eventi').insert(payload).select().single()
+                    : sb.from('eventi').update(payload).eq('id', e.id).select().single(),
+        { label: 'salvataggio evento' }
+      );
+      if (error) {
+        btnSave.disabled = false; btnSave.textContent = 'Salva';
+        return toast(error.message, 'err');
+      }
+      state.eventi = state.eventi || [];
+      if (isNew) { if (!state.eventi.find(x => x.id === riga.id)) state.eventi.push(riga); }
+      else state.eventi = state.eventi.map(x => x.id === e.id ? riga : x);
+      toast(isNew ? 'Evento creato' : 'Evento aggiornato');
+      closeModal(); renderTab('chiusure');
+    } catch (err) {
+      btnSave.disabled = false; btnSave.textContent = 'Salva';
+      toast('Errore di rete: ' + (err.message || err), 'err');
+    }
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+}
+
 function renderChiusure(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const annoAttuale = new Date().getFullYear();
@@ -7471,6 +7691,8 @@ function renderChiusure(root) {
   tbl.append(tb);
   tw.append(tbl);
   root.append(tw);
+
+  sezioneEventi(root);
 }
 
 function openChiusuraModal(c) {

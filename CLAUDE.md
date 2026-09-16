@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.04`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.05`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -236,6 +236,23 @@
 - Tre correzioni: **1)** il form si apre sul **primo giorno chiedibile** (`primoGiornoInseribile`: dentro la finestra aperta E lavorativo — oggi propone 01/10/2026), **2)** il riquadro dice **sempre** cosa si puo' fare adesso (`finestraApertaOra`), non solo cosa no, **3)** le date si scrivono `01/02` e non `01-02`, e si nomina la **finestra** e non il "periodo" (i nomi sono femminili: *"il periodo estiva"* non si puo' leggere).
 - ⚠ `primoGiornoInseribile` cerca **in avanti giorno per giorno** invece di calcolare: i periodi scavallano l'anno (01/10 → 28/02) e l'aritmetica sugli intervalli circolari e' il posto dove si sbaglia. 400 giri di una funzione che costa niente, una volta all'apertura del form.
 - ⚠⚠ **LE STESSE FRASI NEL GESTIONALE**: il calendario Assenze e `adminOnly: false`, quindi un non-admin ci arriva e leggeva ancora la versione vecchia. `finestraApertaOra`, `ggmmIT` e `frasePeriodoAperto` stanno adesso **identiche** nei due file, e il test `test-tabelle-coerenti.js` le confronta carattere per carattere (commenti esclusi: quelli parlano a chi legge quel file). `mobile.html` non carica `app.js` — la copia e dichiarata e accettata, ma **una copia che deriva e il modo in cui il telefono e il browser dicono cose diverse alla stessa persona**.
+
+### EVENTI AZIENDALI — una tabella nuova, non una colonna sulle chiusure
+Chiesto da Nico: *"abbiamo un evento che in questo caso e' un pranzo, ma domani potrebbe essere una riunione o altro"*.
+- ⚠⚠ **PERCHE' NON UN `tipo` SU `chiusure_aziendali`**, che era la strada corta. Ogni lettore di quella tabella interpreta una riga come *"questo giorno non si lavora"*: il motore di pianificazione, gli sfondi del Gantt, il calendario, il telefono. Basta dimenticare un filtro in UNO di quei punti e **un pranzo diventa una chiusura aziendale in silenzio**, e il pianificatore smette di programmare quel giorno. Con una tabella separata il motore non la vede mai. (E `chiusure_aziendali` avrebbe cominciato a mentire sul proprio nome, come sta gia' facendo `mancanti`.)
+- ⚠ **UN EVENTO NON TOGLIE TEMPO DI LAVORO** (deciso da Nico): e' un avviso in calendario, niente di piu'. Se un giorno non si lavora, quello e' una CHIUSURA. **Tenere fuori "blocca il lavoro" e' esattamente cio' che rende sicuro avere due tabelle invece di una** — il giorno che un evento dovesse togliere mezza giornata, la cosa da cambiare e' `chiusure_aziendali` (che oggi e' tutto-o-niente), non `eventi`.
+- **Niente colonna `tipo`**: "pranzo" o "riunione" e' il TITOLO, e l'icona (emoji) la sceglie chi crea l'evento. Un elenco di tipi nel codice sarebbe la solita regola scritta dove non si puo' cambiare — stessa ragione di `materiale_dal_cliente`.
+- **Dove**: si crea in Gestione → Chiusure aziendali (una schermata sola per le due cose che finiscono sul calendario dell'azienda, due tabelle distinte sotto). Si vede nel calendario del telefono.
+- ⚠ **Inerte finche' la migrazione non c'e'** (`eventiTabellaOk`, stesso patto di `mancanti` il 31 lug): la sezione si DICHIARA non attiva invece di sparire o dare errore. Una funzione che sparisce lascia chi la cerca a chiedersi se l'ha sognata. Sul telefono invece non si dice niente: gridare tutti i giorni per una tabella che ancora non esiste insegna a scacciare gli avvisi.
+- **Migrazione**: `strumenti/migrazione-eventi.sql` (da eseguire dal pannello).
+
+### ⚠ LA CELLA DEL CALENDARIO HA CINQUE POSTI, E CI SONO VOLUTI TRE TENTATIVI
+Su un telefono la cella e' **46 px**. Dentro ci stanno: numero, lucchetto di chiusura, icona evento, pallino della propria assenza, conteggio degli assenti.
+1. Icona evento in alto a sinistra, assoluta → **copriva il numero del giorno**. Il DOM diceva che c'erano tutti e due, e c'erano: uno sopra l'altro. **Trovato guardando lo screenshot, non leggendo il DOM.**
+2. Icona accanto al numero, lucchetto assoluto a destra → si sovrapponevano sul giorno che ha tutto. ⚠ **Due cose nella stessa riga non possono stare una nel flusso e una in posizione assoluta**: quella nel flusso non sa dell'altra.
+3. Tutti e due nella stessa riga flex → la riga ci stava (36 px su 38) **ma l'emoji no**: un glifo emoji disegna ~12 px dentro una casella da 9, e usciva di 3 px dal bordo. **La larghezza del box non e' la larghezza dell'inchiostro.**
+- Assetto finale: **riga di sopra** numero (sinistra) + lucchetto (destra) · **riga di sotto** pallino assenza (sinistra) + evento (centro) + conteggio (destra). Verificato misurando tutti e cinque i rettangoli sul giorno peggiore: tutti dentro la cella, zero sovrapposizioni a coppie.
+- **Non aggiungere un sesto segno senza rimisurare.**
 
 ### Da chiudere
 - **Le 5 assenze sui giorni di chiusura** (24, 28, 29, 30, 31 dicembre 2026) sono ancora a database: vanno tolte, ma la DELETE su `assenze` non passa dall'account tecnico — serve SQL dal pannello, e serve l'ok di Nico.

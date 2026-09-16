@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-16.04"></script>
+<script src="core/db.js?v=2026-09-16.05"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -124,7 +124,8 @@ button{font-family:inherit;}
 .cal-cell.mia{border-color:var(--acc);background:rgba(212,255,78,.10);}
 .cal-cell.sel{outline:2px solid var(--acc);outline-offset:-1px;}
 .cal-cell.oggi .cal-num{color:var(--acc);font-weight:800;}
-.cal-num{font-size:13px;font-weight:700;line-height:1;}
+.cal-num{display:flex;align-items:center;justify-content:space-between;gap:2px;font-size:13px;font-weight:700;line-height:1;}
+.cal-segni{display:flex;align-items:center;gap:2px;flex-shrink:0;}
 .cal-mine{position:absolute;left:5px;bottom:5px;width:8px;height:8px;border-radius:50%;}
 .cal-count{position:absolute;right:4px;bottom:3px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mut);}
 /* Chiusura aziendale: righine diagonali, come un giorno "barrato". Si vede
@@ -132,7 +133,18 @@ button{font-family:inherit;}
    delle assenze — che su un giorno chiuso non dovrebbero esserci. */
 .cal-cell.chiusa{background:repeating-linear-gradient(135deg,var(--sur),var(--sur) 5px,var(--sur2) 5px,var(--sur2) 10px);border-color:var(--mut);}
 .cal-cell.chiusa .cal-num{color:var(--mut);}
-.cal-lock{position:absolute;right:4px;top:3px;font-size:10px;line-height:1;opacity:.8;}
+.cal-lock{font-size:10px;line-height:1;opacity:.85;}
+/* La cella ha DUE righe e cinque posti, tutti misurati a 375px:
+     sopra  (flex)     numero a sinistra · lucchetto a destra
+     sotto  (assoluti) pallino assenza a sinistra · evento al centro ·
+                       conteggio assenze a destra
+   ⚠ Non aggiungere un terzo segno alla riga di sopra: ci sta la riga ma non
+   il glifo. Un emoji disegna ~12px dentro una casella da 9, e l ultimo esce
+   dal bordo — successo, misurato, 3px fuori. */
+.cal-ev{position:absolute;left:50%;transform:translateX(-50%);bottom:3px;font-size:10px;line-height:1;}
+.day-evento{background:var(--sur2);border:1px solid var(--brd);border-left:4px solid var(--acc);border-radius:10px;padding:10px 13px;margin-top:8px;font-size:13px;}
+.day-evento b{color:var(--txt);}
+.day-evento .de-sub{color:var(--mut);margin-top:4px;}
 .cal-legenda{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:11px;color:var(--mut);}
 .cal-legenda span{display:flex;align-items:center;gap:5px;}
 .cal-legenda i{width:12px;height:12px;border-radius:3px;border:1px solid var(--brd);display:inline-block;}
@@ -295,7 +307,7 @@ const state = {
   utenti: [], utentiById: {}, operazioni: [], aziende: [], articoli: [],
   tipiLav: [], opFasi: [], opAddetti: [], sessioni: [], attivita: [],
   mezzi: [], prenotazioni: [], prenOp: [], consegne: [],
-  tipiAssenza: [], assenze: [], impostazioni: {}, chiusure: [], ferieNonLette: [],
+  tipiAssenza: [], assenze: [], impostazioni: {}, chiusure: [], eventi: [], ferieNonLette: [],
   operatore: null, opSel: null,
   search: '', vediAltre: false,
   timer: null,
@@ -455,11 +467,15 @@ async function loadFerieData() {
   state.ferieNonLette = [];
   try {
     const annoIso = todayISO().slice(0, 4) + '-01-01';
-    const [ta, as, im, ch] = await Promise.all([
+    const [ta, as, im, ch, ev] = await Promise.all([
       sb.from('tipi_assenza').select('*').order('ordine'),
       sb.from('assenze').select('*').eq('stato', 'valida').gte('data', annoIso),
       sb.from('impostazioni').select('*'),
       sb.from('chiusure_aziendali').select('*').order('data'),
+      // Gli eventi da un mese fa in avanti: sul telefono si guarda avanti, e
+      // trascinarsi lo storico degli anni per un pallino in calendario sarebbe
+      // banda regalata.
+      sb.from('eventi').select('*').gte('data', annoIso).order('data'),
     ]);
     const segna = (nome, r) => { if (r.error) state.ferieNonLette.push(nome); };
     segna('tipi di assenza', ta); segna('assenze', as);
@@ -488,6 +504,12 @@ async function loadFerieData() {
     state.assenze = as.data || [];
     state.impostazioni = Object.fromEntries((im.data || []).map(r => [r.chiave, r.valore]));
     state.chiusure = ch.data || [];
+    // ⚠ Gli eventi NON entrano in `ferieNonLette`: finche' la migrazione non
+    // e' stata fatta la tabella non esiste, e mettersi a gridare tutti i
+    // giorni per una cosa che ancora non c'e' e' il modo piu' rapido per far
+    // imparare a scacciare gli avvisi. Se manca, semplicemente non ci sono
+    // eventi da mostrare.
+    state.eventi = ev.data || [];
   } catch (e) {
     state.ferieNonLette = ['i dati delle assenze'];
   }
@@ -1209,6 +1231,53 @@ function festiviNazIsoSet(anno) {
   s.add(toLocalISO(pasquetta));
   return s;
 }
+// ═══════════════════════════════════════════════════════════════════
+// EVENTI AZIENDALI (16 set, chiesto da Nico: *"abbiamo un evento che in
+// questo caso e' un pranzo, ma domani potrebbe essere una riunione o
+// altro"*).
+//
+// ⚠⚠ PERCHE' UNA TABELLA NUOVA E NON UNA COLONNA SU `chiusure_aziendali`.
+// La tentazione era aggiungere un `tipo` alle chiusure: una colonna e via.
+// Ma OGNI lettore di quella tabella interpreta una riga come *"questo giorno
+// non si lavora"* — il motore di pianificazione, gli sfondi del Gantt, il
+// calendario, il telefono. Basta dimenticare un filtro in uno solo di quei
+// punti e **un pranzo diventa una chiusura aziendale in silenzio**, e il
+// pianificatore smette di programmare quel giorno.
+// Con una tabella separata il motore non la vede mai: rischio zero sulla
+// pianificazione, e il calendario le unisce solo per MOSTRARLE. Unire per
+// disegnare va bene; a non doversi mai confondere e' la REGOLA.
+// (E in piu' `chiusure_aziendali` avrebbe cominciato a mentire sul proprio
+// nome, come sta gia' facendo `mancanti`.)
+//
+// ⚠ UN EVENTO NON TOGLIE TEMPO DI LAVORO (deciso con Nico): e' un avviso in
+// calendario, niente di piu'. Se un giorno non si lavora, quello e' una
+// CHIUSURA e si mette dove stanno le altre. Tenere fuori "blocca il lavoro"
+// e' esattamente cio' che rende sicuro avere due tabelle invece di una.
+//
+// ⚠ Niente colonna `tipo`: "pranzo" o "riunione" e' il TITOLO, e l'icona la
+// sceglie chi crea l'evento. Un elenco di tipi nel codice sarebbe la solita
+// regola scritta dove non si puo' cambiare — stessa ragione per cui
+// `materiale_dal_cliente` e' un dato e non un elenco di nomi.
+// ═══════════════════════════════════════════════════════════════════
+
+// Gli eventi che toccano questo giorno. `data_fine` null = un giorno solo.
+// Ordinati: prima quelli di tutto il giorno (senza ora), poi per orario.
+function eventiDelGiorno(iso) {
+  return (state.eventi || []).filter(e => {
+    if (!e || !e.data) return false;
+    const fine = e.data_fine || e.data;
+    return iso >= e.data && iso <= fine;
+  }).sort((a, b) => String(a.ora || '').localeCompare(String(b.ora || ''))
+    || String(a.titolo || '').localeCompare(String(b.titolo || '')));
+}
+// L'evento in una riga di testo: "🍝 12:30 — Pranzo aziendale · Trattoria X".
+function eventoEtichetta(e) {
+  return (e.icona ? e.icona + ' ' : '')
+    + (e.ora ? e.ora + ' — ' : '')
+    + (e.titolo || 'Evento')
+    + (e.luogo ? ' · ' + e.luogo : '');
+}
+
 // La chiusura di questo giorno, o null. Ritorna la RIGA e non un booleano:
 // in calendario serve anche la descrizione ("Chiusura Natalizia", "Ponte"),
 // e un giorno chiuso senza il perche' si legge come un errore.
@@ -1324,8 +1393,19 @@ function renderFerie() {
       (iso === oggiIso ? ' oggi' : '') + (iso === ferieCal.sel ? ' sel' : '');
     const cell = elx('div', { class: cls, title: chiusa ? (chiusa.descrizione || 'Chiusura aziendale') : '',
       onclick: () => { ferieCal.sel = iso; renderFerie(); } });
-    cell.append(elx('div', { class:'cal-num' }, String(g)));
-    if (chiusa) cell.append(elx('div', { class:'cal-lock' }, '🔒'));
+    const segni = elx('div', { class:'cal-segni' });
+    const numEl = elx('div', { class:'cal-num' }, elx('span', {}, String(g)), segni);
+    cell.append(numEl);
+    if (chiusa) segni.append(elx('span', { class:'cal-lock' }, '🔒'));
+    // ⚠ L'evento si vede anche sui giorni CHIUSI e sui weekend: un pranzo
+    // aziendale di sabato e' esattamente il caso in cui sapere che c'e'
+    // serve di piu'. Le chiusure tolgono il lavoro, non il calendario.
+    const evs = eventiDelGiorno(iso);
+    if (evs.length) {
+      cell.append(elx('div', { class:'cal-ev',
+        title: evs.map(eventoEtichetta).join('\n') },
+        evs[0].icona || '●'));
+    }
     if (mia) {
       const t = tipiById[mia.tipo_assenza_id];
       cell.append(elx('div', { class:'cal-mine', style:'background:' + (t?.colore || 'var(--acc)') + ';' }));
@@ -1338,15 +1418,36 @@ function renderFerie() {
   // colore: il lucchetto e l'unica cosa che si distingue davvero a 12 px su
   // un telefono, e un quadratino con le righine diagonali a quella misura
   // diventa un quadratino grigio qualunque.
-  root.append(elx('div', { class:'cal-legenda' },
+  const legenda = elx('div', { class:'cal-legenda' },
     elx('span', {}, elx('b', {}, '🔒'), 'Chiusura aziendale'),
-    elx('span', {}, elx('i', { class:'mia' }), 'Una tua assenza')));
+    elx('span', {}, elx('i', { class:'mia' }), 'Una tua assenza'));
+  // La voce evento compare SOLO se in questo mese ce n'e' uno: una legenda
+  // che spiega un segno che non c'e' e' rumore.
+  const primoIso = ferieCal.y + '-' + zp(ferieCal.m + 1) + '-01';
+  const ultimoIso = ferieCal.y + '-' + zp(ferieCal.m + 1) + '-' + zp(giorniMese);
+  if ((state.eventi || []).some(e => {
+    const fine = e.data_fine || e.data;
+    return e.data && fine >= primoIso && e.data <= ultimoIso;
+  })) legenda.append(elx('span', {}, elx('b', {}, '●'), 'Evento'));
+  root.append(legenda);
 
   // Dettaglio del giorno selezionato
   if (ferieCal.sel) {
     // ⚠ PRIMA il motivo per cui il giorno non e lavorativo, POI chi e
     // assente: su un giorno chiuso "Nessuno assente" e una risposta che non
     // risponde — non c'e nessuno perche l'azienda e chiusa.
+    // Gli eventi PRIMA di tutto: se oggi c'e' il pranzo aziendale, e' la
+    // cosa che si e' venuti a cercare.
+    eventiDelGiorno(ferieCal.sel).forEach(ev => {
+      const box = elx('div', { class:'day-evento' },
+        elx('b', {}, eventoEtichetta(ev)));
+      if (ev.descrizione) box.append(elx('div', { class:'de-sub' }, ev.descrizione));
+      if (ev.data_fine && ev.data_fine !== ev.data) {
+        box.append(elx('div', { class:'de-sub' },
+          'Dal ' + fmtIT(ev.data) + ' al ' + fmtIT(ev.data_fine)));
+      }
+      root.append(box);
+    });
     const mnl = motivoNonLavorativo(ferieCal.sel);
     if (mnl && mnl.tipo !== 'weekend') {
       root.append(elx('div', { class:'day-chiusa' },

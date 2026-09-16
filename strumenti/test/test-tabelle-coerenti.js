@@ -99,6 +99,11 @@ const corpo = (src, firma) => {
   'function frasePeriodoAperto(oggiIso) {',
   'function isoDentroIntervallo(iso, ggmmDa, ggmmA) {',
   'function tipoInseribileDa(tipo, esente) {',
+  // Gli eventi aziendali: il gestionale li scrive, il telefono li mostra.
+  // Se "quali eventi tocca questo giorno" divergesse, un pranzo di due giorni
+  // comparirebbe su uno solo dei due calendari.
+  'function eventiDelGiorno(iso) {',
+  'function eventoEtichetta(e) {',
 ].forEach(firma => {
   const a = corpo(srcApp, firma), b = corpo(srcMob, firma);
   const nome = firma.replace('function ', '').split('(')[0];
