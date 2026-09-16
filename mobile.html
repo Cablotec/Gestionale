@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-16.06"></script>
+<script src="core/db.js?v=2026-09-16.07"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -120,6 +120,10 @@ button{font-family:inherit;}
 .cal-dow{text-align:center;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mut);padding-bottom:2px;}
 .cal-cell{position:relative;aspect-ratio:1;border:1px solid var(--brd);border-radius:8px;background:var(--sur);padding:4px;cursor:pointer;overflow:hidden;}
 .cal-cell.empty{border:none;background:transparent;cursor:default;}
+/* Sabato e domenica: un filo piu chiari, e basta. E il segnale piu debole
+   della cella — la colonna lo dice gia — quindi sta per PRIMO e chiunque
+   altro lo sovrascrive. Serve solo a far risaltare la settimana lavorativa. */
+.cal-cell.weekend{background:var(--sur2);}
 /* Festivo nazionale: numero ROSSO, come sul calendario da muro. Sta qui in
    alto di proposito — `.mia` e `.chiusa` vengono dopo e vincono sullo
    SFONDO, mentre il colore del numero lo si riprende piu' sotto con un
@@ -144,6 +148,11 @@ button{font-family:inherit;}
 .cal-cell.festivo .cal-num span{color:var(--red);}
 .cal-cell.oggi.festivo .cal-num span{color:var(--red);}
 .cal-lock{font-size:10px;line-height:1;opacity:.85;}
+/* Evento: contorno AZZURRO. ⚠ box-shadow inset, non border-color: il bordo e
+   gia preso da tre stati (has, mia, chiusa), e farlo litigare con loro
+   vorrebbe dire perdere un segnale sui giorni che hanno tutti e due. Cosi i
+   canali sono quattro e indipendenti — sfondo, bordo, contorno, outline. */
+.cal-cell.evento{box-shadow:inset 0 0 0 2px var(--blu);}
 /* La cella ha DUE righe e cinque posti, tutti misurati a 375px:
      sopra  (flex)     numero a sinistra · lucchetto a destra
      sotto  (assoluti) pallino assenza a sinistra · evento al centro ·
@@ -1408,8 +1417,14 @@ function renderFerie() {
     // il numero in rosso — la convenzione di qualsiasi calendario da muro.
     const chiusa = chiusuraDelGiorno(iso);
     const festivo = festivoDelGiorno(iso);
-    const cls = 'cal-cell' + (mia ? ' mia' : (ass.length ? ' has' : '')) +
+    // ⚠ Gli eventi si calcolano PRIMA della classe: il contorno azzurro e' una
+    // classe sulla cella, non un figlio, quindi deve essere gia' noto qui.
+    const evs = eventiDelGiorno(iso);
+    const dow = parseISODate(iso).getDay();
+    const cls = 'cal-cell' + ((dow === 0 || dow === 6) ? ' weekend' : '')
+      + (mia ? ' mia' : (ass.length ? ' has' : '')) +
       (festivo ? ' festivo' : '') + (chiusa ? ' chiusa' : '') +
+      (evs.length ? ' evento' : '') +
       (iso === oggiIso ? ' oggi' : '') + (iso === ferieCal.sel ? ' sel' : '');
     const cell = elx('div', { class: cls,
       title: [chiusa && (chiusa.descrizione || 'Chiusura aziendale'), festivo]
@@ -1422,7 +1437,6 @@ function renderFerie() {
     // ⚠ L'evento si vede anche sui giorni CHIUSI e sui weekend: un pranzo
     // aziendale di sabato e' esattamente il caso in cui sapere che c'e'
     // serve di piu'. Le chiusure tolgono il lavoro, non il calendario.
-    const evs = eventiDelGiorno(iso);
     if (evs.length) {
       cell.append(elx('div', { class:'cal-ev',
         title: evs.map(eventoEtichetta).join('\n') },
@@ -1451,7 +1465,7 @@ function renderFerie() {
   if ((state.eventi || []).some(e => {
     const fine = e.data_fine || e.data;
     return e.data && fine >= primoIso && e.data <= ultimoIso;
-  })) legenda.append(elx('span', {}, elx('b', {}, '●'), 'Evento'));
+  })) legenda.append(elx('span', {}, elx('b', { style:'color:var(--blu);' }, '●'), 'Evento'));
   root.append(legenda);
 
   // Dettaglio del giorno selezionato
