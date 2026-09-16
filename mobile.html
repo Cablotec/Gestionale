@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-16.02"></script>
+<script src="core/db.js?v=2026-09-16.03"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -127,6 +127,20 @@ button{font-family:inherit;}
 .cal-num{font-size:13px;font-weight:700;line-height:1;}
 .cal-mine{position:absolute;left:5px;bottom:5px;width:8px;height:8px;border-radius:50%;}
 .cal-count{position:absolute;right:4px;bottom:3px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mut);}
+/* Chiusura aziendale: righine diagonali, come un giorno "barrato". Si vede
+   che il giorno non c'e senza doverlo leggere, e non ruba il posto ai pallini
+   delle assenze — che su un giorno chiuso non dovrebbero esserci. */
+.cal-cell.chiusa{background:repeating-linear-gradient(135deg,var(--sur),var(--sur) 5px,var(--sur2) 5px,var(--sur2) 10px);border-color:var(--mut);}
+.cal-cell.chiusa .cal-num{color:var(--mut);}
+.cal-lock{position:absolute;right:4px;top:3px;font-size:10px;line-height:1;opacity:.8;}
+.cal-legenda{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:11px;color:var(--mut);}
+.cal-legenda span{display:flex;align-items:center;gap:5px;}
+.cal-legenda i{width:12px;height:12px;border-radius:3px;border:1px solid var(--brd);display:inline-block;}
+.cal-legenda b{font-size:12px;line-height:1;}
+.cal-legenda i.mia{background:rgba(212,255,78,.25);border-color:var(--acc);}
+.day-chiusa{background:var(--sur2);border:1px solid var(--mut);border-left:4px solid var(--mut);border-radius:10px;padding:10px 13px;margin-top:10px;font-size:13px;}
+.day-chiusa b{color:var(--txt);}
+.ferie-warn{background:rgba(255,107,53,.08);border:1px solid #ff6b35;border-radius:10px;padding:10px 13px;margin-bottom:10px;font-size:13px;color:#ff9a6e;}
 .comm-row.mia-row{border-color:var(--acc);}
 .scroll{flex:1;overflow-y:auto;padding-bottom:10px;}
 .sec-hd{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--acc);letter-spacing:.1em;text-transform:uppercase;margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--acc);}
@@ -281,7 +295,7 @@ const state = {
   utenti: [], utentiById: {}, operazioni: [], aziende: [], articoli: [],
   tipiLav: [], opFasi: [], opAddetti: [], sessioni: [], attivita: [],
   mezzi: [], prenotazioni: [], prenOp: [], consegne: [],
-  tipiAssenza: [], assenze: [], impostazioni: {}, chiusure: [],
+  tipiAssenza: [], assenze: [], impostazioni: {}, chiusure: [], ferieNonLette: [],
   operatore: null, opSel: null,
   search: '', vediAltre: false,
   timer: null,
@@ -415,23 +429,68 @@ async function loadData() {
   await loadFerieData();
 }
 
-// Dati per la sezione Ferie. Best-effort. Carico tipi, le assenze valide
-// dall'inizio dell'anno (per lista + dedup), impostazioni (finestre/esenti)
-// e chiusure aziendali (per saltare i giorni non lavorativi).
+// Dati per la sezione Ferie. Carico tipi, le assenze valide dall'inizio
+// dell'anno (per lista + dedup), impostazioni (finestre/esenti) e chiusure
+// aziendali (per saltare i giorni non lavorativi e mostrarli in calendario).
+//
+// ⚠⚠ LA TABELLA SI CHIAMA `chiusure_aziendali` (corretto il 16 set). Qui
+// c'era scritto `chiusure`, che **non esiste**. PostgREST rispondeva
+// "Could not find the table", l'errore finiva in `ch.error` — che nessuno
+// guardava — e `state.chiusure` restava `[]`. Effetto: per il telefono le
+// chiusure aziendali non esistevano, quindi `isGiornoNonLavorativo` non le
+// saltava e una richiesta di ferie a cavallo di Natale scriveva assenze
+// **sui giorni di chiusura**. Sui dati veri era gia' successo: 5 giornate
+// (24, 28, 29, 30, 31 dicembre), 40 ore di ferie bruciate su giorni in cui
+// l'azienda e' chiusa. Il gestionale non aveva il difetto, quindi da li' non
+// si vedeva niente.
+//
+// ⚠ La LEZIONE, ed e' il motivo del codice qui sotto: **un `catch` che
+// ingoia tutto e un `|| []` trasformano una tabella inesistente in un
+// archivio vuoto**, e un archivio vuoto si legge come "non c'e' niente da
+// saltare". Adesso ogni pezzo che non arriva viene NOMINATO in
+// `state.ferieNonLette`, e la sezione Ferie lo dichiara invece di far finta
+// di sapere. Stessa regola delle giacenze al kiosk: se non l'hai letto, non
+// dire che non c'e'.
 async function loadFerieData() {
+  state.ferieNonLette = [];
   try {
     const annoIso = todayISO().slice(0, 4) + '-01-01';
     const [ta, as, im, ch] = await Promise.all([
       sb.from('tipi_assenza').select('*').order('ordine'),
       sb.from('assenze').select('*').eq('stato', 'valida').gte('data', annoIso),
       sb.from('impostazioni').select('*'),
-      sb.from('chiusure').select('*'),
+      sb.from('chiusure_aziendali').select('*').order('data'),
     ]);
+    const segna = (nome, r) => { if (r.error) state.ferieNonLette.push(nome); };
+    segna('tipi di assenza', ta); segna('assenze', as);
+    segna('impostazioni', im); segna('chiusure aziendali', ch);
+    // ⚠⚠ ZERO RIGHE SENZA ERRORE NON VUOL DIRE "NON C'E' NIENTE".
+    // L'RLS di Supabase non rifiuta: FILTRA, e una tabella che non ti fa
+    // vedere niente torna `[]` con `error: null` — identica a una tabella
+    // vuota. E' la stessa trappola documentata per le UPDATE ("HTTP 200 e
+    // zero righe"), ma in lettura, e qui morde piu' forte: senza le
+    // impostazioni le finestre ferie scivolano sui valori di default scritti
+    // nel codice, e il telefono direbbe date diverse dal gestionale sulla
+    // stessa domanda.
+    // Le finestre in `impostazioni` ci sono SEMPRE (le scrive l'ufficio): se
+    // arrivano zero righe, o l'RLS blocca o qualcuno le ha cancellate. In
+    // tutti e due i casi non e' vero che "non c'e' niente da sapere".
+    // ⚠ Sulle chiusure NON si puo' fare lo stesso controllo: zero chiusure e'
+    // una risposta legittima (un'azienda puo' non averne). Per questo si
+    // guarda `impostazioni`, che invece non puo' essere vuota.
+    if (!im.error && !(im.data || []).length) {
+      state.ferieNonLette.push('le impostazioni delle finestre ferie');
+    }
+    if (!ta.error && !(ta.data || []).length) {
+      state.ferieNonLette.push('i tipi di assenza');
+    }
     state.tipiAssenza = ta.data || [];
     state.assenze = as.data || [];
     state.impostazioni = Object.fromEntries((im.data || []).map(r => [r.chiave, r.valore]));
     state.chiusure = ch.data || [];
-  } catch (e) { /* best-effort: la timbratura funziona comunque */ }
+  } catch (e) {
+    state.ferieNonLette = ['i dati delle assenze'];
+  }
 }
 
 // Dati per la sezione Mezzi. Best-effort: se falliscono, la timbratura funziona
@@ -1064,6 +1123,42 @@ function tipoInseribileDa(tipo, esente) {
   return false;
 }
 
+// ⚠⚠ QUAL E' IL PERIODO CHE SI PUO' PRENOTARE ADESSO (16 set).
+// Il difetto segnalato da Nico: il form si apre sulla data di OGGI, e oggi
+// (16 settembre) cade nel periodo ESTIVO, che si prenota a febbraio. Quindi
+// la prima cosa che l'operatore leggeva era un rosso
+//   "⚠ le assenze per il periodo estiva si possono inserire dal 01-02 al 28-02"
+// proprio nel mese in cui le ferie si prenotano davvero — perche' a settembre
+// e' aperta la finestra INVERNALE (01-09 → 30-09) per il periodo 01-10 → 28-02.
+// Il messaggio era vero sulla data proposta e **sbagliato sulla domanda**:
+// diceva "non puoi" a qualcuno che in quel momento puo', solo per un'altra
+// parte dell'anno.
+// **Un avviso che dice solo di no, quando un si' esiste, e' un avviso
+// sbagliato anche quando la frase e' esatta.**
+function finestraApertaOra(oggiIso) {
+  return getFinestreAssenze()
+    .find(f => isoDentroIntervallo(oggiIso, f.aperturaDa, f.aperturaA)) || null;
+}
+// "01-02" e' GG-MM: si scrive 01/02, come tutte le date dell'app. Lasciato
+// col trattino si leggeva come un formato a se', e in mezzo a una frase
+// "dal 01-02 al 28-02" sembra un intervallo di numeri.
+function ggmmIT(s) { return String(s || '').replace('-', '/'); }
+
+// Il primo giorno che questa persona puo' davvero chiedere: dentro la
+// finestra aperta E lavorativo. Si cerca in avanti giorno per giorno invece
+// di calcolarlo: i periodi scavallano l'anno (01-10 → 28-02) e l'aritmetica
+// sugli intervalli circolari e' il posto dove si sbaglia. 400 giri di una
+// funzione che costa niente, una volta all'apertura del form.
+function primoGiornoInseribile(utente) {
+  const d = new Date();
+  for (let i = 0; i < 400; i++) {
+    const iso = toLocalISO(d);
+    if (verificaAccessoAssenza(iso, utente).ok && !isGiornoNonLavorativo(d)) return iso;
+    d.setDate(d.getDate() + 1);
+  }
+  return todayISO();
+}
+
 function verificaAccessoAssenza(iso, utente) {
   // ⚠ Il passato PRIMA dell'esenzione: l'esenzione salta la finestra, non
   // le date passate (11 set). Stesso ordine del gestionale, o le due porte
@@ -1076,7 +1171,11 @@ function verificaAccessoAssenza(iso, utente) {
   const finestra = finestre.find(f => isoDentroIntervallo(iso, f.periodoDa, f.periodoA));
   if (!finestra) return { ok:false, motivo:'questa data non rientra in nessuna finestra di apertura' };
   if (!isoDentroIntervallo(oggiIso, finestra.aperturaDa, finestra.aperturaA))
-    return { ok:false, motivo:`le assenze del periodo ${finestra.nome} si inseriscono dal ${finestra.aperturaDa} al ${finestra.aperturaA}` };
+    return { ok:false, finestra,
+      // ⚠ "finestra estiva", non "periodo estiva": i nomi delle finestre sono
+      // femminili (estiva, invernale) perche nati per accordarsi a "finestra".
+      // Infilarli dopo "periodo" fa uscire "il periodo estiva".
+      motivo:`questa data sta nella finestra ${finestra.nome} (${ggmmIT(finestra.periodoDa)} – ${ggmmIT(finestra.periodoA)}), che si prenota dal ${ggmmIT(finestra.aperturaDa)} al ${ggmmIT(finestra.aperturaA)}` };
   return { ok:true, finestra };
 }
 
@@ -1101,11 +1200,43 @@ function festiviNazIsoSet(anno) {
   s.add(toLocalISO(pasquetta));
   return s;
 }
-function chiusuraIso(iso) {
-  return (state.chiusure || []).some(c => {
+// La chiusura di questo giorno, o null. Ritorna la RIGA e non un booleano:
+// in calendario serve anche la descrizione ("Chiusura Natalizia", "Ponte"),
+// e un giorno chiuso senza il perche' si legge come un errore.
+function chiusuraDelGiorno(iso) {
+  return (state.chiusure || []).find(c => {
     if (!c.data) return false;
     return c.ricorrente ? c.data.substring(5) === iso.substring(5) : c.data === iso;
-  });
+  }) || null;
+}
+function chiusuraIso(iso) { return !!chiusuraDelGiorno(iso); }
+
+// Il festivo nazionale di questo giorno, col nome. Stessi giorni di
+// `festiviNazIsoSet`, ma qui serve poterli dire.
+const FESTIVI_NAZ_NOMI = {
+  '01-01':'Capodanno', '01-06':'Epifania', '04-25':'Liberazione', '05-01':'Festa del lavoro',
+  '06-02':'Festa della Repubblica', '08-15':'Ferragosto', '11-01':'Ognissanti',
+  '12-08':'Immacolata', '12-25':'Natale', '12-26':'Santo Stefano',
+};
+function festivoDelGiorno(iso) {
+  const d = parseISODate(iso);
+  const nome = FESTIVI_NAZ_NOMI[iso.substring(5)];
+  if (nome) return nome;
+  const pasqua = calcolaPasqua(d.getFullYear());
+  if (toLocalISO(pasqua) === iso) return 'Pasqua';
+  const pasquetta = new Date(pasqua); pasquetta.setDate(pasqua.getDate() + 1);
+  if (toLocalISO(pasquetta) === iso) return 'Lunedi dell Angelo';
+  return null;
+}
+// Perche' questo giorno non e' lavorativo, in parole. null = lo e'.
+function motivoNonLavorativo(iso) {
+  const ch = chiusuraDelGiorno(iso);
+  if (ch) return { tipo:'chiusura', testo: ch.descrizione || 'Chiusura aziendale' };
+  const fe = festivoDelGiorno(iso);
+  if (fe) return { tipo:'festivo', testo: fe };
+  const dow = parseISODate(iso).getDay();
+  if (dow === 0 || dow === 6) return { tipo:'weekend', testo:'Weekend' };
+  return null;
 }
 function isGiornoNonLavorativo(d) {
   const dow = d.getDay();
@@ -1139,6 +1270,16 @@ function renderFerie() {
   if (!state.operatore) { renderAuth(); return; }
   if (!ferieCal) { const d = new Date(); ferieCal = { y: d.getFullYear(), m: d.getMonth(), sel: todayISO() }; }
   root.innerHTML = '';
+  // ⚠ SE NON L'HO LETTO, LO DICO. E' il difetto del 16 set: il nome sbagliato
+  // della tabella delle chiusure produceva un elenco vuoto, un elenco vuoto si
+  // legge come "non c'e niente da saltare", e le ferie finivano sui giorni di
+  // chiusura. Adesso il silenzio ha una voce.
+  if ((state.ferieNonLette || []).length) {
+    root.append(elx('div', { class:'ferie-warn' },
+      '⚠ Non ho potuto leggere: ' + state.ferieNonLette.join(', ') + '. '
+      + 'Quello che vedi qui potrebbe essere incompleto — prima di chiedere ferie, '
+      + 'riprova piu tardi o parla con l ufficio.'));
+  }
   root.append(elx('button', { class:'mezzi-cta', onclick: () => renderFerieForm() }, '+ Richiedi assenza'));
 
   const tipiById = Object.fromEntries((state.tipiAssenza || []).map(t => [t.id, t]));
@@ -1164,10 +1305,18 @@ function renderFerie() {
     const iso = `${ferieCal.y}-${zp(ferieCal.m + 1)}-${zp(g)}`;
     const ass = (state.assenze || []).filter(a => a.data === iso);
     const mia = ass.find(a => a.utente_id === mioId);
+    // ⚠ La chiusura aziendale si vede, il festivo nazionale no: il festivo lo
+    // sanno tutti, la chiusura la decide l'azienda ed e' l'unica che
+    // sorprende. Segnarli tutti e due avrebbe barrato mezzo dicembre senza
+    // distinguere quello che va saputo da quello che si sa gia.
+    const chiusa = chiusuraDelGiorno(iso);
     const cls = 'cal-cell' + (mia ? ' mia' : (ass.length ? ' has' : '')) +
+      (chiusa ? ' chiusa' : '') +
       (iso === oggiIso ? ' oggi' : '') + (iso === ferieCal.sel ? ' sel' : '');
-    const cell = elx('div', { class: cls, onclick: () => { ferieCal.sel = iso; renderFerie(); } });
+    const cell = elx('div', { class: cls, title: chiusa ? (chiusa.descrizione || 'Chiusura aziendale') : '',
+      onclick: () => { ferieCal.sel = iso; renderFerie(); } });
     cell.append(elx('div', { class:'cal-num' }, String(g)));
+    if (chiusa) cell.append(elx('div', { class:'cal-lock' }, '🔒'));
     if (mia) {
       const t = tipiById[mia.tipo_assenza_id];
       cell.append(elx('div', { class:'cal-mine', style:'background:' + (t?.colore || 'var(--acc)') + ';' }));
@@ -1176,9 +1325,27 @@ function renderFerie() {
     grid.append(cell);
   }
   root.append(grid);
+  // ⚠ La legenda usa il SEGNO VERO che sta nella cella, non un campione di
+  // colore: il lucchetto e l'unica cosa che si distingue davvero a 12 px su
+  // un telefono, e un quadratino con le righine diagonali a quella misura
+  // diventa un quadratino grigio qualunque.
+  root.append(elx('div', { class:'cal-legenda' },
+    elx('span', {}, elx('b', {}, '🔒'), 'Chiusura aziendale'),
+    elx('span', {}, elx('i', { class:'mia' }), 'Una tua assenza')));
 
   // Dettaglio del giorno selezionato
   if (ferieCal.sel) {
+    // ⚠ PRIMA il motivo per cui il giorno non e lavorativo, POI chi e
+    // assente: su un giorno chiuso "Nessuno assente" e una risposta che non
+    // risponde — non c'e nessuno perche l'azienda e chiusa.
+    const mnl = motivoNonLavorativo(ferieCal.sel);
+    if (mnl && mnl.tipo !== 'weekend') {
+      root.append(elx('div', { class:'day-chiusa' },
+        (mnl.tipo === 'chiusura' ? '🔒 Chiusura aziendale — ' : '🇮🇹 Festivo — '),
+        elx('b', {}, mnl.testo),
+        elx('div', { style:'color:var(--mut);margin-top:4px;' },
+          'Non si lavora: chiedendo ferie a cavallo di questo giorno, il giorno non viene contato.')));
+    }
     const ass = (state.assenze || []).filter(a => a.data === ferieCal.sel)
       .sort((a, b) => (state.utentiById[a.utente_id]?.nome || '').localeCompare(state.utentiById[b.utente_id]?.nome || ''));
     root.append(elx('div', { class:'sec-hd', style:'margin-top:14px;' }, fmtIT(ferieCal.sel) + ' · ' + ass.length + ' assenti'));
@@ -1260,7 +1427,13 @@ function renderFerieForm() {
     return;
   }
 
-  const f = { tipo: tipi[0].id, dataIn: todayISO(), dataFi: todayISO(), ore: oreInizialiTipo(tipi[0]), note: '' };
+  // ⚠ Si parte dal primo giorno CHIEDIBILE, non da oggi. Proporre oggi
+  // voleva dire aprire il form su una data rifiutata — a settembre il form
+  // si apriva con un rosso addosso, e chi lo legge pensa che il sistema sia
+  // chiuso, non che debba spostarsi di due settimane.
+  const primoBuono = primoGiornoInseribile(state.operatore);
+  const f = { tipo: tipi[0].id, dataIn: primoBuono, dataFi: primoBuono,
+    ore: oreInizialiTipo(tipi[0]), note: '' };
   root.append(elx('div', { class:'step-title' }, 'Richiedi assenza'));
 
   // Tipo (chips colorate)
@@ -1320,11 +1493,32 @@ function renderFerieForm() {
   // Finestra: feedback immediato sulla data iniziale
   const hintBox = elx('div', { class:'mz-avail' });
   root.append(hintBox);
+  // ⚠ SI DICE SEMPRE COSA SI PUO' FARE, non solo cosa non si puo'. Vedi la
+  // nota su `finestraApertaOra`: un "no" da solo, nel mese in cui un "si'"
+  // esiste, e' l'avviso piu' sbagliato di tutti.
   function renderHint() {
     hintBox.innerHTML = '';
     const v = verificaAccessoAssenza(f.dataIn, state.operatore);
-    if (v.ok) hintBox.append(elx('div', { class:'ok' }, '✅ Inseribile' + (v.esenzione ? ' (gruppo esente)' : '')));
-    else hintBox.append(elx('div', { class:'busy' }, '⚠ ' + v.motivo));
+    const aperta = finestraApertaOra(todayISO());
+    if (v.ok) {
+      hintBox.append(elx('div', { class:'ok' }, '✅ Inseribile' + (v.esenzione ? ' (gruppo esente)' : '')));
+    } else {
+      hintBox.append(elx('div', { class:'busy' }, '⚠ ' + v.motivo));
+    }
+    // La riga verde vale in tutti e due i casi: anche chi ha scelto una data
+    // buona ha diritto di sapere fin dove puo' arrivare.
+    if (!v.esenzione) {
+      if (aperta) {
+        hintBox.append(elx('div', { style:'margin-top:6px;color:var(--txt);' },
+          'Adesso e aperta la finestra ' + aperta.nome + ': puoi chiedere dal '
+          + ggmmIT(aperta.periodoDa) + ' al ' + ggmmIT(aperta.periodoA) + '.'));
+      } else {
+        const prossime = getFinestreAssenze()
+          .map(x => x.nome + ' dal ' + ggmmIT(x.aperturaDa) + ' al ' + ggmmIT(x.aperturaA)).join(' · ');
+        hintBox.append(elx('div', { style:'margin-top:6px;color:var(--txt);' },
+          'Oggi non e aperta nessuna finestra. Si prenota: ' + prossime + '.'));
+      }
+    }
   }
   renderHint();
 
@@ -1343,10 +1537,32 @@ async function salvaAssenza(f, btn, err) {
   const ore = mod === 'fissa' ? 8 : (parseFloat(f.ore) || 0);
   if (mod !== 'fissa' && ore <= 0) { err.textContent = 'Imposta le ore'; return; }
 
-  // Espandi il periodo sui soli giorni lavorativi
-  let giorni = [];
+  // Espandi il periodo sui soli giorni lavorativi.
+  // ⚠ I SALTATI SI CONTANO E SI DICONO (16 set). Prima sparivano in silenzio:
+  // chiedevi dal 24 al 31 dicembre, ne salvava 2 e non diceva perche gli altri
+  // no. Con le chiusure che non arrivavano nemmeno (tabella sbagliata) il
+  // silenzio era doppio — e cosi 40 ore di ferie sono finite su giorni chiusi
+  // senza che nessuno potesse accorgersene.
+  let giorni = [], saltatiChiusura = 0, saltatiFestivo = 0, saltatiWeekend = 0;
   const d = parseISODate(f.dataIn), fine = parseISODate(f.dataFi);
-  while (d <= fine) { if (!isGiornoNonLavorativo(d)) giorni.push(toLocalISO(d)); d.setDate(d.getDate() + 1); }
+  while (d <= fine) {
+    const iso = toLocalISO(d);
+    const mnl = motivoNonLavorativo(iso);
+    if (!mnl) giorni.push(iso);
+    else if (mnl.tipo === 'chiusura') saltatiChiusura++;
+    else if (mnl.tipo === 'festivo') saltatiFestivo++;
+    else saltatiWeekend++;
+    d.setDate(d.getDate() + 1);
+  }
+  const dettaglioSaltati = () => {
+    const p = [];
+    if (saltatiChiusura) p.push(saltatiChiusura
+      + (saltatiChiusura === 1 ? ' giorno di chiusura aziendale' : ' giorni di chiusura aziendale'));
+    if (saltatiFestivo) p.push(saltatiFestivo + (saltatiFestivo === 1 ? ' festivo' : ' festivi'));
+    if (saltatiWeekend) p.push(saltatiWeekend
+      + (saltatiWeekend === 1 ? ' giorno di weekend' : ' giorni di weekend'));
+    return p.join(', ');
+  };
 
   // Salta i giorni già con un'assenza e quelli fuori finestra
   let giaPresenti = 0, fuoriFinestra = 0, motivoFuori = '';
@@ -1355,6 +1571,8 @@ async function salvaAssenza(f, btn, err) {
 
   if (giorni.length === 0) {
     const parti = [];
+    const sal = dettaglioSaltati();
+    if (sal) parti.push(sal);
     if (giaPresenti) parti.push(giaPresenti + ' già presenti');
     if (fuoriFinestra) parti.push(fuoriFinestra + ' fuori finestra');
     err.textContent = 'Nessun giorno da inserire' + (parti.length ? ' (' + parti.join(', ') + ')' : '') + (motivoFuori ? '. ' + motivoFuori : '');
@@ -1375,6 +1593,17 @@ async function salvaAssenza(f, btn, err) {
     }
     (data || rows).forEach(r => { if (!r.id || !state.assenze.find(x => x.id === r.id)) state.assenze.push(r); });
     beep('ok');
+    // ⚠ Anche quando va bene si dice cosa NON e entrato: chi chiede dal 24 al
+    // 31 dicembre e si vede salvare 2 giorni ha diritto di sapere perche, o
+    // torna a chiederlo convinto che sia andato storto qualcosa.
+    const sal = dettaglioSaltati();
+    if (sal || giaPresenti) {
+      const p = [];
+      if (sal) p.push(sal);
+      if (giaPresenti) p.push(giaPresenti + ' già presenti');
+      alert(giorni.length + (giorni.length === 1 ? ' giorno inserito' : ' giorni inseriti')
+        + '.\nNon contati: ' + p.join(', ') + '.');
+    }
     renderFerie();
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Invia richiesta';

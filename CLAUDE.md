@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.03`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -211,6 +211,34 @@
 - ⚠ **Il conto e SINCRONO**, ed e il vero regalo del dato fisso: da quando ogni commessa porta la sua lista, la domanda di ogni codice si ricostruisce **tutta in memoria** (`fabbisognoDaListe` + `materialiCommessa`). Le due mappe (`viveConLista`, `manPerCodice`) si costruiscono **una volta prima del ciclo**: dentro sarebbero rifatte a ogni riga. E servono TUTTE le commesse anche per calcolarne una: la giacenza si divide fra tutte quelle che vogliono lo stesso codice.
 - **TRE FONTI IN SCALA, sempre dichiarate**: lista congelata (esatta) → righe che Alnus attribuisce all'OP (globali) → riflesso da una commessa sorella. Ogni gradino e piu debole, ma meglio di un silenzio che si legge come "a posto".
 - **Strumenti**: `carica-distinte.js` (⚠ leggere il TESTO della cella, non il valore: 2.820 celle su 38.460 hanno il separatore decimale perso — `0,45` scritto `45`) · `copertura-distinte.js` · `genera-materiali-commesse.js` (⚠ `--sql`, non `--scrivi`: l RLS rifiuta le UPDATE su `operazioni` **in silenzio**, HTTP 200 e zero righe) · `prova-fabbisogno.js`.
+
+## 16 SETTEMBRE (pomeriggio): il calendario del telefono (`2026-09-16.03`)
+
+### ⚠⚠⚠ IL DIFETTO PIU' CARO FINORA: UN NOME DI TABELLA SBAGLIATO, E NESSUNO CHE LO DICESSE
+`mobile.html` leggeva `sb.from('chiusure')`. **Quella tabella non esiste**: si chiama `chiusure_aziendali`, come la legge il gestionale. PostgREST rispondeva `PGRST205 Could not find the table`, l'errore finiva in `ch.error` — che nessuno guardava — e `state.chiusure` restava `[]`.
+- **Conseguenza 1 (quella chiesta da Nico)**: le chiusure aziendali sul telefono non si vedevano. Ovvio: non arrivavano mai.
+- **Conseguenza 2, invisibile e peggiore**: `isGiornoNonLavorativo` non le saltava, quindi una richiesta di ferie a cavallo di Natale **scriveva assenze sui giorni di chiusura**. Verificato sui dati veri: **5 giornate, 40 ore di ferie** (24, 28, 29, 30, 31 dicembre 2026), tutte di una persona, tutte create **dal suo account** — cioe' dal telefono. Dal gestionale il difetto non c'era e quindi non si vedeva.
+- ⚠⚠ **LA LEZIONE, e vale per tutta l'app**: `const dati = risposta.data || []` dopo un `try/catch` che ingoia, trasforma **una tabella inesistente in un archivio vuoto** — e un archivio vuoto si legge come *"non c'e' niente da saltare"*. Il difetto non e' stato il refuso: e' stato il fatto che **il refuso non poteva fare rumore**.
+- Adesso ogni pezzo che non arriva viene NOMINATO in `state.ferieNonLette` e dichiarato in cima alla sezione Ferie. Stessa regola gia' scritta per le giacenze al kiosk: **se non l'hai letto, non dire che non c'e'**.
+- ⚠⚠ **E c'e' un secondo modo di non sapere, che un `error` non cattura: l'RLS non rifiuta, FILTRA.** Una tabella che non ti fa vedere niente torna `[]` con `error: null`, identica a una tabella vuota — la versione in lettura del famoso "HTTP 200 e zero righe". Per questo si controlla anche il **contenuto**: `impostazioni` e `tipi_assenza` non possono essere vuote (le scrive l'ufficio), e se arrivano vuote si dichiara. Sulle **chiusure** lo stesso controllo NON si puo' fare: zero chiusure e' una risposta legittima.
+- 🔎 **Verificato che era l'unica**: tutte le altre tabelle interrogate da `mobile.html` e `prelievo.html` (17 + 5) esistono.
+
+### Le chiusure in calendario
+- Cella **tratteggiata col lucchetto 🔒** + legenda. ⚠ Si segna la CHIUSURA AZIENDALE, non il festivo nazionale: il festivo lo sanno tutti, la chiusura la decide l'azienda ed e' l'unica che sorprende. Segnarli entrambi avrebbe barrato mezzo dicembre senza distinguere cio' che va saputo da cio' che si sa gia'.
+- Il giorno selezionato dice **PRIMA perche' non si lavora**, poi chi e' assente: su un giorno chiuso *"Nessuno assente"* e' una risposta che non risponde.
+- ⚠ La legenda usa il **segno vero** (il lucchetto), non un campione di colore: un quadratino con le righine a 12 px su un telefono e' un quadratino grigio qualunque. Misurato guardandolo.
+- **I giorni saltati adesso si DICHIARANO**, anche quando il salvataggio riesce: *"1 giorno inserito. Non contati: 5 giorni di chiusura aziendale, 2 festivi, 1 giorno di weekend"*. Prima sparivano in silenzio — e con le chiusure che non arrivavano nemmeno, il silenzio era doppio.
+
+### ⚠⚠ L'AVVISO CHE DICEVA SOLO DI NO (segnalato da Nico: *"avviso errato nel mobile su ferie estive"*)
+- Configurazione vera: **estiva** = periodo 01/03–30/09, si prenota 01/02–28/02 · **invernale** = periodo 01/10–28/02, si prenota 01/09–30/09.
+- Il form si apriva sulla data di **oggi**. Il 16 settembre oggi cade nel periodo **estivo**, che si prenota a febbraio — quindi la prima cosa che l'operatore leggeva era un rosso *"le assenze del periodo estiva si possono inserire dal 01-02 al 28-02"*, **proprio nel mese in cui le ferie si prenotano davvero** (a settembre e' aperta la finestra invernale).
+- Il messaggio era **vero sulla data proposta e sbagliato sulla domanda**: diceva "non puoi" a qualcuno che in quel momento puo', solo per un'altra parte dell'anno. **Un avviso che dice solo di no, quando un si' esiste, e' un avviso sbagliato anche quando la frase e' esatta.**
+- Tre correzioni: **1)** il form si apre sul **primo giorno chiedibile** (`primoGiornoInseribile`: dentro la finestra aperta E lavorativo — oggi propone 01/10/2026), **2)** il riquadro dice **sempre** cosa si puo' fare adesso (`finestraApertaOra`), non solo cosa no, **3)** le date si scrivono `01/02` e non `01-02`, e si nomina la **finestra** e non il "periodo" (i nomi sono femminili: *"il periodo estiva"* non si puo' leggere).
+- ⚠ `primoGiornoInseribile` cerca **in avanti giorno per giorno** invece di calcolare: i periodi scavallano l'anno (01/10 → 28/02) e l'aritmetica sugli intervalli circolari e' il posto dove si sbaglia. 400 giri di una funzione che costa niente, una volta all'apertura del form.
+
+### Da chiudere
+- **Le 5 assenze sui giorni di chiusura** (24, 28, 29, 30, 31 dicembre 2026) sono ancora a database: vanno tolte, ma la DELETE su `assenze` non passa dall'account tecnico — serve SQL dal pannello, e serve l'ok di Nico.
+- **Non verificato**: che un account OPERATORE (non admin) riesca davvero a leggere `chiusure_aziendali` e `impostazioni`. Il login del mobile e' personale e la password non la si chiede. Se l'RLS le riservasse agli admin, il telefono continuerebbe a non vedere le chiusure — ma adesso **lo direbbe**, invece di tacere.
 
 ## 16 SETTEMBRE: i materiali arrivano al kiosk (`2026-09-16.02`)
 Chiesto dalla produzione: *"poter visualizzare dal kiosk la lista dei componenti disponibili per ordine, in modo da dare all'operatore la possibilita di vedere se manca qualche materiale nella lavorazione"*.
