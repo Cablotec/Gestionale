@@ -6,12 +6,12 @@
 <meta name="theme-color" content="#0f0f0e">
 <title>Cablotec — Sistema Gestionale</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-15.01"></script>
-<script src="domain/scheduling.js?v=2026-09-15.01"></script>
-<script src="domain/materiali.js?v=2026-09-15.01"></script>
-<script src="domain/codifica.js?v=2026-09-15.01"></script>
+<script src="core/db.js?v=2026-09-16.01"></script>
+<script src="domain/scheduling.js?v=2026-09-16.01"></script>
+<script src="domain/materiali.js?v=2026-09-16.01"></script>
+<script src="domain/codifica.js?v=2026-09-16.01"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="app.css?v=2026-09-15.01">
+<link rel="stylesheet" href="app.css?v=2026-09-16.01">
 </head>
 <body>
 
@@ -128,6 +128,15 @@
     <div id="kiosk-tipo-content"></div>
   </div>
 
+  <!-- Schermata commesse - materiali della commessa (sola lettura) -->
+  <div id="kiosk-step-materiali" class="kiosk-step" style="display:none">
+    <div class="kiosk-greet">
+      <div class="kiosk-greet-name">Materiali della commessa</div>
+      <button class="kiosk-cancel" id="kiosk-materiali-back">Indietro</button>
+    </div>
+    <div id="kiosk-materiali-content"></div>
+  </div>
+
   <!-- Schermata commesse - sessione attiva -->
   <div id="kiosk-step-attiva" class="kiosk-step" style="display:none">
     <div class="kiosk-greet">
@@ -152,6 +161,6 @@
   </div>
 </div>
 
-<script src="app.js?v=2026-09-15.01"></script>
+<script src="app.js?v=2026-09-16.01"></script>
 </body>
 </html>

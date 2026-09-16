@@ -84,36 +84,57 @@ const conColonna = (materiale_dal_cliente, distinta) => {
   t('prodotto che non esiste: nessun avviso inventato', !haDistinta(avvisi(OP)));
 }
 
-sez('ADESSO LA SCHERMATA E UNA SOLA');
+sez('DUE SCHERMATE, UNA SOLA FONTE DELLE PAROLE');
 {
-  // Fino al 15 set erano DUE i posti che rispondevano a "cosa manca a questa
+  // La storia, perche questa sezione non si legga come una fissazione.
+  // Fino al 15 set erano due i posti che rispondevano a "cosa manca a questa
   // commessa": la scheda Materiali dentro la commessa e un riquadro gemello
-  // nella scheda Materiali generale (`riquadroMaterialiCommessa`), raggiunto
-  // dal triangolino. L 11 set la frase sul conto lavoro era stata corretta in
-  // uno solo dei due, e Nico guardava l altro: questa sezione nasceva da li.
+  // nella scheda Materiali generale (`riquadroMaterialiCommessa`). L 11 set
+  // la frase sul conto lavoro era stata corretta in uno solo dei due, e Nico
+  // guardava l altro. Il gemello e stato tolto il 15.
+  // ⚠ Aveva anche un difetto mai visto: leggeva `o.cliente_id` dove la
+  // variabile si chiamava `op`, e sul conto lavoro tirava un ReferenceError
+  // invece della frase. Una copia non si limita a divergere: si rompe dove
+  // nessuno guarda.
   //
-  // Il riquadro gemello adesso NON C E PIU. La prova piu forte non e che le
-  // due schermate dicano la stessa cosa: e che di schermata ce ne sia una,
-  // perche una copia che non esiste non puo tornare a divergere.
-  // ⚠ Quel riquadro aveva anche un difetto mai visto: leggeva `o.cliente_id`
-  // dove la variabile si chiamava `op`. Sul conto lavoro tirava un
-  // ReferenceError invece della frase. Due copie della stessa risposta non si
-  // limitano a divergere: la seconda si rompe senza che nessuno se ne accorga.
+  // Il 16 set le schermate sono tornate DUE — gestionale e kiosk — e stavolta
+  // e giusto: sono due pubblici diversi, l ufficio e l operatore in reparto.
+  // Quello che NON deve tornare doppio e la logica. Le parole ("disponibile"
+  // contro "coperto", il consumo, il segnaposto, le lavorazioni) si scrivono
+  // in `materialeStatoRiga` e basta. Questa sezione sorveglia quello.
   const quante = (t) => src.split(t).length - 1;
-  t('il riquadro gemello non esiste piu',
+  t('il riquadro gemello non e tornato',
     !src.includes('function riquadroMaterialiCommessa'));
-  // UNA sola: quella dentro openOperazioneModal, dove `o` E la commessa.
-  // Se ne comparisse una seconda vorrebbe dire che e rinato un gemello.
-  t('un solo posto legge la dichiarazione sulla commessa',
-    quante('materialeDalCliente(o.cliente_id)') === 1);
-  t('la dichiarazione si legge anche altrove (avvisi, anagrafica)',
-    quante('materialeDalCliente(') >= 2);
-  t('la scheda Materiali della commessa dice la frase giusta',
-    src.includes('Materiale fornito dal cliente: questa commessa'));
+  t('la parola sul materiale si scrive in UN posto solo',
+    quante('function materialeStatoRiga') === 1);
+  t('e il contesto si costruisce in UN posto solo',
+    quante('function materialiStatoCommessa') === 1);
+  // 1 definizione + almeno 2 chiamate: il modal della commessa e il kiosk.
+  // Se una schermata smettesse di passare di li, questo scenderebbe.
+  t('la usano tutte e due le schermate', quante('materialeStatoRiga(') >= 3);
+  // La frase sul conto lavoro e la stessa, parola per parola, nei due posti:
+  // e proprio quella che l 11 set era stata corretta a meta.
+  t('la frase sul conto lavoro e identica nelle due schermate',
+    quante('Materiale fornito dal cliente: questa commessa') === 2);
   // Un bottone che offre di creare una lista da una distinta che non esiste
   // e peggio di un messaggio sbagliato: e un invito a premerlo.
   t('niente bottone Crea dalla distinta sul conto lavoro',
     src.includes('if (!isNew && !dalCliente && isAdmin && art)'));
+  // Il kiosk non scrive niente: e una schermata di sola lettura. Se manca un
+  // pezzo la mossa e dell ufficio acquisti, non dell operatore, e un bottone
+  // che promettesse il contrario sarebbe peggio del silenzio.
+  // Si guarda TUTTO il blocco kiosk dei materiali, dall intestazione alla
+  // schermata successiva: se domani ci si infilasse una scrittura, si vede.
+  const daKiosk = src.indexOf('// KIOSK — I MATERIALI DELLA COMMESSA');
+  const aKiosk = src.indexOf('// ─── Schermata selezione tipo lavorazione ───', daKiosk);
+  const bloccoKiosk = (daKiosk >= 0 && aKiosk > daKiosk) ? src.slice(daKiosk, aKiosk) : '';
+  t('il blocco kiosk dei materiali esiste ed e delimitato', bloccoKiosk.length > 500);
+  t('e non contiene nessuna scrittura a database',
+    !/\.(insert|update|delete|upsert)\s*\(/.test(bloccoKiosk));
+  // Le giacenze si chiedono per i codici di UNA commessa, non tutte: il kiosk
+  // e un mini-PC e `mancanti` dal 15 set contiene l intero file.
+  t('le giacenze si chiedono per codice, non in blocco',
+    /\.in\('codice'/.test(bloccoKiosk));
 }
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');

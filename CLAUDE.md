@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-15.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -211,6 +211,34 @@
 - ⚠ **Il conto e SINCRONO**, ed e il vero regalo del dato fisso: da quando ogni commessa porta la sua lista, la domanda di ogni codice si ricostruisce **tutta in memoria** (`fabbisognoDaListe` + `materialiCommessa`). Le due mappe (`viveConLista`, `manPerCodice`) si costruiscono **una volta prima del ciclo**: dentro sarebbero rifatte a ogni riga. E servono TUTTE le commesse anche per calcolarne una: la giacenza si divide fra tutte quelle che vogliono lo stesso codice.
 - **TRE FONTI IN SCALA, sempre dichiarate**: lista congelata (esatta) → righe che Alnus attribuisce all'OP (globali) → riflesso da una commessa sorella. Ogni gradino e piu debole, ma meglio di un silenzio che si legge come "a posto".
 - **Strumenti**: `carica-distinte.js` (⚠ leggere il TESTO della cella, non il valore: 2.820 celle su 38.460 hanno il separatore decimale perso — `0,45` scritto `45`) · `copertura-distinte.js` · `genera-materiali-commesse.js` (⚠ `--sql`, non `--scrivi`: l RLS rifiuta le UPDATE su `operazioni` **in silenzio**, HTTP 200 e zero righe) · `prova-fabbisogno.js`.
+
+## 16 SETTEMBRE: i materiali arrivano al kiosk (`2026-09-16.01`)
+Chiesto dalla produzione: *"poter visualizzare dal kiosk la lista dei componenti disponibili per ordine, in modo da dare all'operatore la possibilita di vedere se manca qualche materiale nella lavorazione"*.
+
+- **Prima il kiosk diceva UNA cosa sola sul materiale**: `Materiale: Completo/Parziale/Vuoto`, cioe' la tendina impostata da qualcuno in ufficio. E' una DICHIARAZIONE, e puo' essere vecchia di giorni. Adesso accanto c'e' il conto vero, sugli stessi numeri del gestionale — e **quando i due si contraddicono lo si dice**, invece di scegliere quale credere: *"L'ufficio ha dichiarato la preparazione COMPLETA, ma dal magazzino risulta che N componenti mancano"*.
+- **Due porte, i due momenti in cui la domanda nasce**: dalla schermata *"Quale tipo di lavoro?"* (l'ultimo istante in cui non hai ancora cominciato) e dalla sessione attiva (un pezzo che manca si scopre spesso dopo). Il bottone porta **gia' dentro la risposta** (`⚠ 2 mancano` / `✓ 70 disponibili`): costringere a premere per sapere se manca qualcosa vorrebbe dire che chi non preme non lo sa. Si preme per il DETTAGLIO — quale pezzo, e quando arriva.
+- **Sola lettura, e per scelta**: se manca un pezzo la mossa e' dell'ufficio acquisti, non dell'operatore. Un bottone che promettesse il contrario sarebbe peggio del silenzio. Il test lo sorveglia: nel blocco kiosk dei materiali non deve comparire nessuna `insert/update/delete`.
+- **I problemi in cima**, ordinati per urgenza (in ritardo → da ordinare → attesa cliente → in arrivo → coperto → disponibile → consumo → segnaposto). Su una distinta da 84 righe, un rosso che va cercato scorrendo non viene trovato.
+
+### ⚠⚠ UNA SOLA FONTE PER LE PAROLE: `materialeStatoRiga`
+- La logica *"che parola tocca a questo componente"* stava DENTRO `openOperazioneModal`. E' stata tirata fuori in `materialeStatoRiga` + `materialiStatoCommessa`, e adesso la usano tutte e due le schermate. **Copiarla sarebbe rimasta uguale per una settimana**: la storia di questo progetto dice che poi una si corregge e l'altra no — e' successo l'11 set con la frase sul conto lavoro, corretta in un posto su due, e il posto giusto era quello che Nico non guardava.
+- ⚠ Sta in `app.js` e non in domain perche' usa `el`/`fmtIT` e legge `state.operazioni`: e' UI, non motore. Ma **app.js e' lo STESSO file per gestionale e kiosk**, quindi condividerla li' e' condividerla davvero.
+- Il test `test-avviso-distinta.js` e' passato da *"le due schermate dicono la stessa cosa"* a *"la parola si scrive in un posto solo e la usano tutte e due"*: `materialeStatoRiga` definita una volta, chiamata almeno due, e la frase sul conto lavoro identica nei due punti.
+
+### ⚠⚠ L'ARCHIVIO DEL FABBISOGNO NON SI CARICA ALL'AVVIO DEL KIOSK
+- Dal 15 set `mancanti` contiene tutto il file (qualche migliaio di righe, con un jsonb di consegne per riga). Il kiosk e' un **mini-PC di reparto** che gia' scarica commesse, sessioni, addetti e fasi: aggiungerci l'intero magazzino a ogni avvio sarebbe banda buttata per una schermata che si apre qualche volta al giorno.
+- `kioskMancantiDi(op)` chiede **i soli codici di QUELLA commessa** (`.in('codice', …)` a blocchi di 80), presi dalla sua lista congelata che il kiosk ha gia' in memoria. Risultato in caldo 5 minuti. ⚠ `.in()` di supabase-js e non un filtro a mano: fra questi codici ce n'e' con la virgola dentro (`83010FILO0H05VK,25BI`) e in un `in.(a,b)` scritto a mano quella virgola spezzerebbe il valore **senza dare errore**.
+- **Perche' il conto viene identico**: `materialiCommessa` cerca nella mappa dei mancanti **solo i codici che la commessa vuole**; la domanda delle altre commesse (quella che divide la giacenza) arriva da `state.operazioni`, che il kiosk ha. **Verificato sui dati veri: 61 commesse vive con lista, 61 su 61 stesso numero di mancanti** fra il conto del gestionale (archivio intero in memoria) e quello del kiosk (righe scaricate per codice).
+- Se la query fallisce **non si scrive "disponibili"**: si dichiara che le giacenze non si sono lette e si mostra la lista senza stato. Senza le giacenze ogni riga direbbe "disponibile", che e' la bugia piu' costosa possibile qui dentro.
+
+### Le due liste da non dimenticare
+- ⚠ Una schermata nuova va **DICHIARATA in due elenchi**, o sparisce o blocca:
+  - `kioskHideAllSteps` — senza, resta aperta sotto le altre;
+  - `kioskInSchermataAttiva` — senza, il timer di inattivita' non si azzera e **l'operatore che legge una distinta da 80 righe viene sbattuto fuori a meta'**. E' la schermata che si legge piu' a lungo di tutte.
+- ⚠ **Griglia CSS e auto-placement** (trovato misurando a 800px): dopo un elemento che occupa tutte le colonne, il flusso riparte dalla colonna 1 — la quantita' scivolava sotto il codice e la seconda colonna restava larga 0. Codice e quantita' vanno **piazzati a mano** (`grid-row:1`) nel ripiego stretto.
+
+### Filo aperto
+- **Sulle card dell'elenco commesse il conto NON c'e'**: resta la sola dichiarazione dell'ufficio. Metterlo vorrebbe dire una query per card all'apertura dell'elenco, oppure caricare l'archivio all'avvio — le due cose che si stanno evitando. Se servisse davvero, la strada giusta e' una vista/RPC che torni il solo conteggio per OP.
 
 ## 15 SETTEMBRE: la scheda Materiali diventa una lista (`2026-09-15.01`)
 Chiesto da Nico: *"lista materiali pura con colonne giacenza, mancanti ecc (colonne ordinabili) · avviso banner con ritardi e prossime consegne uniti, un banner da ordinare a parte"*, piu la constatazione che *"le altre schede tipo fabbisogno calcolato non lo stiamo usando, non e pratico per adesso"*.

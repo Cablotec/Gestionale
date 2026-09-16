@@ -4143,6 +4143,135 @@ function riquadroListeMaterialiMancanti() {
   return box;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// LA PAROLA CHE TOCCA A UN MATERIALE DELLA COMMESSA — una sola, per due
+// schermate (16 set).
+//
+// Questa logica stava DENTRO `openOperazioneModal`, ed e' stata tirata fuori
+// il giorno in cui il kiosk ha dovuto mostrare la stessa cosa all'operatore.
+// Copiarla la sarebbe rimasta uguale per una settimana: la storia di questo
+// progetto dice che poi una delle due si corregge e l'altra no — e' successo
+// l'11 set con la frase sul conto lavoro, corretta in un posto su due, e il
+// posto giusto era quello che Nico non guardava.
+//
+// ⚠ Sta in `app.js` e non in domain perche' usa `el`/`fmtIT` e legge
+// `state.operazioni`: e' UI, non motore. Ma app.js e' lo STESSO file per
+// gestionale e kiosk, quindi condividerla qui e' condividerla davvero.
+//
+// Le due funzioni:
+//   materialiStatoCommessa(op, righeMancanti) -> il contesto, una volta
+//   materialeStatoRiga(codice, tipo, ctx)     -> la parola, per ogni riga
+// ═══════════════════════════════════════════════════════════════════
+
+// Il contesto per una commessa. Si costruisce UNA volta, prima del ciclo:
+// dentro sarebbe rifatto per ogni componente, e su una distinta da 80 righe
+// vuol dire 80 volte la ripartizione della giacenza fra tutte le commesse.
+//
+// `righeMancanti` = l'archivio del fabbisogno. Nel gestionale e'
+// `state.mancanti`, che sta tutto in memoria; nel kiosk sono le righe dei
+// SOLI codici di questa commessa, scaricate al momento (vedi
+// `kioskMancantiDi`). Il conto viene identico: `materialiCommessa` cerca in
+// questa mappa solo i codici che la commessa vuole.
+function materialiStatoCommessa(op, righeMancanti) {
+  const viveConLista = (state.operazioni || []).filter(x =>
+    (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
+  // ⚠ SOLO LE RIGHE SOTTO SCORTA (15 set). `materialiCommessa` in domain ha un
+  // patto scritto: *un codice che qui NON c'e' non manca*. Da quando
+  // l'archivio contiene tutto il file, passargliele tutte romperebbe quel
+  // patto in silenzio — ogni codice di ogni commessa entrerebbe nella
+  // ripartizione della giacenza, anche quelli che nessuno contende.
+  const manPerCodice = {};
+  (righeMancanti || []).forEach(m => {
+    const k = String(m && m.codice || '').trim();
+    if (k && mancanteSottoScorta(m)) manPerCodice[k] = m;
+  });
+  const mio = (typeof materialiCommessa === 'function')
+    ? materialiCommessa(op, viveConLista, manPerCodice) : null;
+  return {
+    viveConLista, manPerCodice, mio,
+    oggi: toLocalISO(new Date()),
+    // Una riga coperta non e' una segnalazione, e trovarla farebbe scrivere
+    // "coperto" (che e' fragile e dipende dalle sorelle) dove la parola
+    // giusta resta "disponibile".
+    manDi: (c) => manPerCodice[String(c == null ? '' : c).trim()] || null,
+  };
+}
+
+// Che parola tocca a UN componente. `tipo` e' il tipo parte della riga
+// SALVATA sulla commessa (sta sull'arco della distinta, non sul codice).
+// Ritorna { stato, testo, colore, titolo, manca, lavorazione }.
+function materialeStatoRiga(codice, tipo, ctx) {
+  const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  const cod = String(codice == null ? '' : codice).trim();
+
+  // Il CONSUMO (MAC) non si cerca in magazzino: e' minuteria, c'e' sempre.
+  // Scrivere "da ordinare" su un faston manderebbe qualcuno a emettere un
+  // ordine che non serve — ed e' la stessa ragione per cui non entra nel
+  // fabbisogno.
+  if (String(tipo || '').trim().toUpperCase() === 'MAC') {
+    return { stato:'consumo', testo:'consumo', colore:'var(--mut)', manca:0,
+      titolo:'Materiale di consumo (MAC): resta in lista perché serve a chi lavora, '
+        + 'ma non entra nel fabbisogno e non si ordina per commessa.' };
+  }
+  // Un segnaposto non e' un pezzo: dire "disponibile" vorrebbe dire che in
+  // magazzino ce n'e', e COMP GENERICO in magazzino non esiste. Si dichiara
+  // che non fa numero, invece di far finta che sia a posto.
+  if (typeof eSegnaposto === 'function' && eSegnaposto(cod)) {
+    return { stato:'segnaposto', testo:'non conteggiato', colore:'var(--mut)', manca:0,
+      titolo:'Voce generica della distinta, non un materiale da prelevare: resta in '
+        + 'lista perché sta nella distinta, ma non entra nel fabbisogno.' };
+  }
+
+  const m = ctx.manDi(cod);
+  // ⚠ DUE STATI CHE SEMBRAVANO UGUALI, e non lo sono (3 set, chiesto da Nico:
+  // "cosa cambia fra coperto e disponibile?"). La domanda stessa era la prova
+  // che le etichette non si spiegavano da sole.
+  //   disponibile = non e' nemmeno sotto scorta: ce n'e', e non dipende da
+  //                 nessun'altra commessa
+  //   coperto     = E' sotto scorta, ma la fetta di questa commessa c'e'
+  //                 perche' scade prima delle altre
+  // La differenza che conta e' che COPERTO E' FRAGILE: dipende dall'ordine di
+  // ripartizione, e una commessa piu' urgente che entra domani se lo porta
+  // via. Per questo dice anche quante altre se lo contendono.
+  if (!m) {
+    return { stato:'disponibile', testo:'disponibile', colore:'var(--mut)', manca:0,
+      titolo:"Non compare fra i sotto scorta dell'ultima estrazione di Alnus: "
+        + "ce n'è in magazzino, e non dipende da nessun'altra commessa." };
+  }
+  const q = ctx.mio && ctx.mio.get(cod);
+  const st = statoMateriale(m, ctx.oggi);
+  if (!q || q.manca <= 0) {
+    const quante = (ctx.viveConLista || []).filter(x => (x.materiali || [])
+      .some(z => String(z.codice || '').trim() === cod)).length;
+    return { stato:'coperto', testo:'coperto', colore:'var(--grn)', manca:0,
+      titolo:'Questo codice È sotto scorta (in casa ' + nf(m.giacenza)
+        + "), ma la parte che serve a questa commessa c'è perché scade prima.\n"
+        + (quante > 1
+            ? 'Se lo contendono ' + quante + ' commesse: se ne entra una più urgente, '
+              + 'questo può tornare a mancare.'
+            : "Nessun'altra commessa lo chiede.") };
+  }
+
+  // ⚠ ESSERE UNA LAVORAZIONE NON VUOL DIRE CHE NESSUNO L'HA ORDINATA (7 set,
+  // trovato da Nico: "perche' mi dice che TS-342010003_K e' da ordinare al
+  // terzista, quando vedi che c'e' gia' un ordine fornitore? al massimo e' in
+  // ritardo"). Erano due domande diverse trattate come una: `_K` dice DOVE si
+  // prende (da un terzista, non dallo scaffale), lo stato dice SE e' gia'
+  // stata comprata. Il controllo su `lav` stava per primo e mangiava l'altro.
+  // Adesso comanda lo STATO, e `lav` aggiunge solo la parola giusta.
+  const lav = typeof eLavorazione === 'function' && eLavorazione(cod);
+  let t = 'mancano ' + nf(q.manca), c = 'var(--red)';
+  if (st.stato === 'in_ritardo') { t += ' · in ritardo dal ' + fmtIT(st.data)
+    + (st.of ? ' · OF ' + st.of : ''); if (lav) t += ' · lavorazione'; }
+  else if (st.stato === 'in_arrivo') { t += st.data ? ' · arriva il ' + fmtIT(st.data) : ' · ordinato';
+    if (st.of) t += ' · OF ' + st.of; if (lav) t += ' · lavorazione'; c = 'var(--blu)'; }
+  else if (st.stato === 'attesa_cliente') { t += ' · lo manda il cliente'; c = 'var(--or)'; }
+  else if (lav) { t += ' · da ordinare a terzista'; c = 'var(--vio)'; }
+  else t += ' · da ordinare';
+  return { stato: st.stato, testo: t, colore: c, manca: q.manca, lavorazione: lav,
+    titolo: st.fornitore || '' };
+}
+
 // ── IMPORT DELL'ESTRAZIONE ─────────────────────────────────────────────
 // Estratto dalla scheda il 15 set: era duecento righe in mezzo al render, e
 // la lista non riusciva a diventare il corpo della pagina finche' il
@@ -9881,102 +10010,20 @@ function openOperazioneModal(o, opts) {
     // **Una guardia scritta per del codice asincrono diventa un difetto il
     // giorno che quel codice smette di esserlo.**
     {
-      const viveConLista = (state.operazioni || []).filter(x =>
-        (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
-      // ⚠ SOLO LE RIGHE SOTTO SCORTA (15 set). `materialiCommessa` in domain
-      // ha un patto scritto: *un codice che qui NON c'e' non manca*. Da quando
-      // l'archivio contiene tutto il file, passargliele tutte avrebbe rotto
-      // quel patto in silenzio — ogni codice di ogni commessa sarebbe entrato
-      // nella ripartizione della giacenza, anche quelli che nessuno contende.
-      // Il conto della commessa resta esattamente quello di ieri.
-      const manPerCodice = {};
-      (state.mancanti || []).forEach(m => {
-        const k = String(m.codice || '').trim();
-        if (k && mancanteSottoScorta(m)) manPerCodice[k] = m;
-      });
-      const mio = (typeof materialiCommessa === 'function')
-        ? materialiCommessa(o, viveConLista, manPerCodice) : null;
-      const oggi = toLocalISO(new Date());
-      // Stessa regola: una riga coperta non e' una segnalazione, e trovarla
-      // farebbe scrivere "coperto" (che e' fragile e dipende dalle sorelle)
-      // dove la parola giusta resta "disponibile".
-      const manDi = (c) => (state.mancanti || [])
-        .find(x => String(x.codice || '').trim() === c && mancanteSottoScorta(x));
+      // ⚠ LA PAROLA DI OGNI RIGA LA DECIDE `materialeStatoRiga`, non piu'
+      // questo posto (16 set). Stava tutta qui dentro finche' la schermata
+      // era una sola; da quando il kiosk mostra la stessa cosa all'operatore,
+      // una copia qui sarebbe diventata la seconda versione della verita'.
+      // Le spiegazioni di "disponibile" contro "coperto", del consumo, del
+      // segnaposto e delle lavorazioni stanno tutte li'.
+      const ctx = materialiStatoCommessa(o, state.mancanti);
       let nMancano = 0;
       celleStato.forEach((cella, codice) => {
-        const m = manDi(codice);
-        const lav = typeof eLavorazione === 'function' && eLavorazione(codice);
-        // ⚠ DUE STATI CHE SEMBRAVANO UGUALI, e non lo sono (3 set, chiesto da
-        // Nico: "cosa cambia fra coperto e disponibile?"). La domanda stessa
-        // era la prova che le etichette non si spiegavano da sole.
-        //   disponibile = non e nemmeno sotto scorta: ce n'e, e non dipende
-        //                 da nessun'altra commessa
-        //   coperto     = E sotto scorta, ma la fetta di questa commessa c'e
-        //                 perche scade prima delle altre
-        // La differenza che conta e che COPERTO E FRAGILE: dipende dall'ordine
-        // di ripartizione, e una commessa piu urgente che entra domani se lo
-        // porta via. Per questo dice anche quante altre se lo contendono.
-        // Un segnaposto non e un pezzo: dire "disponibile" vorrebbe dire
-        // che in magazzino ce n'e, e in magazzino COMP GENERICO non esiste.
-        // Si dichiara che non fa numero, invece di far finta che sia a posto.
-        // Il CONSUMO (MAC) non si cerca in magazzino: e' minuteria, c'e'
-        // sempre. Scrivere "da ordinare" su un faston manderebbe qualcuno a
-        // emettere un ordine che non serve — ed e' la stessa ragione per cui
-        // non entra nel fabbisogno.
-        if (tipoDi.get(codice) === 'MAC') {
-          cella.textContent = 'consumo'; cella.style.color = 'var(--mut)';
-          cella.title = 'Materiale di consumo (MAC): resta in lista perché serve a chi '
-            + 'lavora, ma non entra nel fabbisogno e non si ordina per commessa.';
-          return;
-        }
-        if (typeof eSegnaposto === 'function' && eSegnaposto(codice)) {
-          cella.textContent = 'non conteggiato'; cella.style.color = 'var(--mut)';
-          cella.title = 'Voce generica della distinta, non un materiale da prelevare: '
-            + 'resta in lista perché sta nella distinta, ma non entra nel fabbisogno.';
-          return;
-        }
-        if (!m) {
-          cella.textContent = 'disponibile'; cella.style.color = 'var(--mut)';
-          cella.title = "Non compare fra i sotto scorta dell'ultima estrazione di Alnus: "
-            + "ce n'è in magazzino, e non dipende da nessun'altra commessa.";
-          return;
-        }
-        const q = mio && mio.get(codice);
-        const st = statoMateriale(m, oggi);
-        if (!q || q.manca <= 0) {
-          const quante = (viveConLista || []).filter(x => (x.materiali || [])
-            .some(z => String(z.codice || '').trim() === codice)).length;
-          cella.textContent = 'coperto'; cella.style.color = 'var(--grn)';
-          cella.title = 'Questo codice È sotto scorta (in casa ' + nf(m.giacenza)
-            + "), ma la parte che serve a questa commessa c'è perché scade prima.\n"
-            + (quante > 1
-                ? 'Se lo contendono ' + quante + ' commesse: se ne entra una più urgente, '
-                  + 'questo può tornare a mancare.'
-                : "Nessun'altra commessa lo chiede.");
-          return;
-        }
-        nMancano++;
-        // ⚠ ESSERE UNA LAVORAZIONE NON VUOL DIRE CHE NESSUNO L'HA ORDINATA
-        // (7 set, trovato da Nico: "perche' mi dice che TS-342010003_K e' da
-        // ordinare al terzista, quando vedi che c'e' gia' un ordine
-        // fornitore? al massimo e' in ritardo").
-        // Erano due domande diverse trattate come una: `_K` dice DOVE si
-        // prende (da un terzista, non dallo scaffale), lo stato dice SE e'
-        // gia' stata comprata. Il controllo su `lav` stava per primo e
-        // mangiava l'altro: una lavorazione con l'OF gia' emesso e la data
-        // passata si dichiarava da ordinare, e qualcuno andava a ordinarla
-        // due volte invece di sollecitare quella che c'era.
-        // Adesso comanda lo STATO, e `lav` aggiunge solo la parola giusta.
-        let t = 'mancano ' + nf(q.manca), c = 'var(--red)';
-        if (st.stato === 'in_ritardo') { t += ' · in ritardo dal ' + fmtIT(st.data)
-          + (st.of ? ' · OF ' + st.of : ''); if (lav) t += ' · lavorazione'; }
-        else if (st.stato === 'in_arrivo') { t += st.data ? ' · arriva il ' + fmtIT(st.data) : ' · ordinato';
-          if (st.of) t += ' · OF ' + st.of; if (lav) t += ' · lavorazione'; c = 'var(--blu)'; }
-        else if (st.stato === 'attesa_cliente') { t += ' · lo manda il cliente'; c = 'var(--or)'; }
-        else if (lav) { t += ' · da ordinare a terzista'; c = 'var(--vio)'; }
-        else t += ' · da ordinare';
-        cella.textContent = t; cella.style.color = c;
-        cella.title = st.fornitore || '';
+        const r = materialeStatoRiga(codice, tipoDi.get(codice), ctx);
+        if (r.manca > 0) nMancano++;
+        cella.textContent = r.testo;
+        cella.style.color = r.colore;
+        cella.title = r.titolo || '';
       });
       if (nMancano) {
         intestazione.append(document.createTextNode(' · '),
@@ -14237,7 +14284,7 @@ function kioskGoToMezzi() {
 
 function kioskHideAllSteps() {
   ['kiosk-step-id','kiosk-step-action','kiosk-step-menu',
-   'kiosk-step-op-list','kiosk-step-tipo','kiosk-step-attiva',
+   'kiosk-step-op-list','kiosk-step-tipo','kiosk-step-attiva','kiosk-step-materiali',
    'kiosk-step-attivita-list','kiosk-step-mezzo-rientro','kiosk-step-done'].forEach(id => {
     const e = $('#'+id); if (e) e.style.display = 'none';
   });
@@ -14745,7 +14792,7 @@ function kioskResetInactivity() {
 // quella di conferma "done" (ha già il suo timer di 2s).
 function kioskInSchermataAttiva() {
   const ids = ['kiosk-step-action','kiosk-step-op-list','kiosk-step-menu',
-               'kiosk-step-tipo','kiosk-step-attiva'];
+               'kiosk-step-tipo','kiosk-step-attiva','kiosk-step-materiali'];
   return ids.some(id => {
     const e = document.getElementById(id);
     return e && e.style.display !== 'none';
@@ -15574,6 +15621,244 @@ function kioskSelectOperazione(o) {
   kioskGoToTipo();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// KIOSK — I MATERIALI DELLA COMMESSA (16 set, chiesto dalla produzione:
+// *"poter vedere dal kiosk la lista dei componenti disponibili per ordine,
+// in modo da dare all'operatore la possibilita di vedere se manca qualche
+// materiale nella lavorazione"*).
+//
+// Fino a ieri il kiosk diceva una cosa sola sul materiale: `Materiale:
+// Completo/Parziale/Vuoto`, cioe' la tendina che qualcuno in ufficio ha
+// impostato. E' una DICHIARAZIONE, e puo' essere vecchia di giorni o
+// sbagliata. Adesso accanto c'e' il conto vero, fatto sugli stessi numeri del
+// gestionale — e quando i due si contraddicono lo si dice, invece di
+// scegliere quale dei due credere.
+//
+// ⚠ NESSUNA PAROLA NUOVA: ogni riga passa da `materialeStatoRiga`, la stessa
+// che riempie la scheda Materiali della commessa nel gestionale. Se un
+// domani si corregge una frase, si corregge in tutte e due le schermate
+// perche' la frase e' scritta una volta sola.
+//
+// ⚠ L'operatore non puo' TOCCARE niente qui: e' una schermata di sola
+// lettura. Se manca un pezzo la mossa e' dell'ufficio acquisti, non sua, e
+// un bottone che promette il contrario sarebbe peggio del silenzio.
+// ═══════════════════════════════════════════════════════════════════
+
+// ⚠⚠ L'ARCHIVIO DEL FABBISOGNO NON SI CARICA ALL'AVVIO DEL KIOSK.
+// Dal 15 set la tabella `mancanti` contiene TUTTO il file dell'estrazione
+// (qualche migliaio di righe, con un jsonb di consegne per riga). Il kiosk e'
+// un mini-PC di reparto che sta acceso tutto il giorno e che gia' scarica
+// commesse, sessioni, addetti e fasi: aggiungerci l'intero magazzino a ogni
+// avvio sarebbe banda buttata per una schermata che si apre qualche volta al
+// giorno.
+// Qui servono i codici di UNA commessa per volta — e quali siano lo dice la
+// sua lista congelata, che il kiosk ha gia' in memoria. Quindi si chiede
+// esattamente quello: una `in(codice, ...)` da qualche decina di righe.
+// Il risultato si tiene in caldo qualche minuto, perche' fra "guardo i
+// materiali" e "avvio il lavoro" l'operatore ci torna su.
+const KIOSK_MAT_TTL_MS = 5 * 60 * 1000;
+const kioskMatCache = new Map();     // operazione_id -> { quando, righe }
+
+async function kioskMancantiDi(op) {
+  if (!op || !Array.isArray(op.materiali) || !op.materiali.length) return [];
+  const in_ = kioskMatCache.get(op.id);
+  if (in_ && (Date.now() - in_.quando) < KIOSK_MAT_TTL_MS) return in_.righe;
+  const codici = [...new Set(op.materiali
+    .map(r => String(r && r.codice || '').trim()).filter(Boolean))];
+  const righe = [];
+  // ⚠ `.in()` di supabase-js e NON un filtro costruito a mano: fra questi
+  // codici ce ne sono con la virgola dentro (`83010FILO0H05VK,25BI`) e in un
+  // `in.(a,b)` scritto a mano quella virgola spezzerebbe il valore in due —
+  // con la query che torna dati sbagliati SENZA dare errore.
+  for (let i = 0; i < codici.length; i += 80) {
+    const { data, error } = await sb.from('mancanti').select('*')
+      .in('codice', codici.slice(i, i + 80));
+    if (error) throw error;
+    (data || []).forEach(r => righe.push(r));
+  }
+  kioskMatCache.set(op.id, { quando: Date.now(), righe });
+  return righe;
+}
+
+// Il riepilogo di una commessa: quanti componenti, quanti ne mancano.
+// Ritorna { totale, mancano, voci } con `voci` gia' pronte da disegnare.
+// ⚠ Le VOCI ARRIVANO ORDINATE con i problemi in cima. Su una distinta da 80
+// righe, un operatore che deve scorrere per trovare il rosso non lo trova:
+// quello che ferma il lavoro va letto senza cercarlo.
+const KIOSK_MAT_PESO = { in_ritardo:0, da_ordinare:1, attesa_cliente:2, in_arrivo:3,
+  coperto:4, disponibile:5, consumo:6, segnaposto:7 };
+
+function kioskRiepilogoMateriali(op, righeMancanti) {
+  const ctx = materialiStatoCommessa(op, righeMancanti);
+  const voci = (op.materiali || []).map(r => {
+    const st = materialeStatoRiga(r.codice, r.tipo, ctx);
+    return { riga: r, st };
+  });
+  voci.sort((a, b) =>
+    ((KIOSK_MAT_PESO[a.st.stato] ?? 9) - (KIOSK_MAT_PESO[b.st.stato] ?? 9))
+    || String(a.riga.codice || '').localeCompare(String(b.riga.codice || '')));
+  return { totale: voci.length, mancano: voci.filter(v => v.st.manca > 0).length, voci };
+}
+
+// ─── Schermata materiali ───
+// `kMat.op` e `kMat.ritorno` si impostano prima di entrarci: la schermata si
+// apre da due posti (scelta del tipo lavorazione e sessione attiva) e deve
+// sapere dove rimandare indietro. Un "Indietro" che riporta sempre nello
+// stesso posto, su un kiosk, e' un operatore che si perde.
+const kMat = { op: null, ritorno: null };
+
+function kioskGoToMateriali(op, ritorno) {
+  kMat.op = op || null;
+  kMat.ritorno = ritorno || kioskGoToOpList;
+  kioskHideAllSteps();
+  $('#kiosk-step-materiali').style.display = 'flex';
+  kioskRenderMateriali();
+  kioskResetInactivity();
+}
+
+function kioskRenderMateriali() {
+  const o = kMat.op;
+  const root = $('#kiosk-materiali-content');
+  if (!o) { (kMat.ritorno || kioskGoToOpList)(); return; }
+  root.innerHTML = '';
+  $('#kiosk-materiali-back').onclick = () => (kMat.ritorno || kioskGoToOpList)();
+
+  root.append(el('div', { style:'background:var(--sur);border:1px solid var(--brd);'
+    + 'border-radius:8px;padding:14px 18px;margin-bottom:16px;' }, kioskInfoBlock(o)));
+
+  // ── Le commesse senza lista: NON e' un buco, e non si dice che lo sia ──
+  // ⚠ LA STESSA FRASE DEL GESTIONALE, parola per parola. Dove il materiale lo
+  // manda il cliente non manca niente: scrivere "nessuna lista" li' si legge
+  // come "manca un dato", e su un kiosk di reparto diventa una telefonata
+  // all'ufficio per una cosa che va bene cosi'.
+  if (!Array.isArray(o.materiali) || !o.materiali.length) {
+    const dalCliente = materialeDalCliente(o.cliente_id);
+    root.append(el('div', { class:'kmat-avviso' + (dalCliente ? '' : ' warn') },
+      dalCliente
+        ? 'Materiale fornito dal cliente: questa commessa non ha una lista perché non c\'è '
+          + 'niente da prelevare. Non manca nulla.'
+        : 'Questa commessa non ha ancora la sua lista materiali. '
+          + 'Chiedi in ufficio prima di partire.'));
+    return;
+  }
+
+  const caricando = el('div', { class:'kiosk-empty' }, 'Controllo il magazzino…');
+  root.append(caricando);
+
+  (async () => {
+    let righe = null, errore = null;
+    try { righe = await kioskMancantiDi(o); } catch (e) { errore = e; }
+    // La schermata puo' essere gia' cambiata: l'operatore non aspetta.
+    if (kMat.op !== o || $('#kiosk-step-materiali').style.display === 'none') return;
+    caricando.remove();
+
+    if (errore) {
+      // ⚠ Si dice che il conto NON si e' potuto fare, e non si mostra la lista
+      // come se fosse tutta a posto: senza le giacenze ogni riga direbbe
+      // "disponibile", che e' esattamente la bugia piu' costosa qui dentro.
+      root.append(el('div', { class:'kmat-avviso warn' },
+        '⚠ Non riesco a leggere le giacenze (' + (errore.message || errore) + ').'
+        + ' La lista dei componenti c\'è, ma NON posso dire se manca qualcosa.'));
+      const { voci } = kioskRiepilogoMateriali(o, []);
+      root.append(kioskListaMateriali(voci, { senzaStato: true }));
+      return;
+    }
+
+    const r = kioskRiepilogoMateriali(o, righe);
+    // ── Il verdetto, grande, in cima ──
+    const ok = r.mancano === 0;
+    root.append(el('div', { class:'kmat-verdetto ' + (ok ? 'ok' : 'ko') },
+      el('div', { class:'kmat-verdetto-icona' }, ok ? '✅' : '⚠'),
+      el('div', {},
+        el('div', { class:'kmat-verdetto-testo' }, ok
+          ? 'Tutti i ' + r.totale + ' componenti sono disponibili'
+          : r.mancano + (r.mancano === 1 ? ' componente manca' : ' componenti mancano')
+            + ' su ' + r.totale),
+        el('div', { class:'kmat-verdetto-sub' }, ok
+          ? 'Il magazzino copre questa commessa. Puoi partire.'
+          : 'Qui sotto in cima, in rosso. La mossa è dell\'ufficio: segnalalo, non ordinare da solo.'))));
+
+    // ── La dichiarazione dell'ufficio, e la contraddizione se c'e' ──
+    // ⚠ Le due cose NON si mescolano: la tendina dice cosa qualcuno ha
+    // DICHIARATO, il conto dice cosa risulta dai numeri. Quando si
+    // contraddicono, la contraddizione e' l'informazione — sceglierne una e
+    // tacere l'altra vorrebbe dire decidere al posto di chi guarda.
+    const prepKey = o.stato_preparazione || 'vuoto';
+    root.append(el('div', { class:'kmat-prep' },
+      el('span', { class:'prep-dot ' + (OP_PREP[prepKey]?.classe || 'vuoto') }),
+      'Preparazione dichiarata in ufficio: ' + (OP_PREP[prepKey]?.label || '—')));
+    if (prepKey === 'completo' && r.mancano) {
+      root.append(el('div', { class:'kmat-avviso warn' },
+        '⚠ L\'ufficio ha dichiarato la preparazione COMPLETA, ma dal magazzino risulta che '
+        + r.mancano + (r.mancano === 1 ? ' componente manca' : ' componenti mancano')
+        + '. Vale la pena chiedere prima di partire.'));
+    }
+
+    root.append(kioskListaMateriali(r.voci, {}));
+  })();
+}
+
+// L'elenco vero e proprio. `opts.senzaStato` quando le giacenze non si sono
+// potute leggere: si mostra cosa serve, e si tace su cosa c'e'.
+function kioskListaMateriali(voci, opts) {
+  opts = opts || {};
+  const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  const lista = el('div', { class:'kmat-lista' });
+  voci.forEach(v => {
+    const r = v.riga, st = v.st;
+    const manca = !opts.senzaStato && st.manca > 0;
+    lista.append(el('div', { class:'kmat-riga' + (manca ? ' manca' : '') },
+      el('div', { class:'kmat-cod' }, r.codice),
+      el('div', { class:'kmat-desc', title: r.descrizione || '' }, r.descrizione || '—'),
+      el('div', { class:'kmat-qta' }, nf(r.qta) + (r.um ? ' ' + r.um : '')),
+      opts.senzaStato
+        ? el('div', { class:'kmat-stato', style:'color:var(--mut);' }, '—')
+        : el('div', { class:'kmat-stato', style:'color:' + st.colore + ';',
+            title: st.titolo || '' }, st.testo),
+    ));
+  });
+  return lista;
+}
+
+// Il bottone che porta qui, con GIA' DENTRO la risposta. Lo usano la
+// schermata del tipo lavorazione e quella della sessione attiva.
+// ⚠ Il conto parte da solo e si scrive nel bottone: costringere a premere per
+// sapere se manca qualcosa vorrebbe dire che chi non preme non lo sa. Il
+// bottone serve per il DETTAGLIO — quale pezzo, e quando arriva.
+function kioskBottoneMateriali(op, ritorno) {
+  const btn = el('button', { class:'kmat-btn', onclick: () => kioskGoToMateriali(op, ritorno) },
+    el('span', { class:'kmat-btn-ico' }, '📦'),
+    el('span', { class:'kmat-btn-testo' }, 'Materiali'),
+    el('span', { class:'kmat-btn-esito' }, '…'));
+  const esito = btn.querySelector('.kmat-btn-esito');
+  if (!Array.isArray(op.materiali) || !op.materiali.length) {
+    esito.textContent = materialeDalCliente(op.cliente_id) ? 'dal cliente' : 'nessuna lista';
+    esito.style.color = 'var(--mut)';
+    return btn;
+  }
+  (async () => {
+    try {
+      const righe = await kioskMancantiDi(op);
+      if (!btn.isConnected) return;
+      const r = kioskRiepilogoMateriali(op, righe);
+      if (r.mancano) {
+        esito.textContent = '⚠ ' + r.mancano + ' mancano';
+        esito.style.color = 'var(--red)';
+        btn.classList.add('manca');
+      } else {
+        esito.textContent = '✓ ' + r.totale + ' disponibili';
+        esito.style.color = 'var(--grn)';
+      }
+    } catch (e) {
+      if (!btn.isConnected) return;
+      // Non si scrive "disponibili" quando non si e' potuto guardare.
+      esito.textContent = 'giacenze non lette';
+      esito.style.color = 'var(--yel)';
+    }
+  })();
+  return btn;
+}
+
 // ─── Schermata selezione tipo lavorazione ───
 function kioskGoToTipo() {
   kioskHideAllSteps();
@@ -15593,6 +15878,10 @@ function kioskRenderTipo() {
     el('div', { style:'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;' }, 'Operazione selezionata'),
     kioskInfoBlock(o),
   ));
+
+  // I materiali PRIMA di avviare: e' il momento in cui la risposta serve
+  // davvero, perche' e' l'ultimo in cui non hai ancora cominciato.
+  root.append(kioskBottoneMateriali(o, kioskGoToTipo));
 
   // ── Se la commessa ha fasi → scelta della FASE (taggata sulla mansione) ──
   const fasi = opFasiOf(o);
@@ -16103,6 +16392,11 @@ function kioskRenderAttiva() {
     );
   }
   root.append(card);
+
+  // I materiali anche a lavoro avviato: un pezzo che manca si scopre spesso
+  // dopo aver cominciato, e la domanda e' la stessa. Sulle attivita' extra
+  // non c'e' commessa, quindi non c'e' niente da chiedere.
+  if (o) root.append(kioskBottoneMateriali(o, kioskGoToAttiva));
 
   // Azioni DIRETTE: niente più tasto "Termina" intermedio (che a volte non
   // mostrava la scelta, a seconda dei permessi/dati). Se la sessione è su una
