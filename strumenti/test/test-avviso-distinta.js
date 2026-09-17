@@ -5,6 +5,18 @@
 // dichiarato in anagrafica. Elcotec e uno di quelli, Senzani un altro (22
 // commesse su 22 senza distinta): scrivere "tranne Elcotec" nel codice
 // avrebbe acceso 22 falsi allarmi il giorno stesso.
+//
+// ⚠⚠ 17 SET: IL CLIENTE NON GOVERNA PIU, SEMINA. `materiale_dal_cliente` era
+// rimasta l'ultima regola-cliente di questa casa a decidere DAL VIVO, a ogni
+// disegno della tabella. Adesso scrive `senza_distinta` sulla commessa appena
+// nata e poi tace, come `tariffa_cliente` e come i minuti sull'articolo.
+// Il motivo non e l'eleganza, e una richiesta: *"se per caso un ordine dovesse
+// avere qualche componente io potrei cambiarlo togliendo la spunta dall'ordine
+// specifico"*. Finche il cliente parlava dal vivo quella spunta tolta non
+// aveva effetto — il flag zittiva l'avviso comunque, e la casella sembrava
+// rotta. Meta di questo test e cambiata di conseguenza, ed e giusto cosi: la
+// regola e cambiata. Quello che NON deve cambiare e che l'avviso taccia dove
+// non c'e niente da comprare.
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const G = process.argv[2] || '.';
 const src = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
@@ -17,7 +29,8 @@ vm.createContext(sandbox);
 // PIANIFICAZIONE) alla colonna Prep. Materiale, dove uno guarda quando si
 // chiede se il materiale c'e'. Il test ci ha guadagnato: prova la regola
 // direttamente, invece che attraverso un aggregatore che fa altre otto cose.
-['function contoLavoroDichiarato()', 'function materialeDalCliente(', 'function distintaMancante('].forEach(m => {
+['function contoLavoroDichiarato()', 'function materialeDalCliente(',
+ 'function senzaDistintaDichiarabile()', 'function distintaMancante('].forEach(m => {
   const i = src.indexOf(m);
   if (i < 0) { console.error('KO: manca ' + m); process.exit(1); }
   vm.runInContext(src.slice(i, src.indexOf('\n}\n', i) + 3), sandbox);
@@ -32,21 +45,32 @@ const avvisi = (op) => sandbox.distintaMancante(op);
 const haDistinta = (codice) => !!codice;
 const OP = { id:'o1', cliente_id:'c1', articolo_id:'a1', scadenza:'2026-01-01', minuti:5 };
 
-sez('PRIMA della migrazione: chi non sa non accusa');
-{
-  // Nessuna azienda ha la colonna: acceso a meta darebbe 39 falsi allarmi su
-  // Elcotec e 22 su Senzani il giorno stesso.
-  sandbox.state = { aziende: [{ id:'c1', nome:'Cliente Uno' }],
-    articoli: [{ id:'a1', codice:'ART-1', distinta: null }] };
-  t('colonna assente: nessun avviso sulla distinta', !haDistinta(avvisi(OP)));
-}
-
-sez('DOPO la migrazione');
+// ⚠ `operazioni` nello stato non e decorazione: da li `senzaDistintaDichiarabile`
+// capisce se la colonna esiste. Senza, l'avviso e spento del tutto.
 const conColonna = (materiale_dal_cliente, distinta) => {
   sandbox.state = {
     aziende: [{ id:'c1', nome:'Cliente Uno', materiale_dal_cliente }],
-    articoli: [{ id:'a1', codice:'ART-1', distinta }] };
+    articoli: [{ id:'a1', codice:'ART-1', distinta }],
+    operazioni: [{ id:'o1', senza_distinta: false }] };
 };
+
+sez('PRIMA della migrazione: chi non sa non accusa');
+{
+  // ⚠ 17 set: la colonna che conta adesso e `operazioni.senza_distinta`, non
+  // piu `aziende.materiale_dal_cliente`. E la stessa regola di sempre applicata
+  // alla fonte nuova: senza quella colonna la dichiarazione non si puo
+  // leggere, e ogni commessa di conto lavoro sembrerebbe rotta. Sui dati del
+  // 17 set sarebbero 245 righe che urlano tutte insieme.
+  sandbox.state = { aziende: [{ id:'c1', nome:'Cliente Uno', materiale_dal_cliente: false }],
+    articoli: [{ id:'a1', codice:'ART-1', distinta: null }],
+    operazioni: [{ id:'o1' }] };   // niente `senza_distinta` fra le chiavi
+  t('colonna assente: nessun avviso sulla distinta', !haDistinta(avvisi(OP)));
+  // Anche con lo stato vuoto: all avvio, prima che le operazioni arrivino.
+  sandbox.state = { aziende: [], articoli: [{ id:'a1', codice:'ART-1', distinta:null }] };
+  t('stato ancora vuoto: nessun avviso inventato', !haDistinta(avvisi(OP)));
+}
+
+sez('DOPO la migrazione');
 {
   conColonna(false, null);
   t('cliente normale senza distinta: avvisa', haDistinta(avvisi(OP)));
@@ -63,45 +87,87 @@ const conColonna = (materiale_dal_cliente, distinta) => {
   t('distinta c e: nessun avviso', !haDistinta(avvisi(OP)));
 }
 {
-  conColonna(true, null);
-  t('materiale dal cliente: NESSUN avviso', !haDistinta(avvisi(OP)));
-}
-{
-  conColonna(true, [{ codice:'X', qta:1 }]);
-  t('materiale dal cliente e distinta presente: comunque zitto', !haDistinta(avvisi(OP)));
-}
-{
-  // Un cliente marcato non deve zittire gli altri.
-  sandbox.state = {
-    aziende: [{ id:'c1', nome:'Elcotec', materiale_dal_cliente: true },
-              { id:'c2', nome:'Sacmi',   materiale_dal_cliente: false }],
-    articoli: [{ id:'a1', codice:'ART-1', distinta: null }] };
-  t('Elcotec zitto', !haDistinta(avvisi(OP)));
-  t('Sacmi avvisa', haDistinta(avvisi(Object.assign({}, OP, { cliente_id:'c2' }))));
-}
-{
   conColonna(false, null);
   sandbox.state.articoli = [];
   t('prodotto che non esiste: nessun avviso inventato', !haDistinta(avvisi(OP)));
 }
 
+sez('IL CLIENTE NON PARLA PIU DAL VIVO (17 set)');
+{
+  // ⚠⚠ QUESTO E IL RIBALTAMENTO. Fino al 16 set `materiale_dal_cliente` da
+  // solo bastava a zittire l'avviso, e infatti qui c'era scritto "materiale
+  // dal cliente: NESSUN avviso". Adesso NO: il flag semina alla nascita, e
+  // quello che l'avviso legge e il seme sulla commessa. Su una commessa nata
+  // prima che il flag esistesse (o nata male) l'avviso si accende — ed e
+  // giusto: nessuno le ha mai detto niente, e il backfill serve a questo.
+  conColonna(true, null);
+  t('flag cliente da solo: NON zittisce piu', haDistinta(avvisi(OP)));
+  const OPsem = Object.assign({}, OP, { senza_distinta: true });
+  t('col seme scritto sulla commessa: zitto', !haDistinta(avvisi(OPsem)));
+  // ⚠ E il punto della richiesta: togliere la spunta sul singolo ordine DEVE
+  // riaccendere l'avviso anche se il cliente ha il flag. Prima era impossibile.
+  t('spunta tolta su un cliente di conto lavoro: l avviso torna',
+    haDistinta(avvisi(Object.assign({}, OP, { senza_distinta: false }))));
+}
+{
+  conColonna(true, [{ codice:'X', qta:1 }]);
+  t('distinta presente: zitto comunque, seme o no', !haDistinta(avvisi(OP)));
+}
+{
+  // Il seme di un cliente non deve arrivare addosso a un altro: e la commessa
+  // a portarlo, quindi due commesse di due clienti sono indipendenti per
+  // costruzione. Si prova lo stesso, perche era il caso del 11 set.
+  sandbox.state = {
+    aziende: [{ id:'c1', nome:'Elcotec', materiale_dal_cliente: true },
+              { id:'c2', nome:'Sacmi',   materiale_dal_cliente: false }],
+    articoli: [{ id:'a1', codice:'ART-1', distinta: null }],
+    operazioni: [{ id:'o1', senza_distinta: true }] };
+  t('Elcotec seminata: zitta', !haDistinta(avvisi(Object.assign({}, OP, { senza_distinta:true }))));
+  t('Sacmi non seminata: avvisa', haDistinta(avvisi(Object.assign({}, OP, { cliente_id:'c2' }))));
+}
+
 sez('LA DICHIARAZIONE SULLA SINGOLA COMMESSA (17 set)');
 {
   // Chiesto da Nico: *"posso spuntare una casella all interno dell ordine nei
-  // materiali per dichiarare che quest ordine non ha distinta"* — si, ed e il
-  // livello PIU BASSO dei tre. Sopra ci sono il cliente
-  // (`materiale_dal_cliente`) e il prodotto (`articoli.distinta = []`).
-  // Sui dati del 17 set: 64 commesse segnalate, 58 si spengono con TRE spunte
-  // sui clienti. Spuntarne 64 a mano per dire una cosa che il cliente diceva
-  // gia sarebbe il modo di ritrovarsi con 300 caselle e nessuna regola.
+  // materiali per dichiarare che quest ordine non ha distinta"*. Dal seme in
+  // poi la casella non e piu il livello piu basso di tre: e l'UNICO posto che
+  // l'avviso legge. Il cliente e il prodotto restano i modi comodi di
+  // riempirla (il primo seminando, il secondo perche una distinta che c'e
+  // toglie la domanda), ma chi decide e la riga.
   conColonna(false, null);
   const OPdich = Object.assign({}, OP, { senza_distinta: true });
   t('commessa dichiarata senza distinta: nessun avviso', !haDistinta(avvisi(OPdich)));
   t('e senza la spunta l avviso torna', haDistinta(avvisi(OP)));
-  // ⚠ L ordine dei controlli: la dichiarazione della COMMESSA viene prima di
-  // quella del cliente, cosi vale anche dove il cliente non dice niente.
-  conColonna(true, null);
-  t('dal cliente E dichiarata: comunque zitto', !haDistinta(avvisi(OPdich)));
+}
+
+sez('IL SEME: dove si scrive, e dove NON si scrive');
+{
+  // Il seme vive in `seminaSenzaDistinta`, chiamata da `creaMaterialiPerCommesse`
+  // — il punto unico dove passano tutte e tre le porte d'ingresso delle
+  // commesse (import Alnus, griglia "+ Nuovo ordine", modal singolo).
+  const quante = (x) => src.split(x).length - 1;
+  t('la funzione del seme esiste', quante('async function seminaSenzaDistinta(') === 1);
+  t('e la chiama chi crea le liste',
+    /creaMaterialiPerCommesse[\s\S]{0,1400}?await seminaSenzaDistinta\(r\)/.test(src));
+  // ⚠⚠ `contoLavoroDichiarato()` PRIMA di `materialeDalCliente()`: la seconda
+  // risponde true per TUTTI quando la colonna non esiste (e fatta per non
+  // accusare), e li quel true vorrebbe dire seminare l'intero archivio.
+  t('non semina finche il flag cliente non esiste',
+    /seminaSenzaDistinta[\s\S]{0,400}?contoLavoroDichiarato\(\)[\s\S]{0,200}?materialeDalCliente\(/.test(src));
+  // ⚠ Non semina dove una lista c'e gia: scriverebbe "questa commessa non ha
+  // distinta" su una che ce l'ha. Sui dati del 17 set e 1 commessa su 181,
+  // e sono proprio quelle che Nico vuole poter gestire a mano.
+  t('non semina dove la lista e gia nata',
+    /if \(nuove\.length\) \{[\s\S]{0,200}?\} else if \(await seminaSenzaDistinta\(r\)\)/.test(src));
+  // ⚠ La lista puo non nascere per tre motivi (articolo sconosciuto, quantita
+  // a zero, distinta vuota) e il seme va messo in tutti e tre: prima erano tre
+  // `continue` che uscivano dal giro in silenzio.
+  t('i tre continue che saltavano il seme non ci sono piu',
+    !/const pezzi = Number\(r\.quantita\) \|\| 0;\s*\n\s*if \(!art \|\| !art\.codice \|\| !\(pezzi > 0\)\) continue;/.test(src));
+  // Il seme aggiorna anche la copia in `state`, come fa la spunta a mano:
+  // la tabella Ordini cliente legge da li.
+  t('il seme aggiorna anche la copia in state',
+    /seminaSenzaDistinta[\s\S]{0,600}?inState\.senza_distinta = true/.test(src));
 }
 
 sez('DUE SCHERMATE, UNA SOLA FONTE DELLE PAROLE');
@@ -155,8 +221,13 @@ sez('DUE SCHERMATE, UNA SOLA FONTE DELLE PAROLE');
   // ⚠ INERTE FINCHE LA COLONNA NON ESISTE, come `tipo_parte` il 27 ago: la
   // casella non deve comparire prima della migrazione, o si spunta e il
   // salvataggio fallisce su una colonna che il database non conosce.
-  t('la casella e inerte finche la colonna non esiste',
-    src.includes("some(x => x && ('senza_distinta' in x))"));
+  // ⚠ La domanda si fa in UN posto solo (`senzaDistintaDichiarabile`): la UI
+  // se la rifaceva a mano, e due copie della stessa domanda sono due occasioni
+  // di rispondere diverso — l'avviso spento e la casella visibile, o il
+  // contrario.
+  t('la domanda sulla colonna e in una funzione sola',
+    quante("some(x => x && ('senza_distinta' in x))") === 1);
+  t('e la casella la usa', src.includes('isAdmin && senzaDistintaDichiarabile()'));
   // ⚠ Il salvataggio aggiorna ANCHE la copia in `state`: la tabella Ordini
   // cliente legge da li, e senza sembrerebbe che la spunta non funzioni
   // finche non si ricarica la pagina.

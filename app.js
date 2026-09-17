@@ -1237,30 +1237,40 @@ function opCampiMancanti(op) {
 // LA DISTINTA DEL PRODOTTO MANCA? Ritorna il CODICE articolo, o null.
 // ⚠ Ritorna il codice e non un booleano: chi lo mostra deve poter dire *quale*
 // prodotto — "manca la distinta" senza sapere di cosa manda a cercare.
-// ⚠⚠ TRANNE DOVE IL MATERIALE LO MANDA IL CLIENTE: li' la distinta non manca,
-// non c'e' proprio niente da comprare, e l'avviso sarebbe rumore fisso (39
-// falsi allarmi su Elcotec il giorno stesso). E finche' la colonna
-// `materiale_dal_cliente` non esiste, `materialeDalCliente` risponde true per
-// tutti e l'avviso resta spento del tutto: **chi non sa non accusa**.
 // ⚠ Una regola in UNA funzione sola: la stessa domanda la fanno la colonna
 // Prep. Materiale, la scheda della commessa e il test. Tre copie sarebbero
 // tre occasioni di correggerne due.
-// ⚠ Dal 17 set c'e' una TERZA via per tacere, ed e' sulla COMMESSA:
-// `operazioni.senza_distinta`, una spunta nella sua scheda Materiali.
-// Serve per il caso che ne' il cliente ne' il prodotto sanno esprimere —
-// "questa commessa qui non ha materiale da preparare, e lo so io".
-// ⚠⚠ E' il livello PIU BASSO, e va usato per ultimo: un'eccezione che
-// riguarda un CLIENTE si dichiara sul cliente (`materiale_dal_cliente`),
-// una che riguarda un PRODOTTO sul prodotto (`articoli.distinta = []`).
-// Sui dati del 17 set: 64 commesse segnalate, **58 si spengono con TRE
-// spunte sui clienti** (Senzani, Tema Sinergie, Bucci, che lavorano come
-// Elcotec ma il flag non ce l'hanno). Ne restano 6, una per prodotto.
-// Spuntare 64 caselle per dire una cosa che il cliente diceva gia' sarebbe
-// il modo di ritrovarsi fra sei mesi con 300 caselle e nessuna regola.
+//
+// ══ DUE SOLE DOMANDE, E LE FA TUTTE E DUE ALLA COMMESSA ══
+// 1. la commessa e' dichiarata senza distinta? (`operazioni.senza_distinta`)
+// 2. il suo articolo una distinta ce l'ha? (`articoli.distinta`)
+// Il CLIENTE non compare piu' (17 set). Prima c'era un terzo controllo su
+// `materiale_dal_cliente`, e quel flag zittiva l'avviso **dal vivo**: era
+// l'ultima regola-cliente di questa casa che governava per sempre invece di
+// decidere alla nascita. Adesso semina (`seminaSenzaDistinta`, dentro
+// `creaMaterialiPerCommesse`) e poi tace, come `tariffa_cliente` e come i
+// minuti sull'articolo.
+// ⚠⚠ IL MOTIVO NON E' L'ELEGANZA, E' UNA RICHIESTA: *"se per caso un ordine
+// dovesse avere qualche componente io potrei cambiarlo togliendo la spunta
+// dall'ordine specifico"*. Finche' il cliente parlava dal vivo quella spunta
+// tolta non aveva effetto — il flag del cliente zittiva l'avviso comunque, e
+// la casella sembrava rotta.
+// ⚠ Il prezzo, dichiarato: togliere il flag a un cliente **non riaccende
+// piu' le sue commesse gia' nate**. E' il patto del seme, ed e' anche il
+// pregio: una commessa non cambia sotto i piedi a chi ci sta lavorando.
+//
+// ⚠⚠ CHI NON SA NON ACCUSA. Senza la colonna `senza_distinta` la
+// dichiarazione non si puo' leggere, ogni commessa di conto lavoro sembrerebbe
+// rotta, e l'avviso urlerebbe su 245 righe (i numeri del 17 set). Quindi
+// finche' la colonna non c'e' l'avviso resta spento **del tutto**, e lo si
+// capisce dalle righe gia' caricate — stesso patto di `tipo_parte` il 27 ago.
+function senzaDistintaDichiarabile() {
+  return (state.operazioni || []).some(x => x && ('senza_distinta' in x));
+}
 function distintaMancante(op) {
   if (!op) return null;
+  if (!senzaDistintaDichiarabile()) return null;   // non si sa: non si accusa
   if (op.senza_distinta) return null;
-  if (materialeDalCliente(op.cliente_id)) return null;
   const art = (state.articoli || []).find(a => a.id === op.articolo_id);
   if (!art) return null;
   if (Array.isArray(art.distinta) && art.distinta.length) return null;
@@ -4178,8 +4188,39 @@ async function salvaMaterialiCommessa(op, righe) {
 // BEST-EFFORT, sempre: un articolo senza distinta non deve far fallire la
 // creazione dell'ordine, che e il fatto importante. Ritorna quante liste sono
 // state scritte, per chi voglia dirlo nel riepilogo.
+// IL SEME: il cliente di conto lavoro decide ALLA NASCITA, poi tace (17 set).
+// `aziende.materiale_dal_cliente` dice "il materiale lo manda lui". Fino a
+// ieri quel flag zittiva l'avviso della distinta **dal vivo**, a ogni disegno
+// della tabella. Adesso scrive una volta sola `senza_distinta` sulla commessa
+// appena nata, e la commessa resta padrona del suo dato: se un ordine di
+// conto lavoro per una volta ha dei componenti, si toglie la spunta li' sopra
+// e nessuno la rimette. E' lo stesso patto gia' scritto per `tariffa_cliente`
+// ("in modifica MAI automatica") e per i minuti seminati sull'articolo.
+//
+// ⚠⚠ NON SEMINA DOVE UNA LISTA C'E' GIA'. Scriverebbe "questa commessa non
+// ha distinta" su una che ce l'ha: una bugia nel database, anche se nessuno
+// la guarda. Sui dati del 17 set e 1 commessa su 181, ed e proprio il
+// caso che Nico vuole poter gestire a mano.
+// ⚠ `contoLavoroDichiarato()` PRIMA di `materialeDalCliente()`: la seconda
+// risponde true per tutti quando la colonna non esiste (e' fatta per non
+// accusare), e qui quel true vorrebbe dire seminare l'intero archivio.
+// ⚠ Best-effort come tutto il resto di questa funzione: un seme che non si
+// scrive lascia acceso un avviso, un errore propagato fermerebbe un import.
+async function seminaSenzaDistinta(r) {
+  if (!r || !r.id || r.senza_distinta) return false;
+  if (!contoLavoroDichiarato()) return false;
+  if (!materialeDalCliente(r.cliente_id)) return false;
+  const { error } = await sb.from('operazioni')
+    .update({ senza_distinta: true }).eq('id', r.id);
+  if (error) return false;
+  r.senza_distinta = true;
+  const inState = (state.operazioni || []).find(x => x && x.id === r.id);
+  if (inState) inState.senza_distinta = true;
+  return true;
+}
+
 async function creaMaterialiPerCommesse(righe) {
-  let scritte = 0;
+  let scritte = 0, seminate = 0;
   for (const r of (righe || [])) {
     try {
       if (!r || !r.id) continue;
@@ -4187,11 +4228,18 @@ async function creaMaterialiPerCommesse(righe) {
       if (Array.isArray(r.materiali) && r.materiali.length) continue;
       const art = (state.articoli || []).find(x => x.id === r.articolo_id);
       const pezzi = Number(r.quantita) || 0;
-      if (!art || !art.codice || !(pezzi > 0)) continue;
-      const nuove = await generaMaterialiCommessa(art.codice, pezzi);
-      if (!nuove.length) continue;
-      await salvaMaterialiCommessa(r, nuove);
-      scritte++;
+      // ⚠ La lista puo' non nascere per tre motivi diversi — articolo
+      // sconosciuto, quantita' a zero, distinta vuota — e il seme va messo in
+      // tutti e tre: sono esattamente i casi in cui l'avviso si accenderebbe.
+      // Prima erano tre `continue` che uscivano dal giro senza dire niente.
+      let nuove = [];
+      if (art && art.codice && pezzi > 0) nuove = await generaMaterialiCommessa(art.codice, pezzi);
+      if (nuove.length) {
+        await salvaMaterialiCommessa(r, nuove);
+        scritte++;
+      } else if (await seminaSenzaDistinta(r)) {
+        seminate++;
+      }
     } catch (e) {}
   }
   return scritte;
@@ -10215,9 +10263,15 @@ function openOperazioneModal(o, opts) {
       // un'altra storia.
       const dalCliente = !isNew && materialeDalCliente(o.cliente_id);
       const dichiarataSenza = !!o.senza_distinta;
+      // ⚠ Le due dichiarazioni INSIEME sono il caso normale dal 17 set: il flag
+      // del cliente semina la spunta alla nascita. Vanno dette insieme, o si
+      // legge "l'ha messa qualcuno a mano" e nessuno si azzarda a toglierla.
       sezMateriali.append(el('div', { class:'sub', style:'font-size:11px;line-height:1.7;' },
         isNew
           ? 'La lista dei materiali si crea insieme all\'ordine, dalla distinta dell\'articolo.'
+          : (dichiarataSenza && dalCliente)
+            ? 'Materiale fornito dal cliente: non c\'è niente da prelevare, e la spunta qui '
+              + 'sotto è stata messa da sola quando l\'ordine è nato.'
           : dichiarataSenza
             ? 'Dichiarata senza distinta: per questa commessa non c\'è una lista materiali '
               + 'da preparare. L\'avviso in Ordini cliente resta spento.'
@@ -10227,15 +10281,15 @@ function openOperazioneModal(o, opts) {
             : 'Questa commessa non ha ancora la sua lista materiali.'));
 
       // ── LA SPUNTA: "questa commessa non ha distinta" ────────────────
-      // ⚠ Si offre SOLO dove l'avviso avrebbe qualcosa da dire: se il
-      // materiale lo manda il cliente la domanda non si pone, e una casella
-      // in piu' sarebbe un gesto offerto per niente. Resta visibile se e'
-      // gia' spuntata, o non si potrebbe togliere.
+      // ⚠⚠ SEMPRE offerta (17 set). Prima si nascondeva dove il materiale lo
+      // manda il cliente, e aveva senso finche' quel flag zittiva l'avviso dal
+      // vivo: la domanda non si poneva. Da quando il flag SEMINA e poi tace,
+      // quello e' diventato il posto dove la casella serve di piu' — e' li'
+      // che va tolta per l'ordine che, per una volta, dei componenti ce li ha.
       // ⚠ Inerte finche' la colonna non esiste (stesso patto di `tipo_parte`
       // il 27 ago): si riconosce dalle righe gia' caricate. Senza colonna la
       // casella non compare, invece di comparire e fallire al salvataggio.
-      const colonnaCe = (state.operazioni || []).some(x => x && ('senza_distinta' in x));
-      if (!isNew && isAdmin && colonnaCe && (dichiarataSenza || !dalCliente)) {
+      if (!isNew && isAdmin && senzaDistintaDichiarabile()) {
         const chk = el('input', { type:'checkbox', id:'chk-senza-distinta',
           style:'width:16px;height:16px;cursor:pointer;margin:0;' });
         chk.checked = dichiarataSenza;
@@ -10267,9 +10321,17 @@ function openOperazioneModal(o, opts) {
           el('span', {},
             el('span', { style:'font-weight:700;' }, 'Questa commessa non ha distinta'),
             el('span', { class:'sub', style:'display:block;font-size:11px;margin-top:2px;' },
-              'Spegne l\'avviso ⚠ distinta in Ordini cliente per questa riga sola. '
-              + 'Se invece e\' il CLIENTE a mandare il materiale, conviene dirlo nella sua '
-              + 'scheda: vale per tutte le sue commesse, anche quelle che devono ancora nascere.'))));
+              // ⚠ "Messa da sola" solo dove la spunta C'E' DAVVERO. Sul conto
+              // lavoro non ancora seminato la casella e' vuota, e leggerci
+              // "messa da sola" mentre non c'e' e' il modo di non fidarsi piu
+              // di quello che si legge.
+              (dalCliente && dichiarataSenza)
+                ? 'Messa da sola perché il cliente manda lui il materiale. Toglila se questo '
+                  + 'ordine ha comunque dei componenti da preparare: cambia questa riga sola, '
+                  + 'e non torna indietro da sé.'
+                : 'Spegne l\'avviso ⚠ distinta in Ordini cliente per questa riga sola. '
+                  + 'Se invece è il CLIENTE a mandare il materiale, conviene dirlo nella sua '
+                  + 'scheda: così la spunta si mette da sola su ogni commessa che nasce.'))));
       }
 
       if (!isNew && !dalCliente && !dichiarataSenza && isAdmin && art) {
