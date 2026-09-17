@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-16.12`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-17.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -34,6 +34,7 @@
 - Tabella `mancanti` (fabbisogno materiale): **ESEGUITA** (31 lug, verificata via REST); primo import fatto: 314 codici su 33 commesse.
 - Tabella `materiali` (anagrafica componenti): **ESEGUITA** (2 set), 9.327 codici. ⚠ La tabella `distinta` **NON ESISTE PIU**: creata il 2 set con 38.461 righe, travasata dentro i prodotti e **droppata il 4 set**. Archivio in `backup-gestionale/distinta-archivio-2026-09-04.json`.
 - `articoli.distinta` jsonb (distinta scritta a mano, vince su Alnus): **ESEGUITA** (2 set).
+- `operazioni.senza_distinta` (dichiarare che UNA commessa non ha distinta): **DA ESEGUIRE** — `strumenti/migrazione-senza-distinta.sql`. Senza, la casella non compare e tutto resta come prima.
 - Tabella `eventi` (eventi aziendali in calendario): **ESEGUITA** (16 set, verificata via REST). Primo evento inserito da Nico: *Pranzo Natalizio*, venerdi 18 dicembre 2026.
 - `operazioni.materiali` jsonb (lista materiali congelata sulla commessa): **ESEGUITA** (3 set). Generate in blocco: **68 commesse vive, 2.735 righe**, coerenza `qta = qta_pz × pezzi` verificata su 2735/2735.
 
@@ -179,6 +180,12 @@
     - Il guadagno non e solo di ordine: prima, su una commessa senza distinta, quella colonna diceva *"Materiale: Vuoto"* e basta — **muta sul perche**, perche il conto dei mancanti non esce (niente lista) e il motivo stava in un altra colonna. Adesso si legge `● Completo ⚠ distinta`: lo stato dichiarato e, accanto, il motivo per cui non se ne puo essere sicuri.
     - La regola e uscita da `opCampiMancanti` e vive in **`distintaMancante(op)`**, che ritorna il CODICE del prodotto (non un booleano: "manca la distinta" senza dire di cosa manda a cercare). Una funzione sola, con dentro la sua eccezione conto lavoro — la chiamano la colonna e il test.
     - **Sui dati del 16 set: 45 righe col badge**, e zero avvisi di distinta rimasti nella colonna Ordine (che ne conserva 23, tutti di pianificazione).
+  - ⚠⚠ **TRE LIVELLI PER DIRE LA STESSA COSA, e vanno usati dall alto** (17 set, chiesto da Nico: *"posso spuntare una casella all interno dell ordine nei materiali per dichiarare che quest ordine non ha distinta"*). Si puo, ed e giusto che si possa — ma e il livello PIU BASSO:
+    - **CLIENTE** `aziende.materiale_dal_cliente` → vale per tutte le sue commesse, **anche quelle che devono ancora nascere**;
+    - **PRODOTTO** `articoli.distinta = []` → vale per tutte le commesse di quel prodotto. ⚠ Nei dati del 17 set **nessuno l ha mai usato**: 64 segnalate, 64 con distinta `null`, zero con `[]`;
+    - **COMMESSA** `operazioni.senza_distinta` → questa riga qui, e basta.
+    - **Il numero che decide**: delle 64 segnalate, **58 si spengono con TRE spunte sui clienti** (Senzani 43, Tema Sinergie 11, Bucci 4). Ne restano **6**, una per prodotto. Spuntarne 64 a mano per dire una cosa che il cliente diceva gia sarebbe il modo di ritrovarsi fra sei mesi con trecento caselle e nessuna regola.
+    - ⚠ Spuntandola sparisce anche il bottone *Crea dalla distinta*: offrire di creare una lista da una distinta che si e appena dichiarato inesistente e un invito a premerlo. E la dichiarazione **vale anche al kiosk** — "nessuna lista" si legge come un dato mancante e manda l operatore a chiedere.
   - ⚠ **Finche la colonna non esiste l avviso resta SPENTO del tutto** (stesso pattern inerte di `tariffa_cliente`). Acceso a meta darebbe 39 falsi allarmi su Elcotec e 22 su Senzani il giorno stesso: **chi non sa non accusa**.
   - ⚠ **Non e "tranne Elcotec".** L eccezione non e su un nome ma su un modo di lavorare, e i nomi cambiano: Senzani e 22 su 22, Tema Sinergie 10 su 16. Scrivere il nome nel codice sarebbe stato giusto per un giorno.
 

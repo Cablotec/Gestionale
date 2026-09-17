@@ -85,6 +85,25 @@ const conColonna = (materiale_dal_cliente, distinta) => {
   t('prodotto che non esiste: nessun avviso inventato', !haDistinta(avvisi(OP)));
 }
 
+sez('LA DICHIARAZIONE SULLA SINGOLA COMMESSA (17 set)');
+{
+  // Chiesto da Nico: *"posso spuntare una casella all interno dell ordine nei
+  // materiali per dichiarare che quest ordine non ha distinta"* — si, ed e il
+  // livello PIU BASSO dei tre. Sopra ci sono il cliente
+  // (`materiale_dal_cliente`) e il prodotto (`articoli.distinta = []`).
+  // Sui dati del 17 set: 64 commesse segnalate, 58 si spengono con TRE spunte
+  // sui clienti. Spuntarne 64 a mano per dire una cosa che il cliente diceva
+  // gia sarebbe il modo di ritrovarsi con 300 caselle e nessuna regola.
+  conColonna(false, null);
+  const OPdich = Object.assign({}, OP, { senza_distinta: true });
+  t('commessa dichiarata senza distinta: nessun avviso', !haDistinta(avvisi(OPdich)));
+  t('e senza la spunta l avviso torna', haDistinta(avvisi(OP)));
+  // ⚠ L ordine dei controlli: la dichiarazione della COMMESSA viene prima di
+  // quella del cliente, cosi vale anche dove il cliente non dice niente.
+  conColonna(true, null);
+  t('dal cliente E dichiarata: comunque zitto', !haDistinta(avvisi(OPdich)));
+}
+
 sez('DUE SCHERMATE, UNA SOLA FONTE DELLE PAROLE');
 {
   // La storia, perche questa sezione non si legga come una fissazione.
@@ -119,8 +138,11 @@ sez('DUE SCHERMATE, UNA SOLA FONTE DELLE PAROLE');
     quante('Materiale fornito dal cliente: questa commessa') === 2);
   // Un bottone che offre di creare una lista da una distinta che non esiste
   // e peggio di un messaggio sbagliato: e un invito a premerlo.
-  t('niente bottone Crea dalla distinta sul conto lavoro',
-    src.includes('if (!isNew && !dalCliente && isAdmin && art)'));
+  // ⚠ Un bottone che offre di creare una lista da una distinta che non esiste
+  // e peggio di un messaggio sbagliato: e un invito a premerlo. Vale per il
+  // conto lavoro E per le commesse dichiarate senza distinta (17 set).
+  t('niente bottone Crea dalla distinta dove la distinta non ci sara',
+    src.includes('if (!isNew && !dalCliente && !dichiarataSenza && isAdmin && art)'));
   // ⚠ La regola sta in UNA funzione, e la colonna Prep. Materiale la chiama.
   // Se qualcuno la ricopiasse nella cella, le due copie divergerebbero al
   // primo cambio dell'eccezione conto lavoro.
@@ -130,6 +152,19 @@ sez('DUE SCHERMATE, UNA SOLA FONTE DELLE PAROLE');
     !/opCampiMancanti[\s\S]{0,1600}?art\.distinta/.test(src));
   t('la colonna Prep. Materiale la usa',
     src.includes('const senzaDistinta = (typeof distintaMancante'));
+  // ⚠ INERTE FINCHE LA COLONNA NON ESISTE, come `tipo_parte` il 27 ago: la
+  // casella non deve comparire prima della migrazione, o si spunta e il
+  // salvataggio fallisce su una colonna che il database non conosce.
+  t('la casella e inerte finche la colonna non esiste',
+    src.includes("some(x => x && ('senza_distinta' in x))"));
+  // ⚠ Il salvataggio aggiorna ANCHE la copia in `state`: la tabella Ordini
+  // cliente legge da li, e senza sembrerebbe che la spunta non funzioni
+  // finche non si ricarica la pagina.
+  t('la spunta aggiorna anche la copia in state',
+    /const inState = \(state\.operazioni \|\| \[\]\)\.find/.test(src));
+  // La dichiarazione vale anche in reparto: "nessuna lista" si legge come un
+  // dato mancante e manda l operatore a chiedere.
+  t('anche il kiosk la rispetta', src.includes("op.senza_distinta"));
   // Il kiosk non scrive niente: e una schermata di sola lettura. Se manca un
   // pezzo la mossa e dell ufficio acquisti, non dell operatore, e un bottone
   // che promettesse il contrario sarebbe peggio del silenzio.

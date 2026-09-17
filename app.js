@@ -1245,8 +1245,21 @@ function opCampiMancanti(op) {
 // ⚠ Una regola in UNA funzione sola: la stessa domanda la fanno la colonna
 // Prep. Materiale, la scheda della commessa e il test. Tre copie sarebbero
 // tre occasioni di correggerne due.
+// ⚠ Dal 17 set c'e' una TERZA via per tacere, ed e' sulla COMMESSA:
+// `operazioni.senza_distinta`, una spunta nella sua scheda Materiali.
+// Serve per il caso che ne' il cliente ne' il prodotto sanno esprimere —
+// "questa commessa qui non ha materiale da preparare, e lo so io".
+// ⚠⚠ E' il livello PIU BASSO, e va usato per ultimo: un'eccezione che
+// riguarda un CLIENTE si dichiara sul cliente (`materiale_dal_cliente`),
+// una che riguarda un PRODOTTO sul prodotto (`articoli.distinta = []`).
+// Sui dati del 17 set: 64 commesse segnalate, **58 si spengono con TRE
+// spunte sui clienti** (Senzani, Tema Sinergie, Bucci, che lavorano come
+// Elcotec ma il flag non ce l'hanno). Ne restano 6, una per prodotto.
+// Spuntare 64 caselle per dire una cosa che il cliente diceva gia' sarebbe
+// il modo di ritrovarsi fra sei mesi con 300 caselle e nessuna regola.
 function distintaMancante(op) {
   if (!op) return null;
+  if (op.senza_distinta) return null;
   if (materialeDalCliente(op.cliente_id)) return null;
   const art = (state.articoli || []).find(a => a.id === op.articolo_id);
   if (!art) return null;
@@ -10201,14 +10214,65 @@ function openOperazioneModal(o, opts) {
       // progetto paga da mesi: la seconda e sempre quella che poi dice
       // un'altra storia.
       const dalCliente = !isNew && materialeDalCliente(o.cliente_id);
+      const dichiarataSenza = !!o.senza_distinta;
       sezMateriali.append(el('div', { class:'sub', style:'font-size:11px;line-height:1.7;' },
         isNew
           ? 'La lista dei materiali si crea insieme all\'ordine, dalla distinta dell\'articolo.'
+          : dichiarataSenza
+            ? 'Dichiarata senza distinta: per questa commessa non c\'è una lista materiali '
+              + 'da preparare. L\'avviso in Ordini cliente resta spento.'
           : dalCliente
             ? 'Materiale fornito dal cliente: questa commessa non ha una lista perché non c\'è '
               + 'niente da prelevare. Non manca nulla.'
             : 'Questa commessa non ha ancora la sua lista materiali.'));
-      if (!isNew && !dalCliente && isAdmin && art) {
+
+      // ── LA SPUNTA: "questa commessa non ha distinta" ────────────────
+      // ⚠ Si offre SOLO dove l'avviso avrebbe qualcosa da dire: se il
+      // materiale lo manda il cliente la domanda non si pone, e una casella
+      // in piu' sarebbe un gesto offerto per niente. Resta visibile se e'
+      // gia' spuntata, o non si potrebbe togliere.
+      // ⚠ Inerte finche' la colonna non esiste (stesso patto di `tipo_parte`
+      // il 27 ago): si riconosce dalle righe gia' caricate. Senza colonna la
+      // casella non compare, invece di comparire e fallire al salvataggio.
+      const colonnaCe = (state.operazioni || []).some(x => x && ('senza_distinta' in x));
+      if (!isNew && isAdmin && colonnaCe && (dichiarataSenza || !dalCliente)) {
+        const chk = el('input', { type:'checkbox', id:'chk-senza-distinta',
+          style:'width:16px;height:16px;cursor:pointer;margin:0;' });
+        chk.checked = dichiarataSenza;
+        chk.onchange = async () => {
+          const val = chk.checked;
+          chk.disabled = true;
+          try {
+            const { data, error } = await eseguiConRetry(
+              () => sb.from('operazioni').update({ senza_distinta: val }).eq('id', o.id).select().single(),
+              { label: 'dichiara senza distinta' });
+            if (error) throw new Error(error.message);
+            Object.assign(o, data);
+            // ⚠ Anche la copia in `state`: la tabella Ordini cliente legge da
+            // li', e senza questo l'avviso resterebbe acceso finche' non si
+            // ricarica la pagina — cioe' sembrerebbe che la spunta non funzioni.
+            const inState = (state.operazioni || []).find(x => x.id === o.id);
+            if (inState) Object.assign(inState, data);
+            toast(val ? 'Dichiarata senza distinta' : 'Dichiarazione tolta', 'ok');
+            renderMancanti();
+          } catch (e) {
+            chk.checked = !val; chk.disabled = false;
+            toast('Errore: ' + (e.message || e), 'err');
+          }
+        };
+        sezMateriali.append(el('label', {
+          style:'display:flex;align-items:flex-start;gap:8px;margin-top:10px;cursor:pointer;'
+            + 'font-size:12px;max-width:560px;line-height:1.5;' },
+          chk,
+          el('span', {},
+            el('span', { style:'font-weight:700;' }, 'Questa commessa non ha distinta'),
+            el('span', { class:'sub', style:'display:block;font-size:11px;margin-top:2px;' },
+              'Spegne l\'avviso ⚠ distinta in Ordini cliente per questa riga sola. '
+              + 'Se invece e\' il CLIENTE a mandare il materiale, conviene dirlo nella sua '
+              + 'scheda: vale per tutte le sue commesse, anche quelle che devono ancora nascere.'))));
+      }
+
+      if (!isNew && !dalCliente && !dichiarataSenza && isAdmin && art) {
         const btn = el('button', { type:'button', class:'btnsm',
           style:'margin-top:8px;align-self:flex-start;' }, '⚙ Crea dalla distinta di ' + art.codice);
         btn.onclick = async () => {
@@ -16125,8 +16189,12 @@ function kioskRenderMateriali() {
   // all'ufficio per una cosa che va bene cosi'.
   if (!Array.isArray(o.materiali) || !o.materiali.length) {
     const dalCliente = materialeDalCliente(o.cliente_id);
-    root.append(el('div', { class:'kmat-avviso' + (dalCliente ? '' : ' warn') },
-      dalCliente
+    const dichiarata = !!o.senza_distinta;
+    root.append(el('div', { class:'kmat-avviso' + (dalCliente || dichiarata ? '' : ' warn') },
+      dichiarata
+        ? 'Dichiarata senza distinta: per questa commessa non c\'è una lista materiali '
+          + 'da preparare. Non manca nulla.'
+      : dalCliente
         ? 'Materiale fornito dal cliente: questa commessa non ha una lista perché non c\'è '
           + 'niente da prelevare. Non manca nulla.'
         : 'Questa commessa non ha ancora la sua lista materiali. '
@@ -16227,6 +16295,15 @@ function kioskBottoneMateriali(op, ritorno) {
 // Ritorna { testo, colore, titolo, manca }.
 function kioskEsitoMateriali(op) {
   if (!op || !Array.isArray(op.materiali) || !op.materiali.length) {
+    // ⚠ La dichiarazione "senza distinta" vale anche in reparto: se l'ufficio
+    // ha detto che per questa commessa non c'e' materiale da preparare,
+    // l'operatore deve leggere quello e non "nessuna lista", che si legge
+    // come un dato mancante e manda a chiedere.
+    if (op && op.senza_distinta) {
+      return { testo:'senza distinta', colore:'var(--mut)', manca:false,
+        titolo:'Dichiarata senza distinta: per questa commessa non c\'è una lista '
+          + 'materiali da preparare.' };
+    }
     return materialeDalCliente(op && op.cliente_id)
       ? { testo:'dal cliente', colore:'var(--mut)', manca:false,
           titolo:'Materiale fornito dal cliente: non c\'è niente da prelevare.' }
