@@ -133,30 +133,40 @@ sez('LE QUATTRO COLONNE, E LA FRECCIA');
     /if \(!inGruppoMode\) \{[\s\S]{0,800}?'↗'/.test(src));
 }
 
-sez('LA CASELLA OP RESTA SCRIVIBILE');
+sez('LA CASELLA OP: NIENTE ICONCINA (tolta il 17 set)');
 {
-  // ⚠⚠ Per gli admin la cella OP e un INPUT, e li il click serve gia a mettere
-  // il cursore. Copiare al click sulla cella avrebbe rotto la scrittura
-  // rapida dell OP, che e una richiesta del 31 ago ("si scrive e si esce").
-  // Percio li c e un iconcina ⧉ accanto: un bersaglio suo per un gesto suo.
+  // Per gli admin la cella OP e un INPUT, e li il click serve gia a mettere il
+  // cursore: percio la cella non copia, e la scrittura rapida dell OP (chiesta
+  // il 31 ago, "si scrive e si esce") resta intatta.
   t('l input dell OP non copia al click', src.includes('onclick: (e) => e.stopPropagation()'));
-  t('accanto c e l iconcina di copia', /'⧉'\),\s*\n\s*o\.numero_op, 'OP'/.test(src));
-  // ⚠ Solo quando un OP c e: altrimenti sarebbe un invito a copiare il vuoto.
-  t('e compare solo se un OP c e', /if \(o\.numero_op\) \{[\s\S]{0,400}?'⧉'/.test(src));
+  // ⚠⚠ L ICONCINA ⧉ C E STATA PER TRE ORE. Nico: *"potendo modificare all
+  // interno del campo e gia facile copiarla"*. Vero: in una casella di testo
+  // il codice si prende col doppio click o con Ctrl+A, gesti che uno gia
+  // conosce. L avevo messa per SIMMETRIA con le altre tre colonne — ma quelle
+  // sono testo morto, dove senza un click non si copia niente.
+  // **La simmetria non e un motivo per aggiungere un comando: il gesto
+  // mancante lo e.** Se ricompare, e tornata la simmetria a decidere.
+  t('niente iconcina di copia accanto alla casella',
+    !/'⧉'\),\s*\n\s*o\.numero_op, 'OP'/.test(src));
+  t('e la cella non e piu allargata per farcela stare',
+    /const opCell = el\('td', \{ class:'mono' \}\)/.test(src));
+  // ⚠ Per chi NON e admin quella cella e testo morto come le altre, e li il
+  // click serve: non c e nessuna casella da cui prendere il codice a mano.
+  t('ma per i non-admin la scritta si copia ancora',
+    /opCell\.append\(testoCopiabile\(o\.numero_op/.test(src));
 }
 
 sez('MISURATO NEL BROWSER, NON DECISO A OCCHIO');
 {
   // ⚠ Prima misura: la freccia andava A CAPO sotto il numero. Cella 112px,
-  // contenuto 123 (⚠ 14 + numero 86 + freccia 17 + margini 6). Stessa cosa
-  // sull OP: cella 122, contenuto 135 (casella 110 + icona 20 + spazio).
+  // contenuto 123 (⚠ 14 + numero 86 + freccia 17 + margini 6).
+  // (Sull OP c era lo stesso problema — 122 contro 135 — ma si e risolto da
+  // se quando l iconcina e stata tolta: la casella da sola ci sta.)
   // La tabella e `table-layout:auto` e scorre gia in orizzontale (1846px in
   // un contenitore da 594): lasciar crescere due colonne e costato 28px in
   // tutto. Mandare a capo un bersaglio da 17px costa un click sbagliato.
   t('la cella Ordine non manda a capo',
     /const ordineCell = el\('td', \{ class:'mono', style:'white-space:nowrap;' \}\)/.test(src));
-  t('e nemmeno la cella OP',
-    /const opCell = el\('td', \{ class:'mono', style:'white-space:nowrap;' \}\)/.test(src));
 }
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');

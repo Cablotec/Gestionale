@@ -9111,9 +9111,11 @@ function renderPianificazione(root) {
     // e salvare tutto il modal. Qui si scrive e si esce. Al fuoco la casella
     // si precompila con "AAAA/OP/": si digita solo il numero, e vale la stessa
     // normalizzazione di ovunque (2026OP1727 → 2026/OP/01727).
-    // ⚠ Stesso motivo della cella Ordine: 122px di cella contro 135 di
-    // contenuto (casella 110 + icona 20 + spazio), e l'icona finiva sotto.
-    const opCell = el('td', { class:'mono', style:'white-space:nowrap;' });
+    // ⚠ Il `nowrap` che stava qui e' andato via con l'iconcina di copia: c'era
+    // solo per farla stare in riga con la casella (122px contro 135). La
+    // casella da sola ci sta, e una colonna che non ha motivo di essere larga
+    // non deve restare larga.
+    const opCell = el('td', { class:'mono' });
     if (isAdmin) {
       const inpOp = el('input', {
         type:'text', value: o.numero_op || '', placeholder:'—',
@@ -9153,18 +9155,13 @@ function renderPianificazione(root) {
         },
       });
       opCell.append(inpOp);
-      // ⚠ QUI LA CELLA NON PUO' COPIARE AL CLICK: e' una casella scrivibile, e
-      // il click ci serve gia' a mettere il cursore. Un'iconcina accanto, come
-      // la freccia su Ordine: un bersaglio suo per un gesto suo.
-      // Compare solo quando un OP c'e' — altrimenti sarebbe un invito a
-      // copiare il vuoto.
-      if (o.numero_op) {
-        opCell.append(rendiCopiabile(
-          el('span', { style:'display:inline-block;margin-left:5px;padding:0 4px;'
-            + 'border:1px solid var(--brd);border-radius:3px;font-size:10px;line-height:15px;'
-            + 'color:var(--mut);vertical-align:middle;' }, '⧉'),
-          o.numero_op, 'OP'));
-      }
+      // ⚠ NIENTE iconcina di copia qui (tolta il 17 set, poche ore dopo averla
+      // messa — Nico: *"potendo modificare all'interno del campo è già facile
+      // copiarla"*). Ed e' vero: in una casella di testo il codice si prende
+      // col doppio click o con Ctrl+A, gesti che uno gia' conosce. L'avevo
+      // aggiunta per simmetria con le altre tre colonne, ma le altre tre sono
+      // testo morto — li' senza un click non si copia niente, qui si'.
+      // **La simmetria non e' un motivo: il gesto mancante lo e'.**
     } else {
       opCell.style.color = 'var(--mut)';
       opCell.append(testoCopiabile(o.numero_op, 'OP'));
