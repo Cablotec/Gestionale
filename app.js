@@ -1306,19 +1306,19 @@ async function copiaTesto(testo, cosa) {
   }
 }
 
-// Rende un nodo (cella o span) copiabile al click. Ritorna il nodo.
+// Rende un nodo copiabile al click. Ritorna il nodo.
 // ⚠⚠ `stopPropagation` SEMPRE: la riga di Ordini cliente apre la commessa, e
 // aprire una finestra ogni volta che si copia sarebbe un gesto che ne fa due.
 // E' la stessa scelta gia' presa per il badge del gruppo e per il triangolo.
-// ⚠ Il segnale sta sulla CELLA, non solo nel toast: chi copia tre codici di
-// fila guarda la tabella, non l'angolo dello schermo, e senza un lampo lì non
-// sa se il terzo click e' andato a segno o se ha ricopiato il secondo.
+// ⚠ Il segnale e' sul NODO, non solo nel toast: chi copia tre codici di fila
+// guarda la tabella, non l'angolo dello schermo, e senza un lampo lì non sa se
+// il terzo click e' andato a segno o se ha ricopiato il secondo.
 // ⚠ Su un trattino non si fa niente: una cella vuota che invita al click e
 // poi copia "—" e' peggio di una cella spenta.
 function rendiCopiabile(nodo, testo, cosa) {
   const t = String(testo == null ? '' : testo).trim();
   if (!nodo || !t || t === '—') return nodo;
-  nodo.style.cursor = 'pointer';
+  nodo.classList.add('copiabile');
   nodo.title = (nodo.title ? nodo.title + '\n' : '') + '⧉ Click per copiare: ' + t;
   nodo.onclick = async (e) => {
     e.stopPropagation();
@@ -1328,6 +1328,18 @@ function rendiCopiabile(nodo, testo, cosa) {
     setTimeout(() => { nodo.style.background = prima || ''; }, 200);
   };
   return nodo;
+}
+
+// La SCRITTA che si copia, non la cella intorno (17 set, chiesto da Nico:
+// *"copiare cliccando la scritta e non tutta la cella"*).
+// ⚠⚠ Ha ragione, e non e' un dettaglio estetico: una cella e' larga quanto la
+// colonna, e su un codice da 12 caratteri in una colonna da 180px i due terzi
+// che si copiano sono **vuoti**. Chi clicca lo spazio accanto si aspetta il
+// gesto della riga — aprire la commessa — e invece si vedeva copiare qualcosa.
+// Cosi' il bersaglio e' esattamente l'inchiostro, e il vuoto torna alla riga.
+function testoCopiabile(testo, cosa, style) {
+  const t = (testo == null || testo === '') ? '—' : String(testo);
+  return rendiCopiabile(el('span', style ? { style } : {}, t), testo, cosa);
 }
 
 // ============================================================
@@ -8698,10 +8710,8 @@ function pianificazioneFiltrate(includiStorico) {
     } else if (sortKey === 'articolo') {
       av = (state.articoli.find(c => c.id === a.articolo_id)?.codice || '');
       bv = (state.articoli.find(c => c.id === b.articolo_id)?.codice || '');
-    } else if (sortKey === 'inizio') {
-      // Ordina per data inizio effettiva (manuale se presente, altrimenti calcolata)
-      av = opInizio(a) || '';
-      bv = opInizio(b) || '';
+    // ⚠ Il ramo `inizio` e' sparito con la sua colonna (17 set): nessuna
+    // intestazione puo' piu' scegliere quella chiave. Sta nella storia git.
     } else if (sortKey === 'prep') {
       // Ordino su un valore numerico così "completo" > "parziale" > "vuoto"
       const rank = { completo: 3, parziale: 2, vuoto: 1 };
@@ -8972,7 +8982,11 @@ function renderPianificazione(root) {
     el('th', { class:'tr', title:'Pezzi prodotti (consegne di produzione registrate)' }, 'Prodotti'),
     el('th', { class:'tr', title:'Pezzi spediti al cliente' }, 'Spediti'),
     sortHead('scadenza',        'Scadenza'),
-    sortHead('inizio',          'Inizio'),
+    // ⚠ Colonna «Inizio» tolta il 17 set, chiesta da Nico. Era la data di
+    // partenza calcolata (o forzata a mano), e in una tabella da 15 colonne
+    // occupava spazio per un dato che si guarda nel Gantt e nella scheda della
+    // commessa, dove si puo' anche cambiare. `opInizio` resta e serve a tutti e
+    // due. Con lei se n'e' andato il suo ordinamento.
     el('th', {}, 'Note'),
     sortHead('prep',            'Prep. materiale', {tc:true}),
     sortHead('stato',           'Stato', {tc:true}),
@@ -8998,7 +9012,6 @@ function renderPianificazione(root) {
   list.forEach(o => {
     const cli = state.aziende.find(c => c.id === o.cliente_id);
     const art = state.articoli.find(a => a.id === o.articolo_id);
-    const inizio = opInizio(o);
     const ritardo = opIsRitardo(o);
 
     let rowClass = '';
@@ -9154,8 +9167,7 @@ function renderPianificazione(root) {
       }
     } else {
       opCell.style.color = 'var(--mut)';
-      opCell.append(document.createTextNode(o.numero_op || '—'));
-      rendiCopiabile(opCell, o.numero_op, 'OP');
+      opCell.append(testoCopiabile(o.numero_op, 'OP'));
     }
     tr.append(opCell);
 
@@ -9163,10 +9175,10 @@ function renderPianificazione(root) {
     // e mostro il valore completo nel tooltip)
     // ⚠ E' proprio il campo dove copiare serve di piu': troncato con le ellissi
     // non lo si puo' nemmeno selezionare per intero col mouse.
-    tr.append(rendiCopiabile(el('td', {
+    tr.append(el('td', {
       style: 'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mut);',
       title: o.riferimento_cliente || '',
-    }, o.riferimento_cliente || '—'), o.riferimento_cliente, 'Rif. cliente'));
+    }, testoCopiabile(o.riferimento_cliente, 'Rif. cliente')));
 
     // Cliente — restringo con troncamento per fare spazio alle nuove colonne
     tr.append(el('td', {
@@ -9175,9 +9187,8 @@ function renderPianificazione(root) {
     }, cli?.nome || '—'));
 
     // Codice articolo — quello che si incolla piu' spesso, in Alnus o in una mail.
-    tr.append(rendiCopiabile(
-      el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
-      art?.codice, 'Codice'));
+    tr.append(el('td', { class:'mono', style:'color:var(--or);' },
+      testoCopiabile(art?.codice, 'Codice')));
 
     // Descrizione articolo (troncata su 1 riga, tooltip pieno al passaggio del mouse)
     const desc = art?.descrizione || '';
@@ -9221,13 +9232,6 @@ function renderPianificazione(root) {
 
     // Scadenza
     tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
-
-    // Inizio (in grassetto, come richiesto)
-    tr.append(el('td', {
-      class:'mono',
-      style: 'font-weight:700;' + (o.inizio_manuale ? 'color:var(--acc);' : ''),
-      title: o.inizio_manuale ? 'Data inizio impostata manualmente' : 'Data inizio calcolata automaticamente',
-    }, inizio ? fmtIT(inizio) : '—'));
 
     // Note (troncate su 1 riga, tooltip pieno)
     tr.append(el('td', {

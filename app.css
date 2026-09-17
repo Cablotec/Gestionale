@@ -82,6 +82,12 @@ table.rt th.tr,table.rt td.tr{text-align:right;}
 table.rt td{padding:8px 10px;border-bottom:1px solid var(--brd);vertical-align:middle;}
 table.rt tbody tr:hover td{background:var(--hover);}
 .mono{font-family:'JetBrains Mono',monospace;}
+/* Testo che si copia al click (17 set). Si veste SOLO al passaggio del mouse:
+   quattro colonne sottolineate di continuo sarebbero una tabella tutta righe,
+   e la sottolineatura perderebbe il significato che ha sul numero d'ordine.
+   ⚠ `inline-block` no: manderebbe a capo dentro le celle troncate. */
+.copiabile{cursor:pointer;}
+.copiabile:hover{text-decoration:underline dotted;text-underline-offset:2px;}
 .cod-cell{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--or);}
 
 /* Badges */
