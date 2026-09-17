@@ -1277,6 +1277,59 @@ function distintaMancante(op) {
   return art.codice || null;
 }
 
+// ── COPIARE UN CODICE ───────────────────────────────────────────────────
+// Chiesto da Nico (17 set): *"posso fare che se clicco su un codice in ordini
+// me lo copia direttamente?"*. Un codice sullo schermo e' quasi sempre di
+// strada verso un'altra finestra — Alnus, una mail, una ricerca — e prenderlo
+// a mano da una cella di tabella e' il gesto piu' scomodo che ci sia: mezza
+// volta si porta via anche uno spazio, e in Alnus quel codice non esiste piu'.
+//
+// ⚠⚠ `navigator.clipboard` NON C'E' SEMPRE: vuole un contesto sicuro (https o
+// localhost), e su un indirizzo IP in chiaro — la rete di fabbrica, un domani
+// — l'oggetto sparisce SENZA DIRE NIENTE. Il ripiego e' il `prompt()`: brutto,
+// ma il codice si porta via lo stesso, e soprattutto **si vede** che qualcosa
+// e' diverso. Senza ripiego uno preme e non ha niente negli appunti, che e' il
+// modo peggiore di fallire: silenzioso e scoperto solo quando incolli.
+// ⚠ Anche `writeText` puo' fallire da sola (permesso negato, finestra non a
+// fuoco): per questo il ripiego sta nel `catch` e non in un `if` sulla
+// presenza dell'oggetto.
+async function copiaTesto(testo, cosa) {
+  const t = String(testo == null ? '' : testo).trim();
+  if (!t) return false;
+  try {
+    await navigator.clipboard.writeText(t);
+    toast((cosa || 'Copiato') + ': ' + t, 'ok');
+    return true;
+  } catch (e) {
+    prompt('Copia ' + (cosa ? cosa.toLowerCase() : 'il testo') + ':', t);
+    return false;
+  }
+}
+
+// Rende un nodo (cella o span) copiabile al click. Ritorna il nodo.
+// ⚠⚠ `stopPropagation` SEMPRE: la riga di Ordini cliente apre la commessa, e
+// aprire una finestra ogni volta che si copia sarebbe un gesto che ne fa due.
+// E' la stessa scelta gia' presa per il badge del gruppo e per il triangolo.
+// ⚠ Il segnale sta sulla CELLA, non solo nel toast: chi copia tre codici di
+// fila guarda la tabella, non l'angolo dello schermo, e senza un lampo lì non
+// sa se il terzo click e' andato a segno o se ha ricopiato il secondo.
+// ⚠ Su un trattino non si fa niente: una cella vuota che invita al click e
+// poi copia "—" e' peggio di una cella spenta.
+function rendiCopiabile(nodo, testo, cosa) {
+  const t = String(testo == null ? '' : testo).trim();
+  if (!nodo || !t || t === '—') return nodo;
+  nodo.style.cursor = 'pointer';
+  nodo.title = (nodo.title ? nodo.title + '\n' : '') + '⧉ Click per copiare: ' + t;
+  nodo.onclick = async (e) => {
+    e.stopPropagation();
+    if (!await copiaTesto(t, cosa)) return;
+    const prima = nodo.style.background;
+    nodo.style.background = 'var(--acc)';
+    setTimeout(() => { nodo.style.background = prima || ''; }, 200);
+  };
+  return nodo;
+}
+
 // ============================================================
 // SPEDIZIONI — uscite dal magazzino verso il cliente
 // Riga in `spedizioni`: evento di spedizione di N pezzi di una commessa,
@@ -5389,10 +5442,7 @@ function renderCodifica(root) {
       const codice = ris.codice;
       wrapEsito.append(el('div', { style:'display:flex;align-items:center;gap:12px;margin-top:10px;flex-wrap:wrap;' },
         el('span', { style:'font-family:JetBrains Mono,monospace;font-size:14px;' }, codice + ' · 20/20'),
-        el('button', { class:'btnp', onclick: async () => {
-          try { await navigator.clipboard.writeText(codice); toast('Codice copiato: ' + codice); }
-          catch (e) { prompt('Copia il codice:', codice); }
-        } }, '⧉ Copia codice'),
+        el('button', { class:'btnp', onclick: () => copiaTesto(codice, 'Codice') }, '⧉ Copia codice'),
       ));
     } else {
       wrapEsito.append(el('div', { class:'sub', style:'margin-top:8px;' },
@@ -8986,7 +9036,12 @@ function renderPianificazione(root) {
 
     // Ordine — con eventuale ⚠ se mancano campi obbligatori per la pianificazione
     const mancanti = opCampiMancanti(o);
-    const ordineCell = el('td', { class:'mono' });
+    // ⚠ `nowrap`: la cella e' larga 112px e il contenuto (⚠ + numero + ↗) ne
+    // chiede 123, quindi la freccia andava A CAPO sotto il numero — misurato,
+    // non supposto. La tabella e' `table-layout:auto` e scorre gia' in
+    // orizzontale: lasciar crescere la colonna di una quindicina di pixel non
+    // costa niente, mandare a capo un bersaglio da 17px costa un click sbagliato.
+    const ordineCell = el('td', { class:'mono', style:'white-space:nowrap;' });
     if (inGruppoMode) {
       ordineCell.append(el('span', { style:'margin-right:6px;' }, selezionata ? '☑' : '☐'));
     }
@@ -9007,14 +9062,29 @@ function renderPianificazione(root) {
         onclick:(e)=>{ e.stopPropagation(); openOperazioneModal(o); },
       }, '⚠'));
     }
-    // Numero OC cliccabile: apre la vista ORDINE INTERO (tutte le posizioni
-    // + totale). Il resto della riga continua ad aprire la singola commessa.
+    // ⚠⚠ DUE GESTI, DUE BERSAGLI (17 set, disegnato da Nico: *"su Ordine farei
+    // in piccolo riquadro con freccia (simbolo link esterno) per aprire
+    // l'ordine intero"*). Fino a ieri il numero faceva due mestieri con un
+    // click solo, e quale dei due non si vedeva. Adesso: **il testo e' un
+    // dato** e si copia, **la freccia e' una navigazione** e apre l'ordine
+    // intero. Il resto della riga continua ad aprire la singola commessa.
     if (o.numero_ordine) {
-      ordineCell.append(el('span', {
-        style:'text-decoration:underline dotted;text-underline-offset:2px;cursor:pointer;',
-        title:'Vedi l\'ordine per intero (tutte le posizioni + totale)',
-        onclick:(e)=>{ e.stopPropagation(); if (!inGruppoMode) openOrdineClienteModal(o.cliente_id, o.numero_ordine); },
-      }, o.numero_ordine));
+      ordineCell.append(rendiCopiabile(
+        el('span', { style:'text-decoration:underline dotted;text-underline-offset:2px;' },
+          o.numero_ordine),
+        o.numero_ordine, 'Ordine'));
+      // ⚠ In modalita' Raggruppa la freccia non compare: li' il click sulla
+      // riga serve a selezionare, e una porta verso un'altra finestra in mezzo
+      // a una selezione multipla e' un modo per perdere quello che si e scelto.
+      if (!inGruppoMode) {
+        ordineCell.append(el('span', {
+          style:'display:inline-block;margin-left:6px;padding:0 4px;border:1px solid var(--brd);'
+            + 'border-radius:3px;font-size:10px;line-height:15px;color:var(--mut);'
+            + 'cursor:pointer;vertical-align:middle;',
+          title:'Apri l\'ordine per intero (tutte le posizioni + totale)',
+          onclick:(e)=>{ e.stopPropagation(); openOrdineClienteModal(o.cliente_id, o.numero_ordine); },
+        }, '↗'));
+      }
     } else {
       ordineCell.append(document.createTextNode('—'));
     }
@@ -9028,7 +9098,9 @@ function renderPianificazione(root) {
     // e salvare tutto il modal. Qui si scrive e si esce. Al fuoco la casella
     // si precompila con "AAAA/OP/": si digita solo il numero, e vale la stessa
     // normalizzazione di ovunque (2026OP1727 → 2026/OP/01727).
-    const opCell = el('td', { class:'mono' });
+    // ⚠ Stesso motivo della cella Ordine: 122px di cella contro 135 di
+    // contenuto (casella 110 + icona 20 + spazio), e l'icona finiva sotto.
+    const opCell = el('td', { class:'mono', style:'white-space:nowrap;' });
     if (isAdmin) {
       const inpOp = el('input', {
         type:'text', value: o.numero_op || '', placeholder:'—',
@@ -9068,18 +9140,33 @@ function renderPianificazione(root) {
         },
       });
       opCell.append(inpOp);
+      // ⚠ QUI LA CELLA NON PUO' COPIARE AL CLICK: e' una casella scrivibile, e
+      // il click ci serve gia' a mettere il cursore. Un'iconcina accanto, come
+      // la freccia su Ordine: un bersaglio suo per un gesto suo.
+      // Compare solo quando un OP c'e' — altrimenti sarebbe un invito a
+      // copiare il vuoto.
+      if (o.numero_op) {
+        opCell.append(rendiCopiabile(
+          el('span', { style:'display:inline-block;margin-left:5px;padding:0 4px;'
+            + 'border:1px solid var(--brd);border-radius:3px;font-size:10px;line-height:15px;'
+            + 'color:var(--mut);vertical-align:middle;' }, '⧉'),
+          o.numero_op, 'OP'));
+      }
     } else {
       opCell.style.color = 'var(--mut)';
       opCell.append(document.createTextNode(o.numero_op || '—'));
+      rendiCopiabile(opCell, o.numero_op, 'OP');
     }
     tr.append(opCell);
 
     // Riferimento cliente (testo libero, può essere lungo: tronco con ellissi
     // e mostro il valore completo nel tooltip)
-    tr.append(el('td', {
+    // ⚠ E' proprio il campo dove copiare serve di piu': troncato con le ellissi
+    // non lo si puo' nemmeno selezionare per intero col mouse.
+    tr.append(rendiCopiabile(el('td', {
       style: 'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mut);',
       title: o.riferimento_cliente || '',
-    }, o.riferimento_cliente || '—'));
+    }, o.riferimento_cliente || '—'), o.riferimento_cliente, 'Rif. cliente'));
 
     // Cliente — restringo con troncamento per fare spazio alle nuove colonne
     tr.append(el('td', {
@@ -9087,8 +9174,10 @@ function renderPianificazione(root) {
       title: cli?.nome || '',
     }, cli?.nome || '—'));
 
-    // Codice articolo
-    tr.append(el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'));
+    // Codice articolo — quello che si incolla piu' spesso, in Alnus o in una mail.
+    tr.append(rendiCopiabile(
+      el('td', { class:'mono', style:'color:var(--or);' }, art?.codice || '—'),
+      art?.codice, 'Codice'));
 
     // Descrizione articolo (troncata su 1 riga, tooltip pieno al passaggio del mouse)
     const desc = art?.descrizione || '';
