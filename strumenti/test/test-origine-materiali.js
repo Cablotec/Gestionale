@@ -88,5 +88,46 @@ sez('Un ANELLO non manda in tilt la provenienza');
   t('il ciclo si dichiara', e.cicli.size > 0);
 }
 
+sez('LA RADICE NON E MAI UN MATERIALE (17 set)');
+{
+  // Il caso vero, trovato da Nico: *"non capisco perche ci sia il codice che
+  // ripete se stesso quando in prodotti la sua distinta e vuota"*.
+  // Commessa 2026/OC/00407: la sua lista materiali conteneva UNA riga, e
+  // quella riga era il prodotto finito. Colpa della distinta VUOTA, non
+  // nonostante: `[]` e una dichiarazione e vince su Alnus (4 set), quindi il
+  // prodotto ENTRA nell albero con zero figli, e di li usciva come foglia —
+  // cioe come pezzo da prelevare.
+  const vuota = (cod) => esplodi(cod, 2, [{ codice: cod, distinta: [] }]);
+  t('prodotto con distinta [] : nessun materiale',
+    vuota('PROD').materiali.size === 0);
+  t('e non si nasconde fra i segnaposto',
+    vuota('PROD').segnaposto.size === 0 && vuota('PROD').consumo.size === 0);
+  // ⚠ Nemmeno per una via traversa: un prodotto che ha in distinta SE STESSO.
+  const seStesso = esplodi('PROD', 2, [{ codice:'PROD', distinta:[{ codice:'PROD', qta:1 }] }]);
+  t('ne per la via del prodotto che contiene se stesso',
+    seStesso.materiali.size === 0);
+
+  // ⚠⚠ E LA GUARDIA NON DEVE ESSERE PIU LARGA DI COSI. Un SOTTOASSIEME con la
+  // distinta vuota resta un materiale da prelevare: non e la radice, e un
+  // pezzo vero che qualcuno in magazzino deve andare a prendere. Se questo
+  // controllo cade, spariscono dalle liste dei componenti veri — in silenzio,
+  // che e il modo peggiore.
+  const conSub = esplodi('PROD', 2, [
+    { codice: 'PROD', distinta: [{ codice: 'SUB', qta: 2 }, { codice: 'DADO', qta: 5 }] },
+    { codice: 'SUB',  distinta: [] },
+  ]);
+  t('un SOTTOASSIEME con distinta vuota resta un materiale',
+    conSub.materiali.get('SUB') === 4);
+  t('e gli altri componenti non si toccano', conSub.materiali.get('DADO') === 10);
+  t('la radice non compare nemmeno qui', !conSub.materiali.has('PROD'));
+
+  // La distinta normale non cambia di una virgola: e il caso di tutti i
+  // giorni, ed e quello che una guardia sbagliata rovinerebbe per primo.
+  const e = esplodi('ENVIRO', 1);
+  t('la distinta normale esplode come prima',
+    e.materiali.get('83010FILO00101042GVM') === 3 && e.materiali.get('GUARNIZIONE') === 2);
+  t('e ENVIRO non e fra i suoi materiali', !e.materiali.has('ENVIRO'));
+}
+
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);

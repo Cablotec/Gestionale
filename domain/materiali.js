@@ -98,6 +98,22 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     if (tipo === 'MAC') { daPadre(cod, padre); out.consumo.set(cod, (out.consumo.get(cod) || 0) + q); return; }
     const figli = figliDi.get(cod);
     if (!figli || !figli.length) {
+      // ⚠⚠ LA RADICE NON E MAI UN MATERIALE (17 set). Qui sotto una foglia e
+      // un pezzo da prelevare, ma la radice e il prodotto che FACCIAMO:
+      // senza questa riga un prodotto senza figli finisce nella sua stessa
+      // lista, e la commessa dice "prelevare 2 pz di se stesso".
+      // ⚠ Non e un caso di scuola, e successo: commessa 2026/OC/00407, l unico
+      // dei 363 articoli con la distinta dichiarata VUOTA. Ed e proprio la
+      // dichiarazione a innescarlo — `[]` vince su Alnus (deciso il 4 set),
+      // quindi il prodotto ENTRA nell albero, con zero figli, e di qui esce
+      // come foglia. Un `null` invece nell albero non entra affatto.
+      // ⚠ La guardia dei chiamanti chiedeva la cosa sbagliata: `figliDi.has()`
+      // e "e dichiarato?", e `[]` E dichiarato. Passava.
+      // La stessa regola stava gia scritta in `fabbisognoPerCodice`, trovata
+      // il 7 set su 65 codici di 807, tutti prodotti finiti. Scriverla due
+      // volte in due modi e il motivo per cui la seconda si e dimenticata:
+      // adesso sta QUI, dove l esplosione la puo garantire a tutti.
+      if (cod === radice) return;
       // Il segnaposto si ferma qui: non e un materiale, non diventa
       // fabbisogno. Si conta a parte, cosi non sparisce in silenzio.
       if (eSegnaposto(cod)) { daPadre(cod, padre); out.segnaposto.set(cod, (out.segnaposto.get(cod) || 0) + q); return; }
