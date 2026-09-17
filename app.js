@@ -9178,8 +9178,10 @@ function renderPianificazione(root) {
     }, testoCopiabile(o.riferimento_cliente, 'Rif. cliente')));
 
     // Cliente — restringo con troncamento per fare spazio alle nuove colonne
+    // ⚠ 180 → 165 il 17 set: vedi la nota sulle tre colonne di testo, sopra
+    // la cella Note. Il nome vorrebbe 190, quindi qui si tronca gia' da prima.
     tr.append(el('td', {
-      style: 'max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+      style: 'max-width:165px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
       title: cli?.nome || '',
     }, cli?.nome || '—'));
 
@@ -9188,9 +9190,10 @@ function renderPianificazione(root) {
       testoCopiabile(art?.codice, 'Codice')));
 
     // Descrizione articolo (troncata su 1 riga, tooltip pieno al passaggio del mouse)
+    // ⚠ 240 → 210 il 17 set: vedi la nota sopra la cella Note.
     const desc = art?.descrizione || '';
     tr.append(el('td', {
-      style: 'max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
+      style: 'max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
       title: desc,
     }, desc || '—'));
 
@@ -9231,8 +9234,27 @@ function renderPianificazione(root) {
     tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
 
     // Note (troncate su 1 riga, tooltip pieno)
+    // ⚠⚠ LE TRE COLONNE DI TESTO SONO TUTTA LA LARGHEZZA DELLA TABELLA
+    // (17 set, Nico: *"quale altra colonna ridurresti per vedere sempre tutta
+    // la schermata fino al furgoncino?"*). La risposta non era quella che
+    // sembrava, ed e' misurata: la tabella chiedeva **1955px** contro i 1869
+    // di un monitor Full HD, e quegli 86 stavano QUI — in Note, Descrizione e
+    // Cliente. Tutte le altre colonne sono gia' al minimo (Codice 186 per un
+    // dato da 166, la tendina Stato 120 perche' "Completata" e' lunga cosi',
+    // la casella OP 110).
+    // ⚠ **Accorciare le INTESTAZIONI non serve a niente**: `PREP. MATERIALE`
+    // → `MATERIALE`, `ORDINATI` → `ORD.`, via la scritta `AZIONI` → **4px in
+    // tutto**. Lo spazio liberato se lo riprendono subito queste tre, che di
+    // testo ne vogliono molto di piu' di quanto gliene diamo (Note da sola ne
+    // vorrebbe 860). In `table-layout:auto` una colonna affamata mangia tutto
+    // quello che le altre lasciano: **si stringe chi ha fame, non chi avanza.**
+    // Tagliati: Note 200→150, Descrizione 240→210, Cliente 180→165. Minimo
+    // della tabella da 1955 a **1860**, e il furgoncino si vede a 1920.
+    // ⚠ Un quinto ciascuna invece che meta' a una sola: Note mostrava gia' il
+    // 23% del suo contenuto e passa al 17%, ma nessuno legge le note in
+    // tabella — si aprono col tooltip, e il titolo pieno resta.
     tr.append(el('td', {
-      style: 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
+      style: 'max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
       title: o.note || '',
     }, o.note || '—'));
 

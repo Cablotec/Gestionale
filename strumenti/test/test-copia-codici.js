@@ -167,6 +167,23 @@ sez('MISURATO NEL BROWSER, NON DECISO A OCCHIO');
   // tutto. Mandare a capo un bersaglio da 17px costa un click sbagliato.
   t('la cella Ordine non manda a capo',
     /const ordineCell = el\('td', \{ class:'mono', style:'white-space:nowrap;' \}\)/.test(src));
+
+  // ⚠⚠ I TRE TAGLI CHE FANNO STARE LA TABELLA IN UN FULL HD (17 set, Nico:
+  // *"quale altra colonna ridurresti per vedere sempre tutta la schermata fino
+  // al furgoncino?"*). La tabella chiedeva **1955px** contro i 1869 di un
+  // monitor 1920, e quegli 86 stavano tutti in queste tre colonne di testo.
+  // Tagliate a 150 / 210 / 165: minimo sceso a **1860**, niente scorrimento
+  // orizzontale, furgoncino dentro lo schermo (bordo destro a 1887 su 1920).
+  // ⚠ Se qualcuno le riporta a cifre tonde, la barra di scorrimento torna e
+  // il furgoncino sparisce di nuovo: sono numeri MISURATI, non arrotondati.
+  // ⚠ Quello che NON funziona, provato: accorciare le intestazioni
+  // (`PREP. MATERIALE`→`MATERIALE`, `ORDINATI`→`ORD.`, via `AZIONI`) rende
+  // **4px in tutto**, perche' in `table-layout:auto` lo spazio liberato se lo
+  // riprendono subito queste tre, che di testo ne vogliono di piu' (Note da
+  // sola ne vorrebbe 860). **Si stringe chi ha fame, non chi avanza.**
+  t('Note tagliata a 150', src.includes("style: 'max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',\n      title: o.note"));
+  t('Descrizione tagliata a 210', /max-width:210px;[\s\S]{0,120}?title: desc,/.test(src));
+  t('Cliente tagliato a 165', /max-width:165px;[\s\S]{0,120}?title: cli\?\.nome/.test(src));
 }
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
