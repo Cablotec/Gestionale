@@ -10,3 +10,5 @@ materiali-commesse.sql
 segreti*
 *.env
 .env*
+# Config locale di Claude Code (dev server): sta sulla macchina, non nel repo.
+.claude/
