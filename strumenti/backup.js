@@ -189,6 +189,14 @@ async function main() {
    alla sessione interattiva: un'operazione pianificata non le vede. Con "Z:"
    il backup notturno fallirebbe in silenzio, che è il modo peggiore.
 
+   ⚠ IL PREZZO DEI PERCORSI UNC: `strumenti/package.json`. Prima di eseguire
+   uno script Node risale le cartelle in cerca del package.json più vicino;
+   partendo da UNC arriva fino a \\srv02\, cioè il server senza
+   la condivisione: non è una cartella valida, e da Node 24.21 quell'errore
+   non è più silenzioso — lo script non parte affatto (ERR_INVALID_PACKAGE_CONFIG).
+   Quel file non serve a npm — npm qui non c'è — serve a fermare la risalita.
+   Preso il 18 set passando a un PC con Node 24.21; col 24.14 non si vedeva.
+
    Gira come utente interattivo (LogonType Interactive): senza credenziali
    salvate è l'unico modo di raggiungere la condivisione di rete — un task
    "anche se l'utente non ha eseguito l'accesso" senza password (S4U) non ha

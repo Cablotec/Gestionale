@@ -1,0 +1,4 @@
+{
+  "type": "commonjs",
+  "_perche": "NON e' un progetto npm: niente dipendenze, niente build. Serve solo a fermare Node. Lanciando uno script da un percorso UNC (la condivisione srv02/dati), Node risale le cartelle in cerca del package.json piu' vicino e arriva fino alla radice //srv02, che UNC non considera una cartella valida: da Node 24.21 quell'errore non e' piu' silenzioso e lo script non parte (ERR_INVALID_PACKAGE_CONFIG). Trovando questo file Node si ferma qui. Cancellandolo, il backup notturno smette di funzionare."
+}
