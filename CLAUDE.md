@@ -604,6 +604,16 @@ Nico ha rimandato lo screenshot dopo la correzione: *"non mi sembra risolto"*. A
 
 ⚠⚠⚠ **LEZIONE, la seconda della giornata sullo stesso tema**: avevo diagnosticato *prima di avere lo schermo davanti*, dal solo racconto. La spiegazione della cache vecchia era **plausibile, coerente e sbagliata** — e siccome era plausibile non ho chiesto lo screenshot, ho corretto e dichiarato risolto. **Quando la segnalazione riguarda cosa si VEDE, la prima richiesta e' l'immagine, non l'ipotesi.** (La correzione della cache resta e serve: era un difetto vero, solo non questo.)
 
+### ⚠⚠ DUE CANALI REALTIME MUTI DA SEMPRE (22 set, trovati per caso)
+Volevo sapere se `prenotazioni_utenti` fosse nella publication del realtime — dubbio mio, dopo aver sostituito una ricarica totale con un canale senza verificarlo. **Lo era**: il codice di stamattina andava bene e `kioskSyncOperatoriPren` e' una cintura in piu', non una riparazione (la tengo comunque: copre il caso che il canale non copre, cioe' un operatore aggiunto a una prenotazione GIA' esistente, senza che la prenotazione cambi).
+- **Ma il confronto fra "tabelle ascoltate" e "tabelle pubblicate" ne ha scoperte due che non ricevevano niente da sempre**: `consegne_commessa` e `operazioni_fornitori`. Il gestionale le ascolta in `startRealtime`, la publication non le conteneva. Nessun errore, nessun segnale: semplicemente zero eventi.
+- **Effetto**: consegna parziale registrata o fornitore aggiunto da un collega -> gli altri col gestionale aperto non lo vedevano fino al ricaricamento. Dati giusti a database, schermate indietro.
+- **Chiuso**: `alter publication supabase_realtime add table public.consegne_commessa;` e `... operazioni_fornitori;`, verificate presenti dopo. Il kiosk era gia' a posto (9 tabelle su 9).
+- `prelievi_magazzino` e' pubblicata e non l'ascolta nessuno: innocuo, senza sottoscrittori non viene spedito niente. Lasciata com'e'.
+
+⚠⚠ **IL CONTROLLO DA RIFARE quando si aggiunge un `.on('postgres_changes', ...)`**: confrontare la lista delle tabelle ascoltate con `select tablename from pg_publication_tables where pubname='supabase_realtime'`. Un canale su una tabella non pubblicata **non fallisce**: tace. E una schermata che non si aggiorna non somiglia a un difetto, somiglia a una distrazione di chi guarda — per questo era li' da sempre senza che nessuno la trovasse.
+- Le due liste si estraggono cosi': `sed -n '/^function startRealtime/,/\.subscribe(/p' app.js | grep -o "table:'[a-z_]*'"`.
+
 ### Cosa resta a Nico
 ✅ **Fatto tutto la sera stessa.** Password ruotata via SQL (`update auth.users set encrypted_password = extensions.crypt(...)`: l'account e' `@cablotec.local`, non una mail vera, quindi il recupero via email non era percorribile), `PW.txt` aggiornato, policy corrette.
 **Verificato, non dedotto**: password VECCHIA rifiutata (HTTP 400) · password nuova da `PW.txt` funzionante · file su Pages senza password · backup rilanciato a mano, 10.119 righe in 24 tabelle · 27 tabelle su 27 mute senza sessione.
