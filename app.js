@@ -11136,8 +11136,19 @@ function openOperazioneModal(o, opts) {
               + (isAdmin ? 'cursor:pointer;' : '')
               + (s.fine?'':'background:rgba(78,255,163,.04);'),
             title: isAdmin ? 'Clic per modificare questa timbratura' : '',
+            // ⚠ IL SECONDO ARGOMENTO E' "dove tornare quando hai finito", e qui
+            // mancava (22 set, segnalato da Nico: *"quando elimino una sessione
+            // mi si chiude ogni volta la scheda"*). `finalize()` chiude il modal
+            // e, senza `onDone`, ridisegna solo la scheda di sfondo: la commessa
+            // spariva. Riapriamo la sua scheda sul Consuntivo, dove eravamo.
+            // ⚠ La commessa si ripesca da `state` invece di riusare `o`: dopo la
+            // cancellazione le ore sono cambiate, e riaprire l'oggetto vecchio
+            // mostrerebbe i numeri di prima.
             onclick: isAdmin
-              ? () => { if (typeof openSessioneModal === 'function') openSessioneModal(s); }
+              ? () => { if (typeof openSessioneModal === 'function') {
+                  openSessioneModal(s, () => openOperazioneModal(
+                    (state.operazioni || []).find(x => x.id === o.id) || o, { scheda:'cons' }));
+                } }
               : null,
           },
             el('div', { style:'width:6px;height:6px;border-radius:50%;background:'+(tipo?.colore||'#6b6b64')+';' }),
@@ -19084,7 +19095,7 @@ function openSessioneModal(s, onDone) {
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, 'Modifica sessione di lavoro'),
-    el('button', { class:'mclose', onclick:closeModal }, '✕'),
+    el('button', { class:'mclose', onclick:finalize }, '✕'),
   ));
   const body = el('div', { class:'mbody' });
   const form = el('form');
@@ -19174,7 +19185,12 @@ function openSessioneModal(s, onDone) {
       + (fasiTolte ? ' · tolta anche ' + fasiTolte + (fasiTolte === 1 ? ' fase rimasta vuota' : ' fasi rimaste vuote') : ''));
     finalize();
   } }, '🗑 Elimina'));
-  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Annulla'));
+  // ⚠ Anche annullare passa da `finalize()`: USCIRE DA QUESTA SCHEDA E' SEMPRE
+  // LO STESSO GESTO, che si sia cancellato, salvato o cambiato idea. Con
+  // `closeModal` secco, chi apriva una timbratura dal Consuntivo e premeva
+  // Annulla si ritrovava comunque senza la commessa sotto — stesso difetto
+  // della cancellazione, solo meno appariscente.
+  foot.append(el('button', { class:'btng', onclick:finalize }, 'Annulla'));
 
   const btnSave = el('button', { class:'btnp' }, 'Salva');
   btnSave.onclick = async () => {
@@ -19225,6 +19241,12 @@ function openSessioneModal(s, onDone) {
   foot.append(btnSave);
   modal.append(foot);
   openModal(modal);
+  // ⚠ DOPO `openModal`, che passando da `closeModal` azzera la guardia
+  // precedente. Serve a far tornare anche **Esc** da dove si era venuti: la
+  // regola di casa e' che lasciare una scheda sia sempre lo stesso gesto, e
+  // qui le uscite sono quattro (Elimina, Salva, Annulla, ✕) piu' Esc. Senza,
+  // Esc restava l'unica via che si portava via la commessa sotto.
+  window.__modalGuardia = finalize;
 }
 
 

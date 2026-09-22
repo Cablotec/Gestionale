@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-22.04`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-22.05`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -613,6 +613,17 @@ Volevo sapere se `prenotazioni_utenti` fosse nella publication del realtime — 
 
 ⚠⚠ **IL CONTROLLO DA RIFARE quando si aggiunge un `.on('postgres_changes', ...)`**: confrontare la lista delle tabelle ascoltate con `select tablename from pg_publication_tables where pubname='supabase_realtime'`. Un canale su una tabella non pubblicata **non fallisce**: tace. E una schermata che non si aggiorna non somiglia a un difetto, somiglia a una distrazione di chi guarda — per questo era li' da sempre senza che nessuno la trovasse.
 - Le due liste si estraggono cosi': `sed -n '/^function startRealtime/,/\.subscribe(/p' app.js | grep -o "table:'[a-z_]*'"`.
+
+### 22 SETTEMBRE (sera): la scheda commessa spariva cancellando una timbratura (`2026-09-22.05`)
+Segnalato da Nico: *"quando elimino una sessione, all'interno dell'ordine mi si chiude ogni volta la scheda"* — nel **Consuntivo**.
+- **Causa**: `openSessioneModal(s, onDone)` ha un secondo argomento che vuol dire *"dove tornare quando hai finito"*. Tutti i chiamanti lo passavano (`apriStoricoConsuntivi(utente)`, `renderTab('timbri_extra')`, …) **tranne quello del Consuntivo**, che chiamava `openSessioneModal(s)` secco. Senza, `finalize()` chiude il modal e ridisegna solo la scheda di sfondo: la commessa spariva.
+- ⚠ **Non era solo la cancellazione**: le modal non si impilano (`openModal` fa `closeModal` e svuota `#modal-root`), quindi **ogni** uscita si portava via la commessa. Si notava sulla cancellazione perche' li' il gesto e' voluto e ci si aspetta di restare.
+- **Correzione**: dal Consuntivo si passa `() => openOperazioneModal(<commessa fresca da state>, { scheda:'cons' })`. ⚠ La commessa si **ripesca da `state`** invece di riusare l'oggetto vecchio: dopo la cancellazione le ore sono cambiate, e riaprire quello di prima mostrerebbe i numeri di prima.
+- ⚠⚠ **E le uscite sono CINQUE, non una**: Elimina, Salva, Annulla, ✕ ed Esc. Elimina e Salva passavano gia' da `finalize()`; Annulla e ✕ facevano `closeModal` secco; Esc finiva nell'handler globale. Allineate tutte — Esc via `window.__modalGuardia = finalize`, impostata **dopo** `openModal` (che azzera la guardia precedente). E' la regola gia' scritta per la scheda commessa il 4 set: *lasciare la scheda e' sempre lo stesso gesto*, e vale per ogni porta.
+- **Test**: `node strumenti/test/test-uscite-modal.js .` (11 controlli). Verifica che **ogni** chiamata a `openSessioneModal` passi il secondo argomento, e che dentro la funzione `closeModal` compaia **una volta sola** — dentro `finalize` — cosi' nessuna uscita nuova puo' nascere scollegata. Provato che si accorge di una ricaduta.
+- **Provato nel browser**: ✕, Annulla ed Esc tornano indietro tutti e tre; riaprendo, la linguetta attiva e' **Consuntivo**. Stato finto in memoria, nessuna rete.
+
+⚠⚠ **LEZIONE: un argomento FACOLTATIVO dimenticato non da' nessun errore.** `openSessioneModal(s)` e `openSessioneModal(s, onDone)` sono tutte e due chiamate valide, e la differenza si vede solo usando l'app dal punto giusto. Quando un parametro opzionale cambia **dove finisce l'utente**, o si rende obbligatorio o lo si sorveglia con un test sui chiamanti — rileggere le chiamate a mano non basta, era gia' sbagliata da mesi sotto gli occhi di tutti.
 
 ### Cosa resta a Nico
 ✅ **Fatto tutto la sera stessa.** Password ruotata via SQL (`update auth.users set encrypted_password = extensions.crypt(...)`: l'account e' `@cablotec.local`, non una mail vera, quindi il recupero via email non era percorribile), `PW.txt` aggiornato, policy corrette.
