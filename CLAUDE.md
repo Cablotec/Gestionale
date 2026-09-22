@@ -480,11 +480,20 @@ Domanda di Nico: *"e' normale un egress su Supabase di quasi 200 MB al giorno?"*
 - **Peso di una passata** (dal backup del 21 set, che scarica le stesse tabelle): gestionale **4,42 MB** in chiaro / **718 KB** gzip · kiosk **1,54 MB** / 268 KB. Compressione misurata contro il vero endpoint: **5,15×**.
 - **Dove stanno i byte**: `operazioni.materiali` 52% della sua tabella · `articoli.distinta`+`fasi` 73% della sua · `sessioni_lavoro` 4.470 righe di cui solo 1.141 dell'ultimo mese.
 
-### ⚠⚠ COMPRESSO O IN CHIARO: NON E' DECISO, e ci ho sbattuto il naso
+### ⚠⚠ COMPRESSO O IN CHIARO: DECISO, si paga IN CHIARO (22 set)
 Avevo usato il **4 settembre** come taratura: 150 articoli modificati × 2 postazioni = 300 ricariche, +430 MB sul grafico, quindi "si paga in chiaro". **Falso.** Il 4 settembre e' il giorno del travaso della tabella `distinta`: `backup-gestionale/distinta-archivio-2026-09-04.json` pesa **14,76 MB** e gli strumenti di quel pomeriggio ci rileggevano sopra. **Il grosso di quei MB li ho scaricati io, non i kiosk.** La divisione attribuiva tutto alle postazioni.
 - La sezione EGRESS del 27 ago pesava i byte **compressi** e i conti tornavano cosi'. Le due letture restano entrambe in piedi.
-- ⚠ **Come si scioglie gratis**: leggere il tooltip di un **sabato o domenica**. L'unica cosa che gira e' il backup notturno: **~5 MB = in chiaro, ~1 MB = compresso**. Nessuna quota spesa.
-- ⚠ **Non serve per decidere cosa fare** (meta' e' meta' in tutti e due i casi), serve per sapere **quando si e' finito**: se dopo le diete restano ~30 caricamenti al giorno a testa c'e' dell'altro da cercare, se ne restano 4-5 e' uso normale.
+- ⚠ Il primo tentativo (domenica 20) **non e' bastato**: 12,97 MB, ne' ~5 ne' ~1, perche' quel weekend le postazioni erano accese e ricaricavano da sole. Serviva un weekend a postazioni SPENTE, e il modo di riconoscerlo e' il realtime a zero.
+- **Risposta**: 4-5 a testa. Uso normale, niente altro da cercare.
+- **✅ SCIOLTO la sera del 22 set, con la giornata giusta: domenica 6 settembre.**
+  - **Il numero che decide NON e' PostgREST, e' Realtime: 47,8 KB** (contro gli 8.437 KB di domenica 20). Il realtime mette un TETTO a quanta attivita' client ci puo' essere stata: ogni apertura apre un canale su 20 tabelle e quel canale costa. 47,8 KB valgono **una sessione breve**.
+  - Backup di quel giorno, pesato sulla cartella vera (24 tabelle): **3,89 MB in chiaro / 0,59 gzip**. Osservato: **8,046 MB**. In chiaro resta da spiegare 4,16 MB = **1 apertura del gestionale**; compresso resterebbero 7,46 MB = **10 aperture**, che avrebbero lasciato dieci volte quel realtime.
+  - **Controprova su una giornata piena** (21 set, 166 MB): backup 4,6 + 2 kiosk x ~20 ricariche x 1,54 + 5 operatori x 4-5 aperture x 4,42 = **159 MB**. Torna.
+  - ⚠⚠ **CONSEGUENZA: l'uso e' NORMALE, non c'e' nessun difetto nascosto.** Quattro o cinque aperture a testa al giorno. Il problema e' **quanto pesa una passata, non quante sono** — quindi il lavoro che conta e' il passo 3 (gestionale), non la caccia a un ciclo impazzito.
+  - **Metodo da riusare**: per tarare, non serve una giornata *tranquilla*, serve una giornata di cui si sappia **cosa NON c'era**. E il modo di saperlo e' un contatore INDIPENDENTE da quello che si sta misurando — qui il realtime, che conta le connessioni mentre PostgREST conta i byte.
+
+- **COSTO DI STANDBY, scoperto strada facendo**: domenica 20 (postazioni accese) **21,6 MB**, domenica 6 (spente) **8,0 MB**. Differenza **~13 MB al giorno di chiusura**, di cui 8,4 di solo realtime — un costo FISSO per postazione accesa, identico che si lavori o no (10% di una giornata piena, 39% di una domenica). Weekend + notti feriali: **~300 MB al mese** che si tolgono spegnendo le postazioni, senza toccare codice.
+
 - **Lezione**: una giornata in cui abbiamo lavorato noi due non e' una giornata di taratura. Prima di dividere un totale per un numero di eventi, chiedersi **cos'altro girava quel giorno** — e il primo sospetto e' il lavoro di manutenzione, che e' quello che non lascia traccia nelle tabelle.
 
 ### Cosa e' stato fatto (passi 1 e 2)
