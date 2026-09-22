@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-22.03`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-22.04`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -592,6 +592,17 @@ Segnalazione dal campo: *"posso prenotare un mezzo che ho gia' prenotato"*, dal 
 
 ⚠⚠⚠ **LA LEZIONE, ed e' la piu' cara della giornata perche' l'avevo GIA' SCRITTA POCHE ORE PRIMA**, in questa stessa sezione: *"togliendo una ricarica totale, guardare cos'altro quella ricarica teneva aggiornato per caso"*. L'avevo scritta, avevo perfino aggiunto il canale su `prenotazioni_utenti` proprio per quel motivo — **e poi non ho verificato che quel canale funzionasse**. Scrivere la regola non e' applicarla: la sostituzione di una ricarica totale va **provata**, non ragionata. E la prova non e' "ho aggiunto il canale", e' "ho visto arrivare l'evento".
 - **Da qui in poi**: quando un pezzo di stato dipende da un canale realtime, o si verifica che quella tabella sia nella publication, o **non ci si appoggia** e si rilegge mirato. La rilettura mirata costa centinaia di byte e non ha modi di fallire in silenzio.
+
+### ⚠⚠ ...E LA CAUSA VERA ERA UN'ALTRA: il mezzo che hai fuori restava prendibile
+Nico ha rimandato lo screenshot dopo la correzione: *"non mi sembra risolto"*. Aveva ragione, e la mia diagnosi era **sbagliata**.
+- Nello screenshot il riquadro in alto diceva gia' correttamente *"HAI UN MEZZO FUORI · PEUGEOT GRIGIO · Conferma rientro"*: **`prenMia` funzionava**. Il difetto era sotto, nella lista *"oppure prendi un ALTRO mezzo"*, dove lo stesso mezzo ricompariva **giallo e cliccabile** mentre tutti gli altri occupati erano grigi.
+- **Codice pre-esistente, non una mia regressione.** `occupatoDaAltri = prenAttiva && !prenAttivaMia(prenAttiva)`: se la prenotazione attiva e' TUA il mezzo cade nel ramo "libero". C'era perfino il commento che lo dichiarava — *"Se e' mia non va bloccata"* — scelta sensata di quando il riquadro "Conferma rientro" non esisteva ancora.
+- ⚠⚠ **E non era solo estetica: cliccandolo si rifaceva il check-out, che riscrive `ora_inizio` con l'ora attuale.** L'ora vera in cui il mezzo e' uscito si perdeva, in silenzio. Il danno peggiore non era la prenotazione doppia, era il dato.
+- **Correzione**: ramo dedicato prima di quello "libero" — visibile ma bloccato, etichetta `● Ce l'hai tu · rientro <data ora>`, e al click la frase che dice dove andare (*"usa Conferma rientro qui sopra"*). Ordinamento: va in fondo coi bloccati, non piu' in cima.
+- ⚠ **Vale SOLO per la prenotazione attiva ADESSO.** Un mezzo prenotato da te per PIU' TARDI resta evidenziato, cliccabile e primo della lista: li' prenderlo e' il gesto giusto. Provati tutti e due i casi.
+- **Come l'ho provato senza credenziali**: la schermata d'accesso fa `document.body.innerHTML = ''`, quindi il DOM non c'era piu'. Ricostruito con `fetch('/kiosk.html')` + `DOMParser` (gli script erano gia' in memoria), poi stato finto che riproduce lo screenshot e `kioskGoToAction()` vero. **Il render vero su uno stato finto vale piu' di un ragionamento sul codice.**
+
+⚠⚠⚠ **LEZIONE, la seconda della giornata sullo stesso tema**: avevo diagnosticato *prima di avere lo schermo davanti*, dal solo racconto. La spiegazione della cache vecchia era **plausibile, coerente e sbagliata** — e siccome era plausibile non ho chiesto lo screenshot, ho corretto e dichiarato risolto. **Quando la segnalazione riguarda cosa si VEDE, la prima richiesta e' l'immagine, non l'ipotesi.** (La correzione della cache resta e serve: era un difetto vero, solo non questo.)
 
 ### Cosa resta a Nico
 ✅ **Fatto tutto la sera stessa.** Password ruotata via SQL (`update auth.users set encrypted_password = extensions.crypt(...)`: l'account e' `@cablotec.local`, non una mail vera, quindi il recupero via email non era percorribile), `PW.txt` aggiornato, policy corrette.

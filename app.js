@@ -15189,13 +15189,18 @@ function kioskRenderAction() {
   // Tutti i mezzi: quelli occupati da altri restano visibili ma bloccati.
   const disponibili = state.mezzi.slice();
   // Ordina: prima i liberi, poi gli occupati da altri; il mio prenotato in cima.
+  // ⚠ Il mezzo che hai gia' FUORI adesso va in fondo con gli altri bloccati,
+  // non in cima: in cima ci va la prenotazione tua ancora DA prendere, che e'
+  // l'unica per cui "primo della lista" e' un suggerimento e non un inciampo.
+  const fuoriConMe = (id) => !!(prenAttivaByMezzo[id] && prenAttivaMia(prenAttivaByMezzo[id]));
+  const bloccato = (id) => !!prenAttivaByMezzo[id];   // mio o altrui: non si clicca
   disponibili.sort((a,b) => {
-    if (prenMia) {
+    if (prenMia && !fuoriConMe(prenMia.mezzo_id)) {
       if (a.id === prenMia.mezzo_id) return -1;
       if (b.id === prenMia.mezzo_id) return 1;
     }
-    const aOcc = (prenAttivaByMezzo[a.id] && !prenAttivaMia(prenAttivaByMezzo[a.id])) ? 1 : 0;
-    const bOcc = (prenAttivaByMezzo[b.id] && !prenAttivaMia(prenAttivaByMezzo[b.id])) ? 1 : 0;
+    const aOcc = bloccato(a.id) ? 1 : 0;
+    const bOcc = bloccato(b.id) ? 1 : 0;
     if (aOcc !== bOcc) return aOcc - bOcc;
     return a.nome.localeCompare(b.nome);
   });
@@ -15230,6 +15235,42 @@ function kioskRenderAction() {
             '● Occupato da ' + (chi || '?')),
           fineStr ? el('div', { class:'kiosk-tile-targa', style:'color:var(--mut);' },
             'fino al ' + fineStr) : null,
+        ));
+        return;
+      }
+      // ── Mezzo che HAI GIA' FUORI TU: visibile ma bloccato ──
+      // (22 set, segnalato da Nico: *"posso prenotare un mezzo che ho gia'
+      // prenotato"*). Finiva nel ramo "libero" perche' `occupatoDaAltri` e'
+      // falso quando la prenotazione attiva e' tua — scelta voluta di quando
+      // il riquadro "HAI UN MEZZO FUORI · Conferma rientro" non esisteva
+      // ancora. Adesso quel riquadro c'e', e ripresentare lo stesso mezzo
+      // sotto "Oppure prendi un ALTRO mezzo" e' una contraddizione.
+      // ⚠⚠ E non e' solo estetica: cliccandolo si rifaceva il check-out da
+      // capo, che riscrive `ora_inizio` con l'ora attuale — **l'ora vera in
+      // cui il mezzo e' uscito andava persa**, in silenzio.
+      // ⚠ Vale solo per la prenotazione ATTIVA ADESSO. Un mezzo che hai
+      // prenotato per PIU' TARDI oggi resta in evidenza e cliccabile: li'
+      // prenderlo e' esattamente il gesto giusto.
+      if (prenAttiva && prenAttivaMia(prenAttiva)) {
+        const fineMia = new Date(prenAttiva.data_fine + 'T' + (prenAttiva.ora_fine || '23:59'));
+        const fineMiaStr = !isNaN(fineMia.getTime())
+          ? (fmtIT(toLocalISO(fineMia)) + ' ' + z(fineMia.getHours()) + ':' + z(fineMia.getMinutes()))
+          : null;
+        grid.appendChild(el('div', {
+          class: 'kiosk-tile mezzo mezzo-occupato',
+          style: 'border-left-color:var(--mut);opacity:.55;cursor:not-allowed;',
+          onclick: () => {
+            kioskBeep('err');
+            kioskShowError('Questo mezzo ce l\'hai gia\' fuori tu.\n'
+              + 'Per riconsegnarlo usa "Conferma rientro" qui sopra.');
+          },
+        },
+          el('div', { class:'kiosk-tile-name' }, m.nome),
+          m.targa ? el('div', { class:'kiosk-tile-targa' }, m.targa) : null,
+          el('div', { class:'kiosk-tile-targa', style:'color:var(--blu);font-weight:600;' },
+            '● Ce l\'hai tu'),
+          fineMiaStr ? el('div', { class:'kiosk-tile-targa', style:'color:var(--mut);' },
+            'rientro ' + fineMiaStr) : null,
         ));
         return;
       }
