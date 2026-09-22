@@ -40,7 +40,15 @@ const TABELLE = [
   'impostazioni', 'mancanti', 'ore_esterne', 'produttori',
 ];
 
-// ── Credenziali dal file vero, così non se ne creano due copie ──
+// ── Configurazione: indirizzo e chiave dal codice, PASSWORD da fuori ──
+// ⚠ Dal 22 set 2026 la password NON sta piu' in `core/db.js`: quel file lo
+// serve GitHub Pages a chiunque, quindi era pubblica. Indirizzo, chiave anon
+// ed email restano li' (non sono credenziali), la password arriva da `PW.txt`
+// accanto alla cartella del gestionale, fuori dal repo.
+// ⚠ Se il backup smette di partire con "credenziali non leggibili", il file
+// e' quello: non rimettere la password nel codice per farlo ripartire.
+const { leggiCredenziali } = require('./credenziali');
+
 function leggiConfig() {
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'db.js'), 'utf8');
   const prendi = (nome) => {
@@ -48,11 +56,13 @@ function leggiConfig() {
     if (!m) throw new Error('non trovo ' + nome + ' in core/db.js');
     return m[1];
   };
+  const email = prendi('APP_EMAIL');
+  const cred = leggiCredenziali(email, { radice: path.join(__dirname, '..') });
   return {
     url: prendi('SUPABASE_URL'),
     key: prendi('SUPABASE_ANON_KEY'),
-    email: prendi('APP_EMAIL'),
-    password: prendi('APP_PASSWORD'),
+    email,
+    password: cred.password,
   };
 }
 

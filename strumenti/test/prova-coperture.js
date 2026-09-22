@@ -7,7 +7,9 @@ const db = fs.readFileSync(G + '/core/db.js', 'utf8').replace(/\r\n/g, '\n');
 const URL = db.match(/SUPABASE_URL\s*=\s*"([^"]+)"/)[1];
 const KEY = db.match(/SUPABASE_ANON_KEY\s*=\s*"([^"]+)"/)[1];
 const EMAIL = db.match(/APP_EMAIL\s*=\s*'([^']+)'/)[1];
-const PASS = db.match(/APP_PASSWORD\s*=\s*'([^']+)'/)[1];
+// ⚠ Dal 22 set 2026 la password non sta piu' in core/db.js (era pubblicata da
+// GitHub Pages): arriva da PW.txt, fuori dal repo. Vedi strumenti/credenziali.js.
+const PASS = require('../credenziali').leggiCredenziali(EMAIL, { radice: G }).password;
 const host = URL.replace('https://', '');
 const req = (p, m, b, t) => new Promise((res, rej) => {
   const d = b ? JSON.stringify(b) : null;

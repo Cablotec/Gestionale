@@ -10,7 +10,7 @@
 <title>Prelievo Magazzino — Cablotec</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-22.01"></script>
+<script src="core/db.js?v=2026-09-22.02"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
 <style>
@@ -167,7 +167,8 @@ button{font-family:inherit;}
 
 <script>
 // ═══════════════ CONFIG ═══════════════
-// URL/key Supabase e account tecnico (APP_EMAIL/APP_PASSWORD) vivono in core/db.js.
+// URL/key Supabase e APP_EMAIL vivono in core/db.js. La password NON c'e' piu':
+// l'accesso si fa una volta per dispositivo (vedi mostraAccessoDispositivo).
 const KIOSK_EMAIL  = APP_EMAIL; // per escludere l'account tecnico dalla lista operatori
 
 // ═══════════════ Manifest PWA (iniettato dinamicamente) ═══════════════
@@ -229,14 +230,72 @@ function show(id) {
 }
 
 // ═══════════════ Boot ═══════════════
+// Copia dichiarata di `erroreAccessoInItaliano` in app.js: questa pagina non
+// carica app.js. Se si corregge una, correggere l'altra.
+function erroreAccessoInItaliano(err) {
+  const t = String((err && err.message) || err || '').toLowerCase();
+  if (t.includes('invalid login credentials')) return 'Indirizzo o password non corretti.';
+  if (t.includes('email not confirmed')) return 'Account non ancora confermato.';
+  if (t.includes('too many requests') || t.includes('rate limit')) {
+    return 'Troppi tentativi. Aspetta un minuto e riprova.';
+  }
+  if (t.includes('failed to fetch') || t.includes('networkerror') || t.includes('load failed')) {
+    return 'Nessuna connessione: controlla la rete e riprova.';
+  }
+  return (err && err.message) || 'Accesso non riuscito';
+}
+
+// Accesso del DISPOSITIVO, una volta sola. Gemella di
+// `mostraAccessoPostazione()` in app.js: stessa scelta, stesse ragioni.
+// ⚠ Qui e' un telefono condiviso di reparto, quindi la schermata deve
+// spiegarsi da sola a chi la trova senza sapere cos'e' successo.
+function mostraAccessoDispositivo(messaggio) {
+  const box = $('#boot-box');
+  box.innerHTML = '';
+  box.append(elx('div', { class:'big' }, 'Dispositivo da abilitare'));
+  box.append(elx('div', {}, 'Serve un amministratore che entri una volta sola. '
+    + 'Poi questo dispositivo resta abilitato.'));
+
+  const email = elx('input', { type:'email', value: APP_EMAIL, placeholder:'Indirizzo',
+    autocomplete:'username', style:'width:100%;padding:12px;font-size:16px;margin-top:12px;' });
+  const pwd = elx('input', { type:'password', placeholder:'Password',
+    autocomplete:'current-password', style:'width:100%;padding:12px;font-size:16px;margin-top:8px;' });
+  const btn = elx('button', { style:'margin-top:12px;' }, 'Abilita dispositivo');
+  const msg = elx('div', { style:'font-size:13px;min-height:18px;margin-top:8px;' }, messaggio || '');
+  box.append(email, pwd, btn, msg);
+
+  const entra = async () => {
+    btn.disabled = true;
+    msg.textContent = 'Attendere…';
+    try {
+      const { error } = await sb.auth.signInWithPassword({
+        email: email.value.trim(), password: pwd.value,
+      });
+      if (error) throw error;
+      location.reload();
+    } catch (err) {
+      btn.disabled = false;
+      msg.textContent = erroreAccessoInItaliano(err);
+    }
+  };
+  btn.addEventListener('click', entra);
+  // Su un telefono l'invio della tastiera e' il gesto naturale: senza questo
+  // si resta a fissare un bottone che sembra non fare niente.
+  pwd.addEventListener('keydown', (e) => { if (e.key === 'Enter') entra(); });
+  setTimeout(() => pwd.focus(), 50);
+}
+
 async function boot() {
   const box = $('#boot-box');
   try {
     creaClientSupabase('sb-cablotec-prelievo');
     const { data: sess } = await sb.auth.getSession();
     if (!sess?.session) {
-      const { error } = await sb.auth.signInWithPassword({ email: APP_EMAIL, password: APP_PASSWORD });
-      if (error) throw new Error('Login fallito: ' + error.message);
+      // Prima qui c'era l'autologin con la password scritta nel codice, cioe'
+      // pubblicata da GitHub Pages. Adesso l'accesso si fa UNA VOLTA su questo
+      // dispositivo e la sessione resta. Vedi il commento in core/db.js.
+      mostraAccessoDispositivo();
+      return;
     }
     await loadData();
     // Telefono condiviso: si chiede sempre chi sei a ogni apertura.

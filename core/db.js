@@ -27,9 +27,25 @@
 const SUPABASE_URL      = "https://cuiakdyatsuhioyubpne.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1aWFrZHlhdHN1aGlveXVicG5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjQ0NDYsImV4cCI6MjA5MzA0MDQ0Nn0.kaC1n1ABHxxcUAOIcxQlUxQva25KBKWOTJbPSo9C-l8";
 
-// Account tecnico condiviso (kiosk / app di reparto)
+// Account tecnico condiviso (kiosk / app di reparto).
+// L'indirizzo serve alle pagine per ESCLUDERE questo account dagli elenchi
+// operatori: e' un identificativo, non una credenziale, e puo' stare qui.
 const APP_EMAIL    = 'kiosk@cablotec.local';
-const APP_PASSWORD = 'kiosk-cablotec-2026';
+
+// ⚠⚠ LA PASSWORD NON STA PIU' QUI, e non deve tornarci (tolta il 22 set 2026).
+// Questo file lo serve GitHub Pages: arriva al browser di chiunque apra il
+// gestionale, e infatti era scaricabile da internet con una riga di curl.
+// Chi la leggeva poteva entrare come account tecnico e vedere ordini,
+// clienti, prezzi e timbrature di tutti.
+// ⚠ Non rimetterla in nessuna forma — spezzata, in base64, ricomposta a
+// pezzi: tutto cio' che il browser deve sapere, il browser lo puo' mostrare.
+// Offuscarla la rende piu' lunga da leggere, non segreta.
+// Kiosk e prelievo adesso chiedono l'accesso UNA VOLTA per postazione e
+// tengono la sessione (si rinnova da sola finche' viene usata).
+// ⚠ La chiave anon qui sopra invece e' PUBBLICA PER PROGETTO e va bene che
+// ci sia: da sola non apre niente. Verificato il 22 set — senza sessione
+// ogni tabella risponde `[]`, perche' le policy sono `TO authenticated`.
+// Il giorno che si scrivesse una policy `TO anon`, questa riga diventa falsa.
 
 // ─── Client globale ───
 // Le pagine usano direttamente `sb`. Viene (ri)assegnato qui dentro.

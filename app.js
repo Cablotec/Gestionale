@@ -368,7 +368,20 @@ const KIOSK_PARAM_INVALIDO = _kioskParam !== null && _kioskParam !== '';
 
 // Credenziali account kiosk condiviso (creato a mano su Supabase, vedi istruzioni)
 const KIOSK_EMAIL = 'kiosk@cablotec.local';
-const KIOSK_PASSWORD = 'kiosk-cablotec-2026';
+// ⚠⚠ QUI C'ERA LA PASSWORD, ED E' STATA TOLTA il 22 set 2026.
+// Il sito e' servito da GitHub Pages: `core/db.js` e `app.js` arrivano al
+// browser di CHIUNQUE apra il gestionale, quindi qualunque cosa scritta qui
+// dentro e' pubblica — repository privato o no. La password dell'account
+// tecnico era leggibile da internet a indirizzo noto, e funzionava: con
+// quella si leggevano ordini, clienti, prezzi e timbrature di tutti.
+// ⚠ NON rimetterla, in nessuna forma: nemmeno spezzata, codificata in
+// base64 o assemblata a pezzi. Tutto cio' che il browser deve sapere, il
+// browser lo puo' mostrare — offuscarla la renderebbe solo piu' lunga da
+// leggere, non segreta.
+// Le postazioni adesso si autenticano UNA VOLTA a mano (schermata qui
+// sotto) e tengono la sessione, che si rinnova da sola finche' viene usata.
+// Verificato il 22 set: con la sola chiave anon, senza sessione, ogni
+// tabella risponde `[]` — le policy sono `TO authenticated`.
 
 // True se questo operatore o profilo è l'account tecnico kiosk
 function isKioskRecord(rec) {
@@ -14446,6 +14459,80 @@ async function chiudiSessioniPausaPranzo() {
   }
 }
 
+// Supabase risponde in inglese. Chi legge questa schermata sta in officina
+// davanti a una postazione che non parte: "Invalid login credentials" non
+// gli dice niente, e soprattutto non gli dice COSA FARE.
+// ⚠ Gli errori non riconosciuti si mostrano comunque testuali: nascondere
+// quello che non si sa tradurre lascerebbe senza appiglio chi deve chiamare
+// e spiegare cosa vede.
+function erroreAccessoInItaliano(err) {
+  const t = String((err && err.message) || err || '').toLowerCase();
+  if (t.includes('invalid login credentials')) return 'Indirizzo o password non corretti.';
+  if (t.includes('email not confirmed')) return 'Account non ancora confermato.';
+  if (t.includes('too many requests') || t.includes('rate limit')) {
+    return 'Troppi tentativi. Aspetta un minuto e riprova.';
+  }
+  if (t.includes('failed to fetch') || t.includes('networkerror') || t.includes('load failed')) {
+    return 'Nessuna connessione: controlla la rete e riprova.';
+  }
+  return (err && err.message) || 'Accesso non riuscito';
+}
+
+// ── Accesso della POSTAZIONE, una volta sola ──
+// Sostituisce l'autologin che portava la password nel codice pubblicato.
+// Si fa una volta per postazione: la sessione resta in questo browser e si
+// rinnova da sola finche' viene usata. Torna a comparire solo se qualcuno
+// svuota i dati del browser o rifa' il PC.
+// ⚠ Deve essere CHIARA a chi la trova in officina alle 6 del mattino: chi
+// la vede non sa cos'e' una sessione e non ha le credenziali. Dice cosa e'
+// successo, che non si sono persi dati, e chi chiamare.
+function mostraAccessoPostazione(messaggio) {
+  const wrap = el('div', { class:'setup' });
+  wrap.append(el('h1', {}, 'Postazione da abilitare'));
+  wrap.append(el('p', {},
+    'Questa postazione non ha piu\' un accesso valido al gestionale. '
+    + 'Non si e\' perso niente: le timbrature gia\' fatte sono salvate.'));
+  wrap.append(el('p', {}, 'Serve un amministratore che entri una volta sola. '
+    + 'Poi la postazione resta abilitata e questa schermata non torna.'));
+
+  const form = el('form', { style:'display:flex;flex-direction:column;gap:8px;margin-top:16px;' });
+  const email = el('input', { type:'email', name:'email', placeholder:'Indirizzo',
+    value: KIOSK_EMAIL, autocomplete:'username', required:'required',
+    style:'padding:10px;font-size:14px;' });
+  const pwd = el('input', { type:'password', name:'password', placeholder:'Password',
+    autocomplete:'current-password', required:'required', style:'padding:10px;font-size:14px;' });
+  const btn = el('button', { type:'submit', style:'padding:10px;font-size:14px;' }, 'Abilita postazione');
+  const msg = el('div', { style:'font-size:12px;min-height:18px;color:var(--red);' });
+  if (messaggio) msg.textContent = messaggio;
+  form.append(email, pwd, btn, msg);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    btn.disabled = true;
+    msg.style.color = 'var(--mut)';
+    msg.textContent = 'Attendere…';
+    try {
+      const { error } = await sb.auth.signInWithPassword({
+        email: email.value.trim(), password: pwd.value,
+      });
+      if (error) throw error;
+      // Ricarica: l'avvio riparte e stavolta trova la sessione. Piu' sicuro
+      // che proseguire da qui, dove meta' dell'inizializzazione e' gia' saltata.
+      location.reload();
+    } catch (err) {
+      btn.disabled = false;
+      msg.style.color = 'var(--red)';
+      msg.textContent = erroreAccessoInItaliano(err);
+    }
+  });
+  wrap.append(form);
+
+  document.body.innerHTML = '';
+  document.body.append(wrap);
+  applyTheme(localStorage.getItem('theme') || 'dark');
+  setTimeout(() => pwd.focus(), 50);
+}
+
 async function kioskInit() {
   // Setup bottone "Admin": se la tab è stata aperta da window.open, "chiudi tab"; altrimenti naviga
   setupKioskExitButton();
@@ -14461,20 +14548,10 @@ async function kioskInit() {
   }
 
   if (!sessioneEsistente) {
-    // Autologin con account dedicato (caso mini-PC sede, nessuna sessione preesistente)
-    try {
-      const { error } = await sb.auth.signInWithPassword({
-        email: KIOSK_EMAIL, password: KIOSK_PASSWORD,
-      });
-      if (error) throw error;
-    } catch (e) {
-      document.body.innerHTML = `<div class="setup">
-        <h1>⚠ Errore login kiosk</h1>
-        <p>${e.message || e}</p>
-        <p>Verifica che l'utente <code>${KIOSK_EMAIL}</code> esista su Supabase.</p>
-      </div>`;
-      return;
-    }
+    // Nessuna sessione: si chiede l'accesso UNA VOLTA, a mano. Prima qui
+    // c'era l'autologin con la password scritta nel codice — cioe' pubblicata.
+    mostraAccessoPostazione();
+    return;
   } else {
     console.log('[KIOSK] Sessione esistente trovata ('+sessioneEsistente.user.email+') — uso quella invece di autologin kiosk');
   }

@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-22.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-22.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -65,7 +65,7 @@
      - La somiglianza fra il tab `articoli` e la tabella `articoli` e **apparente**: due stringhe diverse che si assomigliano, nessuna deriva dall'altra.
      - ⚠⚠ **IL PERICOLO VERO E UN ALTRO, e non c'entra coi nomi**: la catena di `else if` in `renderTab` **non fallisce** su un id sconosciuto — cade in fondo e la scheda resta BIANCA, senza errore. Una stringa dimenticata in un rename non si vede: si scopre quando qualcuno apre quella scheda. **Prima di riordinare, aggiungere un `else` finale** che scriva "scheda sconosciuta: <id>": trasforma un silenzio in un cartello, e costa tre righe.
      - Idea scartata (11 set, proposta da Nico e discussa): **id in codice** (`t01`, `t07`) al posto delle parole, per rinominare senza vincoli. Non serve — rinominare e gia sicuro — e costa leggibilita: `if (name === 't07')` non dice niente, e l'errore a schermo diventa "Errore rendering tab t07". Gli id non li vede nessuno fuori dal codice, quindi una chiave che non combacia con l'etichetta (`articoli` → "Prodotti") non e un problema. Nico: *"se si possono rinominare, sono a posto cosi per ora"*.
-5. **Prospettiva "tutta l'azienda"**: Supabase regge; fatturazione fuori; il salto è SICUREZZA — **repo PUBBLICO con anon key + password kiosk in core/db.js** → privatizzare + ruotare, RPC, backup. Nessuna azione ora.
+5. **Prospettiva "tutta l'azienda"**: Supabase regge; fatturazione fuori; il salto è SICUREZZA. ✅ **La password del kiosk è uscita dal codice il 22 set** (sezione dedicata); resta da ruotarla dal pannello. ⚠ Privatizzare il repo NON serve: Pages pubblica quei file comunque.
 
 6. **Fabbisogno materiale** (31 lug, `2026-07-31.1`): scheda Gestione → Fabbisogno importa l'estrazione "Fabbisogno Massivo" (.xlsx). Chiave = **numero OP** (`OdL Prossimo Impegno` → `odlANumeroOp`: `2026OP1727` → `2026/OP/01727`). Aggancio per **chiave scritta, non FK**: gli OP senza commessa si salvano e si agganciano da soli quando la commessa nasce. **Ogni import SOSTITUISCE** il precedente (è una fotografia). Colonne cercate **per nome, non per posizione**. Libreria xlsx da CDN caricata **solo all'apertura della scheda**. Si vedono nel modal commessa sotto "Preparazione materiale" e come badge `⚠N` in Ordini cliente; se la tendina dice "completo" ma ci sono mancanti, **la contraddizione si dichiara in rosso**. **v2 (31 lug, `.3`)**: si importa **tutto ciò che è sotto scorta** (364 righe), non solo il da ordinare — scoperta chiave: le righe `Qta da ord > 0` **non hanno quasi mai una data** (2 su 317), le date ce l'hanno solo le **già ordinate** (47 su 47) che prima venivano scartate. Due categorie sempre distinte: **DA ORDINARE** = ferma la commessa, nessuna data; **IN ARRIVO** = già ordinato, con consegna. Fino a **5 previsioni di entrata** per riga in `consegne` jsonb → 51 consegne, 35 future e **16 già in ritardo** (il dato più utile del file, prima invisibile). Scheda rinominata **"Mancanti"**; contiene ritardi → prossime consegne → tabella filtrabile. Triangolo `⚠7/67` (bloccanti/totale), **rosso solo se c'è un bloccante**, tooltip troncato ai primi 8, clic → scheda filtrata. Migrazione eseguita (31 lug); serve il **reimport** perché il vecchio archivio non ha le consegne. **Scheda in Lavoro e visibile a TUTTI** (5 ago, `.4`): serve in reparto. **L'import però resta admin** — sostituisce l'intero archivio ed è l'unica azione distruttiva della scheda; la RLS è `FOR ALL TO authenticated`, quindi il freno sta solo nella UI. **Import per trascinamento (5 ago, `2026-08-05.4`)**: **quadrato 220×220** con freccia grande (un bordo tratteggiato attorno a un campo file non si legge come area di rilascio), il selettore di sistema **nascosto dentro** e il quadrato che fa da bottone — una cosa sola, non due; il nome del file si scrive nel quadrato perché il selettore non lo dice più. Una sola `analizzaFile(f)` per entrambe le strade. Trappola: `inFile.click()` **bolla fino al quadrato** → guardia `e.target !== inFile` o il gestore si richiama all'infinito. Il trascinamento **ignora `accept`** → il formato si controlla a mano; `dragleave` scatta anche sui figli → serve un contatore di profondità; `preventDefault` su `dragover`/`drop` anche a livello di **documento** (una volta sola, `window.__dropGuard`) o un file che cade fuori dal riquadro apre e butta via la pagina.
 
@@ -521,6 +521,53 @@ Non fatto, e di proposito: e' il risparmio piu' grosso (**4,42 → 2,20 MB**) ma
 - `operazioni.materiali` e `articoli.distinta`/`fasi` fuori dal caricamento iniziale, chieste dalle schermate che le usano (scheda Materiali, modal articolo).
 - `sessioni_lavoro` a finestra di 30 giorni; lo storico intero solo aprendo i report (~2 s la prima volta, poi resta in memoria). Offerta a Nico l'alternativa: caricarlo **in sottofondo** dopo l'avvio, cosi' l'attesa non si sente.
 - ⚠ **Il rischio non e' la lentezza, e' la svista**: una schermata che si apre vuota perche' ci si dimentica di farle chiedere il dato. Una schermata per volta, con Nico che la apre e conferma.
+
+## 22 SETTEMBRE (sera): la password non sta piu' nel codice (`2026-09-22.02`)
+Chiesto da Nico dopo aver capito cosa c'era davvero esposto. Era il filo aperto 5, in coda da mesi.
+
+### ⚠⚠ COSA C'ERA, misurato e non supposto
+`curl https://cablotec.github.io/Gestionale/core/db.js` rispondeva **HTTP 200, 9.398 byte**, e dentro:
+`APP_EMAIL = 'kiosk@cablotec.local'` + `APP_PASSWORD = '...'`. Stessa coppia anche in `app.js` (`KIOSK_*`).
+- **Non era teoria**: quella password l'ho usata io stesso la mattina del 22 set, da riga di comando, per misurare il fattore di compressione — mi sono collegato e ho letto 300 righe di `sessioni_lavoro`.
+- L'account ha ruolo `user`, non puo' cancellare, ma **legge tutto**: ordini, clienti, prezzi unitari, distinte, timbrature di ogni dipendente. E puo' inserire timbri.
+
+### ⚠⚠ RENDERE PRIVATO IL REPOSITORY NON SERVE — e per un pezzo avevo detto il contrario
+Il sito lo serve **GitHub Pages**: `core/db.js` e `app.js` devono arrivare al browser di chiunque apra il gestionale, o l'app non parte. Repo privato o pubblico, quei file sono scaricabili.
+- **La regola generale**: *tutto cio' che il browser deve sapere, il browser lo puo' mostrare.* Un segreto dentro una pagina web non esiste.
+- Quindi **ruotare la password non basta da sola**: la nuova sarebbe pubblica il giorno dopo. Bisognava togliere il meccanismo, non cambiare il valore.
+- ⚠ Non rimetterla offuscata (base64, spezzata, ricomposta): la rende piu' lunga da leggere, non segreta.
+
+### La chiave anon invece va bene dov'e', ed e' una cosa diversa
+E' **pubblica per progetto**: Supabase la chiama cosi' apposta, deve stare nel browser. La barriera vera e' la RLS.
+- **Verificato il 22 set**: con la sola chiave anon, senza sessione, `operazioni`, `aziende`, `articoli`, `utenti`, `sessioni_lavoro`, `profili`, `impostazioni`, `assenze`, `mancanti`, `spedizioni` rispondono tutte **`[]`**. Le policy sono `TO authenticated`.
+- ⚠ Il giorno che si scrivesse una policy `TO anon`, quella verifica diventa falsa e l'anon key diventa una chiave vera.
+- ⚠ **Le scritture NON sono state provate empiricamente.** Un POST con un UUID malformato risponde `22P02`, che e' il **controllo di tipo del database** e scatta PRIMA della RLS: quel test non dice niente. Per chiudere il dubbio serve elencare le policy e guardare a che ruolo sono intestate.
+
+### Com'e' adesso
+Le postazioni si autenticano **UNA VOLTA a mano** e tengono la sessione, che si rinnova da sola finche' viene usata.
+- `mostraAccessoPostazione()` in app.js (kiosk) e `mostraAccessoDispositivo()` in prelievo.html.
+- ⚠ Il kiosk **cercava gia'** una sessione esistente prima di fare l'autologin: la modifica ha solo sostituito il ramo di ripiego. Per questo **le postazioni gia' abilitate non si sono accorte di niente** — verificato nel browser sui dati veri.
+- ⚠ **La schermata deve spiegarsi da sola a chi la trova in officina alle 6 del mattino**: dice cosa e' successo, che non si sono persi dati, e che serve un amministratore. Chi la vede non sa cosa sia una sessione.
+- ⚠ Gli errori di Supabase arrivano **in inglese**: `erroreAccessoInItaliano()` traduce i quattro casi veri (credenziali, rete, troppi tentativi, account non confermato) e lascia passare testuali quelli sconosciuti — nascondere cio' che non si sa tradurre lascerebbe senza appiglio chi deve chiamare e descrivere.
+- Dopo il login riuscito si fa `location.reload()` invece di proseguire: meta' dell'inizializzazione e' gia' saltata, ripartire da zero e' piu' sicuro che rattoppare.
+
+### ⚠ GLI STRUMENTI CHE LEGGEVANO LA PASSWORD DA `core/db.js`
+Erano **quattro**, e uno e' il backup notturno: senza la correzione si sarebbe rotto la notte stessa, in silenzio.
+`strumenti/backup.js` · `strumenti/anomalie-alnus.js` · `strumenti/test/prova-coperture.js` · (e il gemello in `credenziali.js`, che gia' faceva la cosa giusta).
+- Adesso prendono indirizzo, chiave ed email da `core/db.js` e **solo la password** da `PW.txt` via `leggiCredenziali()`.
+- **Backup rilanciato a mano dopo la modifica: 10.119 righe in 24 tabelle.** Non si dichiara sistemato un backup senza averlo fatto girare.
+- ⚠ **Il primo giro di ricerca me ne aveva fatto sfuggire uno** perche' avevo escluso `strumenti/test/` dal grep: l'ho visto solo perche' la suite e' fallita. **Cercare in tutto il repo, senza esclusioni furbe.**
+
+### Test di guardia
+`node strumenti/test/test-nessuna-password.js .` (25 controlli). Cerca la **forma**, non il valore — il valore nel test sarebbe di nuovo una password nel repo.
+- Nessuna `*PASSWORD = 'letterale'` nei file pubblicati · nessun `password: 'letterale'` come chiave d'oggetto · nessuno strumento che estragga `APP_PASSWORD` da `core/db.js` · `PW.txt` non dentro il repo.
+- ⚠ La regola sul login vuole la chiave **minuscola e preceduta da `{` o `,`**: senza, prendeva l'etichetta `'Password: '` del modulo e falliva su un testo a schermo.
+- **Provato che si accorge di una ricaduta**: rimessa la riga a mano, il test fallisce; tolta, torna verde.
+
+### Cosa resta a Nico
+1. **Ruotare la password** dal pannello Supabase (Authentication → Users). ⚠ **Dopo** il deploy, mai prima: le postazioni girano sulla sessione che hanno gia'.
+2. **Verificare le policy `anon`** con la query data in chat.
+3. Se una postazione chiede l'accesso, entrare una volta con la password NUOVA — che non finira' mai nel codice.
 
 ## Leggibilità: temi e testo (31 lug, `2026-07-31.8`)
 - **Tre ruoli, tre font**: **Syne** solo titoli e bottoni (è un font da display: illeggibile in frasi piccole); **`var(--ui)`** = stack di sistema per la PROSA (note, hint, didascalie — `.sub`), il font meglio ottimizzato che ogni macchina abbia per il testo piccolo, zero download; **JetBrains Mono** (era DM Mono) solo dove serve incolonnare — codici, quantità, date, ore — perché ha lettere più alte a parità di px.
