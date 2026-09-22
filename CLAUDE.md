@@ -564,10 +564,27 @@ Erano **quattro**, e uno e' il backup notturno: senza la correzione si sarebbe r
 - ⚠ La regola sul login vuole la chiave **minuscola e preceduta da `{` o `,`**: senza, prendeva l'etichetta `'Password: '` del modulo e falliva su un testo a schermo.
 - **Provato che si accorge di una ricaduta**: rimessa la riga a mano, il test fallisce; tolta, torna verde.
 
+### ⚠⚠ E LA RLS AVEVA UN BUCO VERO: `prelievi_magazzino` (stessa sera)
+La query sulle policy — data a Nico perche' la scrittura non la potevo provare io — ha trovato **cinque policy intestate al ruolo `public`**. In Postgres `public` vuol dire **OGNI ruolo, `anon` compreso**: non e' "pubblico" nel senso di "tutti gli utenti dell'app", e' "chiunque".
+- Quattro erano innocue di fatto (`attivita_extra`, `spedizioni`): la loro condizione blocca comunque chi non ha sessione, e infatti rispondevano `[]`.
+- **`prelievi_magazzino` no**: `cmd = ALL`, `qual = true`, `with_check = true`. Cioe' **aperta a chiunque in lettura E in scrittura** — con la sola chiave anon si potevano leggere le 32 righe, inserirne di false e cancellarle tutte.
+- Contenuto esposto: quale commessa, quale codice scansionato, **chi ha prelevato**, quanto, quando. Niente prezzi ne' clienti, ma dati di produzione e identificativi di dipendenti.
+- **Controllato dopo**: 32 righe, zero utenti sconosciuti, zero commesse inesistenti, zero quantita' non positive, distribuite su 9 giornate lavorative fra il 19 giu e l'8 set. **Nessuno ci aveva messo le mani.**
+
+**Correzione**: `alter policy ... to authenticated` su tutte e cinque. ⚠ `alter policy` cambia **solo il ruolo** e lascia intatta la condizione: non si rischia di buttare via una logica che non si e' letta. `drop` + `create` qui sarebbe stato piu' pericoloso e non serviva.
+
+**Verificato dopo**: tutte e **27 le tabelle** rispondono `[]` senza sessione · con la sessione della postazione si legge ancora tutto (prelievi 32, attivita_extra 5, spedizioni 321, operazioni 482).
+
+⚠⚠ **DUE LEZIONI, e la seconda vale piu' della prima.**
+1. **`{public}` in una policy non e' un dettaglio di stile: e' la porta aperta.** Quando si scrive una policy si intesta a `authenticated`, sempre, salvo un motivo dichiarato. Le quattro innocue sono state strette lo stesso: oggi non aprono niente perche' la condizione le ferma, ma basta che un domani qualcuno ritocchi quella condizione e la porta si spalanca **in silenzio**.
+2. **La prima query che avevo dato filtrava su `anon`/`public` e avrebbe trovato queste cinque lo stesso — ma e' stata la LISTA COMPLETA a far capire il quadro.** Quando si cerca un buco, si guarda tutto e si filtra con gli occhi: quello che il filtro scarta non lo si vede mai, e non si sa nemmeno che c'era.
+3. ⚠ Corollario sul metodo: **il test di lettura da solo non bastava.** `spedizioni` e `attivita_extra` rispondevano `[]` e sembravano a posto; `prelievi_magazzino` rispondeva coi dati. Ma la differenza fra "chiusa" e "aperta ma vuota" non la dice la risposta, la dice la policy. **Per sapere cosa e' permesso si legge la regola, non si tira a indovinare dalle risposte.**
+
 ### Cosa resta a Nico
-1. **Ruotare la password** dal pannello Supabase (Authentication → Users). ⚠ **Dopo** il deploy, mai prima: le postazioni girano sulla sessione che hanno gia'.
-2. **Verificare le policy `anon`** con la query data in chat.
-3. Se una postazione chiede l'accesso, entrare una volta con la password NUOVA — che non finira' mai nel codice.
+✅ **Fatto tutto la sera stessa.** Password ruotata via SQL (`update auth.users set encrypted_password = extensions.crypt(...)`: l'account e' `@cablotec.local`, non una mail vera, quindi il recupero via email non era percorribile), `PW.txt` aggiornato, policy corrette.
+**Verificato, non dedotto**: password VECCHIA rifiutata (HTTP 400) · password nuova da `PW.txt` funzionante · file su Pages senza password · backup rilanciato a mano, 10.119 righe in 24 tabelle · 27 tabelle su 27 mute senza sessione.
+⚠ La password vecchia **resta nella storia git** e ci resta: e' una chiave morta, riscrivere la storia di un repo pubblico costa piu' di quanto valga.
+⚠ Se una postazione chiede l'accesso, si entra con la password NUOVA — che non finira' mai nel codice.
 
 ## Leggibilità: temi e testo (31 lug, `2026-07-31.8`)
 - **Tre ruoli, tre font**: **Syne** solo titoli e bottoni (è un font da display: illeggibile in frasi piccole); **`var(--ui)`** = stack di sistema per la PROSA (note, hint, didascalie — `.sub`), il font meglio ottimizzato che ogni macchina abbia per il testo piccolo, zero download; **JetBrains Mono** (era DM Mono) solo dove serve incolonnare — codici, quantità, date, ore — perché ha lettere più alte a parità di px.
