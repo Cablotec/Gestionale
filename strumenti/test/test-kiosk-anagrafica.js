@@ -4,8 +4,11 @@ const fs = require('fs');
 const src = fs.readFileSync(process.argv[2] + '/app.js', 'utf8');
 
 function estrai(nome) {
-  const i = src.indexOf('function ' + nome + '(');
+  let i = src.indexOf('function ' + nome + '(');
   if (i < 0) throw new Error('non trovata: ' + nome);
+  // ⚠ Se la funzione e' `async function`, partire da `function` le toglie
+  // l'`async` e l'`await` dentro diventa un errore di sintassi.
+  if (src.slice(Math.max(0, i - 6), i) === 'async ') i -= 6;
   let d = 0, j = src.indexOf('{', i);
   for (let k = j; k < src.length; k++) {
     if (src[k] === '{') d++;
@@ -27,8 +30,17 @@ function applyChange(tabella, p) {
   else if (p.eventType === 'DELETE') state[k] = state[k].filter(x => x.id !== p.old.id);
 }
 
+// Stub del client: registra la query mirata e restituisce la riga operatore.
+let ultimaQuery = null;
+let rispostaOperatori = [];
+const sb = { from: (tab) => ({ select: () => ({ eq: (col, val) => {
+  ultimaQuery = { tab, col, val };
+  return Promise.resolve({ data: rispostaOperatori, error: null });
+} }) }) };
+
 eval(estrai('kioskApplyAnagrafica'));
 eval(estrai('kioskApplyPrenotazione'));
+eval(estrai('kioskSyncOperatoriPren'));
 
 let ok = 0, ko = 0;
 const t = (nome, atteso, avuto) => {
@@ -77,5 +89,34 @@ kioskApplyPrenotazione({eventType:'INSERT',new:{id:3,data_fine:null}});
 t('senza data_fine resta', [2,3], state.prenotazioni.map(r=>r.id));
 
 t('kioskRefreshActive chiamato a ogni evento', 9, refresh);
-console.log(ok + ' ok, ' + ko + ' ko');
-process.exit(ko ? 1 : 0);
+
+// ── 9-12. Gli OPERATORI della prenotazione si rileggono da soli ──
+// ⚠ Regressione vera, segnalata da Nico il 22 set: il kiosk riconosce
+// "questa prenotazione e' tua" SOLO da `prenotazioni_utenti`. Tolta la
+// ricarica totale, quella cache restava vecchia e il mezzo che avevi gia'
+// prenotato ti appariva libero — niente "conferma rientro", e una seconda
+// prenotazione al posto dell'aggiornamento.
+(async () => {
+  const PREN = 'pren-1', UT = 'utente-1';
+  state = { prenotazioni: [], prenOp: [] };
+  rispostaOperatori = [{ prenotazione_id: PREN, utente_id: UT }];
+  kioskApplyPrenotazione({ eventType:'INSERT', new:{ id:PREN, data_fine:domani } });
+  await new Promise(r => setTimeout(r, 30));
+  t('rilettura sulla tabella giusta', 'prenotazioni_utenti', ultimaQuery && ultimaQuery.tab);
+  t('rilettura sulla prenotazione giusta', PREN, ultimaQuery && ultimaQuery.val);
+  t('operatore finito in prenOp', 1, state.prenOp.filter(r => r.prenotazione_id === PREN).length);
+
+  // Niente doppioni se lo stesso evento arriva due volte (il realtime puo' ripetersi)
+  kioskApplyPrenotazione({ eventType:'UPDATE', new:{ id:PREN, data_fine:domani } });
+  await new Promise(r => setTimeout(r, 30));
+  t('evento ripetuto non duplica gli operatori', 1, state.prenOp.filter(r => r.prenotazione_id === PREN).length);
+
+  // Su DELETE non si rilegge: la prenotazione non c'e' piu'
+  ultimaQuery = null;
+  kioskApplyPrenotazione({ eventType:'DELETE', old:{ id:PREN }, new:null });
+  await new Promise(r => setTimeout(r, 30));
+  t('su DELETE nessuna rilettura', null, ultimaQuery);
+
+  console.log(ok + ' ok, ' + ko + ' ko');
+  process.exit(ko ? 1 : 0);
+})();

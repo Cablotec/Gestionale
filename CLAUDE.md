@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-22.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-22.03`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -579,6 +579,19 @@ La query sulle policy — data a Nico perche' la scrittura non la potevo provare
 1. **`{public}` in una policy non e' un dettaglio di stile: e' la porta aperta.** Quando si scrive una policy si intesta a `authenticated`, sempre, salvo un motivo dichiarato. Le quattro innocue sono state strette lo stesso: oggi non aprono niente perche' la condizione le ferma, ma basta che un domani qualcuno ritocchi quella condizione e la porta si spalanca **in silenzio**.
 2. **La prima query che avevo dato filtrava su `anon`/`public` e avrebbe trovato queste cinque lo stesso — ma e' stata la LISTA COMPLETA a far capire il quadro.** Quando si cerca un buco, si guarda tutto e si filtra con gli occhi: quello che il filtro scarta non lo si vede mai, e non si sa nemmeno che c'era.
 3. ⚠ Corollario sul metodo: **il test di lettura da solo non bastava.** `spedizioni` e `attivita_extra` rispondevano `[]` e sembravano a posto; `prelievi_magazzino` rispondeva coi dati. Ma la differenza fra "chiusa" e "aperta ma vuota" non la dice la risposta, la dice la policy. **Per sapere cosa e' permesso si legge la regola, non si tira a indovinare dalle risposte.**
+
+### ⚠⚠ LA REGRESSIONE CHE HO FATTO IO, trovata da Nico lo stesso giorno
+Segnalazione dal campo: *"posso prenotare un mezzo che ho gia' prenotato"*, dal kiosk, col suo account.
+- **Nessun danno a database**: una sola prenotazione, creata alle 12:39, `modificato_il` identico a `creato_il`. Nessun doppione, niente riscritto.
+- **Una parte e' VOLUTA**: il kiosk esclude di proposito *la tua* prenotazione dal controllo conflitti — il caso normale e' "l'avevi prenotato, ora lo ritiri", e allora aggiorna la tua invece di bloccarti.
+- ⚠⚠ **Ma funziona solo se ti RICONOSCE, e ti riconosce unicamente da `prenotazioni_utenti`** (`prenotazioni.utente_id` e' l'AUTORE, non l'operatore). Cache vecchia -> il kiosk non sa che la prenotazione e' tua -> niente "conferma rientro", mezzo che appare libero, e una SECONDA prenotazione al posto dell'aggiornamento.
+- **La causa**: togliendo `kioskLoadAll()` dall'handler delle prenotazioni avevo sostituito la ricarica totale con un canale realtime su `prenotazioni_utenti` — che funziona **solo se quella tabella e' nella publication del realtime**, cosa che non avevo verificato. La stazione che crea la prenotazione sta a posto (spinge la riga in `state.prenOp` a mano, riga 15442); **l'altra no**.
+- **Correzione**: `kioskSyncOperatoriPren(prenId)`, rilettura mirata delle righe operatore di quella prenotazione dopo ogni evento. **111 byte misurati.** Gemella di `kioskSyncAddetti`, stessa ragione. Non dipende dal canale: vale anche se quel realtime non arriva mai.
+- **Test**: `test-kiosk-anagrafica.js` sale a 14 controlli (rilettura sulla tabella e sulla prenotazione giuste, operatore in `prenOp`, evento ripetuto che non duplica, DELETE che non rilegge).
+- ⚠ `estrai()` nel test tagliava la parola `async` dalla firma (cerca `'function ' + nome`), e l'`await` dentro diventava un errore di sintassi. Corretto li'.
+
+⚠⚠⚠ **LA LEZIONE, ed e' la piu' cara della giornata perche' l'avevo GIA' SCRITTA POCHE ORE PRIMA**, in questa stessa sezione: *"togliendo una ricarica totale, guardare cos'altro quella ricarica teneva aggiornato per caso"*. L'avevo scritta, avevo perfino aggiunto il canale su `prenotazioni_utenti` proprio per quel motivo — **e poi non ho verificato che quel canale funzionasse**. Scrivere la regola non e' applicarla: la sostituzione di una ricarica totale va **provata**, non ragionata. E la prova non e' "ho aggiunto il canale", e' "ho visto arrivare l'evento".
+- **Da qui in poi**: quando un pezzo di stato dipende da un canale realtime, o si verifica che quella tabella sia nella publication, o **non ci si appoggia** e si rilegge mirato. La rilettura mirata costa centinaia di byte e non ha modi di fallire in silenzio.
 
 ### Cosa resta a Nico
 ✅ **Fatto tutto la sera stessa.** Password ruotata via SQL (`update auth.users set encrypted_password = extensions.crypt(...)`: l'account e' `@cablotec.local`, non una mail vera, quindi il recupero via email non era percorribile), `PW.txt` aggiornato, policy corrette.

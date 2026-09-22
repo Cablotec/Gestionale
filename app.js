@@ -14840,6 +14840,29 @@ function kioskApplyPrenotazione(p) {
   state.prenotazioni = (state.prenotazioni || [])
     .filter(r => r && (!r.data_fine || String(r.data_fine).slice(0, 10) >= oggi));
   kioskRefreshActive();
+  // ⚠⚠ E SUBITO GLI OPERATORI DI QUELLA PRENOTAZIONE.
+  // Il kiosk riconosce "questa prenotazione e' TUA" solo da `prenotazioni_utenti`
+  // (`utente_id` sulla prenotazione e' l'AUTORE, non l'operatore). Se quella
+  // cache resta vecchia, il mezzo che hai gia' prenotato ti appare libero: niente
+  // "conferma rientro", e una seconda prenotazione al posto dell'aggiornamento.
+  // Prima del 22 set lo teneva in piedi la ricarica totale; sostituendola avevo
+  // messo un canale realtime su `prenotazioni_utenti`, che pero' funziona solo
+  // se quella tabella e' nella publication del realtime — cosa che non avevo
+  // verificato. Questa rilettura mirata non dipende da quel canale: qualche
+  // centinaio di byte, e vale anche se il canale non arriva mai.
+  const id = (p.new && p.new.id) || (p.old && p.old.id);
+  if (id && p.eventType !== 'DELETE') kioskSyncOperatoriPren(id).then(kioskRefreshActive);
+}
+
+// Le righe operatore di UNA prenotazione. Gemella di `kioskSyncAddetti`, che
+// fa la stessa cosa per gli addetti di una commessa e per la stessa ragione.
+async function kioskSyncOperatoriPren(prenId) {
+  if (!prenId) return;
+  const { data, error } = await sb.from('prenotazioni_utenti')
+    .select('*').eq('prenotazione_id', prenId);
+  if (error || !data) return;
+  state.prenOp = (state.prenOp || [])
+    .filter(r => r.prenotazione_id !== prenId).concat(data);
 }
 
 function kioskStartRealtime() {
