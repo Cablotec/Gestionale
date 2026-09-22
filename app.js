@@ -14549,11 +14549,21 @@ async function kioskLoadAll() {
   // + attività extra per il terzo flusso "Attività extra"
   // + assenze del giorno e tipi_assenza per mostrare ferie/permessi nelle card
   const oggi = toLocalISO(new Date());
-  const [mezzi, util, clienti, articoli, tipiLav, operazioni, sessioni, opAddetti, opFasi, assenze, tipiAss, attExtra, prenFuture, prenOp] = await Promise.all([
+  const [mezzi, util, clienti, articoli, tipiLav, operazioni, sessioni, assenze, tipiAss, attExtra, prenFuture, prenOp] = await Promise.all([
     sb.from('mezzi').select('*').eq('attivo', true).order('nome'),
     sb.from('utenti').select('*').eq('attivo', true).order('nome'),
     sb.from('aziende').select('*').eq('attivo', true).order('nome'),
-    sb.from('articoli').select('*').eq('attivo', true).order('codice'),
+    // ⚠ COLONNE ESPLICITE, e la ragione non e' l'eleganza: `distinta` e
+    // `fasi` pesano da sole 275 KB dei 375 dell'anagrafica, e al kiosk non
+    // le legge NESSUNO — la distinta serve a generare la lista materiali
+    // (gestionale), le fasi a seminare le fasi di una commessa nuova
+    // (gestionale). Il kiosk conta i mancanti dalla lista gia' congelata
+    // in `operazioni.materiali`, che infatti resta.
+    // Aggiungendo una colonna ad `articoli` che serva anche qui, va
+    // aggiunta a questo elenco o al kiosk arrivera' sempre `undefined`.
+    sb.from('articoli')
+      .select('id,codice,descrizione,categoria,note,attivo,created_at,updated_at,minuti_unitari')
+      .eq('attivo', true).order('codice'),
     sb.from('tipi_lavorazione').select('*').eq('attivo', true).order('ordine'),
     fetchTutte(() => sb.from('operazioni').select('*').neq('stato', 'spedita').neq('stato', 'completata').order('scadenza').order('id')),
     // Sessioni: le APERTE (tutte, anche di giorni passati) + le CHIUSE
@@ -14562,11 +14572,12 @@ async function kioskLoadAll() {
     fetchTutte(() => sb.from('sessioni_lavoro').select('*')
       .or('fine.is.null,inizio.gte.' + toLocalISO(new Date(Date.now() - 15 * 86400000)))
       .order('inizio', { ascending:false }).order('id')),
-    fetchTutte(() => sb.from('operazioni_addetti').select('*').order('operazione_id').order('utente_id').order('fase_id')),
-    // Fasi delle commesse: SERVONO al kiosk per timbrare la fase giusta e per
-    // evitare che l'auto-iscrizione crei una riga "tutta la commessa" (fase_id
-    // null) credendo per errore che la commessa non abbia fasi.
-    fetchTutte(() => sb.from('operazioni_fasi').select('*').order('id')),
+    // ⚠ `operazioni_addetti` e `operazioni_fasi` NON stanno piu' qui: si
+    // caricano nella seconda passata, filtrate sulle sole commesse vive
+    // (vedi sotto). Servono sempre — al kiosk per timbrare la fase giusta e
+    // per evitare che l'auto-iscrizione crei una riga "tutta la commessa"
+    // (fase_id null) credendo per errore che la commessa non abbia fasi —
+    // ma solo per le commesse che il kiosk ha davvero in elenco.
     sb.from('assenze').select('*').eq('data', oggi).eq('stato', 'valida'),
     sb.from('tipi_assenza').select('*'),
     sb.from('attivita_extra').select('*').eq('attivo', true).order('ordine'),
@@ -14583,8 +14594,6 @@ async function kioskLoadAll() {
   state.tipiLav = tipiLav.data || [];
   state.operazioni = operazioni.data || [];
   state.sessioni = sessioni.data || [];
-  state.opAddetti = opAddetti.data || [];
-  state.opFasi = opFasi.data || [];
   state.assenze = assenze.data || [];
   state.tipiAssenza = tipiAss.data || [];
   state.attivitaExtra = attExtra.data || [];
@@ -14592,6 +14601,38 @@ async function kioskLoadAll() {
   // e loadPrenotazioneOperatori durante il check-out mezzi.
   state.prenotazioni = prenFuture.data || [];
   state.prenOp = prenOp.data || [];
+
+  // ── Addetti e fasi: SOLO delle commesse che il kiosk ha in elenco ──
+  // Prima si scaricavano tutte (321 + 165 KB), comprese quelle di commesse
+  // spedite o completate mesi fa, che qui non si possono nemmeno aprire.
+  // Filtrate sulle vive sono 80 + 41 KB. Seconda passata e non dentro il
+  // Promise.all perche' servono gli id, che li' non ci sono ancora.
+  // ⚠ Il filtro e' legato a `state.operazioni`: se un domani il kiosk
+  // mostrasse anche le commesse chiuse, questo va allargato con loro o le
+  // loro fasi risulterebbero inesistenti — e una commessa senza fasi fa
+  // iscrivere l'operatore a "tutta la commessa" invece che alla sua fase.
+  const opIdsVive = state.operazioni.map(o => o.id);
+  if (opIdsVive.length > 0) {
+    // ⚠ `in()` mette gli id nell'URL: stessa strada gia' percorsa qui sotto
+    // per le sessioni chiuse, quindi nessun rischio nuovo. Se un giorno le
+    // commesse vive diventassero molte centinaia, l'URL e' il primo posto
+    // dove si rompe (HTTP 414) — allora serve un filtro lato server.
+    const [addettiVivi, fasiVive] = await Promise.all([
+      fetchTutte(() => sb.from('operazioni_addetti').select('*')
+        .in('operazione_id', opIdsVive)
+        .order('operazione_id').order('utente_id').order('fase_id')),
+      fetchTutte(() => sb.from('operazioni_fasi').select('*')
+        .in('operazione_id', opIdsVive).order('id')),
+    ]);
+    if (addettiVivi.error) console.error('[KIOSK] Errore caricamento opAddetti', addettiVivi.error);
+    if (fasiVive.error) console.error('[KIOSK] Errore caricamento opFasi', fasiVive.error);
+    state.opAddetti = addettiVivi.data || [];
+    state.opFasi = fasiVive.data || [];
+  } else {
+    state.opAddetti = [];
+    state.opFasi = [];
+  }
+
   // Log diagnostico (visibile in console)
   console.log('[KIOSK] Loaded:', {
     mezzi: state.mezzi.length,
@@ -14607,7 +14648,7 @@ async function kioskLoadAll() {
   // Log errori se ci sono
   [['mezzi',mezzi],['operatori',util],['prenotazioni',prenFuture],['prenOp',prenOp],
    ['clienti',clienti],['articoli',articoli],['tipiLav',tipiLav],
-   ['operazioni',operazioni],['sessioni',sessioni],['opAddetti',opAddetti],
+   ['operazioni',operazioni],['sessioni',sessioni],
    ['attExtra',attExtra]].forEach(([n,r]) => {
     if (r.error) console.error('[KIOSK] Errore caricamento', n, r.error);
   });
@@ -14620,13 +14661,12 @@ async function kioskLoadAll() {
   // peso minimo anche se lo storico è grande.
   kioskState.opIniziate = new Set();
   kioskState.opOreCons = {};       // operazione_id → ore consuntivate (sessioni chiuse)
-  const opIds = state.operazioni.map(o => o.id);
-  if (opIds.length > 0) {
+  if (opIdsVive.length > 0) {
     try {
       const { data: sessChiuse, error: errIniz } = await sb
         .from('sessioni_lavoro')
         .select('operazione_id, durata_secondi')
-        .in('operazione_id', opIds)
+        .in('operazione_id', opIdsVive)
         .not('fine', 'is', null);
       if (errIniz) console.error('[KIOSK] Errore caricamento op iniziate:', errIniz);
       else (sessChiuse || []).forEach(s => {
@@ -14678,19 +14718,69 @@ function kioskApplyOperazione(p) {
   state.operazioni = state.operazioni.filter(o => o.stato !== 'spedita' && o.stato !== 'completata');
 }
 
+// ── Anagrafiche: applica la riga, non riscaricare tutto ──
+// (22 set) Stessa cura data il 24 ago a commesse e timbrature, arrivata qui
+// con un mese di ritardo. Queste sei tabelle cambiano di rado, ma quando
+// cambiano lo fanno IN BLOCCO: il 4 settembre 146 articoli modificati in
+// un'ora hanno prodotto 146 ricariche complete PER POSTAZIONE.
+// ⚠ Il caricamento filtra `attivo = true`, il messaggio realtime no: senza
+// riapplicare il filtro, una riga disattivata da un'altra postazione
+// resterebbe in elenco al kiosk fino al riavvio — cioe' l'esatto contrario
+// di quello che voleva chi l'ha disattivata.
+// ⚠ `ordinaPer` non e' un vezzo: il caricamento chiede le righe gia'
+// ordinate (nome, codice, ordine) e le schermate si fidano di quell'ordine.
+// Applicando una riga senza riordinare, un operatore nuovo comparirebbe in
+// fondo all'elenco di identificazione invece che al suo posto alfabetico.
+function kioskApplyAnagrafica(tabella, chiave, p, ordinaPer) {
+  applyChange(tabella, p);
+  const arr = state[chiave];
+  if (!Array.isArray(arr)) { kioskRefreshActive(); return; }
+  const riga = p.new;
+  // ⚠ RIATTIVAZIONE: se la riga era disattivata non sta in cache (il filtro
+  // qui sotto l'aveva tolta), e l'UPDATE di applyChange sostituisce soltanto
+  // — non aggiunge. Senza questo, un mezzo o un operatore riacceso
+  // dall'ufficio resterebbe invisibile in reparto fino al riavvio.
+  if (riga && riga.id && riga.attivo !== false && !arr.find(x => x.id === riga.id)) arr.push(riga);
+  let out = arr.filter(r => r && r.attivo !== false);
+  if (ordinaPer) {
+    out = out.slice().sort((a, b) => {
+      const x = a[ordinaPer], y = b[ordinaPer];
+      if (typeof x === 'number' && typeof y === 'number') return x - y;
+      return String(x == null ? '' : x).localeCompare(String(y == null ? '' : y), 'it');
+    });
+  }
+  state[chiave] = out;
+  kioskRefreshActive();
+}
+
+// Le prenotazioni non hanno `attivo`: il caricamento tiene quelle che non
+// sono ancora finite (`data_fine >= oggi`), e lo stesso taglio va rifatto
+// qui — una prenotazione di marzo inserita a mano non deve comparire fra
+// quelle che occupano un mezzo adesso.
+function kioskApplyPrenotazione(p) {
+  applyChange('prenotazioni', p);
+  const oggi = toLocalISO(new Date());
+  state.prenotazioni = (state.prenotazioni || [])
+    .filter(r => r && (!r.data_fine || String(r.data_fine).slice(0, 10) >= oggi));
+  kioskRefreshActive();
+}
+
 function kioskStartRealtime() {
   if (kioskChannel) return;
   if (!_rtLivenessTimer) _rtLivenessTimer = setInterval(_rtLivenessCheck, 45000);
   kioskChannel = sb.channel('kiosk-changes')
-    .on('postgres_changes', { event:'*', schema:'public', table:'mezzi' }, () => {
-      kioskLoadAll().then(kioskRefreshActive);
-    })
-    .on('postgres_changes', { event:'*', schema:'public', table:'utenti' }, () => {
-      kioskLoadAll().then(kioskRefreshActive);
-    })
-    .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni' }, () => {
-      kioskLoadAll().then(kioskRefreshActive);
-    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'mezzi' },
+        (p) => kioskApplyAnagrafica('mezzi', 'mezzi', p, 'nome'))
+    .on('postgres_changes', { event:'*', schema:'public', table:'utenti' },
+        (p) => kioskApplyAnagrafica('utenti', 'utenti', p, 'nome'))
+    .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni' },
+        (p) => kioskApplyPrenotazione(p))
+    // La pivot delle prenotazioni: prima si aggiornava di rimbalzo, perche'
+    // un cambio di prenotazione faceva ricaricare tutto. Senza questo canale
+    // il kiosk avrebbe la prenotazione ma non chi la usa, e il controllo
+    // conflitti al check-out mezzi lavorerebbe su una lista vecchia.
+    .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni_utenti' },
+        (p) => { applyChange('prenotazioni_utenti', p); kioskRefreshActive(); })
     // ── Le due tabelle che cambiano di continuo NON fanno riscaricare tutto ──
     // (24 ago) Ogni timbro produce due eventi, insert e chiusura, e le quote di
     // un gruppo ne producono uno per commessa. Con kioskLoadAll() ogni evento
@@ -14708,15 +14798,17 @@ function kioskStartRealtime() {
       kioskRefreshActive();
       if (opId) kioskSyncAddetti(opId).then(kioskRefreshActive);
     })
-    .on('postgres_changes', { event:'*', schema:'public', table:'aziende' }, () => {
-      kioskLoadAll().then(kioskRefreshActive);
-    })
-    .on('postgres_changes', { event:'*', schema:'public', table:'articoli' }, () => {
-      kioskLoadAll().then(kioskRefreshActive);
-    })
-    .on('postgres_changes', { event:'*', schema:'public', table:'tipi_lavorazione' }, () => {
-      kioskLoadAll().then(kioskRefreshActive);
-    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'aziende' },
+        (p) => kioskApplyAnagrafica('aziende', 'aziende', p, 'nome'))
+    // ⚠ La riga che arriva di qui porta anche `distinta` e `fasi`, che il
+    // caricamento NON scarica piu'. Nessuno al kiosk le legge, quindi non
+    // cambia niente — ma se un domani servissero, non ci si puo' fidare di
+    // trovarle: le hanno solo gli articoli toccati da quando la postazione
+    // e' accesa. La fonte e' il `select` di kioskLoadAll, non questo canale.
+    .on('postgres_changes', { event:'*', schema:'public', table:'articoli' },
+        (p) => kioskApplyAnagrafica('articoli', 'articoli', p, 'codice'))
+    .on('postgres_changes', { event:'*', schema:'public', table:'tipi_lavorazione' },
+        (p) => kioskApplyAnagrafica('tipi_lavorazione', 'tipiLav', p, 'ordine'))
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         if (_kioskNeedCatchup) {

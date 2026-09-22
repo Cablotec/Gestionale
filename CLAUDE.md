@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-17.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-22.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -470,6 +470,48 @@ Chiesto da Nico: *"lista materiali pura con colonne giacenza, mancanti ecc (colo
 - **La chiusura di un timbro è IDEMPOTENTE** (24 ago): aggiorna solo se `fine` è ancora null e, se non tocca nulla, non crea le quote del gruppo. Senza, una chiusura partita due volte raddoppia le ore — successo 9 volte: un doppio tocco e sette ritentativi dopo il timeout di 10 s di `eseguiConRetry`. **Un retry senza guardia di idempotenza è un moltiplicatore, non una rete.**
 
 - **Segnalare non è chiedere di intervenire** (24 ago): la soglia delle 7 h vive in due posti con due mestieri. Sulle **card Live e nello storico** è un marcatore informativo — le mattinate lunghe di chi attacca alle 5 ci restano, e va bene. Nella **striscia delle sospette** è un elenco di cose da sistemare, e lì una giornata regolare non ci deve stare (i timbri chiusi dalla pausa sono esclusi: li ha chiusi il gestionale). Stesso numero, domanda diversa: **non unificarle**.
+
+## 22 SETTEMBRE: l'egress del kiosk a dieta (`2026-09-22.01`)
+Domanda di Nico: *"e' normale un egress su Supabase di quasi 200 MB al giorno?"*
+
+### I numeri, misurati
+- **Pannello Supabase, 21 set**: PostgREST **166 MB (89,5%)** · Realtime 19 MB (10,2%) · Auth 0,6 MB · Functions 1,4 KB. Periodo: **4,17 GB su 5** inclusi nel piano gratuito.
+- ⚠ **I sabati e le domeniche sono quasi a zero**: 5-6, 12-13, 19-20 set. Nessun processo impazzito di notte — il traffico e' l'uso d'ufficio. Se un giorno il weekend si alzasse, quello SI' sarebbe un difetto.
+- **Peso di una passata** (dal backup del 21 set, che scarica le stesse tabelle): gestionale **4,42 MB** in chiaro / **718 KB** gzip · kiosk **1,54 MB** / 268 KB. Compressione misurata contro il vero endpoint: **5,15×**.
+- **Dove stanno i byte**: `operazioni.materiali` 52% della sua tabella · `articoli.distinta`+`fasi` 73% della sua · `sessioni_lavoro` 4.470 righe di cui solo 1.141 dell'ultimo mese.
+
+### ⚠⚠ COMPRESSO O IN CHIARO: NON E' DECISO, e ci ho sbattuto il naso
+Avevo usato il **4 settembre** come taratura: 150 articoli modificati × 2 postazioni = 300 ricariche, +430 MB sul grafico, quindi "si paga in chiaro". **Falso.** Il 4 settembre e' il giorno del travaso della tabella `distinta`: `backup-gestionale/distinta-archivio-2026-09-04.json` pesa **14,76 MB** e gli strumenti di quel pomeriggio ci rileggevano sopra. **Il grosso di quei MB li ho scaricati io, non i kiosk.** La divisione attribuiva tutto alle postazioni.
+- La sezione EGRESS del 27 ago pesava i byte **compressi** e i conti tornavano cosi'. Le due letture restano entrambe in piedi.
+- ⚠ **Come si scioglie gratis**: leggere il tooltip di un **sabato o domenica**. L'unica cosa che gira e' il backup notturno: **~5 MB = in chiaro, ~1 MB = compresso**. Nessuna quota spesa.
+- ⚠ **Non serve per decidere cosa fare** (meta' e' meta' in tutti e due i casi), serve per sapere **quando si e' finito**: se dopo le diete restano ~30 caricamenti al giorno a testa c'e' dell'altro da cercare, se ne restano 4-5 e' uso normale.
+- **Lezione**: una giornata in cui abbiamo lavorato noi due non e' una giornata di taratura. Prima di dividere un totale per un numero di eventi, chiedersi **cos'altro girava quel giorno** — e il primo sospetto e' il lavoro di manutenzione, che e' quello che non lascia traccia nelle tabelle.
+
+### Cosa e' stato fatto (passi 1 e 2)
+**Ricarica kiosk da 1,54 a 0,96 MB (−40%)**, verificato nel browser sulla pagina vera:
+
+| | prima | dopo |
+|---|---|---|
+| `articoli` | 375 KB | **100 KB** (colonne esplicite, via `distinta` e `fasi`) |
+| `operazioni_addetti` | 321 KB (1.487 righe) | **81 KB** (390, solo commesse vive) |
+| `operazioni_fasi` | 165 KB (701) | **41 KB** (175, solo commesse vive) |
+
+- ⚠⚠ **`operazioni.materiali` RESTA, ed e' la colonna piu' pesante.** Sembrava il taglio ovvio e non lo e': dal 16 set il conto dei mancanti sta su **tutte** le card (`kioskEsitoMateriali`), non solo sulla commessa aperta. Toglierla avrebbe spento una cosa chiesta dalla produzione. **Prima di togliere una colonna, cercare chi la legge — anche nei rami che credi di conoscere: qui mi ero gia' sbagliato una volta.**
+- ⚠ Il filtro di addetti e fasi e' legato a **`state.operazioni`**: se un domani il kiosk mostrasse anche le commesse chiuse, va allargato con loro — una commessa senza fasi fa iscrivere l'operatore a "tutta la commessa" invece che alla sua fase.
+- ⚠ `in()` mette gli id nell'URL. Strada gia' percorsa (le sessioni chiuse fanno lo stesso), quindi nessun rischio nuovo, ma con molte centinaia di commesse vive l'URL e' il primo posto che si rompe (**HTTP 414**).
+
+**Le sei anagrafiche non fanno piu' ricaricare tutto** (`kioskApplyAnagrafica`, `kioskApplyPrenotazione`): mezzi, utenti, prenotazioni, aziende, articoli, tipi_lavorazione. E' la stessa cura data il 24 ago a commesse e timbrature, arrivata qui **con un mese di ritardo**.
+- **Perche' contava**: queste tabelle cambiano di rado ma **in blocco**. Il 4 set, 146 articoli in un'ora = 146 ricariche complete per postazione. Non e' solo egress: sono 146 scatti dello schermo in reparto.
+- ⚠⚠ **Due difetti nella prima stesura, trovati rileggendo e non provando**: (1) una riga **RIATTIVATA** non tornava — non e' in cache perche' il filtro l'aveva tolta, e l'UPDATE di `applyChange` **sostituisce, non aggiunge**; (2) una riga nuova finiva **in fondo** invece che al suo posto, perche' il caricamento chiede `.order(...)` e le schermate si fidano di quell'ordine. Da qui `ordinaPer`.
+- ⚠ Aggiunto il canale **`prenotazioni_utenti`**, che prima si aggiornava di rimbalzo: senza, il kiosk avrebbe la prenotazione ma non chi la usa, e il controllo conflitti al check-out mezzi lavorerebbe su una lista vecchia. **Togliendo una ricarica totale, guardare cos'altro quella ricarica teneva aggiornato per caso.**
+- ⚠ Le righe che arrivano dal canale `articoli` portano `distinta` e `fasi`, che il caricamento non scarica piu'. Nessuno le legge, ma **non ci si puo' fidare di trovarle**: le hanno solo gli articoli toccati da quando la postazione e' accesa. La fonte e' il `select` di `kioskLoadAll`, non il canale.
+- **Test**: `node strumenti/test/test-kiosk-anagrafica.js .` (9 controlli) — estrae le funzioni da app.js e le ESEGUE con uno state finto. Piu' la prova sulla pagina viva: disattiva/riattiva/ordine/prenotazione scaduta, tutto ok, 9 card live ridisegnate senza errori.
+
+### Filo aperto: passo 3, il gestionale
+Non fatto, e di proposito: e' il risparmio piu' grosso (**4,42 → 2,20 MB**) ma tocca schermate vere.
+- `operazioni.materiali` e `articoli.distinta`/`fasi` fuori dal caricamento iniziale, chieste dalle schermate che le usano (scheda Materiali, modal articolo).
+- `sessioni_lavoro` a finestra di 30 giorni; lo storico intero solo aprendo i report (~2 s la prima volta, poi resta in memoria). Offerta a Nico l'alternativa: caricarlo **in sottofondo** dopo l'avvio, cosi' l'attesa non si sente.
+- ⚠ **Il rischio non e' la lentezza, e' la svista**: una schermata che si apre vuota perche' ci si dimentica di farle chiedere il dato. Una schermata per volta, con Nico che la apre e conferma.
 
 ## Leggibilità: temi e testo (31 lug, `2026-07-31.8`)
 - **Tre ruoli, tre font**: **Syne** solo titoli e bottoni (è un font da display: illeggibile in frasi piccole); **`var(--ui)`** = stack di sistema per la PROSA (note, hint, didascalie — `.sub`), il font meglio ottimizzato che ogni macchina abbia per il testo piccolo, zero download; **JetBrains Mono** (era DM Mono) solo dove serve incolonnare — codici, quantità, date, ore — perché ha lettere più alte a parità di px.
