@@ -19064,6 +19064,91 @@ function ganttRangeLabel(range, zoom) {
 }
 
 
+// Testo per un `datetime-local` con i secondi. I secondi sono indispensabili:
+// senza, le sessioni sotto il minuto avrebbero inizio e fine identici
+// (collasso al minuto) e non sarebbero salvabili.
+const dtLocalStr = (d) => `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
+
+// ⚠⚠ UN CAMPO CHE NON HAI TOCCATO NON DEVE CAMBIARE VALORE.
+// `datetime-local` arriva ai SECONDI: i millisecondi dell'istante originale
+// non ci stanno. Rileggere il campo e rispedirlo li azzera — e un timbro che
+// comincia `08:38:02.164` tornerebbe indietro di 164 ms.
+// Sembra niente, e invece: le quote di un gruppo sono fette CONSECUTIVE, una
+// comincia nell'istante esatto in cui finisce l'altra. Spostarne una indietro
+// di un sesto di secondo crea una sovrapposizione VERA — bloccata dal
+// controllo e invisibile sullo schermo, dove tutte e due dicono `10:38`.
+// ⚠ Non si rimedia allargando la tolleranza del controllo: nasconderebbe
+// anche gli accavallamenti veri da mezzo secondo. Si rimedia non toccando
+// quello che l'utente non ha toccato.
+// Ritorna l'ISO da salvare, o null se il campo e' vuoto.
+function istanteDaCampo(testo, dtOriginale, isoOriginale) {
+  if (!testo) return null;
+  if (dtOriginale && isoOriginale && testo === dtLocalStr(dtOriginale)) return isoOriginale;
+  return new Date(testo).toISOString();
+}
+
+// ⚠⚠ L'ACCAVALLAMENTO SI CHIEDE AL SERVER, NON ALLA CACHE
+// (23 set, segnalato da Claudio Benini su Ryan Gagliani, giovedi 17: cancellata
+// la timbratura 11:00→12:30, poi impossibile prolungare quella 10:38→11:00
+// perche' *"si sovrappone ad un'altra timbratura che non c'e'"*.)
+// Il messaggio la NOMINAVA pure — data, orari, commessa — ma a database quella
+// riga non esiste piu': era rimasta in `state.sessioni`, la copia locale di quel
+// browser. Chi cancella la toglie dalla propria cache; gli altri lo imparano
+// solo dall'evento realtime, e per le DELETE quell'evento e' il piu' fragile
+// che ci sia (senza REPLICA IDENTITY FULL porta solo la chiave, e con la RLS
+// accesa puo' non arrivare affatto).
+// ⚠ E' la STESSA malattia curata al kiosk il 7 ago — *"ogni postazione si
+// fidava di state.sessioni, la sua copia locale"* — su un'altra schermata.
+// Quando una decisione BLOCCA un gesto legittimo, la cache non basta: si chiede
+// a chi ha la verita'.
+// ⚠ La REGOLA resta una sola, `sessioneInConflitto` in domain: qui si aggiornano
+// i DATI che legge, non si riscrive il criterio. Due definizioni di "conflitto"
+// sarebbero due risposte diverse alla stessa domanda.
+async function conflittoConDatiFreschi(utenteId, inizioIso, fineIso, escludiId) {
+  const conLaCache = () => (typeof sessioneInConflitto === 'function')
+    ? sessioneInConflitto(utenteId, inizioIso, fineIso, escludiId) : null;
+  if (!utenteId || !inizioIso || !sb) return conLaCache();
+
+  const a1 = new Date(inizioIso).getTime();
+  const a2 = fineIso ? new Date(fineIso).getTime() : Date.now();
+  // Finestra larga sette giorni all'indietro: un timbro che si accavalla puo'
+  // essere cominciato prima. Le APERTE si prendono tutte comunque — occupano
+  // da quando sono nate fino ad adesso, quindi una dimenticata a maggio
+  // bloccherebbe una modifica di oggi.
+  const daMs = a1 - 7 * 86400000;
+  const aMs = Math.max(a2, Date.now());
+  let dati;
+  try {
+    const { data, error } = await sb.from('sessioni_lavoro').select('*')
+      .eq('utente_id', utenteId)
+      .or('fine.is.null,and(inizio.gte.' + new Date(daMs).toISOString()
+        + ',inizio.lte.' + new Date(aMs).toISOString() + ')');
+    if (error || !data) return conLaCache();
+    dati = data;
+  } catch (e) {
+    // ⚠ Rete giu': si ricade sulla cache invece di lasciar passare tutto. Un
+    // accavallamento vero conta le ore due volte; meglio un blocco di troppo.
+    return conLaCache();
+  }
+
+  // Riallinea la cache con la verita': prima si TOLGONO le righe che il server
+  // non ha piu' — senza questo il fantasma resta li' e blocca anche il
+  // tentativo dopo — poi si rimettono quelle vere.
+  const vivi = new Set(dati.map(r => r.id));
+  const nellaFinestra = (r) => {
+    if (!r.fine) return true;
+    const t = new Date(r.inizio).getTime();
+    return t >= daMs && t <= aMs;
+  };
+  state.sessioni = (state.sessioni || [])
+    .filter(r => !(r.utente_id === utenteId && nellaFinestra(r) && !vivi.has(r.id)));
+  dati.forEach(r => {
+    const i = state.sessioni.findIndex(x => x.id === r.id);
+    if (i >= 0) state.sessioni[i] = r; else state.sessioni.push(r);
+  });
+  return conLaCache();
+}
+
 // ─── Modal modifica/elimina sessione (admin) ───
 // onDone (opzionale): callback eseguito DOPO un salvataggio/eliminazione andati
 // a buon fine, al posto del re-render della tab corrente. Serve ai chiamanti che
@@ -19090,7 +19175,7 @@ function openSessioneModal(s, onDone) {
   // Per input datetime-local con secondi serve formato "YYYY-MM-DDTHH:MM:SS".
   // I secondi sono indispensabili: senza, le sessioni sotto il minuto avrebbero
   // inizio e fine identici (collasso al minuto) e non sarebbero salvabili.
-  const dtLocalStr = (d) => `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
+  // dtLocalStr e istanteDaCampo vivono fuori: vedi sopra openSessioneModal.
 
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
@@ -19199,9 +19284,22 @@ function openSessioneModal(s, onDone) {
     const fineStr = fd.get('fine');
     if (!inizioStr) return toast('Inizio obbligatorio', 'err');
     if (fineStr && fineStr <= inizioStr) return toast('Fine deve essere dopo inizio', 'err');
+    // ⚠⚠ UN CAMPO CHE NON HAI TOCCATO NON DEVE CAMBIARE VALORE.
+    // (23 set — la causa vera della segnalazione di Claudio su Ryan.)
+    // `datetime-local` arriva ai SECONDI: i millisecondi del timbro non ci
+    // stanno. Rileggere il campo e rispedirlo riportava `inizio` a `.000`,
+    // cioe' **164 ms piu' indietro** del valore vero (`08:38:02.164`) — e
+    // siccome le quote di un gruppo sono fette CONSECUTIVE, quel timbro
+    // cominciava esattamente quando finiva il precedente. Spostarlo indietro
+    // di un sesto di secondo creava una sovrapposizione vera, che il
+    // controllo bloccava e che sullo schermo non si poteva vedere: entrambi
+    // scrivono `10:38`.
+    // ⚠ Non si risolve allargando la tolleranza del controllo — quello
+    // nasconderebbe anche gli accavallamenti veri da mezzo secondo. Si
+    // risolve non toccando cio' che l'utente non ha toccato.
     const payload = {
-      inizio: new Date(inizioStr).toISOString(),
-      fine: fineStr ? new Date(fineStr).toISOString() : null,
+      inizio: istanteDaCampo(inizioStr, inizioDt, s.inizio),
+      fine: istanteDaCampo(fineStr, fineDt, s.fine),
       note: (fd.get('note')||'').trim() || null,
     };
     // ACCAVALLAMENTI: si impediscono qui, che è da dove nascono. Una persona
@@ -19209,8 +19307,11 @@ function openSessioneModal(s, onDone) {
     // sovrapposti contano le ore due volte. Bloccante e non un avviso: qui c'è
     // un admin davanti allo schermo che può correggere subito, e il conflitto
     // è certo — non un'ipotesi come le assenze sui mezzi.
-    const conflitto = (typeof sessioneInConflitto === 'function')
-      ? sessioneInConflitto(s.utente_id, payload.inizio, payload.fine, s.id) : null;
+    // ⚠ Dati freschi dal server, non la cache: vedi conflittoConDatiFreschi.
+    btnSave.disabled = true; btnSave.textContent = 'Controllo…';
+    const conflitto = await conflittoConDatiFreschi(
+      s.utente_id, payload.inizio, payload.fine, s.id);
+    btnSave.disabled = false; btnSave.textContent = 'Salva';
     if (conflitto) {
       const dc = descriviSessione(conflitto);
       const oraC = fmtT(new Date(conflitto.inizio)) + '→'

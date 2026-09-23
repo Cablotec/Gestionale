@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-22.05`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-23.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -630,6 +630,31 @@ Segnalato da Nico: *"quando elimino una sessione, all'interno dell'ordine mi si 
 **Verificato, non dedotto**: password VECCHIA rifiutata (HTTP 400) · password nuova da `PW.txt` funzionante · file su Pages senza password · backup rilanciato a mano, 10.119 righe in 24 tabelle · 27 tabelle su 27 mute senza sessione.
 ⚠ La password vecchia **resta nella storia git** e ci resta: e' una chiave morta, riscrivere la storia di un repo pubblico costa piu' di quanto valga.
 ⚠ Se una postazione chiede l'accesso, si entra con la password NUOVA — che non finira' mai nel codice.
+
+## 23 SETTEMBRE: 164 millisecondi (`2026-09-23.01`)
+Segnalato da Claudio Benini (mail del 21, girata da Nico): su **Ryan Gagliani**, giovedi 17, *"abbiamo cancellato una timbratura dalle 11 alle 12:30 e ora vorremmo prolungare la timbratura dalle 10:38 fino alle 12:30, ma esce il messaggio che si sovrappone ad un'altra timbratura che non c'e'"*.
+
+### ⚠⚠ LA CAUSA: un campo che arriva ai SECONDI e un timbro che ha i MILLISECONDI
+- I timbri di Ryan del 17 sono **quote di gruppo**: fette CONSECUTIVE, una comincia nell'istante esatto in cui finisce l'altra. A database: `08:15:11.164 → 08:38:02.164` e `08:38:02.164 → 09:00:53.164` (UTC). **Combaciano al millisecondo.**
+- L'input e' `datetime-local` con `step:'1'`: mostra `10:38:02`, i millisecondi non ci stanno. Riaprendo e risalvando, `new Date('2026-09-17T10:38:02')` tornava `08:38:02.**000**` — **164 ms piu' indietro** del valore vero.
+- Da li' una sovrapposizione **vera** con la quota precedente, che il controllo bloccava giustamente. E invisibile: sullo schermo tutti e due dicono `10:38`.
+- ⚠ **Il messaggio d'errore era gia' fatto bene** — nominava data, orari e commessa del timbro in conflitto. Claudio ha guardato la lista, ha visto `10:15→10:38` che finisce quando il suo comincia, e ha concluso *"non c'e'"*. **Aveva ragione lui: a occhio quella sovrapposizione non esiste.** Un avviso puo' essere esatto e lo stesso incomprensibile, se la grandezza di cui parla e' sotto la soglia di cio' che si vede.
+
+**Correzione — `istanteDaCampo(testo, dtOriginale, isoOriginale)`**: se il testo del campo e' identico a quello che ci era stato messo, si tiene l'ISO originale **coi suoi millisecondi**; altrimenti si converte. Cioe': **un campo che non hai toccato non cambia valore.**
+- ⚠⚠ **Non si rimedia allargando la tolleranza del controllo** (es. ignorare scarti sotto il secondo): nasconderebbe anche gli accavallamenti veri da mezzo secondo, che contano le ore due volte. Si rimedia non toccando quello che l'utente non ha toccato.
+- `dtLocalStr` e `istanteDaCampo` sono salite a livello di modulo, cosi' la regola ha un nome e un test invece di stare dentro il pulsante Salva.
+- **Test**: `node strumenti/test/test-modifica-timbro.js .` (8 controlli) coi timestamp VERI di Ryan — campo intatto che conserva i ms, campo cambiato che si riscrive, estremi che si toccano esattamente, e la controprova che **una sovrapposizione vera resta un conflitto**.
+
+### E un secondo difetto, trovato mentre cercavo il primo (non era la causa)
+La mia prima ipotesi era il **fantasma in cache**: la sessione cancellata rimasta in `state.sessioni`. Sbagliata — a database non c'era piu' e il controllo con dati freschi passava. Ma il ragionamento ha portato a una debolezza reale: `sessioneInConflitto` legge **solo la copia locale**, e su una decisione che BLOCCA un gesto legittimo quella copia non basta. Se un collega cancella un timbro dal suo browser, gli altri lo sanno solo dall'evento realtime — e le DELETE sono l'evento piu' fragile che ci sia (senza `REPLICA IDENTITY FULL` porta solo la chiave, e con la RLS accesa puo' non arrivare affatto).
+- **`conflittoConDatiFreschi()`**: prima di bloccare chiede al server i timbri di quell'operatore (finestra di 7 giorni all'indietro **+ tutte le aperte**, che occupano fino ad adesso), **toglie dalla cache le righe che il server non ha piu'** e poi rilancia la stessa `sessioneInConflitto`. La REGOLA resta una sola: cambiano i dati che legge, non il criterio.
+- ⚠ Se la rete e' giu' si ricade sulla cache: meglio un blocco di troppo che un accavallamento vero, che conta le ore due volte.
+- E' la stessa medicina del kiosk il 7 ago (*"ogni postazione si fidava di `state.sessioni`, la sua copia locale"*), su un'altra schermata. **Quando la stessa malattia ricompare in un punto nuovo, cercarla anche negli altri.**
+
+⚠⚠⚠ **LE LEZIONI**
+1. **Un'ipotesi plausibile non e' una diagnosi.** Il fantasma in cache spiegava tutto ed era falso; l'ho scoperto solo interrogando il database con i timestamp veri. **Prima di correggere, riprodurre il conto coi dati veri** — qui bastava stampare `inizio` con i millisecondi.
+2. **I dati che si mostrano troncati si risalvano troncati.** Ogni campo che mostra meno precisione di quella che il database contiene e' un troncamento in agguato al prossimo salvataggio. Vale per le date coi secondi, per i decimali arrotondati a schermo, per i testi tagliati con l'ellissi: **se il campo non puo' rappresentare il valore, non deve riscriverlo.**
+3. Il difetto era li' **da quando esistono le quote di gruppo** (14 lug) e non lo aveva trovato nessuno: si manifesta solo modificando a mano un timbro incatenato a un altro, cioe' raramente e per mano di un admin.
 
 ## Leggibilità: temi e testo (31 lug, `2026-07-31.8`)
 - **Tre ruoli, tre font**: **Syne** solo titoli e bottoni (è un font da display: illeggibile in frasi piccole); **`var(--ui)`** = stack di sistema per la PROSA (note, hint, didascalie — `.sub`), il font meglio ottimizzato che ogni macchina abbia per il testo piccolo, zero download; **JetBrains Mono** (era DM Mono) solo dove serve incolonnare — codici, quantità, date, ore — perché ha lettere più alte a parità di px.
