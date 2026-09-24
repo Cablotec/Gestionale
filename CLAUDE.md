@@ -38,6 +38,19 @@
 - Tabella `eventi` (eventi aziendali in calendario): **ESEGUITA** (16 set, verificata via REST). Primo evento inserito da Nico: *Pranzo Natalizio*, venerdi 18 dicembre 2026.
 - `operazioni.materiali` jsonb (lista materiali congelata sulla commessa): **ESEGUITA** (3 set). Generate in blocco: **68 commesse vive, 2.735 righe**, coerenza `qta = qta_pz × pezzi` verificata su 2735/2735.
 
+### ⚠ DAL 30 OTTOBRE 2026: una tabella nuova nasce MUTA (mail Supabase del 23 set)
+Supabase smette di concedere da sola l'accesso Data API alle tabelle nuove nello schema `public`. **Le tabelle esistenti non cambiano**: tengono i loro permessi e continuano a funzionare. Cambia solo cio' che nasce dopo.
+- **Ogni `create table` va accompagnato dai suoi `grant`**, nella STESSA migrazione. Senza, la tabella esiste ma PostgREST risponde `permission denied` — e vale anche per progetti nuovi, branch di anteprima e `supabase db reset`.
+- **Il blocco da incollare** (⚠ NON quello della mail: vedi sotto):
+  ```sql
+  grant select, insert, update, delete on public.<tabella> to authenticated;
+  grant select, insert, update, delete on public.<tabella> to service_role;
+  ```
+- ⚠⚠ **NIENTE `to anon`, che la mail invece suggerisce.** Qui nessuna pagina legge senza login: il gestionale ha il form, il telefono il login per persona, kiosk e prelievo la sessione della postazione. Verificato il 22 set: senza sessione tutte e 27 le tabelle rispondono `[]`.
+- ⚠⚠ **E non e' zelo: GRANT e RLS sono DUE serrature diverse, e il 22 set una era aperta.** `prelievi_magazzino` aveva una policy `ALL to public` con `qual = true` — la RLS spalancata — ed era leggibile e scrivibile da chiunque avesse la chiave anon. **Se `anon` non avesse avuto il GRANT sulla tabella, quella falla non sarebbe esistita**: la richiesta sarebbe stata respinta prima di arrivare alla policy. Il GRANT e' la serratura che non dipende da come qualcuno ha scritto una condizione.
+- **Il sintomo, se ci si dimentica, e' RUMOROSO**: `permission denied` col comando esatto da eseguire. Meglio del solito silenzio di questa casa (HTTP 200 e zero righe).
+- Le tabelle create finora e coperte dal vecchio automatismo: `mancanti` (31 lug), `produttori`, `ore_esterne` (28 lug), `materiali` (2 set), `eventi` (16 set), `prelievi_magazzino`. Nessuna azione su queste.
+
 ## ▶ Fili aperti (priorità)
 0. **Codifica articoli** (15 lug, `2026-07-15.1`): tab Codifica in Gestione genera codici a 20 caratteri (5 classificazione da `domain/codifica.js` + 4 produttore + 11 codice con zeri PRIMA). Migrazione `produttori` **eseguita** (28 lug): anagrafica attiva, tabella da popolare. Ambiguità dei fogli **chiuse** (7 ago, "considera ok"): le note restano come documentazione di trascrizione, non più come avvisi. Codici a sé stanti: collegamento all'anagrafica articoli = futuro.
    - **Sigle produttore più corte di 4 → zeri IN FONDO** (28 lug): `TDK`→`TDK0`, `3M`→`3M00`. Le posizioni sono fisse (produttore = caratteri 6-9), la quarta casella esiste sempre. Zero e non quarta lettera: automatico, non ambiguo, nessuna scelta marchio-per-marchio. Marchi più lunghi: **abbreviati a mano**, mai tagliati in automatico. Il riempimento sta all'INSERIMENTO — `codificaComponi` resta severo a 4 caratteri esatti.
