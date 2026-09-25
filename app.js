@@ -15097,6 +15097,21 @@ function kioskNomeOperatorePren(p) {
   return null;
 }
 
+// Prenotazione di un operatore attiva ADESSO = il mezzo che ha fuori.
+// "Sua" = sta in prenotazioni_utenti. NON si usa utente_id: e' l'account
+// kiosk, uguale per tutti gli operatori → identificherebbe chiunque.
+function kioskPrenFuoriDi(uId) {
+  const nowTS = new Date();
+  return (state.prenotazioni || []).find(p => {
+    if (!p.mezzo_id || !p.data_inizio || !p.data_fine) return false;
+    const pInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
+    const pFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
+    if (isNaN(pInizio.getTime()) || isNaN(pFine.getTime())) return false;
+    if (!(pInizio <= nowTS && pFine > nowTS)) return false;
+    return (loadPrenotazioneOperatori(p.id) || []).includes(uId);
+  }) || null;
+}
+
 function kioskRenderAction() {
   const u = kioskState.utenteSelezionato;
   if (!u) { kioskGoToId(); return; }
@@ -15106,20 +15121,7 @@ function kioskRenderAction() {
   root.innerHTML = '';
 
   // Ha un mezzo fuori? (verità unica: prenotazione mia attiva ADESSO)
-  // "Mia" = l'utente corrente è operatore della prenotazione (via
-  // prenotazioni_utenti). NON si usa utente_id: è l'account kiosk, uguale per
-  // tutti gli operatori → identificherebbe chiunque come "mio".
-  const nowTS = new Date();
-  const prenFuoriMia = (state.prenotazioni || []).find(p => {
-    if (!p.mezzo_id || !p.data_inizio || !p.data_fine) return false;
-    const pInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
-    const pFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
-    if (isNaN(pInizio.getTime()) || isNaN(pFine.getTime())) return false;
-    if (!(pInizio <= nowTS && pFine > nowTS)) return false;
-    // L'operatore vero è SOLO chi sta in prenotazioni_utenti. utente_id sulla
-    // prenotazione è l'autore (account kiosk), uguale per tutti → non distingue.
-    return (loadPrenotazioneOperatori(p.id) || []).includes(u.id);
-  });
+  const prenFuoriMia = kioskPrenFuoriDi(u.id);
   if (prenFuoriMia) {
     const m = state.mezzi.find(x => x.id === prenFuoriMia.mezzo_id);
     const inizio = new Date(prenFuoriMia.data_inizio + 'T' + (prenFuoriMia.ora_inizio || '00:00'));
@@ -15138,7 +15140,12 @@ function kioskRenderAction() {
       el('button', { class:'kiosk-rientro-btn', onclick:()=>kioskConfirmRientro(prenFuoriMia) },
         '✓ Conferma rientro'),
     ));
-    root.appendChild(el('div', { class:'kiosk-section-title' }, 'Oppure prendi un altro mezzo'));
+    // (25 set, segnalato da Nico) Una persona non guida due mezzi insieme:
+    // finche' questo non rientra, la lista degli altri non si mostra.
+    // Prima qui c'era "Oppure prendi un altro mezzo".
+    root.appendChild(el('div', { class:'kiosk-section-title' },
+      'Per prendere un altro mezzo, prima conferma il rientro di questo'));
+    return;
   }
 
   // Lista mezzi.
@@ -15418,6 +15425,17 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO, tipo) {
   const u = kioskState.utenteSelezionato;
   const oraUscita = new Date();
   const rp = new Date(rientroPrevistoISO);
+
+  // Seconda serratura: la lista non mostra altri mezzi a chi ne ha uno fuori,
+  // ma la schermata di conferma puo' essere rimasta aperta da prima.
+  const giaFuori = kioskPrenFuoriDi(u.id);
+  if (giaFuori && giaFuori.mezzo_id !== mezzo.id) {
+    const mf = state.mezzi.find(x => x.id === giaFuori.mezzo_id);
+    kioskBeep('err');
+    kioskShowError('Hai gia\' fuori ' + (mf?.nome || 'un mezzo')
+      + '.\nConferma prima il rientro, poi prendi l\'altro.');
+    return;
+  }
 
   // Date in formato ISO giorno per le prenotazioni (che ragionano a giorni)
   const dataInizio = toLocalISO(oraUscita);
