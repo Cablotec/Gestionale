@@ -15098,9 +15098,10 @@ function kioskNomeOperatorePren(p) {
 }
 
 // Prenotazione di un operatore attiva ADESSO = il mezzo che ha fuori.
+// Usata dal kiosk (blocco secondo mezzo) e dalle card live (buildLiveCard).
 // "Sua" = sta in prenotazioni_utenti. NON si usa utente_id: e' l'account
 // kiosk, uguale per tutti gli operatori → identificherebbe chiunque.
-function kioskPrenFuoriDi(uId) {
+function mezzoFuoriDi(uId) {
   const nowTS = new Date();
   return (state.prenotazioni || []).find(p => {
     if (!p.mezzo_id || !p.data_inizio || !p.data_fine) return false;
@@ -15121,7 +15122,7 @@ function kioskRenderAction() {
   root.innerHTML = '';
 
   // Ha un mezzo fuori? (verità unica: prenotazione mia attiva ADESSO)
-  const prenFuoriMia = kioskPrenFuoriDi(u.id);
+  const prenFuoriMia = mezzoFuoriDi(u.id);
   if (prenFuoriMia) {
     const m = state.mezzi.find(x => x.id === prenFuoriMia.mezzo_id);
     const inizio = new Date(prenFuoriMia.data_inizio + 'T' + (prenFuoriMia.ora_inizio || '00:00'));
@@ -15428,7 +15429,7 @@ async function kioskFinalizzaUscita(mezzo, rientroPrevistoISO, tipo) {
 
   // Seconda serratura: la lista non mostra altri mezzi a chi ne ha uno fuori,
   // ma la schermata di conferma puo' essere rimasta aperta da prima.
-  const giaFuori = kioskPrenFuoriDi(u.id);
+  const giaFuori = mezzoFuoriDi(u.id);
   if (giaFuori && giaFuori.mezzo_id !== mezzo.id) {
     const mf = state.mezzi.find(x => x.id === giaFuori.mezzo_id);
     kioskBeep('err');
@@ -17644,9 +17645,16 @@ function buildLiveCard(u, onClick, opts = {}) {
   const assOggi = state.assenze.find(a =>
     a.stato === 'valida' && a.data === oggiISO && a.utente_id === u.id);
 
+  // (25 set, Nico) Il mezzo fuori dice CHE LO HA, non che sta guidando: in
+  // trasferta si guida un'ora e il resto si lavora. Per questo una timbratura
+  // aperta vince sempre, e il mezzo prende il posto solo di "fermo".
+  // Il tempo di viaggio vero, se serve, e' un'attivita' extra timbrata a mano.
+  const prenMezzo = mezzoFuoriDi(u.id);
+  const mezzoFuori = prenMezzo ? state.mezzi.find(m => m.id === prenMezzo.mezzo_id) : null;
+
   let cardClass = 'live-card ';
   if (sess) cardClass += 'attivo';
-  else if (assOggi) cardClass += 'fermo';
+  else if (prenMezzo) cardClass += 'fuori';
   else cardClass += 'fermo';
 
   const card = el('div', {
@@ -17657,7 +17665,7 @@ function buildLiveCard(u, onClick, opts = {}) {
 
   // Colore assenza sulla card SOLO se l'operatore non sta lavorando ora: una
   // sessione aperta significa che è presente, quindi vince lo stile "attivo".
-  if (assOggi && !sess) {
+  if (assOggi && !sess && !prenMezzo) {
     const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
     card.style.background = `${(tipo?.colore || '#6b6b64')}15`;
     card.style.borderColor = (tipo?.colore || '#6b6b64');
@@ -17665,6 +17673,7 @@ function buildLiveCard(u, onClick, opts = {}) {
 
   let badgeStato;
   if (sess) badgeStato = '● attivo';
+  else if (prenMezzo) badgeStato = '🚐 fuori';
   else if (assOggi) {
     const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
     const ore = parseFloat(assOggi.ore) || 0;
@@ -17674,8 +17683,8 @@ function buildLiveCard(u, onClick, opts = {}) {
   const hd = el('div', { class:'live-card-hd' },
     el('div', { class:'live-card-nome' }, u.nome),
     el('div', {
-      class:'live-card-stato-badge '+(sess?'attivo':'fermo'),
-      style: (assOggi && !sess) ? `color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};border-color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};` : '',
+      class:'live-card-stato-badge '+(sess?'attivo':(prenMezzo?'fuori':'fermo')),
+      style: (assOggi && !sess && !prenMezzo) ? `color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};border-color:${state.tipiAssenza.find(t=>t.id===assOggi.tipo_assenza_id)?.colore || ''};` : '',
     }, badgeStato),
   );
   card.append(hd);
@@ -17706,6 +17715,36 @@ function buildLiveCard(u, onClick, opts = {}) {
       card.append(el('div', {
         style: 'font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);margin-top:4px;opacity:.85;',
       }, `◷ ${tipo?.nome || 'Assenza'} ${ore}h oggi${assOggi.note ? ' — '+assOggi.note : ''}`));
+    }
+    if (prenMezzo) card.append(el('div', { class:'live-card-mezzo-nota' },
+      '🚐 ha fuori ' + (mezzoFuori?.nome || 'un mezzo')));
+  } else if (prenMezzo) {
+    const tipo = TIPI.find(t => t.id === prenMezzo.tipo);
+    const inizio = new Date(prenMezzo.data_inizio + 'T' + (prenMezzo.ora_inizio || '00:00'));
+    const fine = new Date(prenMezzo.data_fine + 'T' + (prenMezzo.ora_fine || '23:59'));
+    const hm = d => z(d.getHours()) + ':' + z(d.getMinutes());
+    // Oggi basta l'ora; un altro giorno vuole anche la data. Senza ora_inizio
+    // (prenotazione dal calendario) non si inventa un orario.
+    const quando = (d, ora) => (toLocalISO(d) === oggiISO ? (ora ? '' : 'oggi') : fmtIT(toLocalISO(d)) + (ora ? ' ' : ''))
+      + (ora ? hm(d) : '');
+    const soloOggi = !prenMezzo.ora_inizio && !prenMezzo.ora_fine
+      && prenMezzo.data_inizio === oggiISO && prenMezzo.data_fine === oggiISO;
+    const daQuando = (prenMezzo.ora_inizio && toLocalISO(inizio) === oggiISO ? 'dalle ' : 'dal ')
+      + quando(inizio, prenMezzo.ora_inizio);
+    card.append(
+      el('div', { class:'live-card-cliente' },
+        (mezzoFuori?.nome || 'Mezzo') + (mezzoFuori?.targa ? ' · ' + mezzoFuori.targa : '')),
+      tipo ? el('div', { class:'live-card-tipo' },
+        el('div', { class:'live-card-tipo-dot', style:'background:' + tipo.color + ';' }),
+        tipo.label) : null,
+      el('div', { class:'live-card-vuoto' },
+        soloOggi ? 'prenotato per oggi'
+          : daQuando + ' · rientro ' + quando(fine, prenMezzo.ora_fine)),
+    );
+    if (assOggi) {
+      const tipoA = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
+      card.append(el('div', { class:'live-card-mezzo-nota' },
+        `◷ ${tipoA?.nome || 'Assenza'} ${parseFloat(assOggi.ore) || 0}h oggi`));
     }
   } else if (assOggi) {
     const tipo = state.tipiAssenza.find(t => t.id === assOggi.tipo_assenza_id);
