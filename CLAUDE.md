@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-28.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-28.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -459,6 +459,14 @@ Chiesto da Nico: *"lista materiali pura con colonne giacenza, mancanti ecc (colo
 - Chiesto da Nico. La colonna **Commesse** della lista non legge piu' il `numero_op` del file (`OdL Prossimo Impegno` = la PRIMA che consumera' il codice, una sola) ma le **liste congelate** delle commesse vive (`fabbisognoDaListe`): "3 commesse", clic sul codice o sul conteggio -> dettaglio sotto la riga con qta, scadenza ed esito (coperto / manca N / disponibile).
 - ⚠ **Stesso conto della scheda commessa** (`disponibilePerNoi` + `ripartisciGiacenza`): verificato sui dati del 27 set, 1.071 coppie codice-commessa, **0 differenze** con `materialiCommessa`. 211 codici su 757 sono usati da piu' di una commessa.
 - Il file resta il **ripiego** solo dove nessuna lista contiene il codice (conto lavoro, commessa chiusa qui): la cella e' grigia e lo dice. Il filtro commesse ha due famiglie, `c:<id>` (codici della lista) e `a:<OP>` (attribuzione Alnus, marcata "da Alnus").
+
+## ⚠⚠ La domanda di materiale e' il RESIDUO da produrre (28 set, `2026-09-28.02`)
+- Mail di Claudio: *"l'OP 1165 e' completa ma da ancora 16 mancanti"*. Quattro commesse dello stesso articolo (`SP-RT0386806`); `OC/00107` aveva **2 pezzi prodotti su 4** ma la sua lista congelata chiedeva ancora il materiale per 4. Quel materiale era gia' consumato (giacenza Alnus gia' scesa), quindi contato due volte: `00107` e `00222` hanno la **stessa scadenza**, e `00222` restava a secco. Alnus impegna solo il residuo (impegno 14 = 4 + 2 + 4 + 4) e la dava coperta.
+- **`commessaSuResiduo(o)`** dentro `materialiBase`: scala la qta di ogni riga per `(quantita - prodotti) / quantita` (lotti in `consegne_commessa`). La lista congelata resta intera, cambia solo la domanda nel conto.
+- ⚠ **Erano TRE copie** del filtro `viveConLista` (materialiBase, tabella Ordini cliente, linguetta Materiali del modal, quest'ultima anche senza il filtro sotto scorta). Ora passano tutte da `materialiBase`.
+- ⚠ **Il kiosk non caricava `consegne_commessa`**: adesso carica i lotti delle sole commesse vive + canale realtime. Senza, kiosk e gestionale avrebbero detto numeri diversi.
+- **Sui dati del 27 set**: 5 commesse cambiano, **tutte in calo** (OP 01165 16->1, 00760 11->1, 00761 6->2, 01918 6->5, 01921 5->4), zero triangoli nuovi. Il residuo su 01165 e' `SP-RT0386806_KF` (lavorazione esterna), e Alnus lo attribuisce proprio a 01165.
+- ⚠ La preparazione "Completo" NON entra nel conto, di proposito: e' una dichiarazione, e finche' il materiale non e' scaricato in Alnus sta ancora nella giacenza.
 
 ## Ordini cliente e Storico: due schede, nessun buco (27 ago, `2026-08-27.5`)
 - **UNA regola sola, in domain**: `commessaInStorico(op, spedizioni, oggi)` (16 test). Non spedita -> Ordini cliente · spedita da <30 gg -> Ordini cliente sotto il chip **SPEDITE** · spedita da >30 gg -> Storico · **spedita senza data -> Storico** (le 34 del caricamento 19 mag). `GIORNI_SPEDITE_IN_ORDINI = 30`.

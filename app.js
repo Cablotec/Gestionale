@@ -4430,9 +4430,32 @@ function riquadroListeMaterialiMancanti() {
 // volta per disegnata non ne vale la pena.
 // E' la stessa regola gia' scritta per la tabella Ordini cliente, dimenticata
 // qui perche' la prima versione contava UNA commessa per volta.
+// ⚠⚠ LA DOMANDA E' QUELLA ANCORA DA PRODURRE (28 set, mail di Claudio:
+// *"l'OP 1165 e' completa ma da ancora 16 mancanti"*). La lista congelata vale
+// per TUTTI i pezzi dell'ordine; ma i pezzi gia' prodotti (lotti in
+// `consegne_commessa`) il loro materiale l'hanno gia' consumato, e la giacenza
+// di Alnus e' gia' scesa. Contarli ancora vuol dire chiedere due volte lo
+// stesso materiale: `OC/00107` (2 pezzi fatti su 4) si prendeva la giacenza
+// di 4 e la commessa accanto, stessa scadenza, restava a secco — mentre Alnus,
+// che impegna solo il residuo, la dava coperta. Con il residuo i due conti
+// tornano a coincidere (impegno 14 = 4 + 2 + 4 + 4).
+// Si scala la QUANTITA' della riga, non la lista: la lista resta congelata e
+// intera, come la si vede nella scheda.
+function commessaSuResiduo(o) {
+  const tot = Number(o.quantita) || 0;
+  const fatti = (typeof quantitaConsegnata === 'function') ? quantitaConsegnata(o.id) : 0;
+  if (!(tot > 0) || !(fatti > 0)) return o;
+  const frac = Math.max(0, tot - fatti) / tot;
+  return Object.assign({}, o, { materiali: frac > 0
+    ? o.materiali.map(r => Object.assign({}, r, { qta: +((Number(r.qta) || 0) * frac).toFixed(4) }))
+    : [] });
+}
+
 function materialiBase(righeMancanti) {
   const viveConLista = (state.operazioni || []).filter(x =>
-    (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
+    (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length)
+    .map(commessaSuResiduo)
+    .filter(x => x.materiali.length);
   // ⚠ SOLO LE RIGHE SOTTO SCORTA (15 set). `materialiCommessa` in domain ha un
   // patto scritto: *un codice che qui NON c'e' non manca*. Da quando
   // l'archivio contiene tutto il file, passargliele tutte romperebbe quel
@@ -9135,14 +9158,9 @@ function renderPianificazione(root) {
   // `viveConLista` serve TUTTA anche per una riga sola: la giacenza si divide
   // fra tutte le commesse che vogliono lo stesso codice, e guardarne una sola
   // le darebbe una copertura che non ha.
-  const viveConLista = (state.operazioni || []).filter(x =>
-    (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
-  // ⚠ Solo le righe sotto scorta: vedi la nota in openOperazioneModal.
-  const manPerCodice = {};
-  (state.mancanti || []).forEach(m => {
-    const k = String(m.codice || '').trim();
-    if (k && mancanteSottoScorta(m)) manPerCodice[k] = m;
-  });
+  // ⚠ Da `materialiBase` e non ricostruite qui: erano TRE copie dello stesso
+  // filtro, e il 28 set il residuo da produrre andava messo in tutte.
+  const { viveConLista, manPerCodice } = materialiBase(state.mancanti);
 
   list.forEach(o => {
     const cli = state.aziende.find(c => c.id === o.cliente_id);
@@ -12395,10 +12413,9 @@ function openOperazioneModal(o, opts) {
   // significato.**
   if (!isNew && Array.isArray(o.materiali) && o.materiali.length
       && typeof materialiCommessa === 'function' && tabBtns.mat) {
-    const vive = (state.operazioni || []).filter(x =>
-      (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length);
-    const mp = {};
-    (state.mancanti || []).forEach(m => { const k = String(m.codice || '').trim(); if (k) mp[k] = m; });
+    // Stessa base della tabella e della scheda (prima qui la mappa non
+    // filtrava il sotto scorta, e il numero sulla linguetta poteva divergere).
+    const { viveConLista: vive, manPerCodice: mp } = materialiBase(state.mancanti);
     const m = materialiCommessa(o, vive, mp);
     const n = m ? [...m.values()].filter(q => q.manca > 0).length : 0;
     if (n) {
@@ -14827,13 +14844,20 @@ async function kioskLoadAll() {
     // per le sessioni chiuse, quindi nessun rischio nuovo. Se un giorno le
     // commesse vive diventassero molte centinaia, l'URL e' il primo posto
     // dove si rompe (HTTP 414) — allora serve un filtro lato server.
-    const [addettiVivi, fasiVive] = await Promise.all([
+    const [addettiVivi, fasiVive, lottiVivi] = await Promise.all([
       fetchTutte(() => sb.from('operazioni_addetti').select('*')
         .in('operazione_id', opIdsVive)
         .order('operazione_id').order('utente_id').order('fase_id')),
       fetchTutte(() => sb.from('operazioni_fasi').select('*')
         .in('operazione_id', opIdsVive).order('id')),
+      // Lotti prodotti (28 set): il conto dei materiali chiede solo il
+      // residuo da produrre, e senza questi il kiosk direbbe un numero
+      // diverso dal gestionale sulla stessa commessa.
+      fetchTutte(() => sb.from('consegne_commessa').select('id,operazione_id,quantita,data')
+        .in('operazione_id', opIdsVive).order('id')),
     ]);
+    if (lottiVivi.error) console.error('[KIOSK] Errore caricamento lotti', lottiVivi.error);
+    state.consegneCommessa = lottiVivi.data || [];
     if (addettiVivi.error) console.error('[KIOSK] Errore caricamento opAddetti', addettiVivi.error);
     if (fasiVive.error) console.error('[KIOSK] Errore caricamento opFasi', fasiVive.error);
     state.opAddetti = addettiVivi.data || [];
@@ -15008,6 +15032,10 @@ function kioskStartRealtime() {
         (p) => kioskApplyAnagrafica('utenti', 'utenti', p, 'nome'))
     .on('postgres_changes', { event:'*', schema:'public', table:'prenotazioni' },
         (p) => kioskApplyPrenotazione(p))
+    // Un lotto registrato in ufficio cambia il residuo, quindi i mancanti.
+    // (consegne_commessa e' nella publication: verificato il 22 set.)
+    .on('postgres_changes', { event:'*', schema:'public', table:'consegne_commessa' },
+        (p) => { applyChange('consegne_commessa', p); kioskRefreshActive(); })
     // La pivot delle prenotazioni: prima si aggiornava di rimbalzo, perche'
     // un cambio di prenotazione faceva ricaricare tutto. Senza questo canale
     // il kiosk avrebbe la prenotazione ma non chi la usa, e il controllo
