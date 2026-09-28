@@ -11550,25 +11550,32 @@ function openOperazioneModal(o, opts) {
           }
           toast('Lotto registrato');
 
-          // Auto-suggerimento: se ora siamo al 100%, proponi 'completata'
+          // Al 100% lo stato si SCRIVE, non si propone (28 set) — gemello di
+          // `sincronizzaSpedita`. Prima cambiava solo la tendina con "ricordati
+          // di salvare": chi chiudeva la scheda lasciava la commessa aperta con
+          // tutti i pezzi fatti (2026/OC/00233/0010, 4 su 4, trovata lo stesso
+          // giorno). Le due meta' dello stesso gesto devono avere la stessa sorte.
+          // ⚠ Solo in AVANTI: togliere un lotto non riapre una completata.
           const nuovoTot = quantitaConsegnata(o.id);
-          const raggiuntoOra = nuovoTot >= qtaOrd && (tot < qtaOrd);
-          // Solo se la commessa non è già completata/spedita
-          const statoCorrente = (form.querySelector('[name="stato"]')?.value) || o.stato;
-          const giaFinita = (statoCorrente === 'completata' || statoCorrente === 'spedita');
-          if (raggiuntoOra && !giaFinita) {
-            const ok = confirm(
-              `Tutto il materiale è stato prodotto (${nuovoTot} / ${qtaOrd} pz).\n\n` +
-              `Vuoi marcare la commessa come COMPLETATA?\n\n` +
-              `(Ricordati poi di salvare il modal per confermare il cambio di stato.)`
-            );
-            if (ok) {
+          const statoForm = form.querySelector('[name="stato"]')?.value;
+          const daChiudere = (o.stato === 'aperta' || o.stato === 'sospesa')
+            && statoForm !== 'completata' && statoForm !== 'spedita';
+          if (qtaOrd > 0 && nuovoTot >= qtaOrd && daChiudere) {
+            const { data: agg, error: errSt } = await eseguiConRetry(
+              () => sb.from('operazioni').update({ stato: 'completata' }).eq('id', o.id).select().single(),
+              { label: 'stato completata' });
+            if (errSt) {
+              // Il lotto c'e' comunque: lo stato si puo' correggere a mano.
+              toast('Lotto salvato, ma lo stato non si è aggiornato: ' + errSt.message, 'err');
+            } else {
+              Object.assign(o, agg);
+              const idx = state.operazioni.findIndex(x => x.id === agg.id);
+              if (idx >= 0) state.operazioni[idx] = agg;
+              // Il form si allinea a quello gia' scritto, cosi' salvando dopo
+              // non si rimanda indietro lo stato appena messo.
               const sel = form.querySelector('[name="stato"]');
-              if (sel) {
-                sel.value = 'completata';
-                // Notifico eventuali listener che lo stato è cambiato
-                sel.dispatchEvent(new Event('change', { bubbles: true }));
-              }
+              if (sel) sel.value = 'completata';
+              toast('Tutto prodotto · stato impostato a "completata"');
             }
           }
 
