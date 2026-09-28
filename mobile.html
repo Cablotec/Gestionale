@@ -10,7 +10,7 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-28.03"></script>
+<script src="core/db.js?v=2026-09-28.04"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -1937,12 +1937,78 @@ async function assicuraAddetto(uid, opId, faseId, tipoId) {
   } catch (_) {}
 }
 
+// ── Guardia anti-accavallamento (28 set) ─────────────────────────────────
+// Gemella di `kioskChiudiAperteRimaste`: prima di aprire un timbro si chiede
+// al SERVER se questa persona ne ha gia' uno aperto — sul kiosk, su un altro
+// telefono, o su questo con una copia vecchia. `state.sessioni` non basta:
+// e' proprio la copia locale di cui ogni postazione si fidava, e da li'
+// nascevano gli accavallamenti del 7 ago.
+// Differenza voluta dal kiosk: qui CHIEDE invece di chiudere in silenzio. Il
+// telefono e' della persona stessa, e chi e' in trasferta con un timbro
+// dimenticato aperto sul kiosk da stamattina deve vederlo, non ritrovarselo
+// chiuso "adesso" con tutto il viaggio dentro.
+// Ritorna true se si puo' partire.
+async function chiudiAperteAltrove(uid) {
+  let aperte;
+  try {
+    const { data, error } = await eseguiConRetry(
+      () => sb.from('sessioni_lavoro')
+        .select('*, operazioni(numero_ordine,pos,gruppo_id)')
+        .eq('utente_id', uid).is('fine', null),
+      { label: 'controllo timbri aperti' });
+    if (error) throw error;
+    aperte = data || [];
+  } catch (e) {
+    // Senza risposta non si sa: si dice, invece di aprire alla cieca.
+    return confirm('Non riesco a controllare se hai altri timbri aperti ('
+      + (e.message || e) + ').\n\nIniziare lo stesso?');
+  }
+  if (!aperte.length) return true;
+  const oggi = new Date().toISOString().slice(0, 10);
+  const descr = aperte.map(x => {
+    const att = x.attivita_id ? (state.attivita || []).find(a => a.id === x.attivita_id) : null;
+    const cosa = x.operazioni ? x.operazioni.numero_ordine + '/' + x.operazioni.pos
+      : (att?.nome || 'attività extra');
+    const d = new Date(x.inizio);
+    return '• ' + cosa + ' dalle ' + fmtT(d)
+      + (x.inizio.slice(0, 10) !== oggi ? ' del ' + fmtIT(x.inizio.slice(0, 10)) : '')
+      + (x.sede === 'kiosk' ? ' (kiosk)' : '');
+  }).join('\n');
+  // ⚠ Una commessa RAGGRUPPATA non si chiude da qui: il telefono non sa
+  // dividere il tempo fra le commesse del gruppo, e chiudendo con un update
+  // secco finirebbe tutto su una sola (il difetto della pausa pranzo, 24 ago).
+  if (aperte.some(x => x.operazioni && x.operazioni.gruppo_id)) {
+    alert('Hai già un timbro aperto:\n' + descr
+      + '\n\nÈ su una commessa raggruppata: chiudilo dal kiosk, che divide il tempo '
+      + 'fra le commesse del gruppo, poi riprova.');
+    return false;
+  }
+  if (!confirm('Hai già un timbro aperto:\n' + descr
+    + '\n\nLo chiudo adesso e inizio il nuovo?')) return false;
+  const ora = new Date().toISOString();
+  for (const x of aperte) {
+    // `is('fine', null)`: se nel frattempo l'ha chiuso qualcun altro, non si
+    // riscrive la sua ora di fine.
+    const { error } = await eseguiConRetry(
+      () => sb.from('sessioni_lavoro').update({ fine: ora })
+        .eq('id', x.id).is('fine', null).select(),
+      { label: 'chiusura timbro aperto' });
+    if (error) {
+      alert('Non riesco a chiudere il timbro aperto: ' + (error.message || error));
+      return false;
+    }
+  }
+  state.sessioni = state.sessioni.filter(x => !aperte.some(a => a.id === x.id));
+  return true;
+}
+
 async function avvia(tipoId, faseId) {
   const u = state.operatore, o = state.opSel;
   if (!u || !o || !tipoId) return;
   // Conferma esplicita per evitare avvii accidentali con un tocco involontario.
   const nomeTipo = state.tipiLav.find(t => t.id === tipoId)?.nome || 'questa lavorazione';
   if (!confirm('Iniziare a timbrare "' + nomeTipo + '" su ' + (o.numero_ordine || 'questa commessa') + '?')) return;
+  if (!(await chiudiAperteAltrove(u.id))) return;
   // Risolvo la fase. Se timbro un TIPO fuori piano su una commessa con fasi, la
   // fase viene creata al volo (urgenza): così sia la sessione sia l'iscrizione
   // finiscono su quella fase precisa, non su "tutta la commessa".
@@ -2112,16 +2178,23 @@ async function stopSessione(sess) {
   // La sessione si chiude sempre: ogni timbratura resta registrata, qualunque durata.
   try {
     const ora = new Date().toISOString();
-    const { data, error } = await eseguiConRetry(
+    // ⚠ `is('fine', null)` (28 set): se il timbro l'ha gia' chiuso un'altra
+    // postazione, NON si riscrive la sua fine con l'ora di adesso — sarebbe
+    // un timbro allungato sopra quello che nel frattempo e' stato aperto.
+    const { data: righe, error } = await eseguiConRetry(
       () => sb.from('sessioni_lavoro')
         .update(nota ? { fine: ora, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: ora })
-        .eq('id', sess.id).select().single(),
+        .eq('id', sess.id).is('fine', null).select(),
       { label: 'chiusura timbratura' }
     );
     if (error) throw error;
     state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
     beep('ok');
-    showDone(true, 'Sessione sospesa', 'Durata: ' + durataFineStr(data), goHome);
+    if (!righe || !righe.length) {
+      showDone(true, 'Già chiuso', 'Questo timbro era già stato chiuso da un\'altra postazione.', goHome);
+      return;
+    }
+    showDone(true, 'Sessione sospesa', 'Durata: ' + durataFineStr(righe[0]), goHome);
   } catch (e) {
     beep('err');
     showDone(false, 'Errore', String(e.message || e), goAttiva);
@@ -2206,15 +2279,18 @@ async function fineFase(sess) {
 
     // 2) Chiudi la sessione (sempre registrata, qualunque durata) portandosi
     //    dietro la nota: una sola scrittura, non due.
-    const { data, error: e2 } = await eseguiConRetry(
+    const { data: righe, error: e2 } = await eseguiConRetry(
       () => sb.from('sessioni_lavoro')
-        .update(nota ? { fine: ora, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: ora }).eq('id', sess.id).select().single(),
+        .update(nota ? { fine: ora, note: (sess.note ? sess.note + ' · ' : '') + nota } : { fine: ora })
+        .eq('id', sess.id).is('fine', null).select(),
       { label: 'chiusura timbratura' }
     );
     if (e2) throw e2;
     state.sessioni = state.sessioni.filter(s => s.id !== sess.id);
     beep('ok');
-    showDone(true, 'Fase completata ✓', 'Durata: ' + durataFineStr(data), goHome);
+    showDone(true, 'Fase completata ✓', righe && righe.length
+      ? 'Durata: ' + durataFineStr(righe[0])
+      : 'Il timbro era già stato chiuso da un\'altra postazione.', goHome);
   } catch (e) {
     beep('err');
     showDone(false, 'Errore', String(e.message || e), goAttiva);
