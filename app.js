@@ -4824,6 +4824,7 @@ let matFiltroCat = '';
 let matFiltroOp = '';
 let matCerca = '';
 let matQuante = 400;                 // righe disegnate; il resto a richiesta
+let matAperti = new Set();           // codici col dettaglio commesse aperto
 
 // Le categorie in ordine di urgenza: e' anche l'ordine con cui la colonna
 // Stato ordina, cosi' "ordina per stato" vuol dire "prima quello che ferma".
@@ -4854,7 +4855,7 @@ function matManca(m) {
 // tredici pezzi di codice sparsi vuol dire che aggiungere una colonna e'
 // aggiungere una riga qui — e che intestazione e cella non possono scivolare
 // una rispetto all'altra, che e' il difetto classico delle tabelle a mano.
-function matColonne(nf, oggi, opDelGest) {
+function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
   const primaCons = (m) => (mancanteConsegne(m) || [])[0] || null;
   const testo = (v) => el('span', { class:'sub', style:'font-size:11px;' }, v || '—');
   return [
@@ -4864,8 +4865,16 @@ function matColonne(nf, oggi, opDelGest) {
         const eti = MAT_CAT_ETI[mancanteCategoria(m)] || MAT_CAT_ETI.da_ordinare;
         return el('span', { class:'badge ' + eti.cls, title: eti.tip }, eti.txt);
       } },
+    // Il codice apre il dettaglio delle commesse che lo usano, quando ce n'e'.
     { k:'codice', t:'Codice', ord: m => String(m.codice || ''),
-      cella: (m) => el('span', { class:'mono', style:'font-size:11px;' }, m.codice) },
+      cella: (m) => {
+        if (!usiDi(m.codice).length) return el('span', { class:'mono', style:'font-size:11px;' }, m.codice);
+        const aperto = matAperti.has(String(m.codice).trim());
+        return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);',
+          title:'Mostra le commesse che usano questo codice',
+          onclick:(e)=>{ e.preventDefault(); apriChiudi(m.codice); } },
+          (aperto ? '▾ ' : '▸ ') + m.codice);
+      } },
     { k:'descrizione', t:'Descrizione', ord: m => String(m.descrizione || '').toUpperCase(),
       cella: (m) => el('span', { style:'display:block;max-width:280px;overflow:hidden;'
         + 'text-overflow:ellipsis;white-space:nowrap;', title: m.descrizione || '' }, m.descrizione || '—') },
@@ -4914,19 +4923,91 @@ function matColonne(nf, oggi, opDelGest) {
       cella: (m) => { const c = primaCons(m);
         return el('span', { class:'sub', style:'display:block;font-size:11px;max-width:150px;overflow:hidden;'
           + 'text-overflow:ellipsis;white-space:nowrap;', title:(c && c.fornitore) || '' }, (c && c.fornitore) || '—'); } },
-    // La commessa e' un LINK: la domanda che viene subito dopo "questo codice
-    // manca" e' "a chi manca", e la risposta sta nella commessa.
-    { k:'numero_op', t:'Commessa', ord: m => String(m.numero_op || ''),
+    // (28 set, Nico) TUTTE le commesse che usano il codice, dalle nostre liste
+    // congelate. Prima era solo la commessa che Alnus scrive accanto al codice
+    // (`OdL Prossimo Impegno`): la PRIMA che lo consumera', non tutte — e le
+    // sorelle sembravano non usarlo. Il file resta il ripiego solo dove nessuna
+    // lista lo contiene (conto lavoro, commessa chiusa qui).
+    { k:'commesse', t:'Commesse', num:true, giuInizio:true,
+      ord: m => usiDi(m.codice).length || null,
       cella: (m) => {
+        const usi = usiDi(m.codice);
+        if (usi.length > 1) {
+          return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);white-space:nowrap;',
+            title: usi.map(u => (u.commessa.numero_ordine || '—') + '/' + (u.commessa.pos || '—')).join('\n'),
+            onclick:(e)=>{ e.preventDefault(); apriChiudi(m.codice); } },
+            (matAperti.has(String(m.codice).trim()) ? '▾ ' : '▸ ') + usi.length + ' commesse');
+        }
+        if (usi.length === 1) {
+          const o = usi[0].commessa;
+          return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);',
+            title:'Apri ' + (o.numero_op || o.numero_ordine || ''),
+            onclick:(e)=>{ e.preventDefault(); openOperazioneModal(o, { scheda:'mat' }); } },
+            (o.numero_ordine || '—') + '/' + (o.pos || '—'));
+        }
         const o = opDelGest.get(m.numero_op);
         if (!o) return el('span', { class:'mono', style:'font-size:11px;color:var(--mut);',
           title:'Questo OP non ha una commessa nel gestionale' }, (m.numero_op || '—') + ' ✗');
-        return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);',
-          title:'Apri ' + (m.numero_op || ''),
+        return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--mut);',
+          title:'Indicata da Alnus come prossimo impegno. Nessuna commessa aperta '
+            + 'del gestionale ha questo codice nella sua lista materiali.',
           onclick:(e)=>{ e.preventDefault(); openOperazioneModal(o, { scheda:'mat' }); } },
           (o.numero_ordine || '—') + '/' + (o.pos || '—'));
       } },
   ];
+}
+
+// Il dettaglio sotto la riga: chi usa il codice, quanto, e se la sua parte
+// c'e'. ⚠ STESSO CONTO della scheda Materiali della commessa (fabbisognoDaListe
+// + disponibilePerNoi + ripartisciGiacenza, chi scade prima serve prima): se
+// qui dicesse "coperto" e aprendo la commessa si leggesse "manca", non si
+// crederebbe piu' a nessuna delle due.
+function matDettaglioUsi(m, usi, manPerCodice, nf) {
+  const cod = String(m.codice || '').trim();
+  const nostra = usi.reduce((a, u) => a + u.qta, 0);
+  const mm = manPerCodice[cod];
+  let esito, riservato = 0;
+  if (!mm) {
+    // Non sotto scorta: ce n'e' per tutti, e non dipende dall'ordine.
+    esito = usi.map(u => ({ commessa: u.commessa, qta: u.qta, coperto: u.qta, scoperto: 0 }));
+  } else {
+    const d = disponibilePerNoi(Number(mm.giacenza) || 0, mm.impegno, nostra);
+    riservato = d.riservato;
+    esito = ripartisciGiacenza(usi, d.disponibile).esito;
+  }
+  const um = m.um ? ' ' + m.um : '';
+  const box = el('div', { style:'padding:8px 10px 10px 22px;background:var(--sur2);' });
+  box.append(el('div', { class:'sub', style:'font-size:11px;margin-bottom:6px;' },
+    'Richiesti ' + nf(nostra) + um + ' da ' + usi.length + (usi.length === 1 ? ' commessa aperta' : ' commesse aperte')
+    + ' · giacenza ' + nf(m.giacenza) + ' · impegno Alnus ' + nf(m.impegno)
+    + (riservato > 0 ? ' · ' + nf(riservato) + ' già impegnati da domanda che il gestionale non vede' : '')
+    + (mm ? ' · ripartiti per scadenza: chi scade prima viene servito prima.' : ' · non è sotto scorta.')));
+  const tb = el('tbody');
+  esito.forEach(e => {
+    const o = e.commessa;
+    const cli = (state.aziende || []).find(a => a.id === o.cliente_id);
+    const art = (state.articoli || []).find(a => a.id === o.articolo_id);
+    const stato = !mm ? { t:'disponibile', c:'var(--mut)', tip:'Il codice non è sotto scorta.' }
+      : e.scoperto > 0 ? { t:'manca ' + nf(e.scoperto), c:'var(--red)', tip:'La giacenza non arriva fino a questa commessa.' }
+      : { t:'coperto', c:'var(--grn)', tip:'C\'è, perché scade prima delle altre: una commessa più urgente se lo può prendere.' };
+    tb.append(el('tr', {},
+      el('td', {}, el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);',
+        onclick:(ev)=>{ ev.preventDefault(); openOperazioneModal(o, { scheda:'mat' }); } },
+        (o.numero_ordine || '—') + '/' + (o.pos || '—'))),
+      el('td', { class:'mono', style:'font-size:11px;color:var(--mut);' }, o.numero_op || '—'),
+      el('td', { style:'font-size:11px;' }, cli?.nome || '—'),
+      el('td', { class:'mono', style:'font-size:11px;' }, art?.codice || '—'),
+      el('td', { class:'mono', style:'font-size:11px;' }, o.scadenza ? fmtIT(o.scadenza) : '—'),
+      el('td', { class:'tr mono', style:'font-size:11px;' }, nf(e.qta) + um),
+      el('td', { style:'font-size:11px;font-weight:600;color:' + stato.c + ';', title: stato.tip }, stato.t),
+      el('td', { style:'font-size:11px;color:var(--mut);' },
+        o.numero_op && o.numero_op === m.numero_op ? 'prossimo impegno per Alnus' : ''),
+    ));
+  });
+  box.append(el('table', { class:'rt', style:'width:auto;' },
+    el('thead', {}, el('tr', {}, ...['Commessa', 'OP', 'Cliente', 'Prodotto', 'Scadenza', 'Qtà', 'Esito', '']
+      .map((t, i) => el('th', { class: i === 5 ? 'tr' : '' }, t)))), tb));
+  return box;
 }
 
 function renderFabbisogno(root) {
@@ -5106,8 +5187,25 @@ function renderFabbisogno(root) {
   if (!righeOra.length) return;
   const opDelGest = new Map();
   (state.operazioni || []).forEach(o => { if (o.numero_op) opDelGest.set(o.numero_op, o); });
-  const colonne = matColonne(nf, oggi, opDelGest);
+  // Chi usa ogni codice, dalle liste congelate delle commesse aperte: la
+  // stessa domanda su cui si ripartisce la giacenza nella scheda commessa.
+  const { viveConLista, manPerCodice } = materialiBase(righeOra);
+  const usi = (typeof fabbisognoDaListe === 'function') ? fabbisognoDaListe(viveConLista) : new Map();
+  const usiDi = (cod) => usi.get(String(cod == null ? '' : cod).trim()) || [];
+  const apriChiudi = (cod) => {
+    const k = String(cod).trim();
+    if (matAperti.has(k)) matAperti.delete(k); else matAperti.add(k);
+    disegnaLista();
+  };
+  const colonne = matColonne(nf, oggi, opDelGest, usiDi, apriChiudi);
   const opConRighe = [...new Set(righeOra.map(m => m.numero_op))].filter(Boolean).sort();
+  // Codici di ogni commessa, per il filtro: una commessa "ha" un codice se ce
+  // l'ha nella SUA lista, non solo se Alnus gliel'ha attribuito.
+  const codiciDi = new Map();
+  usi.forEach((righe, cod) => righe.forEach(r => {
+    if (!codiciDi.has(String(r.commessa.id))) codiciDi.set(String(r.commessa.id), new Set());
+    codiciDi.get(String(r.commessa.id)).add(cod);
+  }));
 
   const perCat = (c) => righeOra.filter(m => mancanteCategoria(m) === c).length;
   const selCat = el('select', { style:'max-width:240px;' },
@@ -5118,16 +5216,31 @@ function renderFabbisogno(root) {
     el('option', { value:'consumo' },        'Di consumo (' + perCat('consumo') + ')'),
     el('option', { value:'coperto' },        'Coperti (' + perCat('coperto') + ')'));
   selCat.value = matFiltroCat;
+  // Due famiglie di voci: `c:` le commesse con la lista (tutti i codici che
+  // usano), `a:` gli OP che conosce solo Alnus (conto lavoro, o senza
+  // commessa qui) — per quelli resta l'attribuzione del file, l'unica che c'e'.
+  const inArchivio = new Set(righeOra.map(m => String(m.codice || '').trim()));
+  const vociOp = [];
+  viveConLista.slice()
+    .sort((a, b) => String(a.numero_ordine || '').localeCompare(String(b.numero_ordine || ''))
+      || String(a.pos || '').localeCompare(String(b.pos || ''), undefined, { numeric:true }))
+    .forEach(o => {
+      const n = [...(codiciDi.get(String(o.id)) || [])].filter(c => inArchivio.has(c)).length;
+      if (n) vociOp.push(el('option', { value:'c:' + o.id },
+        (o.numero_ordine || '—') + '/' + (o.pos || '—') + (o.numero_op ? ' — ' + o.numero_op : '') + ' · ' + n));
+    });
+  opConRighe.forEach(op => {
+    const o = opDelGest.get(op);
+    if (o && codiciDi.has(String(o.id))) return;
+    const n = righeOra.filter(m => m.numero_op === op).length;
+    vociOp.push(el('option', { value:'a:' + op },
+      op + (o ? ' — ' + (o.numero_ordine || '') + '/' + (o.pos || '') : ' — (nessuna commessa)')
+      + ' · ' + n + ' (da Alnus)'));
+  });
   const selOp = el('select', { style:'max-width:300px;' },
-    el('option', { value:'' }, 'Tutte le commesse'),
-    ...opConRighe.map(op => {
-      const o = opDelGest.get(op);
-      const n = righeOra.filter(m => m.numero_op === op).length;
-      return el('option', { value: op },
-        op + (o ? ' — ' + (o.numero_ordine || '') + '/' + (o.pos || '') : ' — (nessuna commessa)')
-        + ' · ' + n);
-    }));
+    el('option', { value:'' }, 'Tutte le commesse'), ...vociOp);
   selOp.value = matFiltroOp;
+  if (selOp.value !== matFiltroOp) matFiltroOp = '';
   const inCerca = el('input', { class:'search', type:'search',
     placeholder:'Cerca codice, descrizione, fornitore, OF…', value: matCerca, style:'min-width:260px;' });
 
@@ -5136,7 +5249,12 @@ function renderFabbisogno(root) {
     tabWrap.innerHTML = '';
     let righe = righeOra.slice();
     if (matFiltroCat) righe = righe.filter(m => mancanteCategoria(m) === matFiltroCat);
-    if (matFiltroOp) righe = righe.filter(m => m.numero_op === matFiltroOp);
+    if (matFiltroOp.startsWith('c:')) {
+      const cod = codiciDi.get(matFiltroOp.slice(2)) || new Set();
+      righe = righe.filter(m => cod.has(String(m.codice || '').trim()));
+    } else if (matFiltroOp.startsWith('a:')) {
+      righe = righe.filter(m => m.numero_op === matFiltroOp.slice(2));
+    }
     if (matCerca.trim()) {
       // Una sola casella su tutte le colonne di testo: con qualche migliaio di
       // codici trovare il proprio e' il gesto piu' frequente della scheda, e
@@ -5216,6 +5334,10 @@ function renderFabbisogno(root) {
             renderFabbisogno(root);
           } }, '✕')));
       tb.append(tr);
+      if (matAperti.has(String(m.codice || '').trim()) && usiDi(m.codice).length) {
+        tb.append(el('tr', {}, el('td', { colspan: String(colonne.length + 1), style:'padding:0;' },
+          matDettaglioUsi(m, usiDi(m.codice), manPerCodice, nf))));
+      }
     });
 
     const tw = el('div', { class:'tw' });

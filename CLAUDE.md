@@ -6,7 +6,7 @@
 - **Cos'è**: ERP Cablotec. Backend **Supabase**, hosting **GitHub Pages** (deploy = git push, nessun build tool, **script classici — niente ES module**, scope globale condiviso).
 - **Pubblicazione Pages**: workflow esplicito `.github/workflows/pages.yml` (Source = "GitHub Actions"). NON tornare a "Deploy from a branch" (pipeline legacy incastrata il 5-6 lug 2026). Deploy fallito → Actions → Re-run jobs o commit vuoto.
 - **Struttura**: `index.html`/`kiosk.html` (gusci gemelli), `app.js` (~14k r) + `app.css`, `core/db.js` (Supabase condiviso + `fetchTutte` paginata oltre il tetto 1000 righe), `domain/scheduling.js` (motore PURO: no DOM, no Supabase), `domain/codifica.js` (dati piano dei conti + tabelle + composizione codici 20 caratteri, PURO), `domain/materiali.js` (esplosione distinta multilivello, ripartizione giacenza, stati materiale — PURO), `mobile.html`/`prelievo.html` autonome.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-25.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-09-28.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -454,6 +454,11 @@ Chiesto da Nico: *"lista materiali pura con colonne giacenza, mancanti ecc (colo
 
 ### Filo aperto dichiarato
 - La tabella si chiama ancora **`mancanti`** ma non contiene piu solo i mancanti. Rinominarla vuol dire una migrazione SQL piu una cinquantina di riferimenti: **non fatto di proposito**, e scritto qui perche il nome non inganni chi arriva dopo. Il significato vero e: *fotografia dell'ultima estrazione Fabbisogno Massivo*.
+
+## Materiali: TUTTE le commesse di un codice (28 set, `2026-09-28.01`)
+- Chiesto da Nico. La colonna **Commesse** della lista non legge piu' il `numero_op` del file (`OdL Prossimo Impegno` = la PRIMA che consumera' il codice, una sola) ma le **liste congelate** delle commesse vive (`fabbisognoDaListe`): "3 commesse", clic sul codice o sul conteggio -> dettaglio sotto la riga con qta, scadenza ed esito (coperto / manca N / disponibile).
+- ⚠ **Stesso conto della scheda commessa** (`disponibilePerNoi` + `ripartisciGiacenza`): verificato sui dati del 27 set, 1.071 coppie codice-commessa, **0 differenze** con `materialiCommessa`. 211 codici su 757 sono usati da piu' di una commessa.
+- Il file resta il **ripiego** solo dove nessuna lista contiene il codice (conto lavoro, commessa chiusa qui): la cella e' grigia e lo dice. Il filtro commesse ha due famiglie, `c:<id>` (codici della lista) e `a:<OP>` (attribuzione Alnus, marcata "da Alnus").
 
 ## Ordini cliente e Storico: due schede, nessun buco (27 ago, `2026-08-27.5`)
 - **UNA regola sola, in domain**: `commessaInStorico(op, spedizioni, oggi)` (16 test). Non spedita -> Ordini cliente · spedita da <30 gg -> Ordini cliente sotto il chip **SPEDITE** · spedita da >30 gg -> Storico · **spedita senza data -> Storico** (le 34 del caricamento 19 mag). `GIORNI_SPEDITE_IN_ORDINI = 30`.
