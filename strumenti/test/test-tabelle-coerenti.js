@@ -70,51 +70,32 @@ const noteApp = new Set([...app, ...core]);
   });
 });
 
-sez('LE REGOLE COPIATE DEVONO RESTARE COPIE, NON VARIANTI');
-// `mobile.html` e autonomo: non carica `app.js`, quindi le regole delle
-// finestre ferie ci stanno dentro COPIATE. E una duplicazione accettata e
-// dichiarata — ma una copia che deriva e il modo in cui il telefono e il
-// browser dicono cose diverse alla stessa persona, sulla stessa domanda,
-// nello stesso giorno. Qui si confrontano carattere per carattere.
-const srcApp = leggi('app.js'), srcMob = leggi('mobile.html');
-// Si confronta il CODICE, non i commenti: quelli possono e devono essere
-// diversi, perche parlano a chi legge quel file. Si tolgono le righe di
-// commento e si appiattiscono gli spazi.
-// ⚠ Lo spogliatore e ingenuo (taglia da `//` a fine riga) e andrebbe in
-// confusione su una stringa che contenesse `//`. In queste cinque funzioni
-// non ce ne sono; se un domani ce ne fossero, questo controllo va rifatto
-// meglio invece che disattivato.
-const corpo = (src, firma) => {
-  const i = src.indexOf(firma);
-  if (i < 0) return null;
-  const j = src.indexOf('\n}\n', i);
-  if (j < 0) return null;
-  return src.slice(i, j + 2)
-    .split('\n').map(r => r.replace(/\/\/.*$/, '')).join(' ')
-    .replace(/\s+/g, ' ').trim();
-};
-[
-  'function finestraApertaOra(oggiIso) {',
-  'function ggmmIT(s) {',
-  'function frasePeriodoAperto(oggiIso) {',
-  'function isoDentroIntervallo(iso, ggmmDa, ggmmA) {',
-  'function tipoInseribileDa(tipo, esente) {',
-  // Gli eventi aziendali: il gestionale li scrive, il telefono li mostra.
-  // Se "quali eventi tocca questo giorno" divergesse, un pranzo di due giorni
-  // comparirebbe su uno solo dei due calendari.
-  'function eventiDelGiorno(iso) {',
-  'function eventoEtichetta(e) {',
-].forEach(firma => {
-  const a = corpo(srcApp, firma), b = corpo(srcMob, firma);
-  const nome = firma.replace('function ', '').split('(')[0];
-  if (!a || !b) { ko++; console.log('  KO   ' + nome + ' — manca in ' + (!a ? 'app.js' : 'mobile.html')); return; }
-  t(nome + ' identica nei due frontend', a === b);
+sez('LE REGOLE DEL CALENDARIO STANNO UNA VOLTA SOLA, NEL MOTORE');
+// Fino al 29 set `mobile.html` le aveva COPIATE, e qui si controllava che le
+// copie restassero uguali carattere per carattere. Non bastava: le copie
+// controllate erano sette, quelle vere venticinque, e le altre si erano gia'
+// allontanate (nomi dei festivi, frasi dei rifiuti). Dal 30 set stanno in
+// domain/calendario.js, caricato da gestionale, kiosk e telefono, e il
+// controllo e' quello opposto: NESSUNA pagina le ridefinisce.
+// Una ridefinizione non darebbe errore — l'ultima caricata vince in silenzio —
+// ed e' proprio cosi' che una copia torna a nascere.
+const srcApp = leggi('app.js'), srcMob = leggi('mobile.html'), srcCal = leggi('domain/calendario.js');
+const REGOLE = ['z', 'toLocalISO', 'parseISODate', 'fmtIT', 'fmtT', 'todayISO', 'ggmmIT', 'parseGGMM',
+  'isoDentroIntervallo', 'FESTIVI_NAZ_FISSI', 'calcolaPasqua', 'festiviNazionali', 'festiviNazIsoSet',
+  'festivoDelGiorno', 'chiusureIsoSet', 'isGiornoNonLavorativo', 'chiusuraDelGiorno', 'motivoNonLavorativo',
+  'eventiDelGiorno', 'eventoEtichetta', 'getImpostazione', 'getFinestreAssenze', 'getGruppiEsentiAssenze',
+  'finestraApertaOra', 'frasePeriodoAperto', 'tipoInseribileDa', 'verificaAccessoAssenza', 'getAssenza',
+  'primoGiornoInseribile'];
+const definita = (src, n) => new RegExp('^(?:async )?function ' + n + '\\s*\\(|^(?:const|let|var) ' + n + '\\s*=', 'm').test(src);
+REGOLE.forEach(n => {
+  const qui = definita(srcCal, n), inApp = definita(srcApp, n), inMob = definita(srcMob, n);
+  t(n + ' nel motore e in nessuna pagina', qui && !inApp && !inMob);
 });
-// La frase del rifiuto non sta in una funzione a se: si confronta il testo.
-const frase = 'che si prenota dal ';
-t('la frase del rifiuto e la stessa',
-  srcApp.includes(frase) && srcMob.includes(frase)
-  && srcApp.includes('questa data sta nella finestra') && srcMob.includes('questa data sta nella finestra'));
+['index.html', 'kiosk.html', 'mobile.html'].forEach(g => {
+  const h = leggi(g);
+  const iCal = h.indexOf('src="domain/calendario.js'), iSch = h.indexOf('src="domain/scheduling.js');
+  t(g + ' carica il motore del calendario prima della pianificazione', iCal >= 0 && iSch >= 0 && iCal < iSch);
+});
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);

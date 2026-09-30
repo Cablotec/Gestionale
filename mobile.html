@@ -10,10 +10,11 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-30.01"></script>
+<script src="core/db.js?v=2026-09-30.02"></script>
 <!-- Il MOTORE (30 set): il telefono usa le regole del gestionale invece di copiarle. -->
-<script src="domain/scheduling.js?v=2026-09-30.01"></script>
-<script src="core/timbri.js?v=2026-09-30.01"></script>
+<script src="domain/calendario.js?v=2026-09-30.02"></script>
+<script src="domain/scheduling.js?v=2026-09-30.02"></script>
+<script src="core/timbri.js?v=2026-09-30.02"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -363,9 +364,6 @@ function elx(tag, attrs = {}, ...children) {
   for (const c of children) if (c != null) n.append(c.nodeType ? c : document.createTextNode(c));
   return n;
 }
-const fmtT = d => String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
-const fmtIT = iso => { if (!iso) return '—'; const [y,m,g] = iso.split('-'); return g + '/' + m + '/' + y; };
-const todayISO = () => { const d = new Date(); const z = n => String(n).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); };
 const TIPI_MEZZI = [
   { id:'trasferta', label:'Trasferta' },
   { id:'consegna', label:'Consegna' },
@@ -1108,155 +1106,11 @@ async function salvaPrenotazione(f, btn, err) {
 }
 
 // ═══════════════ Ferie / assenze ═══════════════
-// Helper portati fedelmente dal gestionale (finestre di apertura, festivi,
-// chiusure, ore per codice tipo). La scrittura è identica a quella admin:
-// una riga per giorno, stato 'valida', niente approvazione.
-const zp = n => String(n).padStart(2, '0');
-const toLocalISO = d => `${d.getFullYear()}-${zp(d.getMonth()+1)}-${zp(d.getDate())}`;
-const parseISODate = s => { const [y,m,d] = String(s).split('-').map(Number); return new Date(y, m-1, d); };
+// Le REGOLE (festivi, chiusure, giorni lavorativi, finestre ferie, chi puo'
+// chiedere cosa) stanno in domain/calendario.js dal 30 set: sono le stesse
+// del gestionale, non piu' una copia. Qui resta la scrittura, identica a
+// quella admin: una riga per giorno, stato 'valida', niente approvazione.
 
-function getImpostazione(chiave, def) {
-  const v = state.impostazioni && state.impostazioni[chiave];
-  return (v === undefined || v === null) ? def : v;
-}
-function parseGGMM(s) {
-  if (!s) return null;
-  const m = String(s).match(/^(\d{1,2})-(\d{1,2})$/);
-  if (!m) return null;
-  const g = +m[1], me = +m[2];
-  if (g < 1 || g > 31 || me < 1 || me > 12) return null;
-  return { giorno: g, mese: me };
-}
-function isoDentroIntervallo(iso, ggmmDa, ggmmA) {
-  const da = parseGGMM(ggmmDa), a = parseGGMM(ggmmA);
-  if (!da || !a) return false;
-  const d = parseISODate(iso);
-  const g = d.getDate(), m = d.getMonth() + 1;
-  const k = (mm, gg) => mm * 100 + gg;
-  const kd = k(m, g), kDa = k(da.mese, da.giorno), kA = k(a.mese, a.giorno);
-  if (kDa <= kA) return kd >= kDa && kd <= kA;
-  return kd >= kDa || kd <= kA;
-}
-function getFinestreAssenze() {
-  return [
-    { nome:'estiva',
-      aperturaDa: getImpostazione('finestra_estiva_apertura_da', '01-03'),
-      aperturaA:  getImpostazione('finestra_estiva_apertura_a',  '31-03'),
-      periodoDa:  getImpostazione('finestra_estiva_periodo_da',  '01-04'),
-      periodoA:   getImpostazione('finestra_estiva_periodo_a',   '30-09') },
-    { nome:'invernale',
-      aperturaDa: getImpostazione('finestra_invernale_apertura_da', '01-09'),
-      aperturaA:  getImpostazione('finestra_invernale_apertura_a',  '30-09'),
-      periodoDa:  getImpostazione('finestra_invernale_periodo_da',  '01-10'),
-      periodoA:   getImpostazione('finestra_invernale_periodo_a',   '31-03') },
-  ];
-}
-function getGruppiEsentiAssenze() {
-  const raw = getImpostazione('assenze_gruppi_esenti', null);
-  if (raw === null || raw === undefined) return ['laboratorio'];
-  try { const arr = typeof raw === 'string' ? JSON.parse(raw) : raw; return Array.isArray(arr) ? arr : []; }
-  catch (_) { return []; }
-}
-// Regola finestre: niente date passate, solo dentro la finestra di apertura
-// del periodo, salvo gruppi esenti. Identica al gestionale.
-// CHI puo inserire un tipo: 'tutti' (ferie), 'esenti' (permessi), 'admin'
-// (malattia). ⚠ 'admin' e il RUOLO, non il gruppo Ufficio — che e una
-// chiave di gruppo e si confonderebbe. Stessa funzione del gestionale,
-// parola per parola: due versioni che divergono sono il modo in cui il
-// telefono e il browser dicono cose diverse alla stessa persona.
-function tipoInseribileDa(tipo, esente) {
-  const chi = String((tipo && tipo.chi_inserisce) || '').toLowerCase();
-  if (chi === 'tutti') return true;
-  if (chi === 'esenti') return !!esente;
-  return false;
-}
-
-// ⚠⚠ SI DICE SEMPRE ANCHE COSA SI PUO' FARE (16 set, segnalato da Nico:
-// *"avviso errato nel mobile su ferie estive"*).
-// Il difetto: il form si apre sulla data di oggi, e a settembre oggi cade nel
-// periodo ESTIVO, che si prenota a febbraio. Quindi la prima cosa che si
-// leggeva era un rosso sulle ferie estive **proprio nel mese in cui le ferie
-// si prenotano davvero** — perche' a settembre e' aperta la finestra
-// INVERNALE. Il messaggio era vero sulla data e sbagliato sulla domanda.
-// **Un avviso che dice solo di no, quando un si' esiste, e' un avviso
-// sbagliato anche quando la frase e' esatta.**
-function finestraApertaOra(oggiIso) {
-  return getFinestreAssenze()
-    .find(f => isoDentroIntervallo(oggiIso, f.aperturaDa, f.aperturaA)) || null;
-}
-// "01-02" e' GG-MM: si scrive 01/02, come tutte le date dell'app. Col trattino
-// "dal 01-02 al 28-02" sembra un intervallo di numeri, non due date.
-function ggmmIT(s) { return String(s || '').replace('-', '/'); }
-// La meta' positiva dell'avviso, una frase sola. Sta in una funzione perche'
-// la usano quattro punti diversi fra telefono e gestionale, e devono dirla
-// con le stesse parole.
-function frasePeriodoAperto(oggiIso) {
-  const aperta = finestraApertaOra(oggiIso);
-  if (aperta) {
-    return 'Adesso e aperta la finestra ' + aperta.nome + ': puoi chiedere dal '
-      + ggmmIT(aperta.periodoDa) + ' al ' + ggmmIT(aperta.periodoA) + '.';
-  }
-  const prossime = getFinestreAssenze()
-    .map(x => x.nome + ' dal ' + ggmmIT(x.aperturaDa) + ' al ' + ggmmIT(x.aperturaA)).join(' · ');
-  return 'Oggi non e aperta nessuna finestra. Si prenota: ' + prossime + '.';
-}
-
-// Il primo giorno che questa persona puo' davvero chiedere: dentro la
-// finestra aperta E lavorativo. Si cerca in avanti giorno per giorno invece
-// di calcolarlo: i periodi scavallano l'anno (01-10 → 28-02) e l'aritmetica
-// sugli intervalli circolari e' il posto dove si sbaglia. 400 giri di una
-// funzione che costa niente, una volta all'apertura del form.
-function primoGiornoInseribile(utente) {
-  const d = new Date();
-  for (let i = 0; i < 400; i++) {
-    const iso = toLocalISO(d);
-    if (verificaAccessoAssenza(iso, utente).ok && !isGiornoNonLavorativo(d)) return iso;
-    d.setDate(d.getDate() + 1);
-  }
-  return todayISO();
-}
-
-function verificaAccessoAssenza(iso, utente) {
-  // ⚠ Il passato PRIMA dell'esenzione: l'esenzione salta la finestra, non
-  // le date passate (11 set). Stesso ordine del gestionale, o le due porte
-  // direbbero due cose diverse.
-  const oggiIso = todayISO();
-  if (iso < oggiIso) return { ok:false, motivo:'le date passate non sono inseribili' };
-  const esenti = getGruppiEsentiAssenze();
-  if (utente?.gruppo && esenti.includes(utente.gruppo)) return { ok:true, esenzione:utente.gruppo };
-  const finestre = getFinestreAssenze();
-  const finestra = finestre.find(f => isoDentroIntervallo(iso, f.periodoDa, f.periodoA));
-  if (!finestra) return { ok:false, motivo:'questa data non rientra in nessuna finestra di apertura' };
-  if (!isoDentroIntervallo(oggiIso, finestra.aperturaDa, finestra.aperturaA))
-    return { ok:false, finestra,
-      // ⚠ "finestra estiva", non "periodo estiva": i nomi delle finestre sono
-      // femminili (estiva, invernale) perche nati per accordarsi a "finestra".
-      // Infilarli dopo "periodo" fa uscire "il periodo estiva".
-      motivo:`questa data sta nella finestra ${finestra.nome} (${ggmmIT(finestra.periodoDa)} – ${ggmmIT(finestra.periodoA)}), che si prenota dal ${ggmmIT(finestra.aperturaDa)} al ${ggmmIT(finestra.aperturaA)}` };
-  return { ok:true, finestra };
-}
-
-// Giorni non lavorativi: weekend + festivi nazionali + chiusure aziendali.
-const FESTIVI_NAZ_FISSI = [
-  {m:1,d:1},{m:1,d:6},{m:4,d:25},{m:5,d:1},{m:6,d:2},
-  {m:8,d:15},{m:11,d:1},{m:12,d:8},{m:12,d:25},{m:12,d:26},
-];
-function calcolaPasqua(anno) {
-  const a=anno%19, b=Math.floor(anno/100), c=anno%100, d=Math.floor(b/4), e=b%4,
-    f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3), h=(19*a+b-d-g+15)%30,
-    i=Math.floor(c/4), k=c%4, l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
-    mese=Math.floor((h+l-7*m+114)/31), giorno=((h+l-7*m+114)%31)+1;
-  return new Date(anno, mese-1, giorno);
-}
-function festiviNazIsoSet(anno) {
-  const s = new Set();
-  FESTIVI_NAZ_FISSI.forEach(f => s.add(toLocalISO(new Date(anno, f.m-1, f.d))));
-  const pasqua = calcolaPasqua(anno);
-  s.add(toLocalISO(pasqua));
-  const pasquetta = new Date(pasqua); pasquetta.setDate(pasqua.getDate()+1);
-  s.add(toLocalISO(pasquetta));
-  return s;
-}
 // ═══════════════════════════════════════════════════════════════════
 // EVENTI AZIENDALI (16 set, chiesto da Nico: *"abbiamo un evento che in
 // questo caso e' un pranzo, ma domani potrebbe essere una riunione o
@@ -1300,69 +1154,8 @@ function festiviNazIsoSet(anno) {
 // vuoto non e' un campo facoltativo, e' un campo di troppo.**
 // ═══════════════════════════════════════════════════════════════════
 
-// Gli eventi che toccano questo giorno. `data_fine` null = un giorno solo.
-// Ordinati: prima quelli di tutto il giorno (senza ora), poi per orario.
-function eventiDelGiorno(iso) {
-  return (state.eventi || []).filter(e => {
-    if (!e || !e.data) return false;
-    const fine = e.data_fine || e.data;
-    return iso >= e.data && iso <= fine;
-  }).sort((a, b) => String(a.ora || '').localeCompare(String(b.ora || ''))
-    || String(a.titolo || '').localeCompare(String(b.titolo || '')));
-}
-// L'evento in una riga di testo: "🍝 12:30 — Pranzo aziendale · Trattoria X".
-function eventoEtichetta(e) {
-  return (e.ora ? e.ora + ' — ' : '') + (e.titolo || 'Evento');
-}
 
-// La chiusura di questo giorno, o null. Ritorna la RIGA e non un booleano:
-// in calendario serve anche la descrizione ("Chiusura Natalizia", "Ponte"),
-// e un giorno chiuso senza il perche' si legge come un errore.
-function chiusuraDelGiorno(iso) {
-  return (state.chiusure || []).find(c => {
-    if (!c.data) return false;
-    return c.ricorrente ? c.data.substring(5) === iso.substring(5) : c.data === iso;
-  }) || null;
-}
-function chiusuraIso(iso) { return !!chiusuraDelGiorno(iso); }
 
-// Il festivo nazionale di questo giorno, col nome. Stessi giorni di
-// `festiviNazIsoSet`, ma qui serve poterli dire.
-const FESTIVI_NAZ_NOMI = {
-  '01-01':'Capodanno', '01-06':'Epifania', '04-25':'Liberazione', '05-01':'Festa del lavoro',
-  '06-02':'Festa della Repubblica', '08-15':'Ferragosto', '11-01':'Ognissanti',
-  '12-08':'Immacolata', '12-25':'Natale', '12-26':'Santo Stefano',
-};
-function festivoDelGiorno(iso) {
-  const d = parseISODate(iso);
-  const nome = FESTIVI_NAZ_NOMI[iso.substring(5)];
-  if (nome) return nome;
-  const pasqua = calcolaPasqua(d.getFullYear());
-  if (toLocalISO(pasqua) === iso) return 'Pasqua';
-  const pasquetta = new Date(pasqua); pasquetta.setDate(pasqua.getDate() + 1);
-  if (toLocalISO(pasquetta) === iso) return 'Lunedi dell Angelo';
-  return null;
-}
-// Perche' questo giorno non e' lavorativo, in parole. null = lo e'.
-function motivoNonLavorativo(iso) {
-  const ch = chiusuraDelGiorno(iso);
-  if (ch) return { tipo:'chiusura', testo: ch.descrizione || 'Chiusura aziendale' };
-  const fe = festivoDelGiorno(iso);
-  if (fe) return { tipo:'festivo', testo: fe };
-  const dow = parseISODate(iso).getDay();
-  if (dow === 0 || dow === 6) return { tipo:'weekend', testo:'Weekend' };
-  return null;
-}
-function isGiornoNonLavorativo(d) {
-  const dow = d.getDay();
-  if (dow === 0 || dow === 6) return true;
-  const iso = toLocalISO(d);
-  if (festiviNazIsoSet(d.getFullYear()).has(iso)) return true;
-  return chiusuraIso(iso);
-}
-function getAssenza(utenteId, iso) {
-  return (state.assenze || []).find(a => a.utente_id === utenteId && a.data === iso && a.stato === 'valida');
-}
 // Ore in base al codice tipo: F/M = giornata intera (8h), P = permesso a ore.
 function modalitaOre(tipo) {
   const c = (tipo?.codice || '').toUpperCase();
@@ -1417,7 +1210,7 @@ function renderFerie() {
   for (let i = 0; i < offset; i++) grid.append(elx('div', { class:'cal-cell empty' }));
 
   for (let g = 1; g <= giorniMese; g++) {
-    const iso = `${ferieCal.y}-${zp(ferieCal.m + 1)}-${zp(g)}`;
+    const iso = `${ferieCal.y}-${z(ferieCal.m + 1)}-${z(g)}`;
     const ass = (state.assenze || []).filter(a => a.data === iso);
     const mia = ass.find(a => a.utente_id === mioId);
     // ⚠ SI SEGNANO TUTTI E DUE (16 set, chiesto da Nico: *"anche i giorni
@@ -1474,8 +1267,8 @@ function renderFerie() {
     elx('span', {}, elx('i', { class:'mia' }), 'Una tua assenza'));
   // La voce evento compare SOLO se in questo mese ce n'e' uno: una legenda
   // che spiega un segno che non c'e' e' rumore.
-  const primoIso = ferieCal.y + '-' + zp(ferieCal.m + 1) + '-01';
-  const ultimoIso = ferieCal.y + '-' + zp(ferieCal.m + 1) + '-' + zp(giorniMese);
+  const primoIso = ferieCal.y + '-' + z(ferieCal.m + 1) + '-01';
+  const ultimoIso = ferieCal.y + '-' + z(ferieCal.m + 1) + '-' + z(giorniMese);
   if ((state.eventi || []).some(e => {
     const fine = e.data_fine || e.data;
     return e.data && fine >= primoIso && e.data <= ultimoIso;

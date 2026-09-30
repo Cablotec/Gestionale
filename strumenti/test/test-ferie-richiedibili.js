@@ -20,11 +20,13 @@ let GRUPPI_ESENTI = [];
 const sandbox = { console, state: {},
   getGruppiEsentiAssenze: () => GRUPPI_ESENTI };
 vm.createContext(sandbox);
-// La funzione vera, presa da mobile.html: il test prova QUELLA, non una copia.
+// La funzione vera, presa dal motore (domain/calendario.js dal 30 set, prima
+// era copiata in mobile.html e in app.js): il test prova QUELLA.
+const cal = fs.readFileSync(path.resolve(G, 'domain/calendario.js'), 'utf8').replace(/\r\n/g, '\n');
 {
-  const a = src.indexOf('function tipoInseribileDa(tipo, esente) {');
-  if (a < 0) { console.error('KO: tipoInseribileDa non trovata in mobile.html'); process.exit(1); }
-  vm.runInContext(src.slice(a, src.indexOf('\n}\n', a) + 3), sandbox);
+  const a = cal.indexOf('function tipoInseribileDa(tipo, esente) {');
+  if (a < 0) { console.error('KO: tipoInseribileDa non trovata in domain/calendario.js'); process.exit(1); }
+  vm.runInContext(cal.slice(a, cal.indexOf('\n}\n', a) + 3), sandbox);
 }
 
 let ok = 0, ko = 0;
@@ -126,9 +128,12 @@ sez('TUTTE LE PORTE, NON UNA SOLA');
   const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
   t('il telefono filtra', src.includes('tipoInseribileDa(t, esente)'));
   t('il gestionale filtra', app.includes('tipoInseribileDa(t, esenteQui)'));
-  t('la regola e la STESSA funzione nelle due porte',
-    src.includes("if (chi === 'esenti') return !!esente;") &&
-    app.includes("if (chi === 'esenti') return !!esente;"));
+  // Dal 30 set la regola sta UNA volta, nel motore, e nessuna porta ne ha
+  // una copia sua.
+  t('la regola sta nel motore', cal.includes("if (chi === 'esenti') return !!esente;"));
+  t('e non e copiata in nessuna porta',
+    !src.includes('function tipoInseribileDa') && !app.includes('function tipoInseribileDa'));
+  t('il telefono carica il motore', src.includes('src="domain/calendario.js'));
   t('e il kiosk non chiede assenze',
     !fs.readFileSync(path.resolve(G, 'kiosk.html'), 'utf8').includes('tipi_assenza'));
 }
@@ -137,18 +142,13 @@ sez('LE DATE PASSATE NON LE INSERISCE NESSUNO');
 {
   // 11 set: "le date passate no!". L esenzione salta la finestra, non il
   // passato — e a farlo e l ORDINE dei controlli.
-  const app = fs.readFileSync(path.resolve(G, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  // Una funzione sola per le due porte (domain/calendario.js dal 30 set).
   const posizione = (s, testo) => s.indexOf(testo);
-  const bloccoApp = app.slice(app.indexOf('function verificaAccessoAssenza'),
-                              app.indexOf('const finestre = getFinestreAssenze();',
-                                app.indexOf('function verificaAccessoAssenza')));
-  t('nel gestionale il passato si controlla PRIMA dell esenzione',
-    posizione(bloccoApp, 'iso < oggiIso') < posizione(bloccoApp, 'esenti.includes'));
-  const bloccoMob = src.slice(src.indexOf('function verificaAccessoAssenza'),
-                              src.indexOf('const finestre = getFinestreAssenze();',
-                                src.indexOf('function verificaAccessoAssenza')));
-  t('e sul telefono pure',
-    posizione(bloccoMob, 'iso < oggiIso') < posizione(bloccoMob, 'esenti.includes'));
+  const blocco = cal.slice(cal.indexOf('function verificaAccessoAssenza'),
+                           cal.indexOf('const finestre = getFinestreAssenze();',
+                             cal.indexOf('function verificaAccessoAssenza')));
+  t('il passato si controlla PRIMA dell esenzione',
+    blocco.length > 0 && posizione(blocco, 'iso < oggiIso') < posizione(blocco, 'esenti.includes'));
 }
 
 sez('L AMMINISTRATORE VEDE TUTTO');

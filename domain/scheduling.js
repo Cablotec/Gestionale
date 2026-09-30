@@ -14,10 +14,12 @@
    3) Carico %: distribuzione ore sul periodo, pesi addetti/fornitori,
       carico pianificato per operatore e fornitore.
 
-   Dipendenze rimaste in index (risolte a runtime come globali):
-   toLocalISO/parseISODate (formato), giornoNonLavorativo, festiviNazIsoSet,
-   chiusureIsoSet, state.*, getOperazioneAddetti, getOperazioneFornitoriDettaglio,
-   quantitaConsegnata, orariUtente e affini.
+   Dipendenze (risolte a runtime come globali):
+   - da domain/calendario.js, caricato PRIMA: toLocalISO/parseISODate,
+     isGiornoNonLavorativo, festiviNazIsoSet, chiusureIsoSet;
+   - rimaste in app.js: giornoNonLavorativo, getOperazioneAddetti,
+     getOperazioneFornitoriDettaglio, quantitaConsegnata, orariUtente e affini;
+   - state.*.
    ═══════════════════════════════════════════════════════════════════ */
 
 // Calcola data inizio: data scadenza - N giorni lavorativi

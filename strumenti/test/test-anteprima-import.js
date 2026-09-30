@@ -46,9 +46,12 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 // Il motore vero: il piano non e finto, lo calcola `analizzaImportOrdini`.
+// I formattatori di date (z, parseISODate, fmtIT) stanno in domain/calendario.js
+// dal 30 set: si caricano da li', come fanno le pagine.
+vm.runInContext(fs.readFileSync(path.resolve(G, 'domain/calendario.js'), 'utf8').replace(/\r\n/g, '\n'), sandbox);
 vm.runInContext(fs.readFileSync(path.resolve(G, 'domain/scheduling.js'), 'utf8').replace(/\r\n/g, '\n'), sandbox);
-// I formattatori veri, presi dal file: se uno sparisse, il test cade.
-['const z =', 'const parseISODate', 'const fmtIT', 'const fmtE'].forEach(m => {
+// I formattatori rimasti nel guscio, presi dal file: se uno sparisse, il test cade.
+['const fmtE'].forEach(m => {
   const i = src.indexOf(m);
   if (i < 0) { console.error('KO: manca ' + m); process.exit(1); }
   vm.runInContext(src.slice(i, src.indexOf('\n', src.indexOf(';', i))), sandbox);
