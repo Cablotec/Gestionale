@@ -10,11 +10,12 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-30.02"></script>
+<script src="core/db.js?v=2026-09-30.03"></script>
 <!-- Il MOTORE (30 set): il telefono usa le regole del gestionale invece di copiarle. -->
-<script src="domain/calendario.js?v=2026-09-30.02"></script>
-<script src="domain/scheduling.js?v=2026-09-30.02"></script>
-<script src="core/timbri.js?v=2026-09-30.02"></script>
+<script src="domain/calendario.js?v=2026-09-30.03"></script>
+<script src="domain/mezzi.js?v=2026-09-30.03"></script>
+<script src="domain/scheduling.js?v=2026-09-30.03"></script>
+<script src="core/timbri.js?v=2026-09-30.03"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -602,26 +603,6 @@ const opCompletataDaMe = (uid, opId) => {
   const righe = righeAddetto(uid, opId);
   return righe.length > 0 && righe.every(r => r.completata_il);
 };
-// Riga pertinente alla sessione: per fase_id, poi per tipo, poi l'unica incompleta.
-function rigaPerSessione(uid, sess) {
-  if (!sess || !sess.operazione_id) return null;
-  const righe = righeAddetto(uid, sess.operazione_id);
-  if (righe.length === 0) return null;
-  if (sess.fase_id) {
-    const r = righe.find(x => x.fase_id === sess.fase_id);
-    if (r) return r;
-  }
-  if (sess.tipo_lavorazione_id) {
-    const r = righe.find(x => {
-      if (!x.fase_id) return false;
-      const f = state.opFasi.find(ff => ff.id === x.fase_id);
-      return f && f.tipo_lavorazione_id === sess.tipo_lavorazione_id;
-    });
-    if (r) return r;
-  }
-  const inc = righe.filter(x => !x.completata_il);
-  return inc.length === 1 ? inc[0] : null;
-}
 const fasiDi = (o) => state.opFasi
   .filter(f => f.operazione_id === o.id)
   .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
@@ -699,8 +680,9 @@ function renderAuth(msg) {
       beep('ok');
     } catch (e) {
       btn.disabled = false; btn.textContent = 'Entra';
-      const m = e.message || String(e);
-      err.textContent = /invalid login|credenziali|invalid/i.test(m) ? 'Email o password errate' : m;
+      // La traduzione comune (core/db.js): lascia passare testuali i messaggi
+      // nostri, come "Questo account non è collegato a un operatore".
+      err.textContent = erroreAccessoInItaliano(e);
       beep('err');
     }
   };
@@ -747,45 +729,6 @@ function prenotazioniMezzoGiorno(mezzoId, data) {
     .sort((a, b) => (a.ora_inizio || '').localeCompare(b.ora_inizio || ''));
 }
 
-// Conflitti — portati dal gestionale (intervalli semiaperti [inizio, fine)).
-function checkSovrapposizioni(mezzoId, dataInizio, dataFine, escludiId, oraInizio, oraFine) {
-  const aInizio = new Date(dataInizio + 'T' + (oraInizio || '00:00'));
-  const aFine = new Date(dataFine + 'T' + (oraFine || '23:59'));
-  const usaOrari = !isNaN(aInizio.getTime()) && !isNaN(aFine.getTime());
-  return (state.prenotazioni || []).filter(p => {
-    if (p.mezzo_id !== mezzoId) return false;
-    if (escludiId && p.id === escludiId) return false;
-    if (!(p.data_inizio <= dataFine && p.data_fine >= dataInizio)) return false;
-    if (usaOrari) {
-      const bInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
-      const bFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
-      if (!isNaN(bInizio.getTime()) && !isNaN(bFine.getTime())) return aInizio < bFine && bInizio < aFine;
-    }
-    return true;
-  });
-}
-function checkSovrapposizioniOperatori(utentiIds, dataInizio, dataFine, escludiId, oraInizio, oraFine) {
-  const ids = new Set(utentiIds || []);
-  if (ids.size === 0) return [];
-  const aInizio = new Date(dataInizio + 'T' + (oraInizio || '00:00'));
-  const aFine = new Date(dataFine + 'T' + (oraFine || '23:59'));
-  const usaOrari = !isNaN(aInizio.getTime()) && !isNaN(aFine.getTime());
-  const res = [];
-  (state.prenotazioni || []).forEach(p => {
-    if (escludiId && p.id === escludiId) return;
-    const comuni = (state.prenOp || [])
-      .filter(r => r.prenotazione_id === p.id && ids.has(r.utente_id)).map(r => r.utente_id);
-    if (comuni.length === 0) return;
-    if (!(p.data_inizio <= dataFine && p.data_fine >= dataInizio)) return;
-    if (usaOrari) {
-      const bInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
-      const bFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
-      if (!isNaN(bInizio.getTime()) && !isNaN(bFine.getTime())) { if (!(aInizio < bFine && bInizio < aFine)) return; }
-    }
-    res.push({ pren: p, operatori: comuni });
-  });
-  return res;
-}
 
 // ─── Lista "Le mie prenotazioni" ───
 function renderMezzi() {

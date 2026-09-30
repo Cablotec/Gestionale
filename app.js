@@ -363,8 +363,9 @@ const _kioskParam = new URLSearchParams(location.search).get('kiosk');
 const IS_KIOSK = (window.CABLOTEC_MODE === 'kiosk') || _kioskParam === '';
 const KIOSK_PARAM_INVALIDO = _kioskParam !== null && _kioskParam !== '';
 
-// Credenziali account kiosk condiviso (creato a mano su Supabase, vedi istruzioni)
-const KIOSK_EMAIL = 'kiosk@cablotec.local';
+// Account kiosk condiviso (creato a mano su Supabase, vedi istruzioni).
+// L'indirizzo sta UNA volta, in core/db.js (30 set): qui era riscritto a mano.
+const KIOSK_EMAIL = APP_EMAIL;
 // ⚠⚠ QUI C'ERA LA PASSWORD, ED E' STATA TOLTA il 22 set 2026.
 // Il sito e' servito da GitHub Pages: `core/db.js` e `app.js` arrivano al
 // browser di CHIUNQUE apra il gestionale, quindi qualunque cosa scritta qui
@@ -1446,70 +1447,7 @@ function getPrenotazioneDestinazione(prenId) {
   return { breve, tooltip };
 }
 
-// Verifica sovrapposizioni dalla cache in memoria (no fetch).
-// Considera gli ORARI: due prenotazioni dello stesso mezzo lo stesso giorno in
-// fasce diverse (es. 08:00–12:00 e 14:00–18:00) NON sono in conflitto. Stessa
-// regola del vincolo DB tsrange e di kioskConflittoOrarioMezzo: istanti
-// effettivi, fallback 00:00–23:59 per prenotazioni senza orario, bound [) così
-// che 08–12 e 12–18 (estremi che si toccano) non confliggano.
-function checkSovrapposizioni(mezzoId, dataInizio, dataFine, escludiId, oraInizio, oraFine) {
-  // Istanti della prenotazione in esame.
-  const aInizio = new Date(dataInizio + 'T' + (oraInizio || '00:00'));
-  const aFine = new Date(dataFine + 'T' + (oraFine || '23:59'));
-  const usaOrari = !isNaN(aInizio.getTime()) && !isNaN(aFine.getTime());
 
-  const res = state.prenotazioni.filter(p => {
-    if (p.mezzo_id !== mezzoId) return false;
-    if (escludiId && p.id === escludiId) return false;
-    // Filtro grossolano per giorno: se i giorni non si toccano, niente conflitto.
-    if (!(p.data_inizio <= dataFine && p.data_fine >= dataInizio)) return false;
-    // Affinamento orario (se disponibili gli istanti di entrambe).
-    if (usaOrari) {
-      const bInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
-      const bFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
-      if (!isNaN(bInizio.getTime()) && !isNaN(bFine.getTime())) {
-        // Sovrapposizione su intervalli semiaperti [inizio, fine).
-        return aInizio < bFine && bInizio < aFine;
-      }
-    }
-    return true;
-  });
-  return res;
-}
-
-// Conflitto OPERATORE: lo stesso operatore non può stare su due mezzi (due
-// prenotazioni diverse) che si sovrappongono nel tempo. Stessa semantica a
-// intervalli semiaperti [inizio, fine) di checkSovrapposizioni: 08–12 e 12–18
-// NON confliggono. Ritorna [{ pren, operatori:[id...] }] per ogni conflitto.
-function checkSovrapposizioniOperatori(utentiIds, dataInizio, dataFine, escludiId, oraInizio, oraFine) {
-  const ids = new Set(utentiIds || []);
-  if (ids.size === 0) return [];
-  const aInizio = new Date(dataInizio + 'T' + (oraInizio || '00:00'));
-  const aFine = new Date(dataFine + 'T' + (oraFine || '23:59'));
-  const usaOrari = !isNaN(aInizio.getTime()) && !isNaN(aFine.getTime());
-
-  const res = [];
-  state.prenotazioni.forEach(p => {
-    if (escludiId && p.id === escludiId) return;
-    // Operatori di QUESTA prenotazione che coincidono con quelli in esame.
-    const comuni = (state.prenOp || [])
-      .filter(r => r.prenotazione_id === p.id && ids.has(r.utente_id))
-      .map(r => r.utente_id);
-    if (comuni.length === 0) return;
-    // Filtro grossolano per giorno.
-    if (!(p.data_inizio <= dataFine && p.data_fine >= dataInizio)) return;
-    // Affinamento orario (se disponibili gli istanti di entrambe).
-    if (usaOrari) {
-      const bInizio = new Date(p.data_inizio + 'T' + (p.ora_inizio || '00:00'));
-      const bFine = new Date(p.data_fine + 'T' + (p.ora_fine || '23:59'));
-      if (!isNaN(bInizio.getTime()) && !isNaN(bFine.getTime())) {
-        if (!(aInizio < bFine && bInizio < aFine)) return;
-      }
-    }
-    res.push({ pren: p, operatori: comuni });
-  });
-  return res;
-}
 
 // Conflitto ORARIO (usato dal kiosk al check-out mezzo).
 // Calcola gli istanti effettivi di ogni prenotazione usando anche
@@ -14366,22 +14304,9 @@ async function chiudiSessioniPausaPranzo() {
 
 // Supabase risponde in inglese. Chi legge questa schermata sta in officina
 // davanti a una postazione che non parte: "Invalid login credentials" non
-// gli dice niente, e soprattutto non gli dice COSA FARE.
-// ⚠ Gli errori non riconosciuti si mostrano comunque testuali: nascondere
-// quello che non si sa tradurre lascerebbe senza appiglio chi deve chiamare
-// e spiegare cosa vede.
-function erroreAccessoInItaliano(err) {
-  const t = String((err && err.message) || err || '').toLowerCase();
-  if (t.includes('invalid login credentials')) return 'Indirizzo o password non corretti.';
-  if (t.includes('email not confirmed')) return 'Account non ancora confermato.';
-  if (t.includes('too many requests') || t.includes('rate limit')) {
-    return 'Troppi tentativi. Aspetta un minuto e riprova.';
-  }
-  if (t.includes('failed to fetch') || t.includes('networkerror') || t.includes('load failed')) {
-    return 'Nessuna connessione: controlla la rete e riprova.';
-  }
-  return (err && err.message) || 'Accesso non riuscito';
-}
+// gli dice niente, e soprattutto non gli dice COSA FARE. La traduzione,
+// `erroreAccessoInItaliano`, sta in core/db.js dal 30 set: la usano tutte
+// le pagine con un accesso.
 
 // ── Accesso della POSTAZIONE, una volta sola ──
 // Sostituisce l'autologin che portava la password nel codice pubblicato.
@@ -15588,37 +15513,6 @@ function addettoRigheUtenteOp(uid, opId) {
 function opCompletataDaUtente(uid, opId) {
   const righe = addettoRigheUtenteOp(uid, opId);
   return righe.length > 0 && righe.every(r => r.completata_il);
-}
-// Riga addetto pertinente alla sessione in corso: match per fase_id della
-// sessione, poi per tipo di lavorazione della fase, poi — se l'utente ha una
-// sola riga non completata — quella. Altrimenti null (niente "ho finito").
-function rigaPerSessione(uid, sess) {
-  if (!sess || !sess.operazione_id) return null;
-  // Solo righe non ancora completate: sono le fasi che l'operatore può "finire".
-  const righe = addettoRigheUtenteOp(uid, sess.operazione_id).filter(x => !x.completata_il);
-  if (righe.length === 0) return null;
-  // 1) match esatto sulla fase della sessione
-  if (sess.fase_id) {
-    const r = righe.find(x => x.fase_id === sess.fase_id);
-    if (r) return r;
-  }
-  // 2) match per tipo: riga la cui fase ha lo stesso tipo timbrato
-  if (sess.tipo_lavorazione_id) {
-    const r = righe.find(x => {
-      if (!x.fase_id) return false;
-      const f = (state.opFasi || []).find(ff => ff.id === x.fase_id);
-      return f && f.tipo_lavorazione_id === sess.tipo_lavorazione_id;
-    });
-    if (r) return r;
-  }
-  // 3) un'unica riga con fase specifica → è quella
-  const conFase = righe.filter(x => x.fase_id);
-  if (conFase.length === 1) return conFase[0];
-  // 4) riga "tutta la commessa" (fase_id null), se presente
-  const tutta = righe.find(x => !x.fase_id);
-  if (tutta) return tutta;
-  // 5) ripiego: la prima incompleta, così la scelta compare comunque
-  return righe[0];
 }
 // Etichetta leggibile della fase di una riga addetto (nome del tipo lavorazione).
 function etichettaFaseAddetto(riga) {

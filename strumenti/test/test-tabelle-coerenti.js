@@ -95,7 +95,21 @@ REGOLE.forEach(n => {
   const h = leggi(g);
   const iCal = h.indexOf('src="domain/calendario.js'), iSch = h.indexOf('src="domain/scheduling.js');
   t(g + ' carica il motore del calendario prima della pianificazione', iCal >= 0 && iSch >= 0 && iCal < iSch);
+  t(g + ' carica le regole dei mezzi', h.includes('src="domain/mezzi.js'));
 });
+
+sez('LE ALTRE REGOLE COMUNI, UNA VOLTA SOLA (30 set)');
+const srcMez = leggi('domain/mezzi.js'), srcDb = leggi('core/db.js'), srcPre = leggi('prelievo.html');
+const pagine = [['app.js', srcApp], ['mobile.html', srcMob], ['prelievo.html', srcPre]];
+[['checkSovrapposizioni', srcMez, 'domain/mezzi.js'],
+ ['checkSovrapposizioniOperatori', srcMez, 'domain/mezzi.js'],
+ ['erroreAccessoInItaliano', srcDb, 'core/db.js']].forEach(([n, casa, dove]) => {
+  const altrove = pagine.filter(([, s]) => definita(s, n)).map(([p]) => p);
+  t(n + ' in ' + dove + ' e in nessuna pagina' + (altrove.length ? ' (anche in ' + altrove.join(', ') + ')' : ''),
+    definita(casa, n) && !altrove.length);
+});
+// Era morta in tutte e due le copie: nessuno la chiamava piu'.
+t('rigaPerSessione non esiste piu', pagine.every(([, s]) => !definita(s, 'rigaPerSessione')));
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);

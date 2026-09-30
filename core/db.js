@@ -241,3 +241,23 @@ async function assicuraSessioneValida() {
     }
   }
 }
+
+// Gli errori di accesso di Supabase arrivano in INGLESE: si traducono i
+// quattro casi veri (credenziali, rete, troppi tentativi, account non
+// confermato) e si lascia passare testuale quello che non si conosce —
+// nasconderlo lascerebbe senza appiglio chi deve chiamare e descrivere.
+// UNA per tutte le pagine (30 set): gestionale e prelievo ne avevano una
+// copia a testa, il telefono una terza versione che conosceva solo la
+// password sbagliata.
+function erroreAccessoInItaliano(err) {
+  const t = String((err && err.message) || err || '').toLowerCase();
+  if (t.includes('invalid login credentials')) return 'Indirizzo o password non corretti.';
+  if (t.includes('email not confirmed')) return 'Account non ancora confermato.';
+  if (t.includes('too many requests') || t.includes('rate limit')) {
+    return 'Troppi tentativi. Aspetta un minuto e riprova.';
+  }
+  if (t.includes('failed to fetch') || t.includes('networkerror') || t.includes('load failed')) {
+    return 'Nessuna connessione: controlla la rete e riprova.';
+  }
+  return (err && err.message) || 'Accesso non riuscito';
+}

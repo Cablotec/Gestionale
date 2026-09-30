@@ -10,7 +10,7 @@
 <title>Prelievo Magazzino — Cablotec</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-09-30.02"></script>
+<script src="core/db.js?v=2026-09-30.03"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
 <style>
@@ -229,21 +229,6 @@ function show(id) {
   $('#' + id).classList.add('on');
 }
 
-// ═══════════════ Boot ═══════════════
-// Copia dichiarata di `erroreAccessoInItaliano` in app.js: questa pagina non
-// carica app.js. Se si corregge una, correggere l'altra.
-function erroreAccessoInItaliano(err) {
-  const t = String((err && err.message) || err || '').toLowerCase();
-  if (t.includes('invalid login credentials')) return 'Indirizzo o password non corretti.';
-  if (t.includes('email not confirmed')) return 'Account non ancora confermato.';
-  if (t.includes('too many requests') || t.includes('rate limit')) {
-    return 'Troppi tentativi. Aspetta un minuto e riprova.';
-  }
-  if (t.includes('failed to fetch') || t.includes('networkerror') || t.includes('load failed')) {
-    return 'Nessuna connessione: controlla la rete e riprova.';
-  }
-  return (err && err.message) || 'Accesso non riuscito';
-}
 
 // Accesso del DISPOSITIVO, una volta sola. Gemella di
 // `mostraAccessoPostazione()` in app.js: stessa scelta, stesse ragioni.
