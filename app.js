@@ -2925,10 +2925,6 @@ function openOperatoreModal(u) {
       if (aziendaAttiva) {
         payload.azienda_id = payload.esterno ? (fd.get('azienda_id') || null) : null;
       }
-      // Conto lavoro: vale solo per i clienti, come la tariffa.
-      if (contoLavoroDisponibile) {
-        payload.materiale_dal_cliente = isCliente ? chkContoLav.checked : false;
-      }
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
       const { data, error } = await eseguiConRetry(
         () => isNew ? sb.from('utenti').insert(payload).select().single() : sb.from('utenti').update(payload).eq('id', u.id).select().single(),
@@ -3331,6 +3327,13 @@ function openClienteModal(c) {
           return toast('Tariffa cliente: valore non valido', 'err');
         }
         payload.tariffa_cliente = isCliente ? tcVal : null;
+      }
+      // Conto lavoro: vale solo per i clienti, come la tariffa.
+      // ⚠ Dall'11 al 30 set queste righe stavano per errore nel salvataggio
+      // dell'UTENTE (openOperatoreModal): li' le variabili non esistevano e
+      // Salva si fermava in silenzio, mentre qui la spunta non si salvava mai.
+      if (contoLavoroDisponibile) {
+        payload.materiale_dal_cliente = isCliente ? chkContoLav.checked : false;
       }
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
       btnSave.disabled = true;
