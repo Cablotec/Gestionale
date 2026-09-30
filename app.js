@@ -1581,8 +1581,32 @@ function bindTabs() {
       selectArea(b.dataset.area);
     };
   });
-  // All'avvio, seleziono la macro-area "Calendari"
-  selectArea('calendari');
+  // All'avvio si riapre la scheda scritta nell'indirizzo (#pianificazione…),
+  // altrimenti "Calendari". (30 set, chiesto da Nico: aggiornando la pagina
+  // ripartiva sempre da Calendari.)
+  const dove = schedaDaIndirizzo();
+  if (dove) switchToTab(dove.area, dove.tab);
+  else selectArea('calendari');
+}
+
+// La scheda che l'indirizzo chiede, se esiste e questa persona la puo' vedere.
+// Ritorna { area, tab } o null.
+// ⚠ L'id nell'indirizzo e' SCRITTO fuori dal codice: un preferito salvato oggi
+// sopravvive a un rename domani. Per questo si controlla contro TAB_STRUCTURE
+// e, se non combacia, si riparte da Calendari invece di aprire una scheda
+// sconosciuta. (Gli id "si possono rinominare perche' non li salva nessuno",
+// scritto l'11 set: da oggi un preferito li salva. Rinominando un id, un
+// vecchio indirizzo porta a Calendari, non a una pagina rotta.)
+function schedaDaIndirizzo() {
+  const id = decodeURIComponent((location.hash || '').replace(/^#/, '')).trim();
+  if (!id) return null;
+  const isAdmin = state.profile?.ruolo === 'admin';
+  for (const [area, a] of Object.entries(TAB_STRUCTURE)) {
+    if (a.adminOnly && !isAdmin) continue;
+    const t = a.tabs.find(x => x.id === id);
+    if (t && !(t.adminOnly && !isAdmin)) return { area, tab: id };
+  }
+  return null;
 }
 
 function selectArea(areaId) {
@@ -1620,6 +1644,13 @@ function selectTab(tabId) {
     b.classList.toggle('active', b.dataset.tab === tabId);
   });
   renderTab(tabId);
+  // La scheda aperta finisce nell'indirizzo, cosi' aggiornando si riparte da
+  // qui (vedi schedaDaIndirizzo). `replaceState` e non `location.hash`: non
+  // aggiunge una voce alla cronologia a ogni clic, quindi "Indietro" del
+  // browser continua a uscire dal gestionale come prima.
+  if (!IS_KIOSK) {
+    try { history.replaceState(null, '', '#' + tabId); } catch (_) {}
+  }
 }
 
 // Salta a una tab di una specifica macro-area (es. dal calendario → Gestione/Assenze)
