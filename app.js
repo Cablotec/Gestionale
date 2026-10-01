@@ -6090,6 +6090,18 @@ function openArticoloModal(a, opts) {
       const fasiPayload = fasi
         .filter(f => f.tipo_lavorazione_id)
         .map((f, i) => ({ tipo_lavorazione_id: f.tipo_lavorazione_id, minuti_unitari: Number(f.minuti_unitari) || 0, ordine: i + 1 }));
+      // Le fasi con storico che NON sono in lista sono state tolte col ✕: si
+      // dichiarano `escluso`, o fasiEffettiveArticolo le rimetterebbe dallo
+      // storico alla prossima apertura. Ricalcolate a ogni salvataggio:
+      // rimettere la fase in lista toglie da sola l'esclusione.
+      if (!isNew) {
+        const inLista = new Set(fasiPayload.map(f => f.tipo_lavorazione_id));
+        (state.tipiLav || []).forEach(t => {
+          if (inLista.has(t.id)) return;
+          const st = storicoMinutiPz(a.id, t.id);
+          if (st && st.minPz > 0) fasiPayload.push({ tipo_lavorazione_id: t.id, escluso: true });
+        });
+      }
       // minuti_unitari = tempo PAGATO, sempre manuale (mai sovrascritto dalle fasi).
       const minutiRaw = (fd.get('minuti_unitari') || '').toString().trim();
       const minutiVal = minutiRaw === '' ? null : Number(minutiRaw);

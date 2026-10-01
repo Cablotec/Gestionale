@@ -325,7 +325,13 @@ function fasiEffettiveArticolo(articoloId) {
   if (!art) return [];
   const out = [];
   const visti = new Set();
-  const tmpl = (Array.isArray(art.fasi) ? art.fasi.slice() : [])
+  // Una voce `escluso:true` e una fase TOLTA A MANO dalla scheda prodotto:
+  // ha storico, ma chi conosce il pezzo ha detto che non si fa piu'. Senza
+  // questa riga il ciclo qui sotto la rimetterebbe dallo storico a ogni
+  // apertura, e il ✕ della scheda non avrebbe effetto (mail Cocco, 1 ott).
+  const tutte = Array.isArray(art.fasi) ? art.fasi : [];
+  tutte.forEach(f => { if (f && f.escluso && f.tipo_lavorazione_id) visti.add(f.tipo_lavorazione_id); });
+  const tmpl = tutte.filter(f => f && !f.escluso).slice()
     .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
   tmpl.forEach(f => {
     if (!f.tipo_lavorazione_id || visti.has(f.tipo_lavorazione_id)) return;
