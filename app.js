@@ -11203,10 +11203,35 @@ function openOperazioneModal(o, opts) {
               title:'Elimina questo lotto',
               onclick: async () => {
                 if (!confirm(`Eliminare il lotto del ${fmtIT(c.data)} (${c.quantita} pz)?`)) return;
+                const totPrima = quantitaConsegnata(o.id);
                 const { error } = await sb.from('consegne_commessa').delete().eq('id', c.id);
                 if (error) return toast('Errore eliminazione: '+error.message, 'err');
                 state.consegneCommessa = state.consegneCommessa.filter(x => x.id !== c.id);
                 toast('Lotto eliminato');
+                // Rovescio dell'ultimo lotto che scrive `completata` (1 ott,
+                // Nico: "cancellando 20 pezzi prodotti non mi torna ad aperto").
+                // Si riapre SOLO se la completata era retta dai pezzi (prima
+                // del taglio prodotti >= ordinati): una chiusura a saldo, gia'
+                // sotto l'ordinato, e' una dichiarazione e resta. `spedita` non
+                // si tocca: li' comandano le spedizioni.
+                const qtaOrdDel = Number(o.quantita || 0);
+                const statoFormDel = form.querySelector('[name="stato"]')?.value;
+                if (qtaOrdDel > 0 && totPrima >= qtaOrdDel && quantitaConsegnata(o.id) < qtaOrdDel
+                    && o.stato === 'completata' && statoFormDel !== 'spedita') {
+                  const { data: agg, error: errSt } = await eseguiConRetry(
+                    () => sb.from('operazioni').update({ stato: 'aperta' }).eq('id', o.id).select().single(),
+                    { label: 'stato aperta' });
+                  if (errSt) {
+                    toast('Lotto eliminato, ma lo stato non si è aggiornato: ' + errSt.message, 'err');
+                  } else {
+                    Object.assign(o, agg);
+                    const idx = state.operazioni.findIndex(x => x.id === agg.id);
+                    if (idx >= 0) state.operazioni[idx] = agg;
+                    const sel = form.querySelector('[name="stato"]');
+                    if (sel) sel.value = 'aperta';
+                    toast('Mancano pezzi · stato riportato ad "aperta"');
+                  }
+                }
                 renderConsegne();
               },
             }, '✕') : el('span'),
@@ -11287,7 +11312,8 @@ function openOperazioneModal(o, opts) {
           // di salvare": chi chiudeva la scheda lasciava la commessa aperta con
           // tutti i pezzi fatti (2026/OC/00233/0010, 4 su 4, trovata lo stesso
           // giorno). Le due meta' dello stesso gesto devono avere la stessa sorte.
-          // ⚠ Solo in AVANTI: togliere un lotto non riapre una completata.
+          // Il rovescio sta nel ✕ del lotto: riapre solo se la completata era
+          // retta dai pezzi (dal 1 ott; prima togliere un lotto non riapriva).
           const nuovoTot = quantitaConsegnata(o.id);
           const statoForm = form.querySelector('[name="stato"]')?.value;
           const daChiudere = (o.stato === 'aperta' || o.stato === 'sospesa')
