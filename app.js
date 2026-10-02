@@ -58,7 +58,7 @@ const state = {
   chiusure: [],            // chiusure aziendali (festivi non nazionali)
   eventi: [],              // eventi aziendali: si VEDONO, non tolgono lavoro
   operazioni: [],          // operazioni di pianificazione
-  opFilter: 'all',      // 'all' | 'aperte' | 'sospese' | 'spedite'
+  opStatiVisibili: null, // Set degli stati visibili in Ordini cliente (null = tutti, vedi statiOrdiniVisibili)
   // Set degli ID cliente da NASCONDERE nella Pianificazione (filtro stile Excel)
   // Si carica/salva da localStorage all'avvio della pagina.
   opClientiEsclusi: new Set(),
@@ -7926,11 +7926,20 @@ async function deleteChiusura(c) {
 // ═══════════════════════════════════════════════════════════
 
 const OP_STATI = {
-  aperta:     { label:'Aperta',     badge:'bok',  color:'var(--grn)' },
-  sospesa:    { label:'Sospesa',    badge:'byel', color:'var(--yel)' },
-  completata: { label:'Completata', badge:'bblu', color:'var(--blu)' },
-  spedita: { label:'Spedita', badge:'bgry', color:'var(--mut)' },
+  // Etichette al MASCHILE dal 2 ott (Nico): la riga e' un ORDINE, non piu' una
+  // commessa. Le chiavi a database restano quelle di sempre (aperta, …).
+  aperta:     { label:'Aperto',     badge:'bok',  color:'var(--grn)' },
+  sospesa:    { label:'Sospeso',    badge:'byel', color:'var(--yel)' },
+  completata: { label:'Completato', badge:'bblu', color:'var(--blu)' },
+  spedita:    { label:'Spedito',    badge:'bgry', color:'var(--mut)' },
 };
+// Gli stati che il filtro di Ordini cliente accende e spegne.
+const OP_STATI_FILTRO = ['aperta', 'sospesa', 'completata', 'spedita'];
+// Stati visibili in Ordini cliente: di default tutti.
+function statiOrdiniVisibili() {
+  if (!(state.opStatiVisibili instanceof Set)) state.opStatiVisibili = new Set(OP_STATI_FILTRO);
+  return state.opStatiVisibili;
+}
 const OP_PREP = {
   vuoto:    { label:'Vuoto',    classe:'vuoto' },
   parziale: { label:'Parziale', classe:'parziale' },
@@ -8600,7 +8609,6 @@ async function scioglieGruppoCommessa(o) {
 // `includiStorico` serve solo all'export: la scheda passa sempre false.
 function pianificazioneFiltrate(includiStorico) {
   const search = (state.opSearch || '').toLowerCase();
-  const filter = state.opFilter || 'all';
   const oggi = toLocalISO(new Date());
 
   let list = state.operazioni.slice();
@@ -8611,17 +8619,12 @@ function pianificazioneFiltrate(includiStorico) {
   if (!includiStorico) {
     list = list.filter(o => !commessaInStorico(o, state.spedizioni, oggi));
   }
-  // Le spedite recenti ci sono ma non si mostrano di default: la vista
-  // normale è il lavoro da fare, non quello appena finito. Il chip SPEDITE
-  // le tira fuori quando servono.
-  if (filter === 'spedite')         list = list.filter(o => o.stato === 'spedita');
-  else if (filter === 'aperte')     list = list.filter(o => o.stato === 'aperta');
-  else if (filter === 'sospese')    list = list.filter(o => o.stato === 'sospesa');
-  else if (filter === 'completate') list = list.filter(o => o.stato === 'completata');
-  // 'all' NON toglie niente: un filtro che si chiama "Tutte" e nasconde le
-  // spedite dell'ultimo mese direbbe una cosa falsa, e il conteggio in alto
-  // non corrisponderebbe alla lista sotto. Quello che questa scheda non
-  // mostra è già stato deciso una riga più su, dal confine con lo Storico.
+  // Filtro stato a SCELTA MULTIPLA (2 ott, Nico): si parte con tutti e quattro
+  // accesi, che e' quello che faceva "Tutte" — e resta vero: tutti accesi non
+  // toglie niente, nemmeno gli spediti dell'ultimo mese. Quello che questa
+  // scheda non mostra lo decide il confine con lo Storico, una riga piu' su.
+  const statiOn = statiOrdiniVisibili();
+  if (statiOn.size < OP_STATI_FILTRO.length) list = list.filter(o => statiOn.has(o.stato));
 
   // Filtro clienti esclusi (stile Excel multi-select)
   if (state.opClientiEsclusi && state.opClientiEsclusi.size > 0) {
@@ -8657,7 +8660,10 @@ function pianificazioneFiltrate(includiStorico) {
   });
 
   const filtriAttivi = [];
-  if (filter !== 'all') filtriAttivi.push('stato: ' + filter);
+  if (statiOn.size < OP_STATI_FILTRO.length)
+    filtriAttivi.push('stato: ' + (statiOn.size
+      ? OP_STATI_FILTRO.filter(k => statiOn.has(k)).map(k => OP_STATI[k].label.toLowerCase()).join(', ')
+      : 'nessuno'));
   if (state.opClientiEsclusi && state.opClientiEsclusi.size)
     filtriAttivi.push(state.opClientiEsclusi.size + ' clienti esclusi');
   if (search) filtriAttivi.push('ricerca "' + search + '"');
@@ -8738,7 +8744,6 @@ function mancantiTooltip(mc, numeroOp, oggiIso) {
 function renderPianificazione(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.opSearch || '').toLowerCase();
-  const filter = state.opFilter || 'all';
   const { list } = pianificazioneFiltrate(false);
   // L'ordinamento lo applica pianificazioneFiltrate; qui servono solo per
   // disegnare la freccia sulla colonna attiva.
@@ -8759,27 +8764,32 @@ function renderPianificazione(root) {
   root.innerHTML = '';
   root.append(el('div', { class:'kpis' },
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Totale'),       el('div', { class:'kv ka' }, String(tot))),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Aperte'),        el('div', { class:'kv kg' }, String(aperte))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Aperti'),        el('div', { class:'kv kg' }, String(aperte))),
     el('div', { class:'kpi' }, el('div', { class:'kl' }, 'In ritardo'),    el('div', { class:'kv kr' }, String(inRitardo))),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Sospese'),       el('div', { class:'kv ky' }, String(sospese))),
-    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Completate'),    el('div', { class:'kv kb' }, String(completate))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Sospesi'),       el('div', { class:'kv ky' }, String(sospese))),
+    el('div', { class:'kpi' }, el('div', { class:'kl' }, 'Completati'),    el('div', { class:'kv kb' }, String(completate))),
   ));
 
   // Chips filtro
   const chips = el('div', { class:'chips' });
+  // Scelta multipla: ogni chip accende o spegne il suo stato. Niente "Tutte":
+  // tutti accesi E' tutte, ed e' cosi' che si apre la scheda.
+  const statiOn = statiOrdiniVisibili();
   [
-    { id:'all',        label:'Tutte' },
-    { id:'aperte',     label:'Aperte' },
-    { id:'sospese',    label:'Sospese' },
-    { id:'completate', label:'Completate' },
+    { id:'aperta',     label:'Aperti' },
+    { id:'sospesa',    label:'Sospesi' },
+    { id:'completata', label:'Completati' },
     // L'etichetta dice la REGOLA, non il numero: "48" non spiega perché sono
-    // quelle e non altre, "ultimi 30gg" sì — e chi apre la scheda capisce da
-    // solo dove sono finite le più vecchie.
-    { id:'spedite',    label:'Spedite (ultimi 30gg)' },
+    // quelli e non altri, "ultimi 30gg" sì — e chi apre la scheda capisce da
+    // solo dove sono finiti i più vecchi.
+    { id:'spedita',    label:'Spediti (ultimi 30gg)' },
   ].forEach(opt => {
     chips.append(el('div', {
-      class: 'chip' + (filter === opt.id ? ' act' : ''),
-      onclick: () => { state.opFilter = opt.id; renderTab('pianificazione'); }
+      class: 'chip' + (statiOn.has(opt.id) ? ' act' : ''),
+      onclick: () => {
+        if (statiOn.has(opt.id)) statiOn.delete(opt.id); else statiOn.add(opt.id);
+        renderTab('pianificazione');
+      }
     }, opt.label));
   });
   root.append(chips);
@@ -8868,7 +8878,7 @@ function renderPianificazione(root) {
     // domain che decide dove vive una commessa — non con un'euristica locale.
     const { list: ovunque } = pianificazioneFiltrate(true);
     const oggiVuoto = toLocalISO(new Date());
-    const quiMaNascoste = ovunque.filter(o => o.stato === 'spedita'
+    const quiMaNascoste = statiOrdiniVisibili().has('spedita') ? [] : ovunque.filter(o => o.stato === 'spedita'
       && !commessaInStorico(o, state.spedizioni, oggiVuoto));
     const nelloStorico = ovunque.filter(o => commessaInStorico(o, state.spedizioni, oggiVuoto));
 
@@ -8886,13 +8896,13 @@ function renderPianificazione(root) {
       if (quiMaNascoste.length) {
         box.append(
           el('div', { class:'sub' }, quiMaNascoste.length === 1
-            ? 'Una commessa corrisponde ed è spedita di recente: è in questa scheda, sotto il filtro SPEDITE.'
-            : quiMaNascoste.length + ' commesse corrispondono e sono spedite di recente: sono in questa scheda, sotto il filtro SPEDITE.'),
+            ? 'Un ordine corrisponde ed è spedito di recente: è in questa scheda, sotto il filtro SPEDITI.'
+            : quiMaNascoste.length + ' ordini corrispondono e sono spediti di recente: sono in questa scheda, sotto il filtro SPEDITI.'),
           el('div', { class:'sub', style:'font-family:JetBrains Mono,monospace;font-size:11px;' },
             elenco(quiMaNascoste)),
           el('button', { class:'btng', style:'margin-top:8px;',
-            onclick: () => { state.opFilter = 'spedite'; renderTab('pianificazione'); },
-          }, 'Mostra le spedite'));
+            onclick: () => { statiOrdiniVisibili().add('spedita'); renderTab('pianificazione'); },
+          }, 'Mostra gli spediti'));
       }
       if (nelloStorico.length) {
         box.append(
@@ -9373,16 +9383,16 @@ function renderPianificazione(root) {
           quickStato(o, nuovo);
         },
       },
-        el('option', { value:'aperta' }, 'Aperta'),
-        el('option', { value:'sospesa' }, 'Sospesa'),
-        el('option', { value:'completata' }, 'Completata'),
+        el('option', { value:'aperta' }, OP_STATI.aperta.label),
+        el('option', { value:'sospesa' }, OP_STATI.sospesa.label),
+        el('option', { value:'completata' }, OP_STATI.completata.label),
         // "Spedita" mancava perché prima le spedite in questa scheda non
         // arrivavano mai. Dal 27 ago ci sono (chip SPEDITE), e senza questa
         // opzione `sel.value = 'spedita'` non trovava niente da selezionare:
         // il menu restava VUOTO su ogni commessa spedita. Sceglierla non
         // cambia lo stato di colpo — apre `quickSpedizione`, che chiede data,
         // quantità e DDT, ed è la strada giusta per un passaggio del genere.
-        el('option', { value:'spedita' }, 'Spedita'),
+        el('option', { value:'spedita' }, OP_STATI.spedita.label),
       );
       sel.value = o.stato; // imposto il valore corrente in modo affidabile
       statoCell.append(sel);
@@ -10287,10 +10297,10 @@ function openOperazioneModal(o, opts) {
 
   // Stato + preparazione
   const selStato = el('select', { name:'stato' },
-    el('option', { value:'aperta' }, 'Aperta'),
-    el('option', { value:'sospesa' }, 'Sospesa'),
-    el('option', { value:'completata' }, 'Completata'),
-    el('option', { value:'spedita' }, 'Spedita'),
+    el('option', { value:'aperta' }, OP_STATI.aperta.label),
+    el('option', { value:'sospesa' }, OP_STATI.sospesa.label),
+    el('option', { value:'completata' }, OP_STATI.completata.label),
+    el('option', { value:'spedita' }, OP_STATI.spedita.label),
   );
   selStato.value = o.stato || 'aperta';
 

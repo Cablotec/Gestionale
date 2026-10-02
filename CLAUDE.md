@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-02.03`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-02.04`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -487,6 +487,7 @@ Chiesto da Nico: *"lista materiali pura con colonne giacenza, mancanti ecc (colo
 - **Prima c era un buco**: 21 commesse non si vedevano in NESSUNA scheda — Ordini cliente nasconde le spedite, lo Storico elenca le SPEDIZIONI, il Gantt il LAVORO ASSEGNATO.
 - **Prova da rifare dopo ogni modifica a queste schede**: `scratchpad/prova_coperture.js` — le due liste devono coprire tutte le commesse, zero doppie e zero orfane. Oggi 422 = 221 + 201.
 - **Storico COMMESSA-centrico**: una riga per commessa (prima una per spedizione). Solo 9 commesse su 219 hanno piu di una spedizione; il dettaglio resta nel modal. Qta = totale spedito, `*` se le spedizioni sono piu d una, data "non registrata" dove manca.
+- **Dal 2 ott il filtro stato e' a SCELTA MULTIPLA** (Aperti · Sospesi · Completati · Spediti ultimi 30gg, `state.opStatiVisibili` via `statiOrdiniVisibili()`), tutti accesi di default: il chip "Tutte" e' sparito perche' tutti accesi E' tutte. Etichette di stato al MASCHILE (`OP_STATI`: Aperto, Sospeso, Completato, Spedito: la riga e' un ordine), chiavi a database invariate.
 - **"Tutte" vuol dire TUTTE**: il chip `all` non toglie le spedite recenti. Un filtro che si chiama Tutte e nasconde qualcosa dice il falso, e il conteggio in alto non corrisponderebbe alla lista. Cosa la scheda non mostra lo decide gia il confine con lo Storico. Il chip si chiama **"Spedite (ultimi 30gg)"**: l etichetta dice la REGOLA, non il numero.
 - **Ordini cliente: colonne ORDINATI / PRODOTTI / SPEDITI**. La **scheda Magazzino e stata tolta** (ridondante: la giacenza e prodotti meno spediti). `pezziInMagazzino()` resta, serve al controllo sulle spedizioni.
 - **Ordinamento "come Excel"** (2 ott, Nico): in Ordini cliente e nella lista Materiali la colonna cliccata per ULTIMA comanda e le due cliccate prima fanno da spareggio (`spareggiDopoClic`, `state.opSortPrec`, `matSortPrec`). Per avere ordine poi posizione si clicca prima Pos e poi Ordine. Il clic singolo fa quello di prima. Pos si ordina come numero (`40` = `0040`).
