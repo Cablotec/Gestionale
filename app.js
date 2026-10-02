@@ -562,6 +562,7 @@ async function afterLogin() {
     ? '<span class="badge bvio">admin</span>' : '<span class="badge bgry">user</span>';
   $('#area-gestione').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#area-impostazioni').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
+  $('#area-strumenti').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   // Bottone Kiosk: admin (per testare/aprire da PC personale) + account kiosk
   // dedicato (perché LUI deve sempre poter tornare al kiosk dei mini-PC)
   const mostraBottoneKiosk = state.profile.ruolo === 'admin' || isKioskRecord(state.profile);
@@ -1552,9 +1553,20 @@ const TAB_STRUCTURE = {
     label: 'Gestione',
     adminOnly: true,
     tabs: [
-      { id: 'codifica',       label: 'Codifica',          adminOnly: true },
       { id: 'aziende',        label: 'Aziende',           adminOnly: true },
       { id: 'analisi_clienti', label: 'Analisi clienti',  adminOnly: true },
+    ],
+  },
+  // Strumenti (2 ott, chiesto da Nico): generatori che producono qualcosa da
+  // portare fuori — un codice, un file da stampare — e non leggono ne'
+  // scrivono i dati del gestionale. La Codifica e' uscita da Gestione
+  // (l'id resta 'codifica': e' la chiave di dispatch e degli indirizzi salvati).
+  strumenti: {
+    label: 'Strumenti',
+    adminOnly: true,
+    tabs: [
+      { id: 'codifica',       label: 'Codificatore',      adminOnly: true },
+      { id: 'tessera_qr',     label: 'Tessera QR',        adminOnly: true },
     ],
   },
   impostazioni: {
@@ -1694,6 +1706,7 @@ function renderTab(name) {
     else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
     else if (name === 'analisi_clienti') renderAnalisiClienti(root);
     else if (name === 'codifica') renderCodifica(root);
+    else if (name === 'tessera_qr') renderTesseraQr(root);
     else if (name === 'fabbisogno') renderFabbisogno(root);
     else if (name === 'attivita_extra') renderAttivitaExtra(root);
     else if (name === 'timbri_extra') renderTimbriExtra(root);
@@ -5206,9 +5219,23 @@ function renderFabbisogno(root) {
   disegnaLista();
 }
 
+// Tessera QR: pagina a se' (tessera-qr.html, three.js + qrcode dentro) caricata
+// in un iframe. Porta con se' librerie che definiscono globali (THREE, qrcode,
+// earcut): nello scope condiviso di app.js rischierebbero di pestarsi i piedi
+// con i nostri nomi. Nell'iframe stanno a casa loro. Stessa origine, quindi il
+// download del 3MF funziona come aprendola da sola.
+function renderTesseraQr(root) {
+  root.innerHTML = '';
+  root.append(el('iframe', {
+    src: 'tessera-qr.html?v=' + encodeURIComponent(APP_VERSIONE || ''),
+    title: 'Tessera QR Cablotec',
+    style: 'display:block;width:100%;height:calc(100vh - 170px);min-height:640px;border:0;background:transparent;',
+  }));
+}
+
 function renderCodifica(root) {
   root.innerHTML = '';
-  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Codifica articoli')));
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Codificatore')));
   root.append(el('div', { class:'sub', style:'margin:-4px 0 14px;max-width:900px;' },
     'Codice a 20 caratteri: 5 di classificazione (piano dei conti + tabelle) '
     + '+ 4 di produttore + 11 di codice produttore (zeri di riempimento davanti). '

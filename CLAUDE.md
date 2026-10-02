@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-01.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-02.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -316,6 +316,7 @@ Chiesto da Nico, ed era il filo aperto 4d da cinque giorni: *"sposta in impostaz
 
 ### Il criterio, che era gia' scritto: **si sta dove si lavora, non dove si configura**
 - In **Gestione** restano le tre schede che si aprono per lavorare su un dato commerciale: **Codifica · Aziende · Analisi clienti**. Erano nove.
+- **Dal 2 ott la Codifica sta in una macro-area sua, STRUMENTI** (admin), rinominata **Codificatore**, accanto a **Tessera QR** (`tessera-qr.html`, pagina a se' in un iframe: porta three.js e qrcode, globali che nello scope di app.js si pesterebbero i piedi coi nostri). Criterio: generatori che producono qualcosa da portare fuori e non toccano i dati. L'id resta `codifica`.
 - In **Impostazioni**: **Calendari · Tipi lavorazione · Utenti · Attivita extra**. Era una sola.
 - Dentro **Impostazioni → Calendari**, quattro sezioni in una schermata: **chiusure ed eventi** (il calendario dell'azienda, quello che si tocca davvero) · **finestre ferie** · **tipi di assenza** · **anagrafica mezzi**.
 - ⚠⚠ **Le due meta' che erano separate adesso sono adiacenti.** Era il sintomo esatto scritto l'11 set: la tendina «Chi lo inserisce» stava in Gestione → Tipi assenza, le finestre ferie in Impostazioni → Calendari, e **non la trovava nemmeno chi l'aveva appena fatta**.
