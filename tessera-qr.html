@@ -4,53 +4,76 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tessera QR Cablotec</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap">
+<script>
+/* Stesso tema del gestionale: la scelta sta in localStorage('theme') sulla
+   stessa origine. Dentro l'iframe l'evento `storage` arriva quando il
+   gestionale cambia tema, e la pagina si allinea senza ricaricare. */
+(function () {
+  function applica() {
+    var t = null; try { t = localStorage.getItem("theme"); } catch (e) {}
+    if (t === "light") document.documentElement.setAttribute("data-theme", "light");
+    else document.documentElement.removeAttribute("data-theme");
+  }
+  applica();
+  window.addEventListener("storage", function (e) {
+    if (e.key !== "theme") return;
+    applica();
+    var c = document.getElementById("url"); // ridisegna le quote col colore nuovo
+    if (c) c.dispatchEvent(new Event("input"));
+  });
+})();
+</script>
 <style>
+/* Colori e font del gestionale (app.css): stessi token, stessi valori. */
 :root {
-  --fondo: #F3F4F5; --carta: #FFFFFF; --testo: #1A1F24; --tenue: #5B6670; --bordo: #C9D0D5;
-  --arancio: #E8571F; --arancio-testo: #FFFFFF; --errore: #B3261E; --quota: #1F57A8;
-  box-sizing: border-box; color-scheme: light;
-  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  --bg:#0f0f0e; --sur:#1a1a18; --sur2:#222220; --brd:#2e2e2a;
+  --acc:#d4ff4e; --txt:#e8e8e2; --mut:#8b8b83; --red:#ff4e6b; --blu:#4eb8ff;
+  --ui:'Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif;
+  --quota: var(--blu);
+  color-scheme: dark;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --fondo: #14181C; --carta: #1D2329; --testo: #E8ECEF; --tenue: #9AA6B0; --bordo: #39434C; --errore: #F2867E; --quota: #8DB8F5; color-scheme: dark; }
+:root[data-theme="light"] {
+  --bg:#f5f5f1; --sur:#ffffff; --sur2:#f0f0ec; --brd:#dcdcd6;
+  --acc:#537600; --txt:#1a1a18; --mut:#6b6b64; --red:#c92648; --blu:#176dbb;
+  color-scheme: light;
 }
-:root[data-theme="dark"] { --fondo: #14181C; --carta: #1D2329; --testo: #E8ECEF; --tenue: #9AA6B0; --bordo: #39434C; --errore: #F2867E; --quota: #8DB8F5; color-scheme: dark; }
-*, *::before, *::after { box-sizing: inherit; }
-html, body { height: 100%; }
-body {
-  margin: 0; background: var(--fondo); color: var(--testo);
-  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-  display: grid; place-items: center; padding: 20px;
-}
-main { width: 100%; max-width: 720px; background: var(--carta); border: 1px solid var(--bordo); border-radius: 6px; padding: 28px; }
-h1 { margin: 0 0 20px; font-size: 22px; font-weight: 600; }
-label { display: block; font-size: 14px; color: var(--tenue); margin-bottom: 6px; }
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--txt); font-family: 'Syne', sans-serif; padding: 0; }
+main { width: 100%; max-width: 760px; background: var(--sur); border: 1px solid var(--brd); border-radius: 4px; padding: 18px 20px 20px; }
+h1 { margin: 0 0 14px; font-size: 15px; font-weight: 700; letter-spacing: 0; }
+label { display: block; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--mut); margin-bottom: 4px; }
 input {
-  width: 100%; font: inherit; font-size: 16px; color: var(--testo); background: var(--carta);
-  border: 1px solid var(--bordo); border-radius: 4px; padding: 11px 12px;
+  width: 100%; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--txt); background: var(--sur2);
+  border: 1px solid var(--brd); border-radius: 4px; padding: 7px 10px; outline: none;
 }
+input:focus { border-color: var(--acc); }
+input::placeholder { color: var(--mut); font-style: italic; }
 button {
-  margin-top: 16px; width: 100%; font: inherit; font-size: 16px; font-weight: 600;
-  background: var(--arancio); color: var(--arancio-testo); border: 0; border-radius: 4px; padding: 13px; cursor: pointer;
+  margin-top: 14px; padding: 9px 14px; background: var(--acc); color: var(--bg);
+  font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  border: none; border-radius: 4px; cursor: pointer; transition: all .2s;
 }
-button:disabled { opacity: .5; cursor: not-allowed; }
-input:focus-visible, button:focus-visible { outline: 2px solid var(--arancio); outline-offset: 2px; }
+button:hover { filter: brightness(.92); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 #vista {
-  position: relative; margin-top: 16px; height: min(62vh, 520px); min-height: 320px;
-  border: 1px solid var(--bordo); border-radius: 4px; overflow: hidden; background: var(--fondo);
+  position: relative; margin-top: 14px; height: min(62vh, 520px); min-height: 320px;
+  border: 1px solid var(--brd); border-radius: 4px; overflow: hidden; background: var(--bg);
   touch-action: none; cursor: grab;
 }
 #vista:active { cursor: grabbing; }
 #vista canvas { display: block; width: 100%; height: 100%; }
-#vuoto { position: absolute; inset: 0; display: grid; place-items: center; color: var(--tenue); font-size: 14px; text-align: center; padding: 20px; pointer-events: none; }
+#vuoto { position: absolute; inset: 0; display: grid; place-items: center; color: var(--mut); font-family: var(--ui); font-size: 12px; text-align: center; padding: 20px; pointer-events: none; }
 .quota {
   position: absolute; transform: translate(-50%, -50%); pointer-events: none; white-space: nowrap;
-  font-size: 12px; font-weight: 600; color: var(--quota); background: var(--fondo); padding: 1px 4px; border-radius: 3px;
-  font-variant-numeric: tabular-nums;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; color: var(--quota);
+  background: var(--bg); padding: 1px 4px; border-radius: 3px;
 }
-#aiuto { margin: 6px 0 0; font-size: 12px; color: var(--tenue); }
-#esito { margin: 12px 0 0; min-height: 1.4em; font-size: 14px; color: var(--tenue); }
-#esito.errore { color: var(--errore); }
+#aiuto { margin: 6px 0 0; font-family: var(--ui); font-size: 11px; color: var(--mut); line-height: 1.45; }
+#esito { margin: 10px 0 0; min-height: 1.4em; font-family: var(--ui); font-size: 12px; color: var(--mut); }
+#esito.errore { color: var(--red); }
 </style>
 </head>
 <body>
