@@ -4671,6 +4671,23 @@ function riquadroImportFabbisogno(root) {
 // scheda per continuare a guardare la stessa cosa, non per ricominciare.
 let matSortKey = 'stato';
 let matSortDir = 1;                  // 1 = crescente, -1 = decrescente
+let matSortPrec = [];                // spareggi: colonne ordinate prima (vedi spareggiDopoClic)
+
+// ORDINAMENTO "COME EXCEL" (2 ott, chiesto da Nico): l'ultima colonna cliccata
+// comanda, quelle cliccate prima restano come SPAREGGIO, nell'ordine in cui
+// erano state scelte. Clic su Pos, poi su Ordine → per ordine, e dentro lo
+// stesso ordine per posizione. Il clic singolo fa esattamente quello di prima.
+// Ritorna la nuova lista di spareggi quando si passa da `vecchia` a `nuova`:
+// la vecchia principale va in testa, la nuova esce dagli spareggi (non puo'
+// spareggiare se stessa). Due livelli bastano: oltre, nessuno ricorda piu'
+// cosa aveva cliccato, e un ordine che non si sa spiegare e' peggio di nessuno.
+const SPAREGGI_MAX = 2;
+function spareggiDopoClic(prec, vecchiaK, vecchiaDir, nuovaK) {
+  return [{ k: vecchiaK, dir: vecchiaDir }].concat(prec || [])
+    .filter(s => s.k && s.k !== nuovaK)
+    .filter((s, i, arr) => arr.findIndex(x => x.k === s.k) === i)
+    .slice(0, SPAREGGI_MAX);
+}
 let matFiltroCat = '';
 let matFiltroOp = '';
 let matCerca = '';
@@ -5126,16 +5143,23 @@ function renderFabbisogno(root) {
     // valore piccolo: e' l'assenza di valore, e non ha posto in una classifica.
     const vuoto = (v) => v == null || v === ''
       || (typeof v === 'number' && !Number.isFinite(v));
-    righe.sort((a, b) => {
-      const va = col.ord(a), vb = col.ord(b);
+    const confronta = (c, dir, a, b) => {
+      const va = c.ord(a), vb = c.ord(b);
       const ea = vuoto(va), eb = vuoto(vb);
       if (ea !== eb) return ea ? 1 : -1;
-      let d = ea ? 0 : (col.num ? (va - vb) : String(va).localeCompare(String(vb)));
-      // Il codice come spareggio, SEMPRE crescente: due righe con la stessa
-      // giacenza devono restare nello stesso ordine quando si inverte la
-      // colonna, o la lista sembra rimescolarsi da sola.
-      if (!d) return String(a.codice || '').localeCompare(String(b.codice || ''));
-      return d * matSortDir;
+      if (ea) return 0;
+      return (c.num ? (va - vb) : String(va).localeCompare(String(vb))) * dir;
+    };
+    const spareggi = matSortPrec
+      .map(s => ({ c: colonne.find(x => x.k === s.k), dir: s.dir }))
+      .filter(s => s.c);
+    righe.sort((a, b) => {
+      let d = confronta(col, matSortDir, a, b);
+      for (let i = 0; !d && i < spareggi.length; i++) d = confronta(spareggi[i].c, spareggi[i].dir, a, b);
+      // Il codice come ultimo spareggio, SEMPRE crescente: due righe con la
+      // stessa giacenza devono restare nello stesso ordine quando si inverte
+      // la colonna, o la lista sembra rimescolarsi da sola.
+      return d || String(a.codice || '').localeCompare(String(b.codice || ''));
     });
     if (!righe.length) {
       tabWrap.append(el('div', { class:'empty' }, 'Nessun codice con questi filtri.'));
@@ -5152,7 +5176,10 @@ function renderFabbisogno(root) {
           // "Manca" vuole vedere cosa manca di piu', non le novecento righe
           // che non mancano affatto. Stato e testi partono invece dall'alto
           // dell'alfabeto o dall'urgenza, che e' quello che ci si aspetta.
-          else { matSortKey = c.k; matSortDir = c.giuInizio ? -1 : 1; }
+          else {
+            matSortPrec = spareggiDopoClic(matSortPrec, matSortKey, matSortDir, c.k);
+            matSortKey = c.k; matSortDir = c.giuInizio ? -1 : 1;
+          }
           disegnaLista();
         } }, c.t + (attiva ? (matSortDir === 1 ? ' ↑' : ' ↓') : ''));
     };
@@ -8617,11 +8644,37 @@ function pianificazioneFiltrate(includiStorico) {
   }
 
   // Sort
-  const sortKey = state.opSortKey || 'scadenza';
-  const sortDir = state.opSortDir === 'desc' ? -1 : 1;
-  list.sort((a,b) => {
+  // Ordinamento "come Excel": la colonna cliccata per ultima comanda, quelle
+  // cliccate prima spareggiano (state.opSortPrec, vedi spareggiDopoClic).
+  const livelli = [{ k: state.opSortKey || 'scadenza', dir: state.opSortDir === 'desc' ? 'desc' : 'asc' }]
+    .concat(state.opSortPrec || []);
+  list.sort((a, b) => {
+    for (const l of livelli) {
+      const d = confrontaOpPer(l.k, a, b);
+      if (d) return l.dir === 'desc' ? -d : d;
+    }
+    return 0;
+  });
+
+  const filtriAttivi = [];
+  if (filter !== 'all') filtriAttivi.push('stato: ' + filter);
+  if (state.opClientiEsclusi && state.opClientiEsclusi.size)
+    filtriAttivi.push(state.opClientiEsclusi.size + ' clienti esclusi');
+  if (search) filtriAttivi.push('ricerca "' + search + '"');
+
+  return { list, filtriAttivi };
+}
+
+// Confronto crescente di due commesse su una colonna di Ordini cliente.
+function confrontaOpPer(sortKey, a, b) {
     let av, bv;
-    if (sortKey === 'cliente') {
+    if (sortKey === 'pos') {
+      // La posizione come NUMERO: "40" e "0040" sono la stessa riga (191
+      // commesse vecchie hanno la forma corta, vedi posNormalizzata).
+      av = parseInt(a.pos, 10); bv = parseInt(b.pos, 10);
+      if (!Number.isFinite(av)) av = Infinity;
+      if (!Number.isFinite(bv)) bv = Infinity;
+    } else if (sortKey === 'cliente') {
       av = (state.aziende.find(c => c.id === a.cliente_id)?.nome || '');
       bv = (state.aziende.find(c => c.id === b.cliente_id)?.nome || '');
     } else if (sortKey === 'articolo') {
@@ -8638,18 +8691,9 @@ function pianificazioneFiltrate(includiStorico) {
       av = a[sortKey] || '';
       bv = b[sortKey] || '';
     }
-    if (av < bv) return -1 * sortDir;
-    if (av > bv) return  1 * sortDir;
+    if (av < bv) return -1;
+    if (av > bv) return  1;
     return 0;
-  });
-
-  const filtriAttivi = [];
-  if (filter !== 'all') filtriAttivi.push('stato: ' + filter);
-  if (state.opClientiEsclusi && state.opClientiEsclusi.size)
-    filtriAttivi.push(state.opClientiEsclusi.size + ' clienti esclusi');
-  if (search) filtriAttivi.push('ricerca "' + search + '"');
-
-  return { list, filtriAttivi };
 }
 
 // Testo del triangolo ⚠ dei mancanti in Ordini cliente.
@@ -8878,8 +8922,13 @@ function renderPianificazione(root) {
       class: opts.tc ? 'tc' : (opts.tr ? 'tr' : ''),
       style: 'cursor:pointer;',
       onclick: () => {
-        if (state.opSortKey === key) state.opSortDir = state.opSortDir === 'asc' ? 'desc' : 'asc';
-        else { state.opSortKey = key; state.opSortDir = 'asc'; }
+        const attuale = state.opSortKey || 'scadenza';
+        if (attuale === key) state.opSortDir = state.opSortDir === 'desc' ? 'asc' : 'desc';
+        else {
+          state.opSortPrec = spareggiDopoClic(state.opSortPrec, attuale,
+            state.opSortDir === 'desc' ? 'desc' : 'asc', key);
+          state.opSortKey = key; state.opSortDir = 'asc';
+        }
         renderTab('pianificazione');
       },
     }, label + indicator);

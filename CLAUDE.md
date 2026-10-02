@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-02.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-02.03`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -489,6 +489,7 @@ Chiesto da Nico: *"lista materiali pura con colonne giacenza, mancanti ecc (colo
 - **Storico COMMESSA-centrico**: una riga per commessa (prima una per spedizione). Solo 9 commesse su 219 hanno piu di una spedizione; il dettaglio resta nel modal. Qta = totale spedito, `*` se le spedizioni sono piu d una, data "non registrata" dove manca.
 - **"Tutte" vuol dire TUTTE**: il chip `all` non toglie le spedite recenti. Un filtro che si chiama Tutte e nasconde qualcosa dice il falso, e il conteggio in alto non corrisponderebbe alla lista. Cosa la scheda non mostra lo decide gia il confine con lo Storico. Il chip si chiama **"Spedite (ultimi 30gg)"**: l etichetta dice la REGOLA, non il numero.
 - **Ordini cliente: colonne ORDINATI / PRODOTTI / SPEDITI**. La **scheda Magazzino e stata tolta** (ridondante: la giacenza e prodotti meno spediti). `pezziInMagazzino()` resta, serve al controllo sulle spedizioni.
+- **Ordinamento "come Excel"** (2 ott, Nico): in Ordini cliente e nella lista Materiali la colonna cliccata per ULTIMA comanda e le due cliccate prima fanno da spareggio (`spareggiDopoClic`, `state.opSortPrec`, `matSortPrec`). Per avere ordine poi posizione si clicca prima Pos e poi Ordine. Il clic singolo fa quello di prima. Pos si ordina come numero (`40` = `0040`).
 - **Le due schede sono ATTACCATE nella barra** (31 ago) e hanno lo **stesso ordine di colonne** per quelle in comune: Ordine · Pos · OP · Rif. cliente · Cliente · Codice · quantita · Scadenza · Note · Azioni. Aggiungendo una colonna a una delle due, guardare l altra.
 - **L OP si scrive DIRETTAMENTE IN TABELLA** (31 ago, admin): arriva quasi sempre dopo l ordine e **non e nel file di Alnus**, quindi questa e la porta principale per inserirlo. Al fuoco la casella si precompila `AAAA/OP/` (`prefissoOpCorrente()`, anno dall orologio), salva al blur, Esc annulla. ⚠ **Solo prefisso = campo VUOTO** (`opSoloPrefisso()`), o il salvataggio si fermerebbe su ogni riga senza OP — che e il caso normale.
 - **Colonna Azioni: solo il 🚚** (spedire). **L elimina NON sta nella riga**: e a un pixel dall unica azione che si usa, su una riga che al clic apre la scheda. Resta il 🗑 dentro la scheda della commessa.
