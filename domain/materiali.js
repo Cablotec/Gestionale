@@ -134,7 +134,7 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
 // Ribalta la domanda: per ogni materiale, l elenco di CHI lo vuole.
 // `commesse`: [{ id, numero_op, codiceArticolo, quantita, scadenza, ... }].
 // Ritorna Map codice -> [{ commessa, qta }], ogni elenco ordinato per
-// scadenza (chi scade prima viene prima).
+// priorita' dell'ordine e poi scadenza (vedi ordineDiServizio).
 //
 // ⚠ E QUI sta la differenza con Alnus. La sua estrazione attribuisce un
 // mancante a UNA commessa sola — quella del "prossimo impegno" — e le altre
@@ -158,9 +158,7 @@ function fabbisognoPerCodice(commesse, figliDi) {
       perCodice.get(cod).push({ commessa: c, qta: q });
     });
   });
-  const senzaData = '9999-12-31';
-  perCodice.forEach(righe => righe.sort((a, b) =>
-    String(a.commessa.scadenza || senzaData).localeCompare(String(b.commessa.scadenza || senzaData))));
+  perCodice.forEach(righe => righe.sort((a, b) => ordineDiServizio(a.commessa, b.commessa)));
   return perCodice;
 }
 
@@ -215,10 +213,26 @@ function fabbisognoDaListe(commesse) {
       perCodice.get(cod).push({ commessa: c, qta: q });
     });
   });
-  const senzaData = '9999-12-31';
-  perCodice.forEach(righe => righe.sort((a, b) =>
-    String(a.commessa.scadenza || senzaData).localeCompare(String(b.commessa.scadenza || senzaData))));
+  perCodice.forEach(righe => righe.sort((a, b) => ordineDiServizio(a.commessa, b.commessa)));
   return perCodice;
+}
+
+// IN CHE ORDINE si serve la giacenza (2 ott, Nico): prima la PRIORITA'
+// dell'ordine (1 = per primo, 999 = default, la scrive l'ufficio in Ordini
+// cliente perche' i clienti spostano date e urgenze), poi la scadenza.
+// Prima era la sola scadenza: con tutti a 999 il risultato e' identico.
+// Un ordine senza il campo (colonna non ancora a database) vale 999.
+const PRIORITA_ORDINE_DEFAULT = 999;
+function prioritaOrdine(c) {
+  const p = c && c.priorita_ordine;
+  return (p === null || p === undefined || p === '' || !Number.isFinite(Number(p)))
+    ? PRIORITA_ORDINE_DEFAULT : Number(p);
+}
+function ordineDiServizio(a, b) {
+  const d = prioritaOrdine(a) - prioritaOrdine(b);
+  if (d) return d;
+  const senzaData = '9999-12-31';
+  return String((a && a.scadenza) || senzaData).localeCompare(String((b && b.scadenza) || senzaData));
 }
 
 // Cosa manca a UNA commessa, con la giacenza gia ripartita fra tutte quelle
@@ -249,11 +263,11 @@ function materialiCommessa(op, commesse, mancantiPerCodice) {
   return out;
 }
 
-// Ripartisce quello che c e fra chi lo vuole, in ordine di scadenza.
+// Ripartisce quello che c e fra chi lo vuole, nell'ordine in cui arriva (priorita', poi scadenza).
 // `righe`: [{ commessa, qta }] gia ordinate. `disponibile`: numero.
 // Ritorna [{ commessa, qta, coperto, scoperto }] piu il residuo.
 //
-// La regola e dichiarata, non implicita: **chi scade prima serve prima**.
+// La regola e dichiarata, non implicita: **chi viene prima serve prima** — priorita' dell'ordine, poi scadenza.
 // Una regola qualunque, purche scritta, batte l attribuzione silenziosa a
 // una commessa sola — perche si puo discutere e cambiare, e soprattutto
 // perche ogni commessa vede la SUA copertura invece di ereditare quella

@@ -6719,6 +6719,7 @@ function operazioniExportExcel(list, filtriAttivi) {
       'Prodotti':          quantitaConsegnata(o.id),
       'Spediti':           quantitaSpedita(o.id),
       'Scadenza':          o.scadenza ? fmtIT(o.scadenza) : '',
+      'Priorità':          prioritaOrdine(o),
       'Inizio':            inizio ? fmtIT(inizio) : '',
       'Note':              o.note || '',
       // Le due tendine escono con la parola che si legge a schermo, non con la
@@ -6742,7 +6743,7 @@ function operazioniExportExcel(list, filtriAttivi) {
     { wch: 16 }, { wch: 7 }, { wch: 16 }, { wch: 24 }, { wch: 24 },
     { wch: 18 }, { wch: 36 },
     { wch: 9 }, { wch: 9 }, { wch: 9 },
-    { wch: 11 }, { wch: 11 }, { wch: 30 }, { wch: 15 }, { wch: 12 },
+    { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 30 }, { wch: 15 }, { wch: 12 },
     { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 30 }, { wch: 36 },
   ];
   const wb = XLSX.utils.book_new();
@@ -7933,6 +7934,12 @@ const OP_STATI = {
   completata: { label:'Completato', badge:'bblu', color:'var(--blu)' },
   spedita:    { label:'Spedito',    badge:'bgry', color:'var(--mut)' },
 };
+// Priorita' dell'ordine (2 ott): esiste solo da quando c'e' la colonna
+// `operazioni.priorita_ordine`. Prima, niente colonna in tabella: una casella
+// che non salva sarebbe peggio di nessuna casella.
+function prioritaOrdineAttiva() {
+  return (state.operazioni || []).some(o => o && o.priorita_ordine !== undefined);
+}
 // Gli stati che il filtro di Ordini cliente accende e spegne.
 const OP_STATI_FILTRO = ['aperta', 'sospesa', 'completata', 'spedita'];
 // Stati visibili in Ordini cliente: di default tutti.
@@ -8674,7 +8681,9 @@ function pianificazioneFiltrate(includiStorico) {
 // Confronto crescente di due commesse su una colonna di Ordini cliente.
 function confrontaOpPer(sortKey, a, b) {
     let av, bv;
-    if (sortKey === 'pos') {
+    if (sortKey === 'priorita_ordine') {
+      av = prioritaOrdine(a); bv = prioritaOrdine(b);
+    } else if (sortKey === 'pos') {
       // La posizione come NUMERO: "40" e "0040" sono la stessa riga (191
       // commesse vecchie hanno la forma corta, vedi posNormalizzata).
       av = parseInt(a.pos, 10); bv = parseInt(b.pos, 10);
@@ -8745,6 +8754,7 @@ function renderPianificazione(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.opSearch || '').toLowerCase();
   const { list } = pianificazioneFiltrate(false);
+  const prioAttiva = prioritaOrdineAttiva();
   // L'ordinamento lo applica pianificazioneFiltrate; qui servono solo per
   // disegnare la freccia sulla colonna attiva.
   const sortKey = state.opSortKey || 'scadenza';
@@ -8958,6 +8968,8 @@ function renderPianificazione(root) {
     el('th', { class:'tr', title:'Pezzi prodotti (consegne di produzione registrate)' }, 'Prodotti'),
     el('th', { class:'tr', title:'Pezzi spediti al cliente' }, 'Spediti'),
     sortHead('scadenza',        'Scadenza'),
+    // Priorita' dell'ordine: decide a chi va prima la giacenza (ordineDiServizio).
+    ...(prioAttiva ? [sortHead('priorita_ordine', 'Prio', {tc:true})] : []),
     // ⚠ Colonna «Inizio» tolta il 17 set, chiesta da Nico. Era la data di
     // partenza calcolata (o forzata a mano), e in una tabella da 15 colonne
     // occupava spazio per un dato che si guarda nel Gantt e nella scheda della
@@ -9162,9 +9174,10 @@ function renderPianificazione(root) {
 
     // Descrizione articolo (troncata su 1 riga, tooltip pieno al passaggio del mouse)
     // ⚠ 240 → 210 il 17 set: vedi la nota sopra la cella Note.
+    // ⚠ 210 → 190 il 2 ott, insieme a Note 150 → 110: i 60px della colonna Prio.
     const desc = art?.descrizione || '';
     tr.append(el('td', {
-      style: 'max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
+      style: 'max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
       title: desc,
     }, desc || '—'));
 
@@ -9204,6 +9217,58 @@ function renderPianificazione(root) {
     // Scadenza
     tr.append(el('td', { class:'mono '+scadCls }, o.scadenza ? fmtIT(o.scadenza) : '—'));
 
+    // Priorita' (1 = servito per primo dalla giacenza, 999 = default).
+    // Stesso gesto della casella OP: si scrive, si salva uscendo, Esc annulla.
+    if (prioAttiva) {
+      const prioCell = el('td', { class:'tc mono' });
+      const prio = (o.priorita_ordine ?? 999);
+      if (isAdmin) {
+        const inp = el('input', {
+          type:'text', inputmode:'numeric', value: String(prio), maxlength: 3,
+          style:'width:40px;text-align:center;font-family:inherit;font-size:11px;padding:2px 3px;border-radius:3px;'
+            + 'background:var(--sur);border:1px solid var(--brd);'
+            + 'color:' + (prio < 999 ? 'var(--acc)' : 'var(--mut)') + ';',
+          title:'Priorità dell\'ordine: 1 prende la giacenza per primo, 999 è il default. '
+            + 'A parità di priorità decide la scadenza. Si salva uscendo dal campo (Esc annulla).',
+          onclick: (e) => e.stopPropagation(),
+          onkeydown: (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') e.target.blur();
+            else if (e.key === 'Escape') { e.target.value = String(o.priorita_ordine ?? 999); e.target.blur(); }
+          },
+          onblur: async (e) => {
+            const raw = (e.target.value || '').trim();
+            const n = raw === '' ? 999 : Number(raw);
+            if (!Number.isInteger(n) || n < 1 || n > 999) {
+              e.target.style.borderColor = 'var(--red)';
+              return toast('Priorità: un numero intero da 1 a 999 (vuoto = 999).', 'err');
+            }
+            e.target.style.borderColor = 'var(--brd)';
+            if (n === (o.priorita_ordine ?? 999)) { e.target.value = String(n); return; }
+            try {
+              const { data, error } = await eseguiConRetry(
+                () => sb.from('operazioni').update({ priorita_ordine: n }).eq('id', o.id).select().single(),
+                { label: 'priorità ordine' });
+              if (error) throw error;
+              Object.assign(o, data);
+              toast('Priorità ' + n + ' salvata', 'ok');
+              // La priorita' cambia a chi va la giacenza: i triangoli dei
+              // materiali di TUTTE le righe vanno ricalcolati.
+              renderTab('pianificazione');
+            } catch (err) {
+              toast('Errore: ' + (err.message || err), 'err');
+              e.target.value = String(o.priorita_ordine ?? 999);
+            }
+          },
+        });
+        prioCell.append(inp);
+      } else {
+        prioCell.style.color = prio < 999 ? 'var(--acc)' : 'var(--mut)';
+        prioCell.append(String(prio));
+      }
+      tr.append(prioCell);
+    }
+
     // Note (troncate su 1 riga, tooltip pieno)
     // ⚠⚠ LE TRE COLONNE DI TESTO SONO TUTTA LA LARGHEZZA DELLA TABELLA
     // (17 set, Nico: *"quale altra colonna ridurresti per vedere sempre tutta
@@ -9225,7 +9290,7 @@ function renderPianificazione(root) {
     // 23% del suo contenuto e passa al 17%, ma nessuno legge le note in
     // tabella — si aprono col tooltip, e il titolo pieno resta.
     tr.append(el('td', {
-      style: 'max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
+      style: 'max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
       title: o.note || '',
     }, o.note || '—'));
 
