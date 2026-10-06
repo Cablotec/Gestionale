@@ -2726,3 +2726,16 @@ function commessaInStorico(op, spedizioni, oggiIso) {
     - GIORNI_SPEDITE_IN_ORDINI * 86400000).toISOString().slice(0, 10);
   return ultima < limite;
 }
+
+// ── Descrizione del timbro all'avvio (6 ott, richiesta Cocco) ──────────
+// Alcuni tipi di lavorazione ("Varie e modifiche") non dicono da soli cosa si
+// e' fatto: chi li sceglie deve scriverlo PRIMA che il timbro parta. Quali sono
+// lo dichiara l'anagrafica (`tipi_lavorazione.chiedi_descrizione`), non un nome
+// scritto nel codice. Colonna assente = nessuno la chiede, come prima.
+function tipoChiedeDescrizione(tipo) {
+  return !!(tipo && tipo.chiedi_descrizione === true);
+}
+// La descrizione buona: spazi compattati. Vuota = non scritta.
+function descrizioneTimbro(testo) {
+  return String(testo || '').trim().replace(/\s+/g, ' ');
+}

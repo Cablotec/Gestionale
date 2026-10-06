@@ -10,12 +10,12 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-10-02.05"></script>
+<script src="core/db.js?v=2026-10-06.01"></script>
 <!-- Il MOTORE (30 set): il telefono usa le regole del gestionale invece di copiarle. -->
-<script src="domain/calendario.js?v=2026-10-02.05"></script>
-<script src="domain/mezzi.js?v=2026-10-02.05"></script>
-<script src="domain/scheduling.js?v=2026-10-02.05"></script>
-<script src="core/timbri.js?v=2026-10-02.05"></script>
+<script src="domain/calendario.js?v=2026-10-06.01"></script>
+<script src="domain/mezzi.js?v=2026-10-06.01"></script>
+<script src="domain/scheduling.js?v=2026-10-06.01"></script>
+<script src="core/timbri.js?v=2026-10-06.01"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -440,7 +440,9 @@ async function loadData() {
     sb.from('operazioni').select('*').not('stato', 'in', '("spedita","completata")'),
     sb.from('aziende').select('id,nome,citta,provincia,attivo'),
     sb.from('articoli').select('id,codice,descrizione'),
-    sb.from('tipi_lavorazione').select('id,nome,colore,attivo,ordine'),
+    // '*' e non l'elenco: chiedi_descrizione (6 ott) nasce da una migrazione, e
+    // nominarla prima che esista farebbe fallire tutta la lettura.
+    sb.from('tipi_lavorazione').select('*'),
     sb.from('operazioni_fasi').select('*'),
     sb.from('operazioni_addetti').select('*'),
     sb.from('sessioni_lavoro').select('*').is('fine', null),
@@ -1727,8 +1729,23 @@ async function avvia(tipoId, faseId) {
   const u = state.operatore, o = state.opSel;
   if (!u || !o || !tipoId) return;
   // Conferma esplicita per evitare avvii accidentali con un tocco involontario.
-  const nomeTipo = state.tipiLav.find(t => t.id === tipoId)?.nome || 'questa lavorazione';
-  if (!confirm('Iniziare a timbrare "' + nomeTipo + '" su ' + (o.numero_ordine || 'questa commessa') + '?')) return;
+  const tipo = state.tipiLav.find(t => t.id === tipoId);
+  const nomeTipo = tipo?.nome || 'questa lavorazione';
+  // Tipi come "Varie e modifiche" (6 ott, Cocco): cosa si fa si scrive prima,
+  // e senza il timbro non parte — stessa regola del kiosk. La domanda fa anche
+  // da conferma: due finestre di fila per lo stesso gesto sarebbero troppe.
+  let descrizione = null;
+  if (tipoChiedeDescrizione(tipo)) {
+    const domanda = nomeTipo + ' su ' + (o.numero_ordine || 'questa commessa')
+      + '\n\nScrivi che tipo di lavoro stai facendo:';
+    let msg = domanda;
+    while (!descrizione) {
+      const r = prompt(msg, '');
+      if (r === null) return;          // annullato: non parte niente
+      descrizione = descrizioneTimbro(r);
+      msg = 'La descrizione è obbligatoria.\n\n' + domanda;
+    }
+  } else if (!confirm('Iniziare a timbrare "' + nomeTipo + '" su ' + (o.numero_ordine || 'questa commessa') + '?')) return;
   if (!(await chiudiAperteAltrove(u.id))) return;
   // Risolvo la fase. Se timbro un TIPO fuori piano su una commessa con fasi, la
   // fase viene creata al volo (urgenza): così sia la sessione sia l'iscrizione
@@ -1743,6 +1760,7 @@ async function avvia(tipoId, faseId) {
     inizio: new Date().toISOString(),
   };
   if (fid) payload.fase_id = fid;
+  if (descrizione) payload.note = descrizione;
   try {
     const { data, error } = await eseguiConRetry(
       () => sb.from('sessioni_lavoro').insert(payload).select().single(),

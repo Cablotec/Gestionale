@@ -410,6 +410,34 @@ function salvaFiltroClienti(set) {
   }
 }
 
+// ── Filtri a chip ricordati (6 ott, richiesta Cocco) ─────────
+// Riaprendo il gestionale le chip tornano come le si era lasciate (es. solo
+// Aperti in Ordini cliente). Per browser, come il filtro clienti: e' una
+// comodita' della postazione, non un dato. Un valore che non si riconosce
+// (chip rinominata, formato vecchio) si ignora e vale il default.
+const LS_FILTRI_CHIP = 'cablotec.filtriChip.v1';
+function leggiFiltriChip() {
+  try {
+    const o = JSON.parse(localStorage.getItem(LS_FILTRI_CHIP) || '{}');
+    return (o && typeof o === 'object') ? o : {};
+  } catch (e) { return {}; }
+}
+function ricordaFiltroChip(nome, valore) {
+  try {
+    const o = leggiFiltriChip();
+    o[nome] = valore;
+    localStorage.setItem(LS_FILTRI_CHIP, JSON.stringify(o));
+  } catch (e) { /* senza storage si torna al default: nessun danno */ }
+}
+(function ripristinaFiltriChip() {
+  const f = leggiFiltriChip();
+  if (['all', 'attivi', 'disattivi'].includes(f.azFilter)) state.azFilter = f.azFilter;
+  if (['tutti', 'cliente', 'fornitore', 'entrambi'].includes(f.azRuoloFilter)) state.azRuoloFilter = f.azRuoloFilter;
+  if (['all', 'attivi', 'disattivi'].includes(f.artFilter)) state.artFilter = f.artFilter;
+  // opStatiVisibili si ripristina in statiOrdiniVisibili(): OP_STATI_FILTRO
+  // e' dichiarata piu' avanti e qui non e' ancora leggibile.
+})();
+
 // ── Finestre di apertura assenze ─────────────────────────────
 // Ogni finestra ha 4 date in formato 'gg-mm' (giorno-mese, ricorrenti
 // ogni anno): apertura_da/a = quando l'utente può inserire,
@@ -3039,7 +3067,7 @@ function renderAziende(root) {
   ].forEach(opt => {
     chipsStato.append(el('div', {
       class: 'chip' + (filter === opt.id ? ' act' : ''),
-      onclick: () => { state.azFilter = opt.id; renderTab('aziende'); }
+      onclick: () => { state.azFilter = opt.id; ricordaFiltroChip('azFilter', opt.id); renderTab('aziende'); }
     }, opt.label));
   });
   root.append(chipsStato);
@@ -3054,7 +3082,7 @@ function renderAziende(root) {
   ].forEach(opt => {
     chipsRuolo.append(el('div', {
       class: 'chip' + (ruoloFilter === opt.id ? ' act' : ''),
-      onclick: () => { state.azRuoloFilter = opt.id; renderTab('aziende'); }
+      onclick: () => { state.azRuoloFilter = opt.id; ricordaFiltroChip('azRuoloFilter', opt.id); renderTab('aziende'); }
     }, opt.label));
   });
   root.append(chipsRuolo);
@@ -3664,7 +3692,7 @@ function renderArticoli(root) {
   ].forEach(opt => {
     chips.append(el('div', {
       class: 'chip' + (filter === opt.id ? ' act' : ''),
-      onclick: () => { state.artFilter = opt.id; renderTab('articoli'); }
+      onclick: () => { state.artFilter = opt.id; ricordaFiltroChip('artFilter', opt.id); renderTab('articoli'); }
     }, opt.label));
   });
   root.append(chips);
@@ -7340,6 +7368,13 @@ const TIPI_LAV_COLORI = [
   '#d4ff4e', '#ff4e6b', '#b88fff', '#6b6b64',
 ];
 
+// La spunta "chiedi descrizione" esiste solo da quando c'e' la colonna
+// `tipi_lavorazione.chiedi_descrizione` (6 ott). Prima, una casella che non
+// salva sarebbe peggio di nessuna casella.
+function tipiLavDescrAttivo() {
+  return (state.tipiLav || []).some(t => t && ('chiedi_descrizione' in t));
+}
+
 function renderTipiLavorazione(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const list = state.tipiLav.slice().sort((a,b) => (a.ordine||0) - (b.ordine||0));
@@ -7373,7 +7408,12 @@ function renderTipiLavorazione(root) {
   list.forEach(t => {
     tb.append(el('tr', {},
       el('td', { class:'tc mono' }, String(t.ordine || 0)),
-      el('td', {}, t.nome),
+      el('td', {}, t.nome,
+        tipoChiedeDescrizione(t)
+          ? el('span', { class:'badge bgry', style:'margin-left:8px;',
+              title:'Al kiosk chi lo sceglie deve scrivere cosa sta facendo prima di iniziare' },
+              '✍ chiede descrizione')
+          : null),
       el('td', { class:'tc' }, el('span', {
         style: `display:inline-block;width:24px;height:14px;border-radius:2px;background:${t.colore||'#6b6b64'};vertical-align:middle;border:1px solid var(--brd);`,
       })),
@@ -7447,6 +7487,18 @@ function openTipoLavModal(t) {
     ),
     el('div', { class:'field' }, el('label', {}, 'Colore'), palette),
   );
+  // Descrizione obbligatoria all'avvio (6 ott, Cocco): per i tipi che da soli
+  // non dicono cosa si e' fatto, come "Varie e modifiche".
+  const chkDescr = el('input', { type:'checkbox', name:'chiedi_descrizione' });
+  chkDescr.checked = tipoChiedeDescrizione(t);
+  if (tipiLavDescrAttivo()) {
+    form.append(el('div', { class:'field' },
+      el('label', { style:'display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;' },
+        chkDescr, "Chiedi descrizione all'avvio"),
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Al kiosk e sul telefono chi sceglie questo tipo deve scrivere cosa sta facendo, '
+        + 'e senza il timbro non parte. La descrizione finisce nella nota del timbro.')));
+  }
 
   body.append(form);
   modal.append(body);
@@ -7462,6 +7514,7 @@ function openTipoLavModal(t) {
       colore: coloreScelto,
       attivo: fd.get('attivo') === 'true',
     };
+    if (tipiLavDescrAttivo()) payload.chiedi_descrizione = chkDescr.checked;
     if (!payload.nome) return toast('Nome obbligatorio', 'err');
     btnSave.disabled = true;
     btnSave.textContent = 'Salvataggio…';
@@ -7942,10 +7995,18 @@ function prioritaOrdineAttiva() {
 }
 // Gli stati che il filtro di Ordini cliente accende e spegne.
 const OP_STATI_FILTRO = ['aperta', 'sospesa', 'completata', 'spedita'];
-// Stati visibili in Ordini cliente: di default tutti.
+// Stati visibili in Ordini cliente: quelli lasciati l'ultima volta, se no tutti.
 function statiOrdiniVisibili() {
-  if (!(state.opStatiVisibili instanceof Set)) state.opStatiVisibili = new Set(OP_STATI_FILTRO);
+  if (!(state.opStatiVisibili instanceof Set)) {
+    const salvati = leggiFiltriChip().opStati;
+    state.opStatiVisibili = new Set(Array.isArray(salvati)
+      ? salvati.filter(s => OP_STATI_FILTRO.includes(s))
+      : OP_STATI_FILTRO);
+  }
   return state.opStatiVisibili;
+}
+function ricordaStatiOrdini() {
+  ricordaFiltroChip('opStati', [...statiOrdiniVisibili()]);
 }
 const OP_PREP = {
   vuoto:    { label:'Vuoto',    classe:'vuoto' },
@@ -8798,6 +8859,7 @@ function renderPianificazione(root) {
       class: 'chip' + (statiOn.has(opt.id) ? ' act' : ''),
       onclick: () => {
         if (statiOn.has(opt.id)) statiOn.delete(opt.id); else statiOn.add(opt.id);
+        ricordaStatiOrdini();
         renderTab('pianificazione');
       }
     }, opt.label));
@@ -8911,7 +8973,7 @@ function renderPianificazione(root) {
           el('div', { class:'sub', style:'font-family:JetBrains Mono,monospace;font-size:11px;' },
             elenco(quiMaNascoste)),
           el('button', { class:'btng', style:'margin-top:8px;',
-            onclick: () => { statiOrdiniVisibili().add('spedita'); renderTab('pianificazione'); },
+            onclick: () => { statiOrdiniVisibili().add('spedita'); ricordaStatiOrdini(); renderTab('pianificazione'); },
           }, 'Mostra gli spediti'));
       }
       if (nelloStorico.length) {
@@ -15029,6 +15091,9 @@ function kioskBeep(kind) {
 
 // ─── SCHERMATA 1: identificazione ───
 function kioskGoToId() {
+  // Una schermata nota rimasta aperta (timer scaduto) rimette a posto la
+  // schermata di conferma che aveva svuotato: vedi kioskNotaSchermata.
+  if (kioskState.notaAperta) { const f = kioskState.notaAperta; kioskState.notaAperta = null; f(); }
   kioskState.utenteSelezionato = null;
   clearTimeout(kioskState.inactivityTimer);
   if (state.kioskTimer) { clearInterval(state.kioskTimer); state.kioskTimer = null; }
@@ -15820,25 +15885,54 @@ function kioskNotaSchermata({ titolo, sottotitolo, azioni, conNota = true, place
       style: 'width:100%;font-size:15px;padding:10px;border-radius:6px;border:1px solid var(--brd);'
         + 'background:var(--sur);color:var(--txt);font-family:var(--ui);margin-top:10px;',
     }) : null;
+    // Avviso per la nota obbligatoria: compare solo se si preme senza scrivere.
+    const avviso = el('div', { style:'display:none;color:var(--red);font-size:14px;font-weight:600;margin-top:6px;' },
+      '✍ Scrivi prima cosa stai facendo.');
     const chiudi = (azione) => {
+      kioskState.notaAperta = null;
       const nota = inp ? (inp.value || '').trim() : '';
       card.innerHTML = vecchio; step.style.display = prec;
       risolvi({ azione, nota });
     };
-    // Nessun bottone si disabilita: la nota è facoltativa, e un bottone spento
-    // su un kiosk di reparto è un operatore fermo che non sa cosa fare.
+    // Se il kiosk torna all'identificazione con questa schermata aperta, la
+    // schermata di conferma (che qui e' stata svuotata) va rimessa com'era, o
+    // la prossima conferma non trova dove scrivere. La promessa resta senza
+    // risposta di proposito: risolverla farebbe navigare chi aspetta (es.
+    // "torna alla scelta del tipo") sopra l'identificazione appena mostrata.
+    kioskState.notaAperta = () => { card.innerHTML = vecchio; };
+    // Nessun bottone si disabilita: un bottone spento su un kiosk di reparto è
+    // un operatore fermo che non sa cosa fare. Dove la nota è obbligatoria
+    // (azione con `vuoleNota`) il bottone resta vivo e, premuto a vuoto, DICE
+    // cosa manca invece di non reagire.
     const bottoni = azioni.map(a => {
       const b = el('button', { class: 'kiosk-attiva-btn' + (a.classe ? ' ' + a.classe : ''),
         style: (a.stile || '') + 'margin-top:8px;' }, a.label);
-      b.onclick = () => chiudi(a.valore);
+      b.onclick = () => {
+        if (a.vuoleNota && inp && !(inp.value || '').trim()) {
+          avviso.style.display = 'block';
+          inp.style.borderColor = 'var(--red)';
+          inp.focus();
+          kioskBeep('err');
+          return;
+        }
+        chiudi(a.valore);
+      };
       return b;
     });
     card.append(
       el('div', { style:'font-size:20px;font-weight:700;margin-bottom:4px;' }, titolo),
       el('div', { class:'sub', style:'font-size:13px;' }, sottotitolo),
-      ...(inp ? [inp] : []),
+      ...(inp ? [inp, avviso] : []),
       ...bottoni,
     );
+    if (inp && azioni.some(a => a.vuoleNota)) {
+      // Questa schermata non e' fra quelle che tengono vivo il timer di
+      // inattivita' (30 s): scrivere una descrizione ci sta tutto, e chi scrive
+      // non deve essere rimandato all'identificazione a meta' frase.
+      kioskResetInactivity();
+      inp.oninput = () => { avviso.style.display = 'none'; inp.style.borderColor = ''; kioskResetInactivity(); };
+      setTimeout(() => inp.focus(), 0);
+    }
   });
 }
 
@@ -16952,6 +17046,27 @@ async function kioskAvviaSessione(tipoId, faseId) {
   const o = kCom.opSelezionata;
   if (!u || !o || !tipoId) return;
 
+  // Tipi come "Varie e modifiche" (6 ott, Cocco): cosa si fa si scrive PRIMA
+  // che il timbro parta, e senza non parte. Si chiede per PRIMA cosa: chi torna
+  // indietro non deve trovarsi una fase creata al volo o l'altro timbro chiuso.
+  const tipo = state.tipiLav.find(t => t.id === tipoId);
+  let descrizione = null;
+  if (tipoChiedeDescrizione(tipo)) {
+    const r = await kioskNotaSchermata({
+      titolo: tipo.nome + ': cosa fai?',
+      sottotitolo: (o.numero_ordine || 'Commessa') + (o.pos ? ' / ' + o.pos : '')
+        + ' — scrivi che tipo di lavoro stai facendo. Senza, il timbro non parte.',
+      placeholder: 'Es. modifica cablaggio QE, sostituzione morsettiera…',
+      azioni: [
+        { label:'▶ Inizia', valore:'ok', vuoleNota:true,
+          stile:'background:var(--grn);color:var(--bg);margin-top:12px;' },
+        { label:'← Torna indietro', valore:null, classe:'pause' },
+      ],
+    });
+    descrizione = descrizioneTimbro(r.nota);
+    if (r.azione !== 'ok' || !descrizione) { kioskGoToTipo(); return; }
+  }
+
   // Risolvo la fase. Tipo fuori piano su commessa con fasi → la creo al volo
   // (urgenza), così sessione e iscrizione finiscono su quella fase precisa.
   let fid = faseId || null;
@@ -16984,6 +17099,7 @@ async function kioskAvviaSessione(tipoId, faseId) {
     inizio: new Date().toISOString(),
   };
   if (fid) payload.fase_id = fid;
+  if (descrizione) payload.note = descrizione;
 
   try {
     const { data, error } = await eseguiConRetry(
