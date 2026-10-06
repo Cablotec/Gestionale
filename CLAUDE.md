@@ -48,6 +48,7 @@
 - Tabella `eventi` (eventi aziendali in calendario): **ESEGUITA** (16 set, verificata via REST). Primo evento inserito da Nico: *Pranzo Natalizio*, venerdi 18 dicembre 2026.
 - `operazioni.materiali` jsonb (lista materiali congelata sulla commessa): **ESEGUITA** (3 set). Generate in blocco: **68 commesse vive, 2.735 righe**, coerenza `qta = qta_pz × pezzi` verificata su 2735/2735.
 - `operazioni.priorita_ordine` smallint 1–999 default 999 (priorita' dell'ordine, decide a chi va prima la giacenza): **ESEGUITA** (verificata via REST il 6 ott: 518 righe, 504 a 999 e 14 gia' portate a 1).
+- `tipi_lavorazione.chiedi_descrizione` boolean default false (descrizione obbligatoria all'avvio del timbro, kiosk e telefono, richiesta Cocco): **ESEGUITA** (6 ott, da Nico). Va spuntata in Impostazioni → Tipi lavorazione su "Varie e modifiche".
 
 ### ⚠ DAL 30 OTTOBRE 2026: una tabella nuova nasce MUTA (mail Supabase del 23 set)
 Supabase smette di concedere da sola l'accesso Data API alle tabelle nuove nello schema `public`. **Le tabelle esistenti non cambiano**: tengono i loro permessi e continuano a funzionare. Cambia solo cio' che nasce dopo.
