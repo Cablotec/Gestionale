@@ -46,9 +46,8 @@
 - `articoli.distinta` jsonb (distinta scritta a mano, vince su Alnus): **ESEGUITA** (2 set).
 - `operazioni.senza_distinta` (dichiarare che UNA commessa non ha distinta): **ESEGUITA TUTTA** (17 set). Colonna + backfill, **verificati via REST dopo l esecuzione**: 180 commesse seminate, tutte del cliente col flag, **zero** seminate per errore su commesse che una lista ce l avevano, 1 di conto lavoro lasciata accesa perche' la lista ce l ha. Clienti col flag: **1**, invariato — il backfill non ha dichiarato niente di nuovo, ha spostato sulle righe il flag che Nico aveva gia messo su Elcotec (filo 4e per le tre spunte tolte). Avvisi ⚠ distinta accesi dopo: **65**, contro i 64 del modello vecchio, di cui **30** su commesse ancora aperte o sospese.
 - Tabella `eventi` (eventi aziendali in calendario): **ESEGUITA** (16 set, verificata via REST). Primo evento inserito da Nico: *Pranzo Natalizio*, venerdi 18 dicembre 2026.
-- `operazioni.materiali` jsonb (lista materiali congelata sulla commessa): **ESEGUITA** (3 set).
+- `operazioni.materiali` jsonb (lista materiali congelata sulla commessa): **ESEGUITA** (3 set). Generate in blocco: **68 commesse vive, 2.735 righe**, coerenza `qta = qta_pz × pezzi` verificata su 2735/2735.
 - `operazioni.priorita_ordine` smallint 1–999 default 999 (priorita' dell'ordine, decide a chi va prima la giacenza): **ESEGUITA** (verificata via REST il 6 ott: 518 righe, 504 a 999 e 14 gia' portate a 1).
-- `operazioni.priorita_ordine` smallint 1–999 default 999 (priorita' dell'ordine, decide a chi va prima la giacenza): **DA ESEGUIRE** (2 ott). Finche' manca la colonna Prio non compare e tutti valgono 999 (= ordine per scadenza, come prima). Generate in blocco: **68 commesse vive, 2.735 righe**, coerenza `qta = qta_pz × pezzi` verificata su 2735/2735.
 
 ### ⚠ DAL 30 OTTOBRE 2026: una tabella nuova nasce MUTA (mail Supabase del 23 set)
 Supabase smette di concedere da sola l'accesso Data API alle tabelle nuove nello schema `public`. **Le tabelle esistenti non cambiano**: tengono i loro permessi e continuano a funzionare. Cambia solo cio' che nasce dopo.
