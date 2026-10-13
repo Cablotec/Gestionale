@@ -1565,6 +1565,10 @@ const TAB_STRUCTURE = {
       // chiave di dispatch e della tabella.
       { id: 'articoli',       label: 'Prodotti',       adminOnly: true },
       { id: 'prelievi',       label: 'Prelievi',       adminOnly: false },
+      // Movimenti di magazzino (13 ott, Nico: per tutti). Accanto a Materiali
+      // e Prelievi perche' e' la stessa catena: cosa serve, cosa e' entrato,
+      // cosa e' uscito. Sola lettura: li scrive l'automazione DDT.
+      { id: 'movimenti',      label: 'Movimenti',      adminOnly: false },
       // Ricerca sui timbri NON legati a commessa (6 ago). L'anagrafica delle
       // attività resta in Gestione: qui si guarda cosa è stato fatto.
       { id: 'timbri_extra',   label: 'Attività extra', adminOnly: false },
@@ -1730,6 +1734,7 @@ function renderTab(name) {
     else if (name === 'operatori')    renderOperatori(root);
     else if (name === 'pianificazione') renderPianificazione(root);
     else if (name === 'prelievi') renderPrelievi(root);
+    else if (name === 'movimenti') renderMovimenti(root);
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt_live') renderGanttLiveTab(root);
     else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
@@ -3804,7 +3809,8 @@ async function caricaMovimenti() {
   try {
     const { data, error } = await fetchTutte(() =>
       sb.from('movimenti_magazzino')
-        .select('id,data,tipo,codice,qta,um,mittente,documento_numero,documento_data,documento_pos,ordine_rif,note')
+        .select('id,data,tipo,codice,descrizione,qta,um,mittente,documento_tipo,documento_numero,'
+          + 'documento_data,documento_pos,ordine_rif,note')
         .order('data').order('id'));
     state.movimenti = error ? null : (data || []);
   } catch (e) { state.movimenti = null; }
@@ -5345,6 +5351,247 @@ function renderFabbisogno(root) {
     } }, 'Azzera')));
   root.append(tabWrap);
   disegnaLista();
+}
+
+// ═══ PRODUZIONE → MOVIMENTI (13 ott, chiesto da Nico) ═══════════════════
+// La lista di `movimenti_magazzino`: oggi i carichi letti dai DDT
+// dall'automazione `Desktop\DDT_arrivi`, domani anche scarichi e rettifiche.
+// SOLO LETTURA, come la tabella: scrive soltanto ai@cablotec.local, e un
+// movimento non si corregge ne' si cancella (vedi la migrazione).
+// Due viste: le RIGHE (un movimento per riga, colonne ordinabili come in
+// Materiali) e i DOCUMENTI (un DDT per riga: e' la domanda "cosa e' arrivato
+// con quel DDT", che sulle righe va ricostruita a occhio).
+// ⚠ Il realtime non ascolta questa tabella: il bottone ⟳ la rilegge. Le
+// righe arrivano da uno script, non da chi guarda la scheda.
+let movVista = 'righe';              // 'righe' | 'documenti'
+let movSortKey = 'data';
+let movSortDir = -1;                 // i piu' recenti in cima
+let movSortPrec = [];
+let movFiltroTipo = '';
+let movFiltroMitt = '';
+let movFiltroOrd = '';
+let movFiltroDoc = '';               // chiave documento, dalla vista Documenti
+let movCerca = '';
+let movQuante = 400;
+
+const MOV_TIPO_ETI = {
+  carico:    { txt:'carico',    cls:'bok' },
+  scarico:   { txt:'scarico',   cls:'bblu' },
+  rettifica: { txt:'rettifica', cls:'byel' },
+};
+const movChiaveDoc = (m) => [m.documento_tipo || 'DOC', m.mittente || '', m.documento_numero || ''].join('|');
+
+function renderMovimenti(root) {
+  root.innerHTML = '';
+  const nf = (n) => (n == null || n === '' || !Number.isFinite(Number(n)))
+    ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  const ricarica = el('button', { class:'btnsm', title:'Rileggi i movimenti dal database',
+    onclick: async () => { ricarica.disabled = true; await caricaMovimenti(); renderMovimenti(root); } }, '⟳ Aggiorna');
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Movimenti'), ricarica));
+
+  // ⚠ null = non letta (tabella assente, rete, permessi): si dice, non si
+  // mostra una lista vuota che sembrerebbe "non e' arrivato niente".
+  if (!Array.isArray(state.movimenti)) {
+    root.append(el('div', { class:'empty' },
+      'I movimenti di magazzino non si sono potuti leggere. Premi ⟳ Aggiorna; se resta così, '
+      + 'la tabella `movimenti_magazzino` non è raggiungibile.'));
+    return;
+  }
+  const tutti = state.movimenti;
+  const ultimo = tutti.reduce((d, m) => (!d || String(m.data || '') > d) ? m.data : d, null);
+  root.append(el('div', { class:'sub', style:'margin:-6px 0 16px;max-width:900px;line-height:1.7;' },
+    tutti.length
+      ? tutti.length.toLocaleString('it-IT') + ' movimenti'
+        + (ultimo ? ' · l\'ultimo del ' + fmtIT(ultimo) : '')
+        + '. Oggi sono i carichi letti in automatico dai DDT scansionati; un errore non si '
+        + 'corregge sulla riga, si registra una rettifica.'
+      : 'Nessun movimento ancora: compaiono qui quando l\'automazione legge il primo DDT.'));
+  if (!tutti.length) return;
+
+  // La commessa di un ordine di riferimento: per aprirla dal numero d'ordine.
+  const commessaDi = (rif) => rif
+    ? (state.operazioni || []).find(o => String(o.riferimento_cliente || '') === String(rif)) || null : null;
+
+  const colonne = [
+    { k:'data', t:'Data', ord: m => String(m.data || ''),
+      cella: m => el('span', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, m.data ? fmtIT(m.data) : '—') },
+    { k:'tipo', t:'Tipo', ord: m => String(m.tipo || ''),
+      cella: m => { const e = MOV_TIPO_ETI[m.tipo] || { txt: m.tipo || '—', cls:'bgry' };
+        return el('span', { class:'badge ' + e.cls }, e.txt); } },
+    { k:'codice', t:'Codice', ord: m => String(m.codice || ''),
+      cella: m => el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);',
+        title:'Mostra solo i movimenti di questo codice, col totale',
+        onclick:(e)=>{ e.preventDefault(); movCerca = m.codice; movQuante = 400; renderMovimenti(root); } }, m.codice) },
+    { k:'descrizione', t:'Descrizione', ord: m => String(m.descrizione || '').toUpperCase(),
+      cella: m => el('span', { style:'display:block;max-width:260px;overflow:hidden;'
+        + 'text-overflow:ellipsis;white-space:nowrap;', title: m.descrizione || '' }, m.descrizione || '—') },
+    { k:'qta', t:'Qtà', tr:true, num:true, giuInizio:true, ord: m => Number(m.qta),
+      cella: m => { const q = Number(m.qta) || 0;
+        return el('span', { class:'mono', style:'font-weight:700;color:' + (q < 0 ? 'var(--red)' : 'var(--grn)') + ';' },
+          (q > 0 ? '+' : '') + nf(q)); } },
+    { k:'um', t:'UM', ord: m => String(m.um || ''), cella: m => el('span', { class:'sub', style:'font-size:11px;' }, m.um || '') },
+    { k:'mittente', t:'Mittente', ord: m => String(m.mittente || '').toUpperCase(),
+      cella: m => el('span', { class:'sub', style:'display:block;font-size:11px;max-width:160px;overflow:hidden;'
+        + 'text-overflow:ellipsis;white-space:nowrap;', title: m.mittente || '' }, m.mittente || '—') },
+    { k:'documento', t:'Documento', ord: m => String(m.documento_numero || ''),
+      cella: m => el('span', { class:'mono', style:'font-size:11px;white-space:nowrap;' },
+        m.documento_numero ? (m.documento_tipo || 'DOC') + ' ' + m.documento_numero
+          + (m.documento_pos ? ' · ' + m.documento_pos : '') : '—') },
+    { k:'ordine', t:'Ordine', ord: m => String(m.ordine_rif || ''),
+      cella: m => { const o = commessaDi(m.ordine_rif);
+        if (!m.ordine_rif) return el('span', { style:'color:var(--mut);' }, '—');
+        if (!o) return el('span', { class:'mono', style:'font-size:11px;' }, m.ordine_rif);
+        return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);',
+          title:'Apri la commessa ' + (o.numero_ordine || '') + '/' + (o.pos || '') + ' (scheda Materiali)',
+          onclick:(e)=>{ e.preventDefault(); openOperazioneModal(o, { scheda:'mat' }); } }, m.ordine_rif); } },
+    { k:'note', t:'Note', ord: m => String(m.note || ''),
+      cella: m => el('span', { class:'sub', style:'display:block;font-size:11px;max-width:220px;overflow:hidden;'
+        + 'text-overflow:ellipsis;white-space:nowrap;' + (m.note ? 'color:var(--or);' : ''),
+        title: m.note || '' }, m.note || '') },
+  ];
+
+  const opzioni = (vals, tutte) => [el('option', { value:'' }, tutte),
+    ...[...new Set(vals.filter(Boolean))].sort().map(v => el('option', { value: v }, v))];
+  const selVista = el('select', {}, el('option', { value:'righe' }, 'Righe'),
+    el('option', { value:'documenti' }, 'Per documento'));
+  selVista.value = movVista;
+  const selTipo = el('select', {}, ...opzioni(tutti.map(m => m.tipo), 'Tutti i tipi'));
+  selTipo.value = movFiltroTipo;
+  const selMitt = el('select', { style:'max-width:220px;' }, ...opzioni(tutti.map(m => m.mittente), 'Tutti i mittenti'));
+  selMitt.value = movFiltroMitt;
+  const selOrd = el('select', {}, ...opzioni(tutti.map(m => m.ordine_rif), 'Tutti gli ordini'));
+  selOrd.value = movFiltroOrd;
+  const inCerca = el('input', { class:'search', type:'search',
+    placeholder:'Cerca codice, descrizione, DDT, note…', value: movCerca, style:'min-width:240px;' });
+
+  const tabWrap = el('div');
+  const filtrate = () => {
+    let r = tutti.slice();
+    if (movFiltroTipo) r = r.filter(m => m.tipo === movFiltroTipo);
+    if (movFiltroMitt) r = r.filter(m => m.mittente === movFiltroMitt);
+    if (movFiltroOrd)  r = r.filter(m => String(m.ordine_rif || '') === movFiltroOrd);
+    if (movFiltroDoc)  r = r.filter(m => movChiaveDoc(m) === movFiltroDoc);
+    if (movCerca.trim()) {
+      const q = movCerca.trim().toUpperCase();
+      r = r.filter(m => [m.codice, m.descrizione, m.documento_numero, m.mittente, m.ordine_rif, m.note]
+        .some(v => String(v == null ? '' : v).toUpperCase().includes(q)));
+    }
+    return r;
+  };
+
+  const disegnaDocumenti = (righe) => {
+    const docs = new Map();
+    righe.forEach(m => {
+      const k = movChiaveDoc(m);
+      const d = docs.get(k) || { k, tipo: m.documento_tipo, numero: m.documento_numero, data: m.documento_data || m.data,
+        mittente: m.mittente, ordini: new Set(), righe: 0, note: 0 };
+      d.righe++; if (m.ordine_rif) d.ordini.add(m.ordine_rif); if (m.note) d.note++;
+      docs.set(k, d);
+    });
+    const lista = [...docs.values()].sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+    const tb = el('tbody');
+    lista.forEach(d => tb.append(el('tr', {},
+      el('td', { class:'mono', style:'font-size:11px;' }, d.data ? fmtIT(d.data) : '—'),
+      el('td', {}, el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);',
+        title:'Mostra le righe di questo documento',
+        onclick:(e)=>{ e.preventDefault(); movFiltroDoc = d.k; movVista = 'righe'; movQuante = 400; renderMovimenti(root); } },
+        (d.numero ? (d.tipo || 'DOC') + ' ' + d.numero : '(senza documento)'))),
+      el('td', { style:'font-size:11px;' }, d.mittente || '—'),
+      el('td', { class:'mono', style:'font-size:11px;' }, [...d.ordini].join(', ') || '—'),
+      el('td', { class:'tr mono', style:'font-size:11px;' }, String(d.righe)),
+      el('td', { style:'font-size:11px;color:' + (d.note ? 'var(--or)' : 'var(--mut)') + ';' },
+        d.note ? d.note + (d.note === 1 ? ' riga con note' : ' righe con note') : ''))));
+    const tw = el('div', { class:'tw' });
+    tw.append(el('table', { class:'rt op-table' },
+      el('thead', {}, el('tr', {}, ...['Data', 'Documento', 'Mittente', 'Ordine', 'Righe', 'Note']
+        .map((t, i) => el('th', { class: i === 4 ? 'tr' : '' }, t)))), tb));
+    tabWrap.append(el('div', { class:'sub', style:'margin-bottom:6px;' },
+      lista.length + (lista.length === 1 ? ' documento' : ' documenti')), tw);
+  };
+
+  const disegna = () => {
+    tabWrap.innerHTML = '';
+    const righe = filtrate();
+    if (movFiltroDoc) {
+      tabWrap.append(el('div', { class:'sub', style:'margin-bottom:8px;' }, 'Solo il documento ',
+        el('span', { class:'mono', style:'color:var(--txt);' }, movFiltroDoc.split('|').slice(1).reverse().join(' · ')),
+        ' ', el('a', { href:'#', onclick:(e)=>{ e.preventDefault(); movFiltroDoc = ''; disegna(); } }, '✕ togli')));
+    }
+    if (!righe.length) { tabWrap.append(el('div', { class:'empty' }, 'Nessun movimento con questi filtri.')); return; }
+    if (movVista === 'documenti') return disegnaDocumenti(righe);
+
+    // UN CODICE SOLO in elenco: il totale e' la sua giacenza secondo il
+    // gestionale (somma dei movimenti). Su piu' codici una somma non
+    // vorrebbe dire niente, e non si scrive.
+    const codici = new Set(righe.map(m => m.codice));
+    if (codici.size === 1) {
+      const tot = righe.reduce((a, m) => a + (Number(m.qta) || 0), 0);
+      tabWrap.append(el('div', { style:'margin-bottom:8px;font-size:12px;' },
+        el('span', { class:'mono', style:'font-weight:700;' }, [...codici][0]),
+        ' · totale dei movimenti in elenco: ',
+        el('span', { class:'mono', style:'font-weight:700;' }, nf(tot) + (righe[0].um ? ' ' + righe[0].um : ''))));
+    }
+
+    const col = colonne.find(c => c.k === movSortKey) || colonne[0];
+    const vuoto = (v) => v == null || v === '' || (typeof v === 'number' && !Number.isFinite(v));
+    const confronta = (c, dir, a, b) => {
+      const va = c.ord(a), vb = c.ord(b);
+      const ea = vuoto(va), eb = vuoto(vb);
+      if (ea !== eb) return ea ? 1 : -1;
+      if (ea) return 0;
+      return (c.num ? (va - vb) : String(va).localeCompare(String(vb), 'it', { numeric:true })) * dir;
+    };
+    const spareggi = movSortPrec.map(s => ({ c: colonne.find(x => x.k === s.k), dir: s.dir })).filter(s => s.c);
+    righe.sort((a, b) => {
+      let d = confronta(col, movSortDir, a, b);
+      for (let i = 0; !d && i < spareggi.length; i++) d = confronta(spareggi[i].c, spareggi[i].dir, a, b);
+      // Ultimo spareggio fisso: documento e posizione, cosi' le righe di un
+      // DDT restano nell'ordine in cui sono sul foglio.
+      return d || String(a.documento_numero || '').localeCompare(String(b.documento_numero || ''))
+        || String(a.documento_pos || '').localeCompare(String(b.documento_pos || ''), 'it', { numeric:true });
+    });
+    const intestazione = (c) => el('th', { class: c.tr ? 'tr' : '', style:'cursor:pointer;user-select:none;',
+      title:'Ordina per ' + c.t,
+      onclick: () => {
+        if (movSortKey === c.k) movSortDir = -movSortDir;
+        else {
+          movSortPrec = spareggiDopoClic(movSortPrec, movSortKey, movSortDir, c.k);
+          movSortKey = c.k; movSortDir = (c.giuInizio || c.k === 'data') ? -1 : 1;
+        }
+        disegna();
+      } }, c.t + (movSortKey === c.k ? (movSortDir === 1 ? ' ↑' : ' ↓') : ''));
+    const tb = el('tbody');
+    righe.slice(0, movQuante).forEach(m => {
+      const tr = el('tr', {});
+      colonne.forEach(c => tr.append(el('td', { class: c.tr ? 'tr' : '' }, c.cella(m))));
+      tb.append(tr);
+    });
+    const tw = el('div', { class:'tw' });
+    tw.append(el('table', { class:'rt op-table' },
+      el('thead', {}, el('tr', {}, ...colonne.map(intestazione))), tb));
+    tabWrap.append(el('div', { class:'sub', style:'margin-bottom:6px;' },
+      righe.length.toLocaleString('it-IT') + (righe.length === 1 ? ' movimento' : ' movimenti')
+      + (righe.length > movQuante ? ' · ne vedi ' + movQuante : '')), tw);
+    if (righe.length > movQuante) {
+      tabWrap.append(el('button', { class:'btnsm', style:'margin-top:10px;', onclick: () => {
+        movQuante += 400; disegna(); } }, 'Mostra altri ' + Math.min(400, righe.length - movQuante)));
+    }
+  };
+
+  selVista.onchange = () => { movVista = selVista.value; disegna(); };
+  selTipo.onchange  = () => { movFiltroTipo = selTipo.value; movQuante = 400; disegna(); };
+  selMitt.onchange  = () => { movFiltroMitt = selMitt.value; movQuante = 400; disegna(); };
+  selOrd.onchange   = () => { movFiltroOrd = selOrd.value;   movQuante = 400; disegna(); };
+  inCerca.oninput   = () => { movCerca = inCerca.value;      movQuante = 400; disegna(); };
+  root.append(el('div', { style:'display:flex;gap:8px;align-items:center;margin:0 0 8px;flex-wrap:wrap;' },
+    el('span', { class:'sub' }, 'Vista:'), selVista,
+    el('span', { class:'sub', style:'margin-left:8px;' }, 'Filtra:'), selTipo, selMitt, selOrd, inCerca,
+    el('button', { class:'btnsm', onclick: () => {
+      movFiltroTipo = ''; movFiltroMitt = ''; movFiltroOrd = ''; movFiltroDoc = ''; movCerca = ''; movQuante = 400;
+      renderMovimenti(root);
+    } }, 'Azzera')));
+  root.append(tabWrap);
+  disegna();
 }
 
 // Tessera QR: pagina a se' (tessera-qr.html, three.js + qrcode dentro) caricata
