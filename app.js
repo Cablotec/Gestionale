@@ -753,6 +753,7 @@ async function loadAllData() {
   // e un loro errore non deve far cadere tutto il caricamento.
   await caricaOreEsterne();
   await caricaMancanti();
+  await caricaMovimenti();
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -3792,6 +3793,23 @@ async function caricaMancanti() {
   } catch (e) { mancantiTabellaOk = false; state.mancanti = []; }
 }
 
+// Movimenti di magazzino (13 ott): oggi i soli carichi letti dai DDT, scritti
+// dall'automazione `Desktop\DDT_arrivi` con l'account ai@. Li legge la
+// commessa con "Materiali da DDT".
+// ⚠ `null` NON E' `[]`, stesso patto del kiosk coi mancanti: null = non si e'
+// potuto leggere, e allora la commessa col flag dice "non letto" invece di
+// "mancano tutti" — che sarebbe la bugia piu' cara, perche' manderebbe a
+// chiedere al cliente materiale gia' arrivato.
+async function caricaMovimenti() {
+  try {
+    const { data, error } = await fetchTutte(() =>
+      sb.from('movimenti_magazzino')
+        .select('id,data,tipo,codice,qta,um,mittente,documento_numero,documento_data,documento_pos,ordine_rif,note')
+        .order('data').order('id'));
+    state.movimenti = error ? null : (data || []);
+  } catch (e) { state.movimenti = null; }
+}
+
 let oreEsterneTabellaOk = null;  // null = da scoprire; false = migrazione mancante
 async function caricaOreEsterne() {
   if (oreEsterneTabellaOk === false) return;
@@ -4090,7 +4108,12 @@ async function generaMaterialiCommessa(codiceArticolo, pezzi) {
         // Il tipo viaggia CON la riga salvata: `fabbisognoDaListe` legge la
         // lista della commessa, non la distinta, quindi se il MAC non e'
         // qui non c'e' modo di riconoscerlo piu' tardi.
-        tipo: (e.consumo && e.consumo.has(codice)) ? 'MAC' : null,
+        // Dal 13 ott viaggiano anche C/L e ACQ: la commessa "Materiali da
+        // DDT" deve sapere quali codici manda il cliente. Due tipi diversi
+        // sullo stesso codice = null, non uno dei due scelto a caso.
+        tipo: (e.consumo && e.consumo.has(codice)) ? 'MAC'
+          : (e.tipi && e.tipi.has(codice) && e.tipi.get(codice).size === 1)
+            ? [...e.tipi.get(codice)][0] : null,
         // DA DOVE VIENE. Chi sta gia' nella distinta di primo livello non ha
         // niente da dichiarare e resta `null`: l'indicazione serve proprio
         // per quelli che nella distinta NON si vedono.
@@ -4311,6 +4334,13 @@ function materialiBase(righeMancanti) {
   const viveConLista = (state.operazioni || []).filter(x =>
     (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length)
     .map(commessaSuResiduo)
+    // ⚠ "MATERIALI DA DDT" (13 ott): le righe C/L di quelle commesse si
+    // contano dai DDT (`arriviDaDdt`) e NON entrano nella ripartizione della
+    // giacenza Alnus. Lasciarle dentro vorrebbe dire contare due volte lo
+    // stesso pezzo appena il magazzino carica il DDT anche in Alnus — e
+    // togliere giacenza ad altre commesse per un materiale che ha gia' il suo.
+    .map(x => x.materiali_da_ddt
+      ? Object.assign({}, x, { materiali: x.materiali.filter(r => !eCL(r)) }) : x)
     .filter(x => x.materiali.length);
   // ⚠ SOLO LE RIGHE SOTTO SCORTA (15 set). `materialiCommessa` in domain ha un
   // patto scritto: *un codice che qui NON c'e' non manca*. Da quando
@@ -4325,12 +4355,33 @@ function materialiBase(righeMancanti) {
   return { viveConLista, manPerCodice };
 }
 
+// I C/L di una commessa "Materiali da DDT", ripartiti fra le commesse vive
+// col flag. Map vuota se la commessa non ha il flag o i movimenti non ci sono.
+// ⚠ UN SOLO POSTO per questo conto: lo usano la scheda Materiali, il badge
+// in Ordini cliente e il numero sulla linguetta. Tre copie direbbero tre cose.
+function arriviDaDdtCommessa(op) {
+  if (!op || !op.materiali_da_ddt || !Array.isArray(state.movimenti)
+      || typeof arriviDaDdt !== 'function') return new Map();
+  const conFlag = (state.operazioni || []).filter(x => x.materiali_da_ddt
+    && (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali))
+    .map(commessaSuResiduo);
+  return arriviDaDdt(commessaSuResiduo(op), conFlag, state.movimenti);
+}
+
 function materialiStatoCommessa(op, righeMancanti, base) {
   const { viveConLista, manPerCodice } = base || materialiBase(righeMancanti);
   const mio = (typeof materialiCommessa === 'function')
     ? materialiCommessa(op, viveConLista, manPerCodice) : null;
+  // I C/L di una commessa "Materiali da DDT": dai carichi, ripartiti fra le
+  // commesse vive col flag. `ddtNonLetto` se i movimenti non si sono potuti
+  // leggere: allora si dice quello, non "mancano".
+  let ddt = null, ddtNonLetto = false;
+  if (op && op.materiali_da_ddt) {
+    if (!Array.isArray(state.movimenti)) ddtNonLetto = true;
+    else ddt = arriviDaDdtCommessa(op);
+  }
   return {
-    viveConLista, manPerCodice, mio,
+    viveConLista, manPerCodice, mio, ddt, ddtNonLetto,
     oggi: toLocalISO(new Date()),
     // Una riga coperta non e' una segnalazione, e trovarla farebbe scrivere
     // "coperto" (che e' fragile e dipende dalle sorelle) dove la parola
@@ -4362,6 +4413,28 @@ function materialeStatoRiga(codice, tipo, ctx) {
     return { stato:'segnaposto', testo:'non conteggiato', colore:'var(--mut)', manca:0,
       titolo:'Voce generica della distinta, non un materiale da prelevare: resta in '
         + 'lista perché sta nella distinta, ma non entra nel fabbisogno.' };
+  }
+
+  // C/L di una commessa "Materiali da DDT" (13 ott): la risposta la danno i
+  // DDT arrivati, non Alnus. Stati gia' noti (`attesa_cliente`, `disponibile`)
+  // cosi' kiosk e ordinamenti li riconoscono senza un caso nuovo.
+  if ((ctx.ddt || ctx.ddtNonLetto) && String(tipo || '').trim().toUpperCase() === 'C/L') {
+    if (ctx.ddtNonLetto) {
+      return { stato:'attesa_cliente', testo:'DDT non letti', colore:'var(--mut)', manca:0,
+        titolo:'Questa commessa conta il materiale del cliente dai DDT, ma i movimenti '
+          + 'di magazzino non si sono potuti leggere. Non si sa: ricarica la pagina.' };
+    }
+    const d = ctx.ddt.get(cod) || { serve: 0, arrivato: 0, manca: 0, documenti: [] };
+    const docs = d.documenti.map(x => 'DDT ' + x.numero + (x.data ? ' del ' + fmtIT(x.data) : ''));
+    const docTxt = docs.length ? ' · ' + docs[0] + (docs.length > 1 ? ' +' + (docs.length - 1) : '') : '';
+    const titolo = docs.length ? 'Arrivato con: ' + docs.join(', ') : 'Nessun DDT registrato per questo codice.';
+    if (d.manca <= 0) {
+      return { stato:'disponibile', testo:'arrivato' + docTxt, colore:'var(--grn)', manca:0, titolo };
+    }
+    return { stato:'attesa_cliente',
+      testo: (d.arrivato > 0 ? 'arrivati ' + nf(d.arrivato) + ' su ' + nf(d.serve) + ' · ' : '')
+        + 'mancano ' + nf(d.manca) + docTxt,
+      colore:'var(--or)', manca: d.manca, titolo };
   }
 
   const m = ctx.manDi(cod);
@@ -9429,13 +9502,17 @@ function renderPianificazione(root) {
     let badgeFatto = false;
     if (Array.isArray(o.materiali) && o.materiali.length && typeof materialiCommessa === 'function') {
       const mm = materialiCommessa(o, viveConLista, manPerCodice);
-      const mancanti = [...mm.entries()].filter(([, q]) => q.manca > 0);
+      // I C/L "da DDT" non sono in `mm` (la base li toglie apposta): si
+      // aggiungono dal loro conto, e lo stato e' sempre "lo manda il cliente".
+      const daDdt = arriviDaDdtCommessa(o);
+      const mancanti = [...mm.entries(), ...daDdt.entries()].filter(([, q]) => q.manca > 0);
       if (mancanti.length) {
         const oggiB = toLocalISO(new Date());
         const stati = mancanti.map(([cod]) => {
           const m = manPerCodice[cod];
           return { cod, lav: typeof eLavorazione === 'function' && eLavorazione(cod),
-            st: m ? statoMateriale(m, oggiB) : { stato:'da_ordinare' } };
+            st: daDdt.has(cod) ? { stato:'attesa_cliente' }
+              : m ? statoMateriale(m, oggiB) : { stato:'da_ordinare' } };
         });
         // Rosso se qualcosa FERMA davvero: da comprare, gia in ritardo, o
         // atteso dal cliente. Blu se il mancante e solo roba ordinata con una
@@ -10606,6 +10683,45 @@ function openOperazioneModal(o, opts) {
     }
     sezMateriali.append(intestazione);
 
+    // ── LA SPUNTA "Materiali da DDT" (13 ott, pilota Enviro) ─────────────
+    // I codici C/L di questa commessa si contano dai DDT letti in automatico
+    // (`movimenti_magazzino`), non dalla giacenza di Alnus. Vedi
+    // `arriviDaDdt` in domain/materiali.js per cosa conta e cosa no.
+    // ⚠ Inerte finche' la colonna non esiste, come `senza_distinta`: si
+    // riconosce dalla riga caricata.
+    if (isAdmin && Object.prototype.hasOwnProperty.call(o, 'materiali_da_ddt')) {
+      const chkDdt = el('input', { type:'checkbox',
+        style:'width:15px;height:15px;cursor:pointer;margin:0;' });
+      chkDdt.checked = !!o.materiali_da_ddt;
+      chkDdt.onchange = async () => {
+        const val = chkDdt.checked;
+        chkDdt.disabled = true;
+        try {
+          const { data, error } = await eseguiConRetry(
+            () => sb.from('operazioni').update({ materiali_da_ddt: val }).eq('id', o.id).select().single(),
+            { label: 'materiali da DDT' });
+          if (error) throw new Error(error.message);
+          Object.assign(o, data);
+          const inState = (state.operazioni || []).find(x => x.id === o.id);
+          if (inState) Object.assign(inState, data);
+          toast(val ? 'Materiale del cliente contato dai DDT' : 'Materiale del cliente di nuovo da Alnus', 'ok');
+          renderMancanti();
+        } catch (e) {
+          chkDdt.checked = !val; chkDdt.disabled = false;
+          toast('Errore: ' + (e.message || e), 'err');
+        }
+      };
+      sezMateriali.append(el('label', {
+        style:'display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;cursor:pointer;'
+          + 'font-size:12px;max-width:620px;line-height:1.5;' },
+        chkDdt,
+        el('span', {},
+          el('span', { style:'font-weight:700;' }, 'Materiali da DDT'),
+          el('span', { class:'sub', style:'display:block;font-size:11px;margin-top:2px;' },
+            'I codici C/L (li manda il cliente) si contano dai DDT letti in automatico, non da Alnus. '
+            + 'ACQ resta su Alnus, MAC resta consumo.'))));
+    }
+
     const COL = 'display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(140px,1.4fr) '
       // ⚠ L'ultima colonna sta in `fr` e non in `auto`. Ogni riga e' una
       // griglia a se: con `auto` la riga che aveva lo stato lungo ("mancano 5 ·
@@ -10654,6 +10770,35 @@ function openOperazioneModal(o, opts) {
         stato));
     });
 
+    // ARRIVATO MA NON IN LISTA (13 ott): un DDT di questo ordine che porta un
+    // codice che la lista non chiede. Puo' essere un codice sostituito dal
+    // cliente, un errore di lettura o materiale in piu': in ogni caso va
+    // detto, non lasciato fuori in silenzio perche' "non ci riguarda".
+    if (o.materiali_da_ddt && Array.isArray(state.movimenti) && o.riferimento_cliente) {
+      const inLista = new Set(righe.map(r => String(r.codice || '').trim()));
+      const fuori = new Map();
+      state.movimenti
+        .filter(m => String(m.ordine_rif || '') === String(o.riferimento_cliente)
+          && !inLista.has(String(m.codice || '').trim()))
+        .forEach(m => {
+          const k = String(m.codice || '').trim();
+          const x = fuori.get(k) || { qta: 0, um: m.um, docs: new Set() };
+          x.qta += Number(m.qta) || 0;
+          if (m.documento_numero) x.docs.add(m.documento_numero);
+          fuori.set(k, x);
+        });
+      if (fuori.size) {
+        sezMateriali.append(el('div', { class:'sub',
+          style:'margin-top:12px;font-size:11px;color:var(--or);font-weight:700;' },
+          '⚠ Arrivati con i DDT dell\'ordine ' + o.riferimento_cliente + ' ma non in questa lista: ' + fuori.size));
+        fuori.forEach((x, k) => sezMateriali.append(el('div', { style: COL + 'padding:3px 0;' },
+          el('span', { class:'mono', style:'font-size:11px;' }, k),
+          el('span', { class:'sub', style:'font-size:11px;' }, 'DDT ' + [...x.docs].join(', ')),
+          el('span', {}), el('span', { class:'mono', style:'font-size:11px;text-align:right;font-weight:700;' }, nf(x.qta)),
+          el('span', { class:'sub', style:'font-size:11px;' }, x.um || ''),
+          el('span', { class:'sub', style:'font-size:11px;' }, 'non richiesto dalla distinta'))));
+      }
+    }
 
     // Lo stato di OGGI, appoggiato sopra le quantita fisse.
     // ⚠⚠ NIENTE `async` E NIENTE GUARDIA `isConnected` QUI (3 set, difetto
@@ -12395,7 +12540,8 @@ function openOperazioneModal(o, opts) {
     // filtrava il sotto scorta, e il numero sulla linguetta poteva divergere).
     const { viveConLista: vive, manPerCodice: mp } = materialiBase(state.mancanti);
     const m = materialiCommessa(o, vive, mp);
-    const n = m ? [...m.values()].filter(q => q.manca > 0).length : 0;
+    const n = (m ? [...m.values()].filter(q => q.manca > 0).length : 0)
+      + [...arriviDaDdtCommessa(o).values()].filter(q => q.manca > 0).length;
     if (n) {
       tabBtns.mat.textContent = 'Materiali ⚠' + n;
       tabBtns.mat.title = n === 1 ? 'Manca 1 codice a questa commessa'
@@ -14707,6 +14853,9 @@ async function kioskInit() {
   // rifiuta, `state.mancanti` resta null e il kiosk semplicemente tace sui
   // materiali, invece di restare alla schermata di errore.
   await kioskCaricaMancanti();
+  // I carichi da DDT, per le commesse con "Materiali da DDT": stesso patto,
+  // fuori da `kioskLoadAll`, null se non si leggono.
+  await caricaMovimenti();
   kioskStartRealtime();
 
   // Orologio

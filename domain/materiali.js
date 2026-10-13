@@ -64,9 +64,10 @@ function eLavorazione(codice) {
 // come distinte mancanti — non hanno figli perche non devono averne.
 function esplodiDistinta(codice, qta, figliDi, acc) {
   const out = acc || { materiali: new Map(), segnaposto: new Map(), consumo: new Map(),
-    origini: new Map(), cicli: new Set(), tagliati: 0 };
+    origini: new Map(), tipi: new Map(), cicli: new Set(), tagliati: 0 };
   if (!out.consumo) out.consumo = new Map();   // `acc` costruito da chi chiamava prima
   if (!out.origini) out.origini = new Map();
+  if (!out.tipi) out.tipi = new Map();
   const radice = codice;
   scendi(codice, Number(qta) || 0, new Set(), 0, null, null);
   return out;
@@ -119,6 +120,16 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
       if (eSegnaposto(cod)) { daPadre(cod, padre); out.segnaposto.set(cod, (out.segnaposto.get(cod) || 0) + q); return; }
       daPadre(cod, padre);
       out.materiali.set(cod, (out.materiali.get(cod) || 0) + q);
+      // IL TIPO DELLA FOGLIA (13 ott): C/L o ACQ, come lo dice l'arco che la
+      // porta qui. Serviva per sapere quali codici manda il cliente — la
+      // commessa con "Materiali da DDT" li conta dai DDT e non da Alnus.
+      // Un INSIEME come le origini: lo stesso codice sotto due archi con due
+      // tipi diversi e' un'incoerenza della distinta, e chi la legge deve
+      // poterla vedere invece di trovarsi deciso uno dei due a caso.
+      if (tipo) {
+        if (!out.tipi.has(cod)) out.tipi.set(cod, new Set());
+        out.tipi.get(cod).add(String(tipo).trim().toUpperCase());
+      }
       return;
     }
     // Il ciclo si riconosce sul CAMMINO, non sui codici gia visti in
@@ -263,6 +274,61 @@ function materialiCommessa(op, commesse, mancantiPerCodice) {
   return out;
 }
 
+// ── MATERIALI DA DDT (13 ott 2026, pilota Enviro) ─────────────────────
+// Una commessa con `materiali_da_ddt` conta i suoi codici C/L dai CARICHI
+// registrati in `movimenti_magazzino` (letti dai DDT), non dalla giacenza di
+// Alnus. Primo pezzo del magazzino proprio, che un giorno sostituira' Alnus.
+//
+// ⚠ Solo C/L: e' quello che manda il cliente e che arriva coi suoi DDT. ACQ
+// (lo compriamo noi) resta su Alnus finche' anche gli acquisti non passano
+// di qui; MAC resta consumo.
+// ⚠ Quello che e' arrivato si ripartisce fra TUTTE le commesse col flag che
+// vogliono quel codice, con la stessa regola della giacenza Alnus
+// (`ordineDiServizio`): due ordini Enviro aperti non devono contare due
+// volte lo stesso DDT.
+// ⚠ Nessuno scarico ancora: finche' la produzione non registra i consumi,
+// "arrivato" e' tutto cio' che e' entrato. Va bene per un ordine solo;
+// col secondo ordine dello stesso articolo servira' lo scarico.
+//
+// `movimenti`: [{ codice, qta, documento_numero, documento_data, tipo }].
+// Ritorna Map codice -> { serve, arrivato, manca, documenti:[{numero,data}] }
+// per i soli codici C/L di `op`.
+function eCL(r) { return String((r && r.tipo) || '').trim().toUpperCase() === 'C/L'; }
+
+function arriviDaDdt(op, commesse, movimenti) {
+  const out = new Map();
+  if (!op || !Array.isArray(op.materiali)) return out;
+  const entrato = new Map(), documenti = new Map();
+  (movimenti || []).forEach(m => {
+    const cod = String((m && m.codice) || '').trim();
+    if (!cod) return;
+    entrato.set(cod, (entrato.get(cod) || 0) + (Number(m.qta) || 0));
+    if (m.documento_numero && (Number(m.qta) || 0) > 0) {
+      if (!documenti.has(cod)) documenti.set(cod, new Map());
+      documenti.get(cod).set(m.documento_numero, m.documento_data || null);
+    }
+  });
+  const conFlag = (commesse || []).filter(c => c && c.materiali_da_ddt && Array.isArray(c.materiali));
+  if (!conFlag.some(c => c.id === op.id)) conFlag.push(op);
+  op.materiali.filter(eCL).forEach(r => {
+    const cod = String(r.codice || '').trim();
+    if (!cod || out.has(cod)) return;
+    const righe = conFlag
+      .map(c => ({ commessa: c, qta: c.materiali.filter(x => eCL(x) && String(x.codice || '').trim() === cod)
+        .reduce((a, x) => a + (Number(x.qta) || 0), 0) }))
+      .filter(x => x.qta > 0)
+      .sort((a, b) => ordineDiServizio(a.commessa, b.commessa));
+    const { esito } = ripartisciGiacenza(righe, entrato.get(cod) || 0);
+    const mia = esito.find(e => e.commessa.id === op.id);
+    if (!mia) return;
+    out.set(cod, { serve: mia.qta, arrivato: mia.coperto, manca: mia.scoperto,
+      documenti: [...(documenti.get(cod) || new Map())]
+        .map(([numero, data]) => ({ numero, data }))
+        .sort((a, b) => String(a.data || '').localeCompare(String(b.data || ''))) });
+  });
+  return out;
+}
+
 // Ripartisce quello che c e fra chi lo vuole, nell'ordine in cui arriva (priorita', poi scadenza).
 // `righe`: [{ commessa, qta }] gia ordinate. `disponibile`: numero.
 // Ritorna [{ commessa, qta, coperto, scoperto }] piu il residuo.
@@ -314,5 +380,5 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
-    fabbisognoDaListe, materialiCommessa };
+    fabbisognoDaListe, materialiCommessa, arriviDaDdt };
 }
