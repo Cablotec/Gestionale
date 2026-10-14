@@ -95,7 +95,7 @@ Chiesto da Nico, dal file *"Riunione 01-10-2026.xlsx"*: una sezione che vedono S
 - **La lista membri si cambia SOLO da SQL** (comandi in fondo alla migrazione): nessuna policy di scrittura su `riunioni_membri`, o un membro potrebbe aggiungere chiunque.
 - Colonne del file Excel (punto, argomento, azione, data limite, operatore, fatto, data esecuzione, commenti) piu': **`urgente` separato dalla data** (nel file "URGENTE" stava al posto della data), stato **aperta/fatta/annullata** (annullata = non serve piu', resta nello storico), chi ha modificato per ultimo (trigger).
 - **Le aperte non restano chiuse nel foglio della loro riunione**: vista *Tutte le azioni* ordinata scadute → urgenti → in scadenza (3 giorni) → con data → senza; nella vista di una riunione, sotto le sue, *"Ancora aperte dalle riunioni precedenti"* = il primo giro di tavolo. Non si ricopiano.
-- "Le mie": il nome scritto ("Claudio") combacia col nome di battesimo o col nome completo del profilo (`riuEDi`). I responsabili sono TESTO (nel file c'e' "Cocco", che non e' un profilo).
+- "Le mie": il nome scritto ("Claudio") combacia col nome di battesimo o col nome completo del profilo (`riuEDi`). I responsabili sono TESTO. ⚠ **"Cocco" = Massimo Contoli** (detto da Nico): scritto cosi' "Le mie" non lo riconosce, va scritto "Massimo Contoli" (il verbale del 1 ott e' stato corretto con un UPDATE).
 - ✓ Fatta dalla riga (data = oggi), ⬇ Excel con le colonne del file originale. Niente realtime: ⟳ Aggiorna, e si rilegge all'apertura.
 - Test: `node strumenti/test/test-riunioni.js .` (26).
 
