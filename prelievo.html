@@ -10,7 +10,7 @@
 <title>Prelievo Magazzino — Cablotec</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-10-14.07"></script>
+<script src="core/db.js?v=2026-10-14.08"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
 <style>
@@ -29,6 +29,22 @@ body{
   display:flex; flex-direction:column;
 }
 button{font-family:inherit;}
+
+/* ⚠⚠ CAMPI: UNO STILE DI BASE (14 ott, Nico: niente caselle bianche del
+   browser). Gemella della regola in app.css, misure di `.search` di questa
+   pagina. `:where()` pesa zero: ogni classe o style inline continua a
+   vincere, si veste solo cio' che era nudo. Un campo nuovo NON si da' uno
+   stile suo: lo prende da qui. `color-scheme` fa scuri anche i calendari,
+   gli orologi e le icone native dei campi data/ora (sul telefono l'icona
+   del calendario era nera su fondo nero). */
+:root{color-scheme:dark;}
+:where(select, textarea,
+  input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]):not([type=range]):not([type=button]):not([type=submit])){
+  background:var(--sur);border:1px solid var(--brd);border-radius:10px;color:var(--txt);
+  font-family:'JetBrains Mono',monospace;font-size:14px;padding:12px;outline:none;}
+:where(select, textarea, input):focus{border-color:var(--acc);}
+:where(select) :where(option, optgroup){background:var(--sur);color:var(--txt);}
+:where(input, textarea)::placeholder{color:var(--mut);}
 
 /* ── Header ── */
 .hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px 12px;border-bottom:2px solid var(--acc);}
@@ -242,9 +258,9 @@ function mostraAccessoDispositivo(messaggio) {
     + 'Poi questo dispositivo resta abilitato.'));
 
   const email = elx('input', { type:'email', value: APP_EMAIL, placeholder:'Indirizzo',
-    autocomplete:'username', style:'width:100%;padding:12px;font-size:16px;margin-top:12px;' });
+    autocomplete:'username', style:'width:100%;font-size:16px;margin-top:12px;' });
   const pwd = elx('input', { type:'password', placeholder:'Password',
-    autocomplete:'current-password', style:'width:100%;padding:12px;font-size:16px;margin-top:8px;' });
+    autocomplete:'current-password', style:'width:100%;font-size:16px;margin-top:8px;' });
   const btn = elx('button', { style:'margin-top:12px;' }, 'Abilita dispositivo');
   const msg = elx('div', { style:'font-size:13px;min-height:18px;margin-top:8px;' }, messaggio || '');
   box.append(email, pwd, btn, msg);

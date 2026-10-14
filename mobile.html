@@ -10,12 +10,12 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-10-14.07"></script>
+<script src="core/db.js?v=2026-10-14.08"></script>
 <!-- Il MOTORE (30 set): il telefono usa le regole del gestionale invece di copiarle. -->
-<script src="domain/calendario.js?v=2026-10-14.07"></script>
-<script src="domain/mezzi.js?v=2026-10-14.07"></script>
-<script src="domain/scheduling.js?v=2026-10-14.07"></script>
-<script src="core/timbri.js?v=2026-10-14.07"></script>
+<script src="domain/calendario.js?v=2026-10-14.08"></script>
+<script src="domain/mezzi.js?v=2026-10-14.08"></script>
+<script src="domain/scheduling.js?v=2026-10-14.08"></script>
+<script src="core/timbri.js?v=2026-10-14.08"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -33,6 +33,22 @@ body{
   display:flex; flex-direction:column;
 }
 button{font-family:inherit;}
+
+/* ⚠⚠ CAMPI: UNO STILE DI BASE (14 ott, Nico: niente caselle bianche del
+   browser). Gemella della regola in app.css, misure di `.search` di questa
+   pagina. `:where()` pesa zero: ogni classe o style inline continua a
+   vincere, si veste solo cio' che era nudo. Un campo nuovo NON si da' uno
+   stile suo: lo prende da qui. `color-scheme` fa scuri anche i calendari,
+   gli orologi e le icone native dei campi data/ora (sul telefono l'icona
+   del calendario era nera su fondo nero). */
+:root{color-scheme:dark;}
+:where(select, textarea,
+  input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]):not([type=range]):not([type=button]):not([type=submit])){
+  background:var(--sur);border:1px solid var(--brd);border-radius:10px;color:var(--txt);
+  font-family:'JetBrains Mono',monospace;font-size:14px;padding:12px;outline:none;}
+:where(select, textarea, input):focus{border-color:var(--acc);}
+:where(select) :where(option, optgroup){background:var(--sur);color:var(--txt);}
+:where(input, textarea)::placeholder{color:var(--mut);}
 
 /* ── Header ── */
 .hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px 12px;border-bottom:2px solid var(--acc);}
@@ -1951,8 +1967,8 @@ function chiediNota() {
   return new Promise((risolvi) => {
     const ov = elx('div', { style:'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;' });
     const box = elx('div', { style:'background:var(--sur);border-radius:10px;padding:18px;max-width:420px;width:100%;' });
-    const inp = elx('textarea', { rows:'2', placeholder:'Dettaglio (facoltativo): quale macchina, quale pezzo, con chi…',
-      style:'width:100%;font-size:15px;padding:10px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);margin-top:10px;' });
+    const inp = elx('textarea', { rows:'2', class:'mz-input', placeholder:'Dettaglio (facoltativo): quale macchina, quale pezzo, con chi…',
+      style:'margin-top:10px;' });
     const ok = elx('button', { class:'att-btn fine', style:'margin-top:12px;width:100%;' }, '✅ Chiudi');
     ok.onclick = () => { ov.remove(); risolvi((inp.value||'').trim()); };
     box.append(elx('div',{style:'font-size:18px;font-weight:700;'},'Hai finito?'),

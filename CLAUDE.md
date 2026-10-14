@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-14.07`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-14.08`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -743,6 +743,7 @@ Nico: *"sblocca anche il passato per i gruppi esenti"*. **Ribalta di proposito l
 ## Campi e tendine: UNO stile di base (14 ott, `2026-10-14.05`)
 Nico, screenshot dei filtri Riunioni: *"queste caselle bianche devono avere uno stile grafico coerente"*. Non era solo Riunioni: ~30 `<select>` e ~60 `<input>` nati FUORI dai contenitori che vestono i campi (`.field`, `.storico-toolbar`, `.op-cell-inline`…) avevano il bianco del browser e padding zero (lo azzera `*`).
 - **Regola base in cima ad `app.css` con `:where()`** (peso zero): veste solo cio' che era nudo, ogni classe o style inline continua a vincere. Misure = `input.search` (fondo `--sur`, 32 px di altezza, misurati: tendina e ricerca affiancate uguali). `color-scheme` dark/light, cosi' anche calendari e menu nativi seguono il tema.
+- **Anche `mobile.html` e `prelievo.html`** (`.08`), che non caricano `app.css`: stessa regola `:where()` nel loro `<style>`, misure del loro `.search` (fondo `--sur`, raggio 10, mono 14). Nudi erano i due campi dell'abilitazione dispositivo del prelievo; la textarea "Hai finito?" del telefono aveva un fondo suo (`--bg`) ed e' passata a `.mz-input`. `color-scheme:dark` su tutte e due: icone e calendari nativi dei campi data/ora del telefono erano chiari su fondo scuro.
 - ⚠ **Una scheda nuova NON da' stile ai suoi campi**: lo prende dalla base. Dare stile inline a fondo/colore/bordo di un campo e' il modo di ricreare l'incoerenza.
 
 ## Leggibilità: temi e testo (31 lug, `2026-07-31.8`)
