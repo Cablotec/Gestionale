@@ -33,6 +33,33 @@
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--txt);font-family:'Syne',sans-serif;min-height:100vh;padding:22px 18px 40px;}
 
+/* ⚠⚠ CAMPI E TENDINE: UNO STILE SOLO, DI BASE (14 ott, Nico: "queste caselle
+   bianche devono avere uno stile grafico coerente"). Prima ogni contenitore
+   vestiva i suoi (.field, .storico-toolbar, .op-cell-inline…) e tutto cio' che
+   nasceva FUORI da quei contenitori — una trentina di <select> e una
+   sessantina di <input> nei filtri delle schede — restava col bianco del
+   browser, senza padding (lo azzera `*`). Ogni scheda nuova ripeteva il buco.
+   `:where()` pesa ZERO: qualunque regola con una classe (.field, .badge,
+   input.search, .ord-inp…) o uno style inline continua a vincere. Quindi
+   questa regola non cambia niente di cio' che era gia' vestito, veste solo
+   cio' che era nudo. Una scheda nuova NON deve dare stile ai suoi campi:
+   lo prende da qui. Checkbox, radio, colore e file restano del browser.
+   Fondo e misure = `input.search`, che sta nelle stesse barre dei filtri:
+   tendina e ricerca affiancate devono sembrare la stessa famiglia. */
+:root{color-scheme:dark;}
+:root[data-theme="light"]{color-scheme:light;}
+:where(select, textarea,
+  input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]):not([type=range]):not([type=button]):not([type=submit])){
+  background:var(--sur);border:1px solid var(--brd);color:var(--txt);border-radius:4px;
+  font-family:'JetBrains Mono',monospace;font-size:12px;line-height:16px;padding:7px 10px;outline:none;
+  transition:border-color .12s;}
+/* La tendina ha 2px interni in piu' del campo: misurato 34 contro 32. */
+:where(select){padding-top:6px;padding-bottom:6px;}
+:where(select, textarea, input):focus{border-color:var(--acc);}
+:where(select):disabled, :where(input, textarea):disabled{opacity:.5;cursor:not-allowed;}
+:where(select) :where(option, optgroup){background:var(--sur);color:var(--txt);}
+:where(input, textarea)::placeholder{color:var(--mut);}
+
 /* Header */
 header.topbar{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;padding-bottom:14px;border-bottom:1px solid var(--brd);gap:12px;flex-wrap:wrap;}
 h1{font-size:clamp(20px,4vw,34px);font-weight:800;line-height:1;letter-spacing:-.02em;}

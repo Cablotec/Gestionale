@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-14.04`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-14.05`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -736,6 +736,11 @@ La mia prima ipotesi era il **fantasma in cache**: la sessione cancellata rimast
 1. **Un'ipotesi plausibile non e' una diagnosi.** Il fantasma in cache spiegava tutto ed era falso; l'ho scoperto solo interrogando il database con i timestamp veri. **Prima di correggere, riprodurre il conto coi dati veri** — qui bastava stampare `inizio` con i millisecondi.
 2. **I dati che si mostrano troncati si risalvano troncati.** Ogni campo che mostra meno precisione di quella che il database contiene e' un troncamento in agguato al prossimo salvataggio. Vale per le date coi secondi, per i decimali arrotondati a schermo, per i testi tagliati con l'ellissi: **se il campo non puo' rappresentare il valore, non deve riscriverlo.**
 3. Il difetto era li' **da quando esistono le quote di gruppo** (14 lug) e non lo aveva trovato nessuno: si manifesta solo modificando a mano un timbro incatenato a un altro, cioe' raramente e per mano di un admin.
+
+## Campi e tendine: UNO stile di base (14 ott, `2026-10-14.05`)
+Nico, screenshot dei filtri Riunioni: *"queste caselle bianche devono avere uno stile grafico coerente"*. Non era solo Riunioni: ~30 `<select>` e ~60 `<input>` nati FUORI dai contenitori che vestono i campi (`.field`, `.storico-toolbar`, `.op-cell-inline`…) avevano il bianco del browser e padding zero (lo azzera `*`).
+- **Regola base in cima ad `app.css` con `:where()`** (peso zero): veste solo cio' che era nudo, ogni classe o style inline continua a vincere. Misure = `input.search` (fondo `--sur`, 32 px di altezza, misurati: tendina e ricerca affiancate uguali). `color-scheme` dark/light, cosi' anche calendari e menu nativi seguono il tema.
+- ⚠ **Una scheda nuova NON da' stile ai suoi campi**: lo prende dalla base. Dare stile inline a fondo/colore/bordo di un campo e' il modo di ricreare l'incoerenza.
 
 ## Leggibilità: temi e testo (31 lug, `2026-07-31.8`)
 - **Tre ruoli, tre font**: **Syne** solo titoli e bottoni (è un font da display: illeggibile in frasi piccole); **`var(--ui)`** = stack di sistema per la PROSA (note, hint, didascalie — `.sub`), il font meglio ottimizzato che ogni macchina abbia per il testo piccolo, zero download; **JetBrains Mono** (era DM Mono) solo dove serve incolonnare — codici, quantità, date, ore — perché ha lettere più alte a parità di px.
