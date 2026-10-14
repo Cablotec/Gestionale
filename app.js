@@ -4368,10 +4368,23 @@ function materialiBase(righeMancanti) {
 function arriviDaDdtCommessa(op) {
   if (!op || !op.materiali_da_ddt || !Array.isArray(state.movimenti)
       || typeof arriviDaDdt !== 'function') return new Map();
-  const conFlag = (state.operazioni || []).filter(x => x.materiali_da_ddt
+  return arriviDaDdt(commessaSuResiduo(op), commesseConDdtVive(), state.movimenti);
+}
+
+// Le commesse vive con "Materiali da DDT", gia' a residuo: chi chiede i C/L
+// contati dal registro movimenti.
+function commesseConDdtVive() {
+  return (state.operazioni || []).filter(x => x.materiali_da_ddt
     && (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali))
     .map(commessaSuResiduo);
-  return arriviDaDdt(commessaSuResiduo(op), conFlag, state.movimenti);
+}
+
+// Le righe della scheda Materiali per i codici che il gestionale conta da se'
+// (vedi `righeGiacenzaGestionale` in domain). [] se i movimenti non si sono
+// letti: allora quei codici restano coi numeri di Alnus, e la scheda lo dice.
+function righeGestionaleOra() {
+  if (!Array.isArray(state.movimenti) || typeof righeGiacenzaGestionale !== 'function') return [];
+  return righeGiacenzaGestionale(state.movimenti, commesseConDdtVive());
 }
 
 function materialiStatoCommessa(op, righeMancanti, base) {
@@ -4858,6 +4871,17 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
     { k:'um', t:'UM', ord: m => String(m.um || ''), cella: (m) => testo(m.um) },
     { k:'giacenza', t:'Giacenza', tr:true, num:true, giuInizio:true, ord: m => Number(m.giacenza),
       cella: (m) => el('span', { class:'mono' }, nf(m.giacenza)) },
+    // DA DOVE VIENE LA GIACENZA (14 ott): durante il passaggio da Alnus al
+    // gestionale un codice sta in una fonte sola, e chi legge il numero deve
+    // sapere quale. "Gestionale" porta ai suoi movimenti.
+    { k:'fonte', t:'Fonte', ord: m => m.fonte === 'gestionale' ? 'Gestionale' : 'Alnus',
+      cella: (m) => m.fonte === 'gestionale'
+        ? el('a', { href:'#', class:'badge bblu', style:'text-decoration:none;',
+            title:'Giacenza = somma dei movimenti del gestionale (' + (m.n_movimenti || 0)
+              + ' movimenti). Clic: i movimenti di questo codice.',
+            onclick:(e)=>{ e.preventDefault(); movCerca = m.codice; movFiltroDoc = ''; movQuante = 400; selectTab('movimenti'); } },
+            'Gestionale')
+        : el('span', { class:'sub', style:'font-size:11px;', title:"Dall'ultima estrazione del magazzino Alnus" }, 'Alnus') },
     { k:'impegno', t:'Impegno', tr:true, num:true, giuInizio:true, ord: m => Number(m.impegno),
       cella: (m) => el('span', { class:'mono', style:'color:var(--mut);' }, nf(m.impegno)) },
     { k:'qta_richiesta', t:'Richiesto', tr:true, num:true, giuInizio:true, ord: m => Number(m.qta_richiesta),
@@ -4942,7 +4966,12 @@ function matDettaglioUsi(m, usi, manPerCodice, nf) {
   const nostra = usi.reduce((a, u) => a + u.qta, 0);
   const mm = manPerCodice[cod];
   let esito, riservato = 0;
-  if (!mm) {
+  const gest = m.fonte === 'gestionale';
+  if (gest) {
+    // Dal registro movimenti: lo scaffale si ripartisce fra le commesse "da
+    // DDT" con la stessa regola (`arriviDaDdt` fa lo stesso conto).
+    esito = ripartisciGiacenza(usi, Number(m.giacenza) || 0).esito;
+  } else if (!mm) {
     // Non sotto scorta: ce n'e' per tutti, e non dipende dall'ordine.
     esito = usi.map(u => ({ commessa: u.commessa, qta: u.qta, coperto: u.qta, scoperto: 0 }));
   } else {
@@ -4954,15 +4983,18 @@ function matDettaglioUsi(m, usi, manPerCodice, nf) {
   const box = el('div', { style:'padding:8px 10px 10px 22px;background:var(--sur2);' });
   box.append(el('div', { class:'sub', style:'font-size:11px;margin-bottom:6px;' },
     'Richiesti ' + nf(nostra) + um + ' da ' + usi.length + (usi.length === 1 ? ' commessa aperta' : ' commesse aperte')
-    + ' · giacenza ' + nf(m.giacenza) + ' · impegno Alnus ' + nf(m.impegno)
-    + (riservato > 0 ? ' · ' + nf(riservato) + ' già impegnati da domanda che il gestionale non vede' : '')
-    + (mm ? ' · ripartiti per scadenza: chi scade prima viene servito prima.' : ' · non è sotto scorta.')));
+    + (gest
+      ? ' · sullo scaffale ' + nf(m.giacenza) + ' (somma dei movimenti del gestionale)'
+        + ' · ripartiti per priorità e scadenza: chi viene prima è servito prima.'
+      : ' · giacenza ' + nf(m.giacenza) + ' · impegno Alnus ' + nf(m.impegno)
+        + (riservato > 0 ? ' · ' + nf(riservato) + ' già impegnati da domanda che il gestionale non vede' : '')
+        + (mm ? ' · ripartiti per scadenza: chi scade prima viene servito prima.' : ' · non è sotto scorta.'))));
   const tb = el('tbody');
   esito.forEach(e => {
     const o = e.commessa;
     const cli = (state.aziende || []).find(a => a.id === o.cliente_id);
     const art = (state.articoli || []).find(a => a.id === o.articolo_id);
-    const stato = !mm ? { t:'disponibile', c:'var(--mut)', tip:'Il codice non è sotto scorta.' }
+    const stato = (!gest && !mm) ? { t:'disponibile', c:'var(--mut)', tip:'Il codice non è sotto scorta.' }
       : e.scoperto > 0 ? { t:'manca ' + nf(e.scoperto), c:'var(--red)', tip:'La giacenza non arriva fino a questa commessa.' }
       : { t:'coperto', c:'var(--grn)', tip:'C\'è, perché scade prima delle altre: una commessa più urgente se lo può prendere.' };
     tb.append(el('tr', {},
@@ -4976,7 +5008,7 @@ function matDettaglioUsi(m, usi, manPerCodice, nf) {
       el('td', { class:'tr mono', style:'font-size:11px;' }, nf(e.qta) + um),
       el('td', { style:'font-size:11px;font-weight:600;color:' + stato.c + ';', title: stato.tip }, stato.t),
       el('td', { style:'font-size:11px;color:var(--mut);' },
-        o.numero_op && o.numero_op === m.numero_op ? 'prossimo impegno per Alnus' : ''),
+        !gest && o.numero_op && o.numero_op === m.numero_op ? 'prossimo impegno per Alnus' : ''),
     ));
   });
   box.append(el('table', { class:'rt', style:'width:auto;' },
@@ -4991,8 +5023,16 @@ function renderFabbisogno(root) {
   const nf = (n) => (n == null || n === '' || !Number.isFinite(Number(n)))
     ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
   const oggi = toLocalISO(new Date());
-  const righeOra = state.mancanti || [];
-  const dataOra = righeOra.reduce((d, m) =>
+  // ⚠ DUE FONTI IN UNA LISTA (14 ott, "giacenze" integrate qui): i codici che
+  // il gestionale conta da se' (registro movimenti) PRENDONO IL POSTO della
+  // loro riga Alnus, non le si affiancano — un codice, una giacenza.
+  // La ripartizione fra commesse (`materialiBase`) resta sulle righe Alnus:
+  // i C/L delle commesse "da DDT" ne sono gia' fuori e hanno il loro conto.
+  const righeAlnus = state.mancanti || [];
+  const righeGest = righeGestionaleOra();
+  const codGest = new Set(righeGest.map(r => r.codice));
+  const righeOra = righeAlnus.filter(m => !codGest.has(String(m.codice || '').trim())).concat(righeGest);
+  const dataOra = righeAlnus.reduce((d, m) =>
     (!d || String(m.import_data || '') > d) ? (m.import_data || d) : d, null);
   const sottoScorta = righeOra.filter(m => mancanteCategoria(m) !== 'coperto');
 
@@ -5012,6 +5052,7 @@ function renderFabbisogno(root) {
     righeOra.length
       ? righeOra.length.toLocaleString('it-IT') + ' codici dall\'ultima estrazione del magazzino'
         + (dataOra ? ' del ' + fmtIT(String(dataOra).slice(0, 10)) : '')
+        + (righeGest.length ? ', ' + righeGest.length + ' dal registro movimenti del gestionale' : '')
         + ' · ' + sottoScorta.length + ' sotto scorta.'
         + ' Ogni import sostituisce il precedente: è una fotografia, non uno storico.'
       : 'Nessuna estrazione importata.'));
@@ -5164,9 +5205,15 @@ function renderFabbisogno(root) {
   (state.operazioni || []).forEach(o => { if (o.numero_op) opDelGest.set(o.numero_op, o); });
   // Chi usa ogni codice, dalle liste congelate delle commesse aperte: la
   // stessa domanda su cui si ripartisce la giacenza nella scheda commessa.
-  const { viveConLista, manPerCodice } = materialiBase(righeOra);
+  const { viveConLista, manPerCodice } = materialiBase(righeAlnus);
   const usi = (typeof fabbisognoDaListe === 'function') ? fabbisognoDaListe(viveConLista) : new Map();
-  const usiDi = (cod) => usi.get(String(cod == null ? '' : cod).trim()) || [];
+  // Chi chiede i codici del gestionale: le righe C/L delle commesse "da DDT",
+  // che `viveConLista` non ha di proposito.
+  const usiGest = (typeof fabbisognoDaListe === 'function' && righeGest.length)
+    ? fabbisognoDaListe(commesseConDdtVive().map(c => Object.assign({}, c, { materiali: c.materiali.filter(eCL) })))
+    : new Map();
+  const usiDi = (cod) => { const k = String(cod == null ? '' : cod).trim();
+    return (codGest.has(k) ? usiGest.get(k) : usi.get(k)) || []; };
   const apriChiudi = (cod) => {
     const k = String(cod).trim();
     if (matAperti.has(k)) matAperti.delete(k); else matAperti.add(k);
@@ -5177,7 +5224,7 @@ function renderFabbisogno(root) {
   // Codici di ogni commessa, per il filtro: una commessa "ha" un codice se ce
   // l'ha nella SUA lista, non solo se Alnus gliel'ha attribuito.
   const codiciDi = new Map();
-  usi.forEach((righe, cod) => righe.forEach(r => {
+  [...usi, ...usiGest].forEach(([cod, righe]) => righe.forEach(r => {
     if (!codiciDi.has(String(r.commessa.id))) codiciDi.set(String(r.commessa.id), new Set());
     codiciDi.get(String(r.commessa.id)).add(cod);
   }));
@@ -5304,7 +5351,9 @@ function renderFabbisogno(root) {
       // fonte. Si offre solo dove c'e' qualcosa da correggere — su una riga
       // coperta non c'e' niente da togliere.
       tr.append(el('td', { class:'tc' },
-        mancanteCategoria(m) === 'coperto' ? el('span', { style:'color:var(--mut);' }, '') :
+        // Una riga del gestionale e' un saldo di movimenti: non si "toglie",
+        // si corregge con una rettifica.
+        (mancanteCategoria(m) === 'coperto' || m.fonte === 'gestionale') ? el('span', { style:'color:var(--mut);' }, '') :
         el('button', { class:'btnd', style:'padding:1px 7px;',
           title:'Togli questa riga dall\'elenco. Torna al prossimo import se il magazzino la segnala ancora.',
           onclick: async (e) => {

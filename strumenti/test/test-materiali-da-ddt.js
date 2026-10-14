@@ -95,6 +95,33 @@ sez('Scarichi di produzione (14 ott)');
   t('lotto annullato: la rettifica restituisce, e non e un "documento"', r.manca === 0 && r.documenti.length === 1);
 }
 
+sez('Giacenze del gestionale nella scheda Materiali (14 ott)');
+{
+  const vm = require('vm'), fs = require('fs'), path = require('path');
+  const sb = { state: { sessioni: [], mancanti: [], operazioni: [] }, console };
+  vm.createContext(sb);
+  vm.runInContext(fs.readFileSync(path.resolve(G, 'domain/scheduling.js'), 'utf8').replace(/\r\n/g, '\n'), sb);
+  const a = op('A', [{ codice: 'TS-1', qta: 60, tipo: 'C/L', descrizione: 'Samtec', um: 'PZ' },
+    { codice: 'TS-2', qta: 15, tipo: 'C/L' }, { codice: 'ACQ-1', qta: 9, tipo: 'ACQ' }]);
+  const b = op('B', [{ codice: 'TS-1', qta: 124, tipo: 'C/L' }]);
+  const mov = [car('TS-1', 166, 'D1', '2026-09-14'), car('TS-2', 15, 'D1', '2026-09-14'),
+    car('TS-9', 4, 'D1', '2026-09-14'), { codice: 'TS-2', qta: -5, tipo: 'scarico' }];
+  const r = new Map(M.righeGiacenzaGestionale(mov, [a, b]).map(x => [x.codice, x]));
+  const t1 = r.get('TS-1');
+  t('giacenza = somma dei movimenti, impegno = somma delle commesse', t1.giacenza === 166 && t1.impegno === 184);
+  t('manca la differenza: 18', t1.qta_da_ordinare === 18 && t1.qta_richiesta === 18);
+  t('la categoria della scheda e "attesa cliente"', sb.mancanteCategoria(t1) === 'attesa_cliente');
+  t('descrizione e UM dalla lista quando i movimenti non le hanno', t1.um === 'PZ');
+  const t2 = r.get('TS-2');
+  t('lo scarico entra nel saldo: 15 - 5 = 10, chiesti 15', t2.giacenza === 10 && t2.qta_da_ordinare === 5);
+  t('un codice arrivato e non chiesto e "coperto"', sb.mancanteCategoria(r.get('TS-9')) === 'coperto');
+  t('ACQ resta di Alnus: non diventa una riga del gestionale', !r.has('ACQ-1'));
+  t('ogni riga dichiara la sua fonte', [...r.values()].every(x => x.fonte === 'gestionale'));
+  const vuota = M.righeGiacenzaGestionale([], [op('C', [{ codice: 'TS-5', qta: 15, tipo: 'C/L' }])]);
+  t('C/L chiesto e mai arrivato: giacenza 0, mancano 15',
+    vuota.length === 1 && vuota[0].giacenza === 0 && vuota[0].qta_da_ordinare === 15);
+}
+
 sez('Lo stesso DDT non si conta due volte fra due commesse');
 {
   const a = op('A', [{ codice: 'TS-1', qta: 15, tipo: 'C/L' }], { scadenza: '2026-10-16' });

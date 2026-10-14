@@ -336,6 +336,54 @@ function arriviDaDdt(op, commesse, movimenti) {
   return out;
 }
 
+// ── GIACENZE DEL GESTIONALE nella scheda Materiali (14 ott) ───────────
+// Nico: "la vista giacenze integrata a materiali? non e' la stessa cosa in
+// fondo?". Si': una scheda Giacenze a parte sarebbe stata un secondo posto
+// dove lo stesso codice ha un'altra giacenza. Qui si costruiscono, per i
+// codici che il gestionale conta da se', righe con LA STESSA FORMA di quelle
+// dell'estrazione Alnus (`mancanti`), cosi' la lista, i filtri e le
+// categorie (`mancanteCategoria`) le trattano senza un caso nuovo.
+// Un codice e' "del gestionale" se ha movimenti o se e' un C/L di una
+// commessa viva con "Materiali da DDT".
+//   giacenza  = saldo dei movimenti (carichi − scarichi ± rettifiche)
+//   impegno   = quanto ne chiedono le commesse col flag (gia' a residuo)
+//   qta_da_ordinare = la differenza, se manca: per un C/L vuol dire
+//     "attesa cliente" — e' il campo che `mancanteCategoria` guarda.
+// `commesseConFlag`: commesse vive col flag, gia' passate da commessaSuResiduo.
+// Ritorna [{ ...riga come `mancanti`, fonte:'gestionale', n_movimenti }].
+function righeGiacenzaGestionale(movimenti, commesseConFlag) {
+  const per = new Map();
+  const prendi = (cod) => {
+    if (!per.has(cod)) per.set(cod, { codice: cod, descrizione: null, um: null,
+      giacenza: 0, impegno: 0, n_movimenti: 0 });
+    return per.get(cod);
+  };
+  (movimenti || []).forEach(m => {
+    const cod = String((m && m.codice) || '').trim();
+    if (!cod) return;
+    const r = prendi(cod);
+    r.giacenza += Number(m.qta) || 0;
+    r.n_movimenti++;
+    if (!r.descrizione && m.descrizione) r.descrizione = m.descrizione;
+    if (!r.um && m.um) r.um = m.um;
+  });
+  (commesseConFlag || []).forEach(c => (c && Array.isArray(c.materiali) ? c.materiali : []).forEach(x => {
+    if (!eCL(x)) return;
+    const cod = String(x.codice || '').trim();
+    if (!cod) return;
+    const r = prendi(cod);
+    r.impegno += Number(x.qta) || 0;
+    if (!r.descrizione && x.descrizione) r.descrizione = x.descrizione;
+    if (!r.um && x.um) r.um = x.um;
+  }));
+  return [...per.values()].map(r => {
+    const g = +r.giacenza.toFixed(4), i = +r.impegno.toFixed(4);
+    const manca = Math.max(0, +(i - g).toFixed(4));
+    return Object.assign(r, { giacenza: g, impegno: i, tipo_parte: 'C/L',
+      qta_richiesta: manca, qta_da_ordinare: manca, consegne: [], fonte: 'gestionale' });
+  }).sort((a, b) => a.codice.localeCompare(b.codice));
+}
+
 // Ripartisce quello che c e fra chi lo vuole, nell'ordine in cui arriva (priorita', poi scadenza).
 // `righe`: [{ commessa, qta }] gia ordinate. `disponibile`: numero.
 // Ritorna [{ commessa, qta, coperto, scoperto }] piu il residuo.
@@ -387,5 +435,5 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
-    fabbisognoDaListe, materialiCommessa, arriviDaDdt };
+    fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale };
 }
