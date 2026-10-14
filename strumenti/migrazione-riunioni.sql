@@ -96,6 +96,9 @@ create policy riunioni_azioni_tutto on public.riunioni_azioni
   for all to authenticated
   using (public.membro_riunioni()) with check (public.membro_riunioni());
 
+-- Fino al 30 ott Supabase concede ancora tutto ad `anon` sulle tabelle nuove:
+-- si toglie, cosi' la RLS non e' l'unica serratura (lezione del 22 set).
+revoke all on public.riunioni_membri, public.riunioni, public.riunioni_azioni from anon;
 grant select on public.riunioni_membri to authenticated;
 grant select, insert, update, delete on public.riunioni        to authenticated;
 grant select, insert, update, delete on public.riunioni_azioni to authenticated;
