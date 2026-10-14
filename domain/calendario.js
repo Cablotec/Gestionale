@@ -232,9 +232,9 @@ function getFinestreAssenze() {
   ];
 }
 
-// Restituisce l'elenco dei gruppi esenti dalle FINESTRE di apertura assenze.
-// ⚠ Il blocco sulle date passate vale anche per loro (11 set, vedi
-// verificaAccessoAssenza). Letto da impostazioni come JSON; fallback
+// Restituisce l'elenco dei gruppi esenti dai vincoli di DATA delle assenze:
+// finestre di apertura e blocco sul passato (dal 14 ott, vedi
+// verificaAccessoAssenza). I tipi riservati agli admin restano esclusi. Letto da impostazioni come JSON; fallback
 // ['laboratorio'] = stato storico, così se la chiave non è mai stata salvata
 // il comportamento resta quello dell'esenzione introdotta sessione precedente.
 function getGruppiEsentiAssenze() {
@@ -306,23 +306,24 @@ function tipoInseribileDa(tipo, esente) {
 // UNA funzione per il calendario del gestionale e il telefono (30 set): prima
 // erano due copie con frasi diverse per lo stesso rifiuto.
 function verificaAccessoAssenza(iso, utente) {
-  // ⚠ LE DATE PASSATE NON LE INSERISCE NESSUNO (11 set, corretto da Nico:
-  // "le date passate no!"). Il controllo sta PRIMA dell'esenzione, ed e
-  // l'ordine a fare la regola: l'esenzione salta la FINESTRA, non il
-  // passato. Segnare ferie la settimana scorsa non e una comodita, e un
-  // modo di far tornare i conti a posteriori.
+  // I GRUPPI ESENTI SALTANO FINESTRA E PASSATO (14 ott, Nico: "sblocca anche
+  // il passato per i gruppi esenti"). Il controllo sta PRIMA di quello sul
+  // passato, ed e' l'ordine a fare la regola. Configurabile da
+  // Impostazioni → Calendari.
+  // ⚠ Storia: l'11 set Nico aveva deciso il contrario ("le date passate
+  // no!", anche per gli esenti) e l'esenzione stava DOPO questo controllo.
+  // Ribaltato il 14 ott, di proposito: non e' una regressione.
+  const esenti = getGruppiEsentiAssenze();
+  if (utente?.gruppo && esenti.includes(utente.gruppo)) {
+    return { ok: true, esenzione: utente.gruppo };
+  }
+  // Per tutti gli altri il passato resta chiuso: segnare ferie la settimana
+  // scorsa non e' una comodita', e' un modo di far tornare i conti a posteriori.
   const oggiIso = toLocalISO(new Date());
   if (iso < oggiIso) {
     // La frase del telefono (30 set): la legge un operatore, e "dagli utenti"
     // parla di lui in terza persona.
     return { ok: false, motivo: 'le date passate non sono inseribili' };
-  }
-  // I gruppi esenti scavalcano solo la finestra di apertura: possono
-  // programmare quando vogliono, purche' avanti. Configurabile da
-  // Impostazioni → Calendari.
-  const esenti = getGruppiEsentiAssenze();
-  if (utente?.gruppo && esenti.includes(utente.gruppo)) {
-    return { ok: true, esenzione: utente.gruppo };
   }
   const finestre = getFinestreAssenze();
   // A quale finestra appartiene 'iso'?

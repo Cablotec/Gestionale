@@ -138,17 +138,19 @@ sez('TUTTE LE PORTE, NON UNA SOLA');
     !fs.readFileSync(path.resolve(G, 'kiosk.html'), 'utf8').includes('tipi_assenza'));
 }
 
-sez('LE DATE PASSATE NON LE INSERISCE NESSUNO');
+sez('IL PASSATO: CHIUSO PER TUTTI, APERTO AI GRUPPI ESENTI');
 {
-  // 11 set: "le date passate no!". L esenzione salta la finestra, non il
-  // passato — e a farlo e l ORDINE dei controlli.
+  // 11 set: "le date passate no!", anche per gli esenti. Ribaltato il 14 ott
+  // (Nico: "sblocca anche il passato per i gruppi esenti"): l esenzione salta
+  // finestra E passato — e a farlo e l ORDINE dei controlli.
   // Una funzione sola per le due porte (domain/calendario.js dal 30 set).
   const posizione = (s, testo) => s.indexOf(testo);
   const blocco = cal.slice(cal.indexOf('function verificaAccessoAssenza'),
                            cal.indexOf('const finestre = getFinestreAssenze();',
                              cal.indexOf('function verificaAccessoAssenza')));
-  t('il passato si controlla PRIMA dell esenzione',
-    blocco.length > 0 && posizione(blocco, 'iso < oggiIso') < posizione(blocco, 'esenti.includes'));
+  t('l esenzione si controlla PRIMA del passato',
+    blocco.length > 0 && posizione(blocco, 'esenti.includes') >= 0
+    && posizione(blocco, 'esenti.includes') < posizione(blocco, 'iso < oggiIso'));
 }
 
 sez('L AMMINISTRATORE VEDE TUTTO');

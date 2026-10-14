@@ -21407,21 +21407,19 @@ function renderFinestreAssenze(root) {
   box.append(blocchiInvernali);
 
   // ── Esenzioni per gruppo ───────────────────────────────────
-  // I gruppi spuntati saltano la FINESTRA di apertura e vedono i tipi
-  // "esenti" (permessi). NON il passato (11 set, Nico: "le date passate no!")
-  // e NON i tipi riservati agli admin (malattia). Globale, letta da
-  // getGruppiEsentiAssenze() in verificaAccessoAssenza() e tipoInseribileDa().
-  // ⚠ Fino al 14 ott la frase a schermo diceva il contrario (qualsiasi data,
-  // qualsiasi tipo): era rimasta indietro rispetto alle regole dell'11 set.
+  // I gruppi spuntati saltano la FINESTRA di apertura e il PASSATO (dal 14
+  // ott, Nico) e vedono i tipi "esenti" (permessi). NON i tipi riservati agli
+  // admin (malattia). Globale, letta da getGruppiEsentiAssenze() in
+  // verificaAccessoAssenza() e tipoInseribileDa().
   const esentiAttuali = new Set(getGruppiEsentiAssenze());
   const checkboxEsenti = {};
   const blocchiEsenti = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:14px;margin-bottom:14px;' });
   blocchiEsenti.append(el('div', { style:'font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--txt);margin-bottom:6px;' },
     '⊘ Esenzioni gruppi'));
   blocchiEsenti.append(el('div', { style:'font-size:11px;color:var(--mut);margin-bottom:12px;line-height:1.6;' },
-    'I gruppi spuntati possono inserire le proprie assenze in qualsiasi momento, senza aspettare '
-    + 'le finestre di apertura, e vedono anche i tipi riservati agli esenti (permessi). '
-    + 'Restano esclusi le date passate e i tipi riservati agli amministratori (malattia).'));
+    'I gruppi spuntati possono inserire e modificare le proprie assenze su qualsiasi data, '
+    + 'anche passata, senza aspettare le finestre di apertura, e vedono anche i tipi riservati '
+    + 'agli esenti (permessi). Restano esclusi i tipi riservati agli amministratori (malattia).'));
   GRUPPI_UTENTI.forEach(g => {
     const row = el('label', {
       style:'display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:3px;cursor:pointer;font-family:JetBrains Mono,monospace;font-size:11px;',
