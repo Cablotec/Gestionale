@@ -232,9 +232,9 @@ function getFinestreAssenze() {
   ];
 }
 
-// Restituisce l'elenco dei gruppi esenti dai vincoli di inserimento assenze
-// (le finestre di apertura e il blocco sulle date passate non si applicano
-// agli utenti di questi gruppi). Letto da impostazioni come JSON; fallback
+// Restituisce l'elenco dei gruppi esenti dalle FINESTRE di apertura assenze.
+// ⚠ Il blocco sulle date passate vale anche per loro (11 set, vedi
+// verificaAccessoAssenza). Letto da impostazioni come JSON; fallback
 // ['laboratorio'] = stato storico, così se la chiave non è mai stata salvata
 // il comportamento resta quello dell'esenzione introdotta sessione precedente.
 function getGruppiEsentiAssenze() {
