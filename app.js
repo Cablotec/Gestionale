@@ -5501,6 +5501,15 @@ const RIU_COND = {
   annullata: { txt:'Annullata',   cls:'bgry' },
 };
 
+// Responsabili = id di `utenti`: il nome si legge dall'anagrafica, esatto.
+// L'utente di chi e' collegato: quello legato al suo account.
+const riuNomeUtente = (id) => { const u = (state.utentiById || {})[id]; return u ? u.nome : '(utente non trovato)'; };
+const riuMioUtenteId = () => { const u = (state.utenti || []).find(x => x.account_id === state.profile?.id); return u ? u.id : null; };
+// Chi si puo' scegliere: dipendenti attivi (niente esterni in sede, niente kiosk).
+const riuUtentiSceglibili = () => (state.utenti || [])
+  .filter(u => u.attivo && !u.esterno && !/@cablotec\.local$/i.test(u.email || ''))
+  .sort((a, b) => String(a.nome).localeCompare(String(b.nome)));
+
 const riuNomeRiunione = (r) => r ? ('Riunione del ' + fmtIT(r.data) + (r.titolo ? ' — ' + r.titolo : '')) : '—';
 
 function renderRiunioni(root) {
@@ -5542,7 +5551,8 @@ function renderRiunioni(root) {
 
   // ── Riepilogo: quello che conta a colpo d'occhio ──
   const c = riuConteggi(tutte, oggi);
-  const mie = tutte.filter(a => riuEDi(a, state.profile?.nome) && ['fatta','annullata'].indexOf(a.stato) < 0);
+  const io = riuMioUtenteId();
+  const mie = tutte.filter(a => riuEDi(a, io) && ['fatta','annullata'].indexOf(a.stato) < 0);
   const pill = (n, txt, cls, onclick) => el('span', { class:'badge ' + cls,
     style:'font-size:12px;padding:4px 10px;' + (onclick ? 'cursor:pointer;' : ''), onclick }, n + ' ' + txt);
   root.append(el('div', { style:'display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 14px;' },
@@ -5564,10 +5574,10 @@ function renderRiunioni(root) {
     riuVista = selVista.value === 'dafare' ? 'dafare' : Number(selVista.value);
     renderRiunioni(root);
   };
-  const nomi = riuNomiUsati(tutte);
+  const persone = riuPersoneUsate(tutte, riuNomeUtente).sort((a, b) => riuNomeUtente(a).localeCompare(riuNomeUtente(b)));
   const selChi = el('select', {}, el('option', { value:'' }, 'Tutti'),
     el('option', { value:'__mie__' }, 'Le mie'),
-    ...nomi.map(n => el('option', { value:n }, n)));
+    ...persone.map(id => el('option', { value:id }, riuNomeUtente(id))));
   selChi.value = riuFiltroChi;
   const selStato = el('select', {}, el('option', { value:'aperte' }, 'Aperte'),
     el('option', { value:'fatte' }, 'Fatte / annullate'), el('option', { value:'tutte' }, 'Tutte'));
@@ -5580,11 +5590,11 @@ function renderRiunioni(root) {
     let r = lista;
     if (riuFiltroStato === 'aperte') r = r.filter(a => a.stato === 'aperta');
     else if (riuFiltroStato === 'fatte') r = r.filter(a => a.stato !== 'aperta');
-    if (riuFiltroChi === '__mie__') r = r.filter(a => riuEDi(a, state.profile?.nome));
+    if (riuFiltroChi === '__mie__') r = r.filter(a => riuEDi(a, io));
     else if (riuFiltroChi) r = r.filter(a => (a.responsabili || []).indexOf(riuFiltroChi) >= 0);
     if (riuCerca.trim()) {
       const q = riuCerca.trim().toLowerCase();
-      r = r.filter(a => [a.punto, a.argomento, a.azione, a.commenti, (a.responsabili || []).join(' ')]
+      r = r.filter(a => [a.punto, a.argomento, a.azione, a.commenti, (a.responsabili || []).map(riuNomeUtente).join(' ')]
         .some(v => String(v || '').toLowerCase().includes(q)));
     }
     return r;
@@ -5593,7 +5603,7 @@ function renderRiunioni(root) {
     corpo.innerHTML = '';
     if (!rSel) {
       const righe = riuOrdinaDaFare(filtra(tutte), oggi);
-      corpo.append(riuTabella(righe, { root, oggi, conRiunione:true, vuoto:'Nessuna azione con questi filtri.' }));
+      corpo.append(riuTabella(righe, { root, oggi, io, conRiunione:true, vuoto:'Nessuna azione con questi filtri.' }));
       return;
     }
     // Una riunione: le sue azioni nell'ordine del verbale, poi quelle ANCORA
@@ -5605,14 +5615,14 @@ function renderRiunioni(root) {
       rSel.note ? el('div', { class:'sub', style:'white-space:pre-line;margin-top:6px;' }, rSel.note) : null));
     const sue = filtra(tutte.filter(a => a.riunione_id === rSel.id))
       .sort((x, y) => (x.ordine || 0) - (y.ordine || 0) || x.id - y.id);
-    corpo.append(riuTabella(sue, { root, oggi, raggruppa:true,
+    corpo.append(riuTabella(sue, { root, oggi, io, raggruppa:true,
       vuoto:'Nessuna azione di questa riunione con questi filtri.' }));
     const prima = new Set(riunioni.filter(r => r.data < rSel.data || (r.data === rSel.data && r.id < rSel.id)).map(r => r.id));
     const riportate = riuOrdinaDaFare(filtra(tutte.filter(a => prima.has(a.riunione_id) && a.stato === 'aperta')), oggi);
     if (riportate.length) {
       corpo.append(el('h3', { style:'font-size:13px;margin:22px 0 8px;' },
         'Ancora aperte dalle riunioni precedenti (' + riportate.length + ')'));
-      corpo.append(riuTabella(riportate, { root, oggi, conRiunione:true }));
+      corpo.append(riuTabella(riportate, { root, oggi, io, conRiunione:true }));
     }
   };
   selChi.onchange = () => { riuFiltroChi = selChi.value; disegna(); };
@@ -5655,8 +5665,8 @@ function riuTabella(righe, o) {
         entro, a.urgente ? el('div', {}, el('span', { class:'badge bor', style:'margin-top:2px;' }, 'Urgente')) : null,
         !entro && !a.urgente ? el('span', { style:'color:var(--mut);' }, '—') : null),
       el('td', { style:'font-size:11px;vertical-align:top;' },
-        ...(a.responsabili || []).map(n => el('div', { style:'white-space:nowrap;'
-          + (riuEDi({ responsabili:[n] }, state.profile?.nome) ? 'color:var(--vio);font-weight:700;' : '') }, n))),
+        ...(a.responsabili || []).map(id => el('div', { style:'white-space:nowrap;'
+          + (id === o.io ? 'color:var(--vio);font-weight:700;' : '') }, riuNomeUtente(id)))),
       el('td', { style:'vertical-align:top;white-space:nowrap;' },
         el('span', { class:'badge ' + eti.cls }, eti.txt),
         a.stato === 'fatta' && a.fatta_il ? el('div', { class:'mono sub', style:'font-size:11px;margin-top:3px;' }, fmtIT(a.fatta_il)) : null,
@@ -5725,16 +5735,30 @@ function openRiuAzioneModal(a, root, riunioneId) {
   const inScad = el('input', { type:'date', value:a.scadenza || '' });
   const inUrg = el('input', { type:'checkbox', style:'width:auto;' });
   inUrg.checked = !!a.urgente;
-  const inChi = el('input', { type:'text', value:(a.responsabili || []).join(' / '),
-    placeholder:'es. Claudio / Matteo' });
-  const nomi = riuNomiUsati(tutte);
-  const chipChi = el('div', { style:'display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;' },
-    ...nomi.map(n => el('span', { class:'badge bgry', style:'cursor:pointer;text-transform:none;',
-      title:'Aggiungi ' + n, onclick: () => {
-        const cur = riuResponsabiliDaTesto(inChi.value);
-        if (cur.map(x => x.toLowerCase()).indexOf(n.toLowerCase()) < 0) cur.push(n);
-        inChi.value = cur.join(' / ');
-      } }, '+ ' + n)));
+  // Chi: SOLO utenti registrati, scelti da elenco (niente testo libero:
+  // "Cocco" o "Claudio" non dicono a quale utente, il nome in anagrafica si').
+  let scelti = (a.responsabili || []).slice();
+  const boxChi = el('div', { style:'display:flex;flex-wrap:wrap;gap:6px;align-items:center;' });
+  const disegnaChi = () => {
+    boxChi.innerHTML = '';
+    scelti.forEach(id => boxChi.append(el('span', { class:'badge bvio',
+      style:'text-transform:none;font-size:12px;padding:4px 8px;display:inline-flex;gap:6px;align-items:center;' },
+      riuNomeUtente(id),
+      el('span', { style:'cursor:pointer;opacity:.8;', title:'Togli',
+        onclick: () => { scelti = scelti.filter(x => x !== id); disegnaChi(); } }, '✕'))));
+    // In cima i piu' usati nelle riunioni, poi tutti gli altri.
+    const usati = riuPersoneUsate(tutte, riuNomeUtente).filter(id => (state.utentiById || {})[id]);
+    const altri = riuUtentiSceglibili().map(u => u.id).filter(id => usati.indexOf(id) < 0);
+    const opt = (id) => el('option', { value:id }, riuNomeUtente(id));
+    const sel = el('select', { style:'width:auto;min-width:200px;' },
+      el('option', { value:'' }, scelti.length ? '+ aggiungi un\'altra persona' : '+ scegli chi'),
+      ...(usati.filter(id => scelti.indexOf(id) < 0).length
+        ? [el('optgroup', { label:'Già nelle riunioni' }, ...usati.filter(id => scelti.indexOf(id) < 0).map(opt))] : []),
+      el('optgroup', { label:'Tutti gli utenti' }, ...altri.filter(id => scelti.indexOf(id) < 0).map(opt)));
+    sel.onchange = () => { if (sel.value) { scelti.push(sel.value); disegnaChi(); } };
+    boxChi.append(sel);
+  };
+  disegnaChi();
   const selStato = el('select', {}, el('option', { value:'aperta' }, 'Aperta'),
     el('option', { value:'fatta' }, 'Fatta'), el('option', { value:'annullata' }, 'Annullata (non serve più)'));
   selStato.value = a.stato || 'aperta';
@@ -5757,7 +5781,7 @@ function openRiuAzioneModal(a, root, riunioneId) {
       el('div', { class:'field' }, el('label', {}, 'Urgente'),
         el('label', { style:'display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:12px;color:var(--txt);' },
           inUrg, 'da fare subito'))),
-    el('div', { class:'field' }, el('label', {}, 'Chi (separati da / )'), inChi, chipChi),
+    el('div', { class:'field' }, el('label', {}, 'Chi'), boxChi),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Stato'), selStato),
       el('div', { class:'field' }, el('label', {}, 'Eseguita il'), inFatta)),
@@ -5794,7 +5818,7 @@ function openRiuAzioneModal(a, root, riunioneId) {
       argomento: inArg.value.trim() || null,
       scadenza: inScad.value || null,
       urgente: inUrg.checked,
-      responsabili: riuResponsabiliDaTesto(inChi.value),
+      responsabili: scelti,
       stato,
       fatta_il: stato === 'fatta' ? (inFatta.value || null) : null,
       commenti: inComm.value.trim() || null,
@@ -5896,7 +5920,7 @@ async function riuEsportaExcel(rSel) {
     const r = riunioni.find(x => x.id === a.riunione_id);
     aoa.push([a.punto || '', a.argomento || '', a.azione || '',
       a.scadenza ? dataXls(a.scadenza) : (a.urgente ? 'URGENTE' : ''),
-      (a.responsabili || []).join('/'),
+      (a.responsabili || []).map(riuNomeUtente).join(' / '),
       a.stato === 'fatta' ? 'ok' : a.stato === 'annullata' ? 'annullata' : '',
       dataXls(a.fatta_il), a.commenti || '', r ? dataXls(r.data) : '']);
   });

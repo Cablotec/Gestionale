@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-14.03`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-14.04`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -95,9 +95,9 @@ Chiesto da Nico, dal file *"Riunione 01-10-2026.xlsx"*: una sezione che vedono S
 - **La lista membri si cambia SOLO da SQL** (comandi in fondo alla migrazione): nessuna policy di scrittura su `riunioni_membri`, o un membro potrebbe aggiungere chiunque.
 - Colonne del file Excel (punto, argomento, azione, data limite, operatore, fatto, data esecuzione, commenti) piu': **`urgente` separato dalla data** (nel file "URGENTE" stava al posto della data), stato **aperta/fatta/annullata** (annullata = non serve piu', resta nello storico), chi ha modificato per ultimo (trigger).
 - **Le aperte non restano chiuse nel foglio della loro riunione**: vista *Tutte le azioni* ordinata scadute → urgenti → in scadenza (3 giorni) → con data → senza; nella vista di una riunione, sotto le sue, *"Ancora aperte dalle riunioni precedenti"* = il primo giro di tavolo. Non si ricopiano.
-- "Le mie": il nome scritto ("Claudio") combacia col nome di battesimo o col nome completo del profilo (`riuEDi`). I responsabili sono TESTO. ⚠ **"Cocco" = Massimo Contoli** (detto da Nico): scritto cosi' "Le mie" non lo riconosce, va scritto "Massimo Contoli" (il verbale del 1 ott e' stato corretto con un UPDATE).
+- **Responsabili = id di `utenti`** (`uuid[]`), scelti da un elenco (dipendenti attivi, niente esterni ne' kiosk) e mostrati col nome dell'anagrafica. Nico, 14 ott: *"nome e cognome esattamente come sono registrati gli utenti"*. Nata `text[]` col testo del file ("Claudio", "Cocco" = Massimo Contoli) e convertita lo stesso giorno. "Le mie" = l'utente con `account_id` = il profilo collegato (`riuMioUtenteId`): un account senza utente legato non ha "mie".
 - ✓ Fatta dalla riga (data = oggi), ⬇ Excel con le colonne del file originale. Niente realtime: ⟳ Aggiorna, e si rilegge all'apertura.
-- Test: `node strumenti/test/test-riunioni.js .` (26).
+- Test: `node strumenti/test/test-riunioni.js .` (20).
 
 ## ▶ Fili aperti (priorità)
 0. **Codifica articoli** (15 lug, `2026-07-15.1`): tab Codifica in Gestione genera codici a 20 caratteri (5 classificazione da `domain/codifica.js` + 4 produttore + 11 codice con zeri PRIMA). Migrazione `produttori` **eseguita** (28 lug): anagrafica attiva, tabella da popolare. Ambiguità dei fogli **chiuse** (7 ago, "considera ok"): le note restano come documentazione di trascrizione, non più come avvisi. Codici a sé stanti: collegamento all'anagrafica articoli = futuro.

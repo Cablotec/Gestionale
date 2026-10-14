@@ -39,28 +39,21 @@ const ord = R.riuOrdinaDaFare(lista, OGGI).map(a => a.id);
 t('scadute, urgenti, vicine, con data, senza, fatte', JSON.stringify(ord) === '[5,4,6,3,2,1]', ord);
 t('non tocca la lista originale', lista[0].id === 1);
 
-console.log('\nRESPONSABILI DAL TESTO');
-const d = (s) => JSON.stringify(R.riuResponsabiliDaTesto(s));
-t('Claudio/Cocco/Alessandra', d('Claudio/Cocco/Alessandra') === '["Claudio","Cocco","Alessandra"]', d('Claudio/Cocco/Alessandra'));
-t('virgole, punto e virgola, "e"', d('Claudio, Matteo; Paola e Fabrizio') === '["Claudio","Matteo","Paola","Fabrizio"]');
-t('doppioni con maiuscole diverse: vince il primo', d('Claudio / claudio / CLAUDIO') === '["Claudio"]');
-t('spazi compattati', d('  Massimo   Contoli / ') === '["Massimo Contoli"]');
-t('"e" dentro un nome non spezza', d('Daniele') === '["Daniele"]');
-t('vuoto', d('') === '[]' && d(null) === '[]');
+console.log('\nLE MIE (per id utente)');
+t("presente", R.riuEDi(az({ responsabili:["u1"] }), "u1"));
+t("fra piu persone", R.riuEDi(az({ responsabili:["u1","u2"] }), "u2"));
+t("altro id no", !R.riuEDi(az({ responsabili:["u3"] }), "u1"));
+t("account senza utente legato no", !R.riuEDi(az({ responsabili:["u1"] }), null));
+t("responsabili vuoti no", !R.riuEDi(az({ responsabili:[] }), "u1"));
 
-console.log('\nLE MIE');
-t('nome di battesimo', R.riuEDi(az({ responsabili:['Claudio'] }), 'Claudio Benini'));
-t('nome completo, maiuscole', R.riuEDi(az({ responsabili:['claudio benini'] }), 'Claudio Benini'));
-t('fra piu nomi', R.riuEDi(az({ responsabili:['Claudio','Matteo'] }), 'Matteo Cavina'));
-t('altro nome no', !R.riuEDi(az({ responsabili:['Fabrizio'] }), 'Claudio Benini'));
-t('profilo senza nome no', !R.riuEDi(az({ responsabili:['Claudio'] }), ''));
-
-console.log('\nCONTEGGI E NOMI');
+console.log('\nCONTEGGI E PERSONE');
 const c = R.riuConteggi(lista, OGGI);
-t('5 aperte, 1 fatta, 1 scaduta, 1 urgente, 1 vicina',
+t("5 aperte, 1 fatta, 1 scaduta, 1 urgente, 1 vicina",
   c.aperte === 5 && c.fatte === 1 && c.scadute === 1 && c.urgenti === 1 && c.vicine === 1, c);
-const nomi = R.riuNomiUsati([az({ responsabili:['Matteo'] }), az({ responsabili:['Claudio','Matteo'] }), az({ responsabili:['Claudio'] }), az({ responsabili:['Claudio'] })]);
-t('per frequenza', JSON.stringify(nomi) === '["Claudio","Matteo"]', nomi);
+const NOMI = { u1:"Claudio Benini", u2:"Matteo Cavina", u3:"Alessandra Benini" };
+const usate = R.riuPersoneUsate([az({ responsabili:["u2"] }), az({ responsabili:["u1","u2"] }),
+  az({ responsabili:["u1","u3"] }), az({ responsabili:["u1"] })], id => NOMI[id]);
+t("per frequenza, poi per nome", JSON.stringify(usate) === JSON.stringify(["u1","u2","u3"]), usate);
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);

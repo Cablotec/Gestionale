@@ -3,7 +3,7 @@
 // `strumenti/test/test-riunioni.js`.
 //
 // Un'azione: { punto, argomento, azione, scadenza 'YYYY-MM-DD'|null,
-//              urgente bool, responsabili [testo], stato 'aperta'|'fatta'|'annullata',
+//              urgente bool, responsabili [id utente], stato 'aperta'|'fatta'|'annullata',
 //              fatta_il, commenti, riunione_id, ordine }
 
 // Quanti giorni prima della scadenza un'azione aperta diventa "in scadenza".
@@ -48,32 +48,13 @@ function riuOrdinaDaFare(azioni, oggiIso) {
   });
 }
 
-// "Claudio/Cocco, Alessandra" → ['Claudio','Cocco','Alessandra'].
-// Separatori: / , ; e la parola "e". Doppioni (anche di maiuscole) tolti,
-// vince la forma scritta per prima.
-function riuResponsabiliDaTesto(testo) {
-  const visti = new Set(), out = [];
-  String(testo || '').split(/[\/,;]|\s+e\s+/i).forEach(p => {
-    const n = p.trim().replace(/\s+/g, ' ');
-    if (!n) return;
-    const k = n.toLowerCase();
-    if (visti.has(k)) return;
-    visti.add(k); out.push(n);
-  });
-  return out;
-}
-
-// L'azione e' di questa persona? Nel file si scrive il NOME ("Claudio"),
-// a volte nome e cognome. Combacia il nome completo o il solo nome di
-// battesimo del profilo, senza badare alle maiuscole.
-function riuEDi(a, nomeProfilo) {
-  const pieno = String(nomeProfilo || '').trim().toLowerCase();
-  if (!pieno) return false;
-  const primo = pieno.split(/\s+/)[0];
-  return (a.responsabili || []).some(r => {
-    const x = String(r).trim().toLowerCase();
-    return x === pieno || x === primo;
-  });
+// I responsabili sono gli id degli UTENTI registrati (tabella `utenti`),
+// non testo: il nome si legge dall'anagrafica, esatto e sempre aggiornato
+// (14 ott, Nico: "nome e cognome esattamente come sono registrati").
+// L'azione e' di questa persona? `utenteId` = l'utente legato all'account.
+function riuEDi(a, utenteId) {
+  if (!utenteId) return false;
+  return (a.responsabili || []).indexOf(utenteId) >= 0;
 }
 
 // I conti per il riepilogo in cima alla scheda.
@@ -93,18 +74,16 @@ function riuConteggi(azioni, oggiIso) {
   return c;
 }
 
-// Tutti i nomi usati come responsabili, per i suggerimenti e i filtri,
-// in ordine di frequenza (i piu' usati prima).
-function riuNomiUsati(azioni) {
+// Le persone usate come responsabili (id), le piu' frequenti prima;
+// a parita', nell'ordine dato da `nomeDi` (alfabetico).
+function riuPersoneUsate(azioni, nomeDi) {
   const n = new Map();
-  azioni.forEach(a => (a.responsabili || []).forEach(r => {
-    const k = String(r).trim();
-    if (k) n.set(k, (n.get(k) || 0) + 1);
-  }));
-  return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(e => e[0]);
+  azioni.forEach(a => (a.responsabili || []).forEach(id => { if (id) n.set(id, (n.get(id) || 0) + 1); }));
+  const nome = nomeDi || (x => String(x));
+  return [...n.entries()].sort((a, b) => b[1] - a[1] || nome(a[0]).localeCompare(nome(b[0]))).map(e => e[0]);
 }
 
 if (typeof module !== 'undefined') module.exports = {
   RIU_GIORNI_VICINA, riuGiorniFra, riuCondizione, riuOrdinaDaFare,
-  riuResponsabiliDaTesto, riuEDi, riuConteggi, riuNomiUsati,
+  riuEDi, riuConteggi, riuPersoneUsate,
 };

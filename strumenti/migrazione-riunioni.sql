@@ -57,7 +57,7 @@ create table public.riunioni_azioni (
   azione        text not null,
   scadenza      date,
   urgente       boolean not null default false,
-  responsabili  text[] not null default '{}',
+  responsabili  uuid[] not null default '{}',   -- id di public.utenti (nome dall'anagrafica)
   stato         text not null default 'aperta' check (stato in ('aperta','fatta','annullata')),
   fatta_il      date,
   commenti      text,
@@ -112,6 +112,10 @@ grant select, insert, update, delete on public.riunioni_azioni to service_role;
 -- INSERT sono stati dati a Nico in chat e incollati a mano dal pannello.
 
 commit;
+
+-- ⚠ Il 14 ott la colonna era nata text[] (nomi scritti a mano: "Claudio",
+-- "Cocco"); Nico: nomi esattamente come registrati. Convertita in uuid[]
+-- con uno script dato in chat (mappava i nomi del primo verbale).
 
 -- ── Verifica, dopo gli INSERT dati in chat (6 · 1 · 7) ───────────────
 select (select count(*) from public.riunioni_membri) as membri,
