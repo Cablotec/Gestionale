@@ -3810,7 +3810,7 @@ async function caricaMovimenti() {
     const { data, error } = await fetchTutte(() =>
       sb.from('movimenti_magazzino')
         .select('id,data,tipo,codice,descrizione,qta,um,mittente,documento_tipo,documento_numero,'
-          + 'documento_data,documento_pos,ordine_rif,note')
+          + 'documento_data,documento_pos,ordine_rif,note,lotto_id')
         .order('data').order('id'));
     state.movimenti = error ? null : (data || []);
   } catch (e) { state.movimenti = null; }
@@ -5379,7 +5379,10 @@ const MOV_TIPO_ETI = {
   scarico:   { txt:'scarico',   cls:'bblu' },
   rettifica: { txt:'rettifica', cls:'byel' },
 };
-const movChiaveDoc = (m) => [m.documento_tipo || 'DOC', m.mittente || '', m.documento_numero || ''].join('|');
+// Un lotto di produzione e' un "documento" a se': stesso numero (la commessa)
+// per tutti i lotti di quella commessa, quindi la chiave porta anche il lotto.
+const movChiaveDoc = (m) => [m.documento_tipo || 'DOC', m.mittente || '', m.documento_numero || '',
+  m.lotto_id || ''].join('|');
 
 function renderMovimenti(root) {
   root.innerHTML = '';
@@ -5514,7 +5517,10 @@ function renderMovimenti(root) {
     const righe = filtrate();
     if (movFiltroDoc) {
       tabWrap.append(el('div', { class:'sub', style:'margin-bottom:8px;' }, 'Solo il documento ',
-        el('span', { class:'mono', style:'color:var(--txt);' }, movFiltroDoc.split('|').slice(1).reverse().join(' · ')),
+        el('span', { class:'mono', style:'color:var(--txt);' }, (() => {
+          const [tipo, mitt, num] = movFiltroDoc.split('|');
+          return tipo + ' ' + num + (mitt ? ' · ' + mitt : '');
+        })()),
         ' ', el('a', { href:'#', onclick:(e)=>{ e.preventDefault(); movFiltroDoc = ''; disegna(); } }, '✕ togli')));
     }
     if (!righe.length) { tabWrap.append(el('div', { class:'empty' }, 'Nessun movimento con questi filtri.')); return; }
@@ -11813,6 +11819,7 @@ function openOperazioneModal(o, opts) {
                 if (error) return toast('Errore eliminazione: '+error.message, 'err');
                 state.consegneCommessa = state.consegneCommessa.filter(x => x.id !== c.id);
                 toast('Lotto eliminato');
+                if (o.materiali_da_ddt) caricaMovimenti();   // la rettifica del trigger
                 // Rovescio dell'ultimo lotto che scrive `completata` (1 ott,
                 // Nico: "cancellando 20 pezzi prodotti non mi torna ad aperto").
                 // Si riapre SOLO se la completata era retta dai pezzi (prima
@@ -11911,6 +11918,10 @@ function openOperazioneModal(o, opts) {
             state.consegneCommessa.push(nuova);
           }
           toast('Lotto registrato');
+          // Il database ha appena scritto gli scarichi (trigger del 14 ott):
+          // senza rileggerli, la scheda Materiali e Movimenti direbbero ancora
+          // il magazzino di prima del lotto.
+          if (o.materiali_da_ddt) caricaMovimenti();
 
           // Al 100% lo stato si SCRIVE, non si propone (28 set) — gemello di
           // `sincronizzaSpedita`. Prima cambiava solo la tendina con "ricordati
@@ -13806,6 +13817,7 @@ async function scriviFattiPerStato(op, fatti) {
         { label: 'lotto chiusura commessa' });
       if (error) throw error;
       if (!state.consegneCommessa.find(x => x.id === data.id)) state.consegneCommessa.push(data);
+      if (op.materiali_da_ddt) caricaMovimenti();   // gli scarichi del trigger
     } else fatti.lotto = null;
   }
   if (fatti.spedizione) {

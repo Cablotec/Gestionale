@@ -286,9 +286,12 @@ function materialiCommessa(op, commesse, mancantiPerCodice) {
 // vogliono quel codice, con la stessa regola della giacenza Alnus
 // (`ordineDiServizio`): due ordini Enviro aperti non devono contare due
 // volte lo stesso DDT.
-// ⚠ Nessuno scarico ancora: finche' la produzione non registra i consumi,
-// "arrivato" e' tutto cio' che e' entrato. Va bene per un ordine solo;
-// col secondo ordine dello stesso articolo servira' lo scarico.
+// SCARICHI (14 ott): un lotto di produzione scrive da solo, via trigger, lo
+// scarico dei C/L (`strumenti/migrazione-scarichi-produzione.sql`). Qui non
+// c'e' niente da fare di diverso: "arrivato" e' la SOMMA di tutti i
+// movimenti del codice (carichi − scarichi ± rettifiche), cioe' quello che
+// c'e' ancora sullo scaffale, e la commessa chiede solo il suo residuo
+// (`commessaSuResiduo`, stesso lotto). I due conti si muovono insieme.
 //
 // `movimenti`: [{ codice, qta, documento_numero, documento_data, tipo }].
 // Ritorna Map codice -> { serve, arrivato, manca, documenti:[{numero,data}] }
@@ -303,7 +306,11 @@ function arriviDaDdt(op, commesse, movimenti) {
     const cod = String((m && m.codice) || '').trim();
     if (!cod) return;
     entrato.set(cod, (entrato.get(cod) || 0) + (Number(m.qta) || 0));
-    if (m.documento_numero && (Number(m.qta) || 0) > 0) {
+    // Fra i "documenti" solo i CARICHI: gli scarichi di produzione e le loro
+    // rettifiche (14 ott) muovono la giacenza ma non sono "arrivato con".
+    // ⚠ `tipo` mancante = carico: le righe lette prima che il campo fosse
+    // selezionato non devono sparire dall'elenco.
+    if (m.documento_numero && (Number(m.qta) || 0) > 0 && (!m.tipo || m.tipo === 'carico')) {
       if (!documenti.has(cod)) documenti.set(cod, new Map());
       documenti.get(cod).set(m.documento_numero, m.documento_data || null);
     }

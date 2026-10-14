@@ -63,6 +63,38 @@ sez('Arrivato e mancante di una commessa');
   t('una rettifica negativa toglie: mancano 3', r.get('TS-1').manca === 3);
 }
 
+sez('Scarichi di produzione (14 ott)');
+{
+  // 00392 da 15 pz: arrivati 60, prodotti 10 pezzi -> scaricati 40.
+  // La commessa chiede il residuo (5 pz = 20), sullo scaffale ce ne sono 20.
+  const a = op('A', [{ codice: 'TS-1', qta: 20, tipo: 'C/L' }]);   // gia' a residuo
+  const mov = [car('TS-1', 60, 'D1', '2026-09-14'),
+    { codice: 'TS-1', qta: -40, tipo: 'scarico', documento_numero: '2026/OC/00392/0010', documento_data: '2026-10-14' }];
+  const r = M.arriviDaDdt(a, [a], mov).get('TS-1');
+  t('scaffale = carichi - scarichi: 20, la commessa a residuo e coperta', r.arrivato === 20 && r.manca === 0);
+  t('lo scarico non compare fra i documenti "arrivato con"', r.documenti.length === 1 && r.documenti[0].numero === 'D1');
+}
+{
+  // La sorella da 31 pz non deve vedere il materiale gia montato sulla prima.
+  const a = op('A', [{ codice: 'TS-1', qta: 0, tipo: 'C/L' }], { scadenza: '2026-10-16' });   // prodotta tutta
+  const b = op('B', [{ codice: 'TS-1', qta: 124, tipo: 'C/L' }], { scadenza: '2026-10-30' });
+  const mov = [car('TS-1', 42, 'D1', '2026-09-14'), car('TS-1', 124, 'D2', '2026-09-25'),
+    { codice: 'TS-1', qta: -60, tipo: 'scarico', documento_numero: 'x' }];
+  t('dopo lo scarico della prima, alla seconda restano 106: mancano 18',
+    M.arriviDaDdt(b, [a, b], mov).get('TS-1').manca === 18);
+  const senza = mov.slice(0, 2);
+  t('SENZA scarico la seconda risulterebbe coperta (il difetto che lo scarico toglie)',
+    M.arriviDaDdt(b, [a, b], senza).get('TS-1').manca === 0);
+}
+{
+  const a = op('A', [{ codice: 'TS-1', qta: 15, tipo: 'C/L' }]);
+  const mov = [car('TS-1', 15, 'D1', '2026-09-14'),
+    { codice: 'TS-1', qta: -15, tipo: 'scarico', documento_numero: 'L', lotto_id: 'l1' },
+    { codice: 'TS-1', qta: 15, tipo: 'rettifica', documento_numero: 'L', lotto_id: 'l1' }];
+  const r = M.arriviDaDdt(a, [a], mov).get('TS-1');
+  t('lotto annullato: la rettifica restituisce, e non e un "documento"', r.manca === 0 && r.documenti.length === 1);
+}
+
 sez('Lo stesso DDT non si conta due volte fra due commesse');
 {
   const a = op('A', [{ codice: 'TS-1', qta: 15, tipo: 'C/L' }], { scadenza: '2026-10-16' });
