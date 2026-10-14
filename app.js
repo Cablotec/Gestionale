@@ -591,6 +591,11 @@ async function afterLogin() {
   $('#area-gestione').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#area-impostazioni').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#area-strumenti').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
+  // Riunioni: prima di bindTabs, che riapre la scheda dell'indirizzo e deve
+  // gia' sapere se questa persona la puo' vedere.
+  await verificaMembroRiunioni();
+  const btnRiu = $('#area-riunioni');
+  if (btnRiu) btnRiu.style.display = state.membroRiunioni ? '' : 'none';
   // Bottone Kiosk: admin (per testare/aprire da PC personale) + account kiosk
   // dedicato (perché LUI deve sempre poter tornare al kiosk dei mini-PC)
   const mostraBottoneKiosk = state.profile.ruolo === 'admin' || isKioskRecord(state.profile);
@@ -1602,6 +1607,17 @@ const TAB_STRUCTURE = {
       { id: 'tessera_qr',     label: 'Tessera QR',        adminOnly: true },
     ],
   },
+  // Riunioni (14 ott, chiesto da Nico): SOLO i membri di `riunioni_membri`,
+  // che non coincidono con gli admin (Fabrizio e' user). `soloRiunioni` la
+  // nasconde agli altri; la serratura vera e' la RLS sulle tabelle.
+  riunioni: {
+    label: 'Riunioni',
+    adminOnly: false,
+    soloRiunioni: true,
+    tabs: [
+      { id: 'riunioni',       label: 'Azioni',            adminOnly: false, soloRiunioni: true },
+    ],
+  },
   impostazioni: {
     label: 'Impostazioni',
     adminOnly: true,
@@ -1645,13 +1661,20 @@ function bindTabs() {
 function schedaDaIndirizzo() {
   const id = decodeURIComponent((location.hash || '').replace(/^#/, '')).trim();
   if (!id) return null;
-  const isAdmin = state.profile?.ruolo === 'admin';
   for (const [area, a] of Object.entries(TAB_STRUCTURE)) {
-    if (a.adminOnly && !isAdmin) continue;
+    if (!puoVedereVoce(a)) continue;
     const t = a.tabs.find(x => x.id === id);
-    if (t && !(t.adminOnly && !isAdmin)) return { area, tab: id };
+    if (t && puoVedereVoce(t)) return { area, tab: id };
   }
   return null;
+}
+
+// Una voce di menu (area o scheda) per chi e' collegato: admin dove serve,
+// membro delle riunioni dove serve. Una regola, usata da menu e indirizzo.
+function puoVedereVoce(v) {
+  if (v.adminOnly && state.profile?.ruolo !== 'admin') return false;
+  if (v.soloRiunioni && !state.membroRiunioni) return false;
+  return true;
 }
 
 function selectArea(areaId) {
@@ -1663,11 +1686,10 @@ function selectArea(areaId) {
   // Genera le sotto-tab
   const area = TAB_STRUCTURE[areaId];
   if (!area) return;
-  const isAdmin = state.profile?.ruolo === 'admin';
   const sub = $('#tabs');
   sub.innerHTML = '';
   area.tabs.forEach(t => {
-    if (t.adminOnly && !isAdmin) return;
+    if (!puoVedereVoce(t)) return;
     const btn = el('button', {
       class: 'navtab',
       'data-tab': t.id,
@@ -1735,6 +1757,7 @@ function renderTab(name) {
     else if (name === 'pianificazione') renderPianificazione(root);
     else if (name === 'prelievi') renderPrelievi(root);
     else if (name === 'movimenti') renderMovimenti(root);
+    else if (name === 'riunioni') renderRiunioni(root);
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt_live') renderGanttLiveTab(root);
     else if (name === 'gantt_commesse') renderGanttCommesseTab(root);
@@ -5432,6 +5455,460 @@ const MOV_TIPO_ETI = {
 // per tutti i lotti di quella commessa, quindi la chiave porta anche il lotto.
 const movChiaveDoc = (m) => [m.documento_tipo || 'DOC', m.mittente || '', m.documento_numero || '',
   m.lotto_id || ''].join('|');
+
+// ═══ RIUNIONI (14 ott, chiesto da Nico) ═══
+// Le azioni decise in riunione: cosa, chi, entro quando, fatta o no. Nasce dal
+// file "Riunione 01-10-2026.xlsx", di cui tiene le stesse colonne; in piu' le
+// azioni aperte non restano chiuse dentro il foglio della loro riunione, ma
+// si vedono tutte insieme ("Da fare") e ricompaiono nella riunione dopo.
+// ⚠⚠ La vedono SOLO i membri di `riunioni_membri`, e la serratura e' la RLS
+// (`membro_riunioni()`), non il menu: nascondere la scheda e' cortesia.
+// La lista dei membri si cambia dal pannello SQL (strumenti/migrazione-riunioni.sql).
+// Regole pure (scadenze, "le mie", conteggi) in domain/riunioni.js.
+// `state.riunioni`: undefined = mai letta · null = non si e' potuta leggere.
+let riuVista = 'dafare';      // 'dafare' | id della riunione
+let riuFiltroChi = '';        // '' | '__mie__' | un nome
+let riuFiltroStato = 'aperte'; // 'aperte' | 'fatte' | 'tutte'
+let riuCerca = '';
+
+async function verificaMembroRiunioni() {
+  try {
+    const { data, error } = await sb.from('riunioni_membri').select('profilo_id')
+      .eq('profilo_id', state.profile.id).limit(1);
+    state.membroRiunioni = !error && Array.isArray(data) && data.length > 0;
+  } catch (e) { state.membroRiunioni = false; }
+}
+
+async function caricaRiunioni() {
+  try {
+    const [r, a] = await Promise.all([
+      sb.from('riunioni').select('*').order('data', { ascending:false }).order('id', { ascending:false }),
+      fetchTutte(() => sb.from('riunioni_azioni').select('*').order('riunione_id').order('ordine').order('id')),
+    ]);
+    if (r.error || a.error) { state.riunioni = null; state.riuAzioni = null; return; }
+    state.riunioni = r.data || [];
+    state.riuAzioni = a.data || [];
+  } catch (e) { state.riunioni = null; state.riuAzioni = null; }
+}
+
+const RIU_COND = {
+  scaduta:   { txt:'Scaduta',     cls:'berr' },
+  urgente:   { txt:'Urgente',     cls:'bor'  },
+  vicina:    { txt:'In scadenza', cls:'byel' },
+  ok:        { txt:'Aperta',      cls:'bblu' },
+  senza:     { txt:'Aperta',      cls:'bblu' },
+  fatta:     { txt:'Fatta',       cls:'bok'  },
+  annullata: { txt:'Annullata',   cls:'bgry' },
+};
+
+const riuNomeRiunione = (r) => r ? ('Riunione del ' + fmtIT(r.data) + (r.titolo ? ' — ' + r.titolo : '')) : '—';
+
+function renderRiunioni(root) {
+  root.innerHTML = '';
+  if (!state.membroRiunioni) {
+    root.append(el('div', { class:'empty' }, 'Questa sezione è riservata ai partecipanti alle riunioni.'));
+    return;
+  }
+  if (state.riunioni === undefined) {
+    root.append(el('div', { class:'empty' }, 'Caricamento riunioni…'));
+    caricaRiunioni().then(() => { if (state.currentTab === 'riunioni') renderRiunioni(root); });
+    return;
+  }
+  const oggi = toLocalISO(new Date());
+  const ricarica = el('button', { class:'btnsm', title:'Rileggi riunioni e azioni dal database',
+    onclick: async () => { ricarica.disabled = true; await caricaRiunioni(); renderRiunioni(root); } }, '⟳ Aggiorna');
+  const riunioni = state.riunioni || [];
+  const tutte = state.riuAzioni || [];
+  const rSel = riuVista === 'dafare' ? null : riunioni.find(r => r.id === riuVista) || null;
+  if (riuVista !== 'dafare' && !rSel) riuVista = 'dafare';
+
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Riunioni'), ricarica,
+    el('button', { class:'btnsm', title:'Scarica in Excel quello che vedi',
+      onclick: () => riuEsportaExcel(rSel) }, '⬇ Excel'),
+    el('button', { class:'btng', onclick: () => openRiunioneModal(null, root) }, '+ Nuova riunione'),
+    riunioni.length ? el('button', { class:'btnp',
+      onclick: () => openRiuAzioneModal(null, root, rSel ? rSel.id : riunioni[0].id) }, '+ Azione') : null));
+
+  if (!Array.isArray(state.riunioni)) {
+    root.append(el('div', { class:'empty' },
+      'Le riunioni non si sono potute leggere. Premi ⟳ Aggiorna; se resta così, '
+      + 'la tabella `riunioni` non è raggiungibile (migrazione non eseguita?).'));
+    return;
+  }
+  if (!riunioni.length) {
+    root.append(el('div', { class:'empty' }, 'Nessuna riunione ancora. Crea la prima con “+ Nuova riunione”.'));
+    return;
+  }
+
+  // ── Riepilogo: quello che conta a colpo d'occhio ──
+  const c = riuConteggi(tutte, oggi);
+  const mie = tutte.filter(a => riuEDi(a, state.profile?.nome) && ['fatta','annullata'].indexOf(a.stato) < 0);
+  const pill = (n, txt, cls, onclick) => el('span', { class:'badge ' + cls,
+    style:'font-size:12px;padding:4px 10px;' + (onclick ? 'cursor:pointer;' : ''), onclick }, n + ' ' + txt);
+  root.append(el('div', { style:'display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 14px;' },
+    pill(c.aperte, c.aperte === 1 ? 'aperta' : 'aperte', 'bblu',
+      () => { riuVista = 'dafare'; riuFiltroStato = 'aperte'; riuFiltroChi = ''; renderRiunioni(root); }),
+    c.scadute ? pill(c.scadute, c.scadute === 1 ? 'scaduta' : 'scadute', 'berr') : null,
+    c.urgenti ? pill(c.urgenti, c.urgenti === 1 ? 'urgente' : 'urgenti', 'bor') : null,
+    c.vicine ? pill(c.vicine, 'in scadenza entro ' + RIU_GIORNI_VICINA + ' giorni', 'byel') : null,
+    pill(mie.length, mie.length === 1 ? 'mia aperta' : 'mie aperte', 'bvio',
+      () => { riuVista = 'dafare'; riuFiltroStato = 'aperte'; riuFiltroChi = '__mie__'; renderRiunioni(root); }),
+    pill(c.fatte, c.fatte === 1 ? 'fatta' : 'fatte', 'bok')));
+
+  // ── Vista e filtri ──
+  const selVista = el('select', {},
+    el('option', { value:'dafare' }, 'Tutte le azioni (da tutte le riunioni)'),
+    ...riunioni.map(r => el('option', { value: String(r.id) }, riuNomeRiunione(r))));
+  selVista.value = String(riuVista);
+  selVista.onchange = () => {
+    riuVista = selVista.value === 'dafare' ? 'dafare' : Number(selVista.value);
+    renderRiunioni(root);
+  };
+  const nomi = riuNomiUsati(tutte);
+  const selChi = el('select', {}, el('option', { value:'' }, 'Tutti'),
+    el('option', { value:'__mie__' }, 'Le mie'),
+    ...nomi.map(n => el('option', { value:n }, n)));
+  selChi.value = riuFiltroChi;
+  const selStato = el('select', {}, el('option', { value:'aperte' }, 'Aperte'),
+    el('option', { value:'fatte' }, 'Fatte / annullate'), el('option', { value:'tutte' }, 'Tutte'));
+  selStato.value = riuFiltroStato;
+  const inCerca = el('input', { class:'search', type:'search', value: riuCerca,
+    placeholder:'Cerca punto, azione, commenti…', style:'min-width:220px;' });
+
+  const corpo = el('div');
+  const filtra = (lista) => {
+    let r = lista;
+    if (riuFiltroStato === 'aperte') r = r.filter(a => a.stato === 'aperta');
+    else if (riuFiltroStato === 'fatte') r = r.filter(a => a.stato !== 'aperta');
+    if (riuFiltroChi === '__mie__') r = r.filter(a => riuEDi(a, state.profile?.nome));
+    else if (riuFiltroChi) r = r.filter(a => (a.responsabili || []).indexOf(riuFiltroChi) >= 0);
+    if (riuCerca.trim()) {
+      const q = riuCerca.trim().toLowerCase();
+      r = r.filter(a => [a.punto, a.argomento, a.azione, a.commenti, (a.responsabili || []).join(' ')]
+        .some(v => String(v || '').toLowerCase().includes(q)));
+    }
+    return r;
+  };
+  const disegna = () => {
+    corpo.innerHTML = '';
+    if (!rSel) {
+      const righe = riuOrdinaDaFare(filtra(tutte), oggi);
+      corpo.append(riuTabella(righe, { root, oggi, conRiunione:true, vuoto:'Nessuna azione con questi filtri.' }));
+      return;
+    }
+    // Una riunione: le sue azioni nell'ordine del verbale, poi quelle ANCORA
+    // APERTE delle riunioni precedenti — sono il primo giro di tavolo.
+    corpo.append(el('div', { style:'margin-bottom:14px;padding:12px 14px;background:var(--sur);border:1px solid var(--brd);border-radius:6px;' },
+      el('div', { style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;' },
+        el('b', { style:'font-size:14px;' }, riuNomeRiunione(rSel)),
+        el('button', { class:'btnsm', onclick: () => openRiunioneModal(rSel, root) }, '✎ Modifica')),
+      rSel.note ? el('div', { class:'sub', style:'white-space:pre-line;margin-top:6px;' }, rSel.note) : null));
+    const sue = filtra(tutte.filter(a => a.riunione_id === rSel.id))
+      .sort((x, y) => (x.ordine || 0) - (y.ordine || 0) || x.id - y.id);
+    corpo.append(riuTabella(sue, { root, oggi, raggruppa:true,
+      vuoto:'Nessuna azione di questa riunione con questi filtri.' }));
+    const prima = new Set(riunioni.filter(r => r.data < rSel.data || (r.data === rSel.data && r.id < rSel.id)).map(r => r.id));
+    const riportate = riuOrdinaDaFare(filtra(tutte.filter(a => prima.has(a.riunione_id) && a.stato === 'aperta')), oggi);
+    if (riportate.length) {
+      corpo.append(el('h3', { style:'font-size:13px;margin:22px 0 8px;' },
+        'Ancora aperte dalle riunioni precedenti (' + riportate.length + ')'));
+      corpo.append(riuTabella(riportate, { root, oggi, conRiunione:true }));
+    }
+  };
+  selChi.onchange = () => { riuFiltroChi = selChi.value; disegna(); };
+  selStato.onchange = () => { riuFiltroStato = selStato.value; disegna(); };
+  inCerca.oninput = () => { riuCerca = inCerca.value; disegna(); };
+  root.append(el('div', { style:'display:flex;gap:8px;align-items:center;margin:0 0 12px;flex-wrap:wrap;' },
+    el('span', { class:'sub' }, 'Vista:'), selVista,
+    el('span', { class:'sub', style:'margin-left:8px;' }, 'Chi:'), selChi,
+    el('span', { class:'sub', style:'margin-left:8px;' }, 'Stato:'), selStato, inCerca));
+  root.append(corpo);
+  disegna();
+}
+
+// La tabella delle azioni, con le stesse colonne del file Excel.
+// o.raggruppa: il "punto" si scrive solo sulla prima riga di una serie uguale
+// (come le celle unite del foglio). o.conRiunione: colonna con la riunione.
+function riuTabella(righe, o) {
+  if (!righe.length) return el('div', { class:'empty', style:'padding:20px;' }, o.vuoto || 'Nessuna azione.');
+  const riunioni = state.riunioni || [];
+  const tb = el('tbody');
+  let puntoPrima = null;
+  righe.forEach(a => {
+    const cond = riuCondizione(a, o.oggi);
+    const eti = RIU_COND[cond];
+    const chiusa = cond === 'fatta' || cond === 'annullata';
+    const nuovoPunto = !o.raggruppa || a.punto !== puntoPrima;
+    puntoPrima = a.punto;
+    const entro = a.scadenza
+      ? el('span', { class:'mono', style:'white-space:nowrap;font-size:11px;'
+          + (cond === 'scaduta' ? 'color:var(--red);font-weight:700;' : cond === 'vicina' ? 'color:var(--yel);font-weight:700;' : '') },
+          fmtIT(a.scadenza))
+      : null;
+    const tr = el('tr', { style:'cursor:pointer;' + (chiusa ? 'opacity:.62;' : ''),
+      title:'Apri l\'azione', onclick: () => openRiuAzioneModal(a, o.root) },
+      el('td', { style:'font-weight:700;font-size:11px;vertical-align:top;' + (nuovoPunto ? '' : 'color:transparent;') }, a.punto || ''),
+      el('td', { class:'sub', style:'white-space:pre-line;font-size:11px;max-width:260px;vertical-align:top;' }, a.argomento || ''),
+      el('td', { style:'white-space:pre-line;max-width:340px;vertical-align:top;'
+        + (cond === 'annullata' ? 'text-decoration:line-through;' : '') }, a.azione || ''),
+      el('td', { style:'vertical-align:top;' },
+        entro, a.urgente ? el('div', {}, el('span', { class:'badge bor', style:'margin-top:2px;' }, 'Urgente')) : null,
+        !entro && !a.urgente ? el('span', { style:'color:var(--mut);' }, '—') : null),
+      el('td', { style:'font-size:11px;vertical-align:top;' },
+        ...(a.responsabili || []).map(n => el('div', { style:'white-space:nowrap;'
+          + (riuEDi({ responsabili:[n] }, state.profile?.nome) ? 'color:var(--vio);font-weight:700;' : '') }, n))),
+      el('td', { style:'vertical-align:top;white-space:nowrap;' },
+        el('span', { class:'badge ' + eti.cls }, eti.txt),
+        a.stato === 'fatta' && a.fatta_il ? el('div', { class:'mono sub', style:'font-size:11px;margin-top:3px;' }, fmtIT(a.fatta_il)) : null,
+        a.stato === 'aperta' ? el('div', { style:'margin-top:4px;' }, el('button', { class:'btnsm',
+          title:'Segna come fatta oggi',
+          onclick: (e) => { e.stopPropagation(); riuSegnaFatta(a, o.root, e.currentTarget); } }, '✓ Fatta')) : null),
+      el('td', { class:'sub', style:'white-space:pre-line;font-size:11px;max-width:240px;vertical-align:top;' }, a.commenti || ''),
+      o.conRiunione ? el('td', { style:'vertical-align:top;' }, (() => {
+        const r = riunioni.find(x => x.id === a.riunione_id);
+        return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);white-space:nowrap;',
+          title:'Apri ' + riuNomeRiunione(r),
+          onclick: (e) => { e.preventDefault(); e.stopPropagation(); riuVista = a.riunione_id; renderRiunioni(o.root); } },
+          r ? fmtIT(r.data) : '—');
+      })()) : null);
+    tb.append(tr);
+  });
+  const tit = ['Punto', 'Argomento', 'Azione da intraprendere', 'Entro', 'Chi', 'Stato', 'Commenti'];
+  if (o.conRiunione) tit.push('Riunione');
+  const tw = el('div', { class:'tw' });
+  tw.append(el('table', { class:'rt' }, el('thead', {}, el('tr', {}, ...tit.map(t => el('th', {}, t)))), tb));
+  return tw;
+}
+
+async function riuSalvaAzione(id, payload) {
+  const { data, error } = await eseguiConRetry(
+    () => id ? sb.from('riunioni_azioni').update(payload).eq('id', id).select().single()
+             : sb.from('riunioni_azioni').insert(payload).select().single(),
+    { label: 'salvataggio azione riunione' });
+  if (error) return { error };
+  if (!data) return { error: { message: 'Il database non ha accettato la modifica (permessi?).' } };
+  state.riuAzioni = state.riuAzioni || [];
+  if (id) state.riuAzioni = state.riuAzioni.map(x => x.id === id ? data : x);
+  else state.riuAzioni.push(data);
+  return { data };
+}
+
+async function riuSegnaFatta(a, root, btn) {
+  if (btn) btn.disabled = true;
+  const { error } = await riuSalvaAzione(a.id, { stato:'fatta', fatta_il: a.fatta_il || toLocalISO(new Date()) });
+  if (error) { if (btn) btn.disabled = false; return toast(error.message, 'err'); }
+  toast('Azione segnata come fatta');
+  renderRiunioni(root);
+}
+
+function openRiuAzioneModal(a, root, riunioneId) {
+  const isNew = !a;
+  const riunioni = state.riunioni || [];
+  a = a || { riunione_id: riunioneId, punto:'', argomento:'', azione:'', scadenza:null, urgente:false,
+    responsabili:[], stato:'aperta', fatta_il:null, commenti:'' };
+  const tutte = state.riuAzioni || [];
+
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuova azione' : 'Azione'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕')));
+  const body = el('div', { class:'mbody' });
+
+  const selRiu = el('select', {}, ...riunioni.map(r => el('option', { value:String(r.id) }, riuNomeRiunione(r))));
+  selRiu.value = String(a.riunione_id);
+  const dlPunti = el('datalist', { id:'riu-punti' },
+    ...[...new Set(tutte.map(x => x.punto).filter(Boolean))].sort().map(p => el('option', { value:p })));
+  const inPunto = el('input', { type:'text', value:a.punto || '', list:'riu-punti',
+    placeholder:'es. PIANO FERIE, FORMAZIONE…' });
+  const inArg = el('textarea', { rows:'2', placeholder:'Di cosa si è parlato (facoltativo)' }, a.argomento || '');
+  const inAzione = el('textarea', { rows:'3', placeholder:'Cosa va fatto' }, a.azione || '');
+  const inScad = el('input', { type:'date', value:a.scadenza || '' });
+  const inUrg = el('input', { type:'checkbox', style:'width:auto;' });
+  inUrg.checked = !!a.urgente;
+  const inChi = el('input', { type:'text', value:(a.responsabili || []).join(' / '),
+    placeholder:'es. Claudio / Matteo' });
+  const nomi = riuNomiUsati(tutte);
+  const chipChi = el('div', { style:'display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;' },
+    ...nomi.map(n => el('span', { class:'badge bgry', style:'cursor:pointer;text-transform:none;',
+      title:'Aggiungi ' + n, onclick: () => {
+        const cur = riuResponsabiliDaTesto(inChi.value);
+        if (cur.map(x => x.toLowerCase()).indexOf(n.toLowerCase()) < 0) cur.push(n);
+        inChi.value = cur.join(' / ');
+      } }, '+ ' + n)));
+  const selStato = el('select', {}, el('option', { value:'aperta' }, 'Aperta'),
+    el('option', { value:'fatta' }, 'Fatta'), el('option', { value:'annullata' }, 'Annullata (non serve più)'));
+  selStato.value = a.stato || 'aperta';
+  const inFatta = el('input', { type:'date', value:a.fatta_il || '' });
+  // Passando a "fatta" la data di esecuzione si propone a oggi: e' quasi
+  // sempre quella. Resta modificabile, e si puo' lasciare vuota (nel file
+  // c'e' un "ok" senza data).
+  selStato.onchange = () => {
+    if (selStato.value === 'fatta' && !inFatta.value) inFatta.value = toLocalISO(new Date());
+  };
+  const inComm = el('textarea', { rows:'2', placeholder:'Esito, note, aggiornamenti' }, a.commenti || '');
+
+  body.append(dlPunti,
+    el('div', { class:'field' }, el('label', {}, 'Riunione'), selRiu),
+    el('div', { class:'field' }, el('label', {}, 'Punto *'), inPunto),
+    el('div', { class:'field' }, el('label', {}, 'Argomento'), inArg),
+    el('div', { class:'field' }, el('label', {}, 'Azione da intraprendere *'), inAzione),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Entro il'), inScad),
+      el('div', { class:'field' }, el('label', {}, 'Urgente'),
+        el('label', { style:'display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:12px;color:var(--txt);' },
+          inUrg, 'da fare subito'))),
+    el('div', { class:'field' }, el('label', {}, 'Chi (separati da / )'), inChi, chipChi),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Stato'), selStato),
+      el('div', { class:'field' }, el('label', {}, 'Eseguita il'), inFatta)),
+    el('div', { class:'field' }, el('label', {}, 'Commenti'), inComm),
+    // ⚠ `.append` scrive "null" invece di saltarlo: spread, non ternario.
+    ...(!isNew && a.modificato_il ? [el('div', { class:'sub', style:'font-size:11px;' },
+      'Ultima modifica ' + fmtIT(String(a.modificato_il).slice(0, 10))
+      + (() => { const p = (state.profiliById || {})[a.modificato_da];
+        return p ? ' · ' + (p.nome || p.email) : ''; })())] : []));
+  modal.append(body);
+
+  const foot = el('div', { class:'mfoot' });
+  if (!isNew) {
+    foot.append(el('button', { class:'btnd', onclick: async () => {
+      if (!confirm('Eliminare l\'azione "' + (a.azione || '').slice(0, 80) + '"?\n\n'
+        + 'Se non serve più, meglio segnarla "Annullata": resta nello storico.')) return;
+      const { error } = await eseguiConRetry(() => sb.from('riunioni_azioni').delete().eq('id', a.id),
+        { label: 'elimina azione riunione' });
+      if (error) return toast(error.message, 'err');
+      state.riuAzioni = (state.riuAzioni || []).filter(x => x.id !== a.id);
+      toast('Azione eliminata'); closeModal(); renderRiunioni(root);
+    } }, '🗑 Elimina'));
+  }
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  const btnSave = el('button', { class:'btnp' }, 'Salva');
+  btnSave.onclick = async () => {
+    const punto = inPunto.value.trim(), azione = inAzione.value.trim();
+    if (!punto) return toast('Il punto è obbligatorio', 'err');
+    if (!azione) return toast('L\'azione è obbligatoria', 'err');
+    const stato = selStato.value;
+    const riunione_id = Number(selRiu.value);
+    const payload = {
+      riunione_id, punto, azione,
+      argomento: inArg.value.trim() || null,
+      scadenza: inScad.value || null,
+      urgente: inUrg.checked,
+      responsabili: riuResponsabiliDaTesto(inChi.value),
+      stato,
+      fatta_il: stato === 'fatta' ? (inFatta.value || null) : null,
+      commenti: inComm.value.trim() || null,
+    };
+    // Una nuova (o spostata in un'altra riunione) va in fondo al verbale.
+    if (isNew || riunione_id !== a.riunione_id) {
+      payload.ordine = 1 + Math.max(0, ...tutte.filter(x => x.riunione_id === riunione_id).map(x => x.ordine || 0));
+    }
+    btnSave.disabled = true; btnSave.textContent = 'Salvataggio…';
+    try {
+      const { error } = await riuSalvaAzione(isNew ? null : a.id, payload);
+      if (error) { btnSave.disabled = false; btnSave.textContent = 'Salva'; return toast(error.message, 'err'); }
+      toast(isNew ? 'Azione aggiunta' : 'Azione aggiornata');
+      closeModal(); renderRiunioni(root);
+    } catch (err) {
+      btnSave.disabled = false; btnSave.textContent = 'Salva';
+      toast('Errore di rete: ' + (err.message || err), 'err');
+    }
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+  if (isNew) setTimeout(() => inPunto.focus(), 0);
+}
+
+function openRiunioneModal(r, root) {
+  const isNew = !r;
+  r = r || { data: toLocalISO(new Date()), titolo:'', note:'' };
+  const modal = el('div', { class:'modal' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, isNew ? 'Nuova riunione' : 'Modifica riunione'),
+    el('button', { class:'mclose', onclick:closeModal }, '✕')));
+  const inData = el('input', { type:'date', value:r.data || '' });
+  const inTitolo = el('input', { type:'text', value:r.titolo || '', placeholder:'facoltativo, es. Riunione responsabili' });
+  const inNote = el('textarea', { rows:'3', placeholder:'Presenti, note generali (facoltativo)' }, r.note || '');
+  const aperte = (state.riuAzioni || []).filter(a => a.stato === 'aperta').length;
+  modal.append(el('div', { class:'mbody' },
+    el('div', { class:'field' }, el('label', {}, 'Data *'), inData),
+    el('div', { class:'field' }, el('label', {}, 'Titolo'), inTitolo),
+    el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
+    isNew && aperte ? el('div', { class:'sub', style:'font-size:11px;' },
+      'Le ' + aperte + ' azioni ancora aperte non vanno ricopiate: compaiono da sole sotto la nuova riunione, '
+      + 'in “Ancora aperte dalle riunioni precedenti”.') : null));
+  const foot = el('div', { class:'mfoot' });
+  if (!isNew) {
+    const sue = (state.riuAzioni || []).filter(a => a.riunione_id === r.id).length;
+    foot.append(el('button', { class:'btnd', onclick: async () => {
+      if (sue) return toast('La riunione ha ' + sue + (sue === 1 ? ' azione' : ' azioni')
+        + ': prima vanno eliminate o spostate in un\'altra riunione.', 'err');
+      if (!confirm('Eliminare ' + riuNomeRiunione(r) + '?')) return;
+      const { error } = await eseguiConRetry(() => sb.from('riunioni').delete().eq('id', r.id),
+        { label: 'elimina riunione' });
+      if (error) return toast(error.message, 'err');
+      state.riunioni = (state.riunioni || []).filter(x => x.id !== r.id);
+      riuVista = 'dafare';
+      toast('Riunione eliminata'); closeModal(); renderRiunioni(root);
+    } }, '🗑 Elimina'));
+  }
+  foot.append(el('button', { class:'btng', onclick:closeModal }, 'Chiudi'));
+  const btnSave = el('button', { class:'btnp' }, 'Salva');
+  btnSave.onclick = async () => {
+    if (!inData.value) return toast('La data è obbligatoria', 'err');
+    const payload = { data: inData.value, titolo: inTitolo.value.trim() || null, note: inNote.value.trim() || null };
+    btnSave.disabled = true; btnSave.textContent = 'Salvataggio…';
+    const { data, error } = await eseguiConRetry(
+      () => isNew ? sb.from('riunioni').insert(payload).select().single()
+                  : sb.from('riunioni').update(payload).eq('id', r.id).select().single(),
+      { label: 'salvataggio riunione' });
+    if (error || !data) {
+      btnSave.disabled = false; btnSave.textContent = 'Salva';
+      return toast(error ? error.message : 'Il database non ha accettato la modifica (permessi?).', 'err');
+    }
+    state.riunioni = isNew ? [data, ...(state.riunioni || [])]
+      : (state.riunioni || []).map(x => x.id === r.id ? data : x);
+    state.riunioni.sort((x, y) => String(y.data).localeCompare(String(x.data)) || y.id - x.id);
+    riuVista = data.id;
+    toast(isNew ? 'Riunione creata' : 'Riunione aggiornata');
+    closeModal(); renderRiunioni(root);
+  };
+  foot.append(btnSave);
+  modal.append(foot);
+  openModal(modal);
+}
+
+// Excel con le colonne del file da cui e' nata la sezione, piu' la riunione.
+// rSel = una riunione (le sue azioni) oppure null (tutte, nell'ordine "da fare").
+async function riuEsportaExcel(rSel) {
+  let XLSX;
+  try { XLSX = await caricaXLSX(); } catch (e) { return toast(e.message, 'err'); }
+  const oggi = toLocalISO(new Date());
+  const riunioni = state.riunioni || [];
+  const righe = rSel
+    ? (state.riuAzioni || []).filter(a => a.riunione_id === rSel.id).sort((x, y) => (x.ordine || 0) - (y.ordine || 0) || x.id - y.id)
+    : riuOrdinaDaFare(state.riuAzioni || [], oggi);
+  const dataXls = (iso) => iso ? new Date(iso + 'T12:00:00') : '';
+  const aoa = [['Punti riunione', 'ARGOMENTI', 'AZIONI DA INTRAPRENDERE', 'DATA LIMITE', 'OPERATORE',
+    'fatto?', 'data esecuzione', 'commenti', 'riunione']];
+  righe.forEach(a => {
+    const r = riunioni.find(x => x.id === a.riunione_id);
+    aoa.push([a.punto || '', a.argomento || '', a.azione || '',
+      a.scadenza ? dataXls(a.scadenza) : (a.urgente ? 'URGENTE' : ''),
+      (a.responsabili || []).join('/'),
+      a.stato === 'fatta' ? 'ok' : a.stato === 'annullata' ? 'annullata' : '',
+      dataXls(a.fatta_il), a.commenti || '', r ? dataXls(r.data) : '']);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true, dateNF: 'dd/mm/yyyy' });
+  ws['!cols'] = [18, 40, 50, 12, 20, 9, 14, 36, 12].map(w => ({ wch: w }));
+  const wb = XLSX.utils.book_new();
+  const nomeFoglio = rSel ? rSel.data.split('-').reverse().join('-') : 'Azioni';
+  XLSX.utils.book_append_sheet(wb, ws, nomeFoglio);
+  XLSX.writeFile(wb, rSel
+    ? 'Riunione ' + rSel.data.split('-').reverse().join('-') + '.xlsx'
+    : 'Azioni riunioni al ' + oggi.split('-').reverse().join('-') + '.xlsx');
+}
 
 function renderMovimenti(root) {
   root.innerHTML = '';
