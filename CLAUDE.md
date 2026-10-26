@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.04`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.05`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -757,6 +757,7 @@ Nico: *"aggiungi la scritta fissa documenti, per indicare il contenuto. magari i
 - Senza scritta il layout torna quello originale (3 spazi da 6,2, logo 30).
 - Versioni superate dello stesso giorno: `.01` scritta in alto sopra il logo (logo 28,7); `.02` quattro spazi uguali da 6,2 (logo 20,3); `.03` spazi = zona bianca 5,2 (logo 22,3).
 - Il font a pixel ha solo MAIUSCOLE, numeri, accentate e `- . / , # + ( ) _ ' &`: niente `:` ne' `@`.
+- **Filamento nel 3MF: `Bambu PETG Basic @BBL H2S`** (26 ott, `.05`, Nico; prima PETG Matte), su tutti e due gli estrusori. Nome verificato nei profili installati (`C:\Program Files\Bambu Studioesources\profiles\BBLilament`), compatibile con "Bambu Lab H2S 0.4 nozzle". ⚠ Il CLI di Bambu Studio (`--slice`) su questo PC va in segmentation fault con QUALUNQUE 3MF, anche quello di prima: non serve a verificare, si apre a mano dall'interfaccia.
 
 ## Campi e tendine: UNO stile di base (14 ott, `2026-10-14.05`)
 Nico, screenshot dei filtri Riunioni: *"queste caselle bianche devono avere uno stile grafico coerente"*. Non era solo Riunioni: ~30 `<select>` e ~60 `<input>` nati FUORI dai contenitori che vestono i campi (`.field`, `.storico-toolbar`, `.op-cell-inline`…) avevano il bianco del browser e padding zero (lo azzera `*`).

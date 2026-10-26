@@ -3046,7 +3046,7 @@ var qrcode = function() {
       printer_settings_id: "Bambu Lab H2S 0.4 nozzle",
       print_settings_id: "0.20mm High Quality @BBL H2S",
       filament_settings_id: o.materiale === "pla" ? ["Bambu PLA Basic @BBL H2S", "Bambu PLA Basic @BBL H2S"]
-                                                  : ["Bambu PETG Matte @BBL H2S", "Bambu PETG Matte @BBL H2S"],
+                                                  : ["Bambu PETG Basic @BBL H2S", "Bambu PETG Basic @BBL H2S"],   // 26 ott, Nico: PETG Basic (prima Matte); nome verificato nei profili di Bambu Studio
       nozzle_diameter: ["0.4"],
       printable_height: "340",
       curr_bed_type: "Textured PEI Plate",
@@ -3115,7 +3115,7 @@ var qrcode = function() {
       "     Se trascini il file e compare la domanda, scegli 'Apri come progetto':",
       "     con 'Importa solo la geometria' i colori andrebbero persi.",
       "  2. La base e' gia' sul filamento 1 (" + (o.coloreBase || "") + "), il rilievo sul filamento 2 (" + (o.coloreRilievo || "") + ").",
-      "     Il progetto usa i profili ufficiali Bambu Lab H2S 0.4, 0.20mm High Quality e " + (o.materiale === "pla" ? "PLA Basic" : "PETG Matte") + ":",
+      "     Il progetto usa i profili ufficiali Bambu Lab H2S 0.4, 0.20mm High Quality e " + (o.materiale === "pla" ? "PLA Basic" : "PETG Basic") + ":",
       "     se stampi con altro, cambiali pure: la geometria e i colori restano.",
       "  3. Prima di stampare, abbina i due filamenti agli slot giusti dell'AMS.",
       "",
