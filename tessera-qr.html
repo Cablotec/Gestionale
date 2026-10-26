@@ -2718,7 +2718,10 @@ var qrcode = function() {
 
   /* ---------- Formato fisso: tessera 85,60 x 53,98 in verticale ----------
      Tre spazi uguali: bordo alto | logo 30 mm | QR 37 mm | bordo basso.
-     G = (85,60 - 30 - 37) / 3 = 6,2 mm. Il logo è la mesh originale dell'STL, solo scalata. */
+     G = (85,60 - 30 - 37) / 3 = 6,2 mm. Il logo è la mesh originale dell'STL, solo scalata.
+     Scritta (26 ott, Nico: "DOCUMENTS", per dire cosa c'e' nella cartella): SOLO nella
+     fascia in alto, sopra il logo. Sopra e sotto il QR i 6,2 mm sono quasi tutti zona
+     bianca obbligatoria (4 moduli): una scritta li' rischia la lettura del codice. */
   var TESSERA = { W: 53.98, H: 85.60, latoQR: 37, logo: 30 };
   TESSERA.spazio = (TESSERA.H - TESSERA.latoQR - TESSERA.logo) / 3;
 
@@ -2742,7 +2745,12 @@ var qrcode = function() {
       x0 = Math.min(x0, v[i]); x1 = Math.max(x1, v[i]); y0 = Math.min(y0, v[i + 1]); y1 = Math.max(y1, v[i + 1]);
       z0 = Math.min(z0, v[i + 2]); z1 = Math.max(z1, v[i + 2]);
     }
-    var s = T.logo / Math.max(x1 - x0, y1 - y0), wL = (x1 - x0) * s, hL = (y1 - y0) * s;
+    // Con la scritta il logo cede quel tanto che serve a lasciarle 1,5 mm sopra e
+    // sotto (26 ott): a logo pieno restavano 0,86 mm, e la scritta toccava logo e
+    // cornice. QR e spazi attorno al QR non si toccano.
+    var latoLogo = T.logo, hT0 = opz.testo ? (opz.altezzaTesto || 3.5) : 0;
+    if (hT0) latoLogo = Math.min(T.logo, T.logo - ((hT0 + 2 * 1.5 + rim) - G));
+    var s = latoLogo / Math.max(x1 - x0, y1 - y0), wL = (x1 - x0) * s, hL = (y1 - y0) * s;
     var ox = (W - wL) / 2 - x0 * s, oy = (yQR + T.latoQR + G) - y0 * s;
     var sz = (opz.rilievo || 0.8) / (z1 - z0), zb = opz.spessore;
     var triLogo = [], f = LM.f;
@@ -2752,14 +2760,39 @@ var qrcode = function() {
       return Math.abs(t[0][2] - zTop) < 1e-4 && Math.abs(t[1][2] - zTop) < 1e-4 && Math.abs(t[2][2] - zTop) < 1e-4;
     }).map(function (t) { return [[t[0][0], t[0][1]], [t[1][0], t[1][1]], [t[2][0], t[2][1]]]; });
 
+    // scritta nella fascia fra la cima del logo e la cornice, centrata in tutti e due i versi
+    var nt = normalizzaTesto(opz.testo), testo = nt.testo, rt = [], hTesto = 0, yTesto = 0;
+    if (nt.scartati && nt.scartati.length) avvisi.push("Caratteri non disponibili tolti dalla scritta: " + nt.scartati.join(" "));
+    if (testo) {
+      var yLogoTop = yQR + T.latoQR + G + hL, fascia = H - rim - yLogoTop, margine = 1.5;
+      var colonne = 0;
+      for (i = 0; i < testo.length; i++) colonne += (testo[i] === " " ? 3 : 5) + (i < testo.length - 1 ? 1 : 0);
+      var pix = Math.min((opz.altezzaTesto || 3.5) / 7, (fascia - 2 * margine) / 7, (W - 2 * (rim + 1.5)) / colonne);
+      if (pix * 7 < (opz.altezzaTesto || 3.5) - 0.01) avvisi.push("Scritta ridotta a " + r2(pix * 7) + " mm di altezza per farla stare.");
+      if (pix < 1.2 * ugello) avvisi.push("Le lettere sono molto piccole (" + r2(pix * 7) + " mm): potrebbero non venire nitide.");
+      hTesto = pix * 7; yTesto = yLogoTop + (fascia - hTesto) / 2;
+      var xt = (W - colonne * pix) / 2, cx = 0;
+      for (var t = 0; t < testo.length; t++) {
+        var ch = testo[t];
+        if (ch !== " ") {
+          var rowsG = FONT[ch].split(",").map(function (z) { return z.split("").map(function (b) { return b === "1"; }); });
+          rettangoli(rowsG, 7, 5).forEach(function (q) {
+            rt.push({ x: xt + (cx + q.c) * pix, y: yTesto + (7 - q.r - q.h) * pix, w: q.w * pix, h: q.h * pix });
+          });
+          cx += 5;
+        } else cx += 3;
+        cx += 1;
+      }
+    }
+
     var grid = [];
     for (var r = 0; r < N; r++) { var row = []; for (var c = 0; c < N; c++) row.push(qr.isDark(r, c)); grid.push(row); }
     var rq = rettangoli(grid, N, N).map(function (q) { return { x: xQR + q.c * m, y: yQR + (N - q.r - q.h) * m, w: q.w * m, h: q.h * m }; });
     avvisi = avvisi.map(function (a) { return a.replace(/(\d)\.(\d)/g, "$1,$2"); });
     return {
       errori: errori, avvisi: avvisi, url: url, N: N, modulo: m, quiet: quiet, W: W, H: H, raggio: Math.min(opz.raggio, 10),
-      bordo: xQR - quiet, testo: "", hTesto: 0, qr: { x: xQR, y: yQR, lato: T.latoQR }, livello: sel.livello, nomeLivello: NOMI_LIVELLO[sel.livello],
-      rettQR: rq, rettTesto: [], rettLogo: [], triLogo: triLogo, logoTop: logoTop, logo: { x: (W - wL) / 2, y: yQR + T.latoQR + G, w: wL, h: hL },
+      bordo: xQR - quiet, testo: testo, hTesto: hTesto, yTesto: yTesto, qr: { x: xQR, y: yQR, lato: T.latoQR }, livello: sel.livello, nomeLivello: NOMI_LIVELLO[sel.livello],
+      rettQR: rq, rettTesto: rt, rettLogo: [], triLogo: triLogo, logoTop: logoTop, logo: { x: (W - wL) / 2, y: yQR + T.latoQR + G, w: wL, h: hL },
       spazio: G, fori: [], raggioForo: 0, opz: opz, grid: grid, tessera: true
     };
   }
@@ -3121,8 +3154,8 @@ var qrcode = function() {
   var campo = document.getElementById("url"), bottone = document.getElementById("scarica"), esito = document.getElementById("esito");
 
   // Tessera Cablotec: tutto fisso
-  var FISSI = { formato: "tessera", materiale: "petg", cornice: true, corniceL: 1, fori: "nessuno", diamForo: 3.5, testo: "",
-                latoQR: 37, altezzaTesto: 5, spessore: 2, rilievo: 0.8, raggio: 3,
+  var FISSI = { formato: "tessera", materiale: "petg", cornice: true, corniceL: 1, fori: "nessuno", diamForo: 3.5, testo: "DOCUMENTS",
+                latoQR: 37, altezzaTesto: 3.5, spessore: 2, rilievo: 0.8, raggio: 3,
                 coloreBase: "#FF6E36", coloreRilievo: "#111111", ugello: 0.4, correzione: "auto" };
 
   function messaggio(t, errore) { esito.textContent = t; esito.className = errore ? "errore" : ""; }
@@ -3253,9 +3286,15 @@ var qrcode = function() {
     var ys = [0, p.qr.y, p.qr.y + p.qr.lato, p.logo.y, p.logo.y + p.logo.h, H];
     var f1 = function (v) { return (Math.round(v * 10) / 10).toString().replace(".", ","); };
     var nomi = [f1(p.qr.y), "QR " + f1(p.qr.lato), f1(p.logo.y - p.qr.y - p.qr.lato), "Logo Ø " + f1(p.logo.w), f1(H - p.logo.y - p.logo.h)];
+    if (p.hTesto) {   // la fascia in alto si divide: spazio, scritta, spazio
+      ys = [0, p.qr.y, p.qr.y + p.qr.lato, p.logo.y, p.logo.y + p.logo.h, p.yTesto, p.yTesto + p.hTesto, H];
+      nomi = nomi.slice(0, 4).concat([f1(p.yTesto - p.logo.y - p.logo.h), "Testo " + f1(p.hTesto), f1(H - p.yTesto - p.hTesto)]);
+    }
     ys.forEach(function (y) { seg([0, y, 0], [-8, y, 0]); tacca(-6.5, y, 0); });
     seg([-6.5, 0, 0], [-6.5, H, 0]);
-    for (var i = 0; i < 5; i++) etichetta(nomi[i], -6.5, (ys[i] + ys[i + 1]) / 2, 0);
+    // i tratti sotto i 3 mm (gli spazi attorno alla scritta) non si etichettano:
+    // le scritte si sovrapporrebbero; la misura si legge per differenza
+    for (var i = 0; i < nomi.length; i++) if (ys[i + 1] - ys[i] >= 3) etichetta(nomi[i], -6.5, (ys[i] + ys[i + 1]) / 2, 0);
     // spessore, sull'angolo in basso a destra
     var zt = p.opz.spessore + p.opz.rilievo;
     seg([W + 3, -3, 0], [W + 3, -3, zt]); tacca(W + 3, -3, 0); tacca(W + 3, -3, zt);
