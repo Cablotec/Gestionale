@@ -2760,7 +2760,7 @@ var qrcode = function() {
       for (i = 0; i < testo.length; i++) colonne += (testo[i] === " " ? 3 : 5) + (i < testo.length - 1 ? 1 : 0);
       var pix = Math.min((opz.altezzaTesto || 3.5) / 7, (W - 2 * (rim + 1.5)) / colonne);
       if (pix * 7 < (opz.altezzaTesto || 3.5) - 0.01) avvisi.push("Scritta ridotta a " + r2(pix * 7) + " mm di altezza per farla stare.");
-      if (pix < 1.2 * ugello) avvisi.push("Le lettere sono molto piccole (" + r2(pix * 7) + " mm): potrebbero non venire nitide.");
+      if (pix < 2 * ugello - 1e-6) avvisi.push("Ogni pixel delle lettere misura " + r2(pix) + " mm: con ugello da " + ugello + " servono almeno " + r2(2 * ugello) + " mm, o le aste escono a un filo solo e spezzate.");
       hTesto = pix * 7; yTesto = yQR + T.latoQR + D;
       var xt = (W - colonne * pix) / 2, cx = 0;
       for (var t = 0; t < testo.length; t++) {
@@ -3181,7 +3181,7 @@ var qrcode = function() {
 
   // Tessera Cablotec: tutto fisso
   var FISSI = { formato: "tessera", materiale: "petg", cornice: true, corniceL: 1, fori: "nessuno", diamForo: 3.5, testo: "DOCUMENTS",
-                latoQR: 37, altezzaTesto: 3.5, spessore: 2, rilievo: 0.8, raggio: 3,
+                latoQR: 37, altezzaTesto: 5.6, spessore: 2, rilievo: 0.8, raggio: 3,
                 coloreBase: "#FF6E36", coloreRilievo: "#111111", ugello: 0.4, correzione: "auto" };
 
   function messaggio(t, errore) { esito.textContent = t; esito.className = errore ? "errore" : ""; }

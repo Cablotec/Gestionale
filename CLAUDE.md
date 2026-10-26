@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.06`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.07`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -756,6 +756,7 @@ Nico: *"aggiungi la scritta fissa documenti, per indicare il contenuto. magari i
 - Il bordo basso (6,2) contiene zona bianca + cornice 1 mm: sotto 6,1 la cornice entrerebbe nella zona bianca. Per questo QR 37 e logo 30 insieme non ci stanno coi margini a norma: proposti QR 32 (logo 28,5) e zona bianca a 2 moduli (da provare in stampa), NON scelti.
 - Senza scritta il layout torna quello originale (3 spazi da 6,2, logo 30).
 - Versioni superate dello stesso giorno: `.01` scritta in alto sopra il logo (logo 28,7); `.02` quattro spazi uguali da 6,2 (logo 20,3); `.03` spazi = zona bianca 5,2 (logo 22,3).
+- **Scritta alta 5,6 mm = pixel 0,8 mm** (`.07`, foto della prima stampa, Nico: *"tutto perfetto tranne la scritta"*). A 3,5 mm il pixel era 0,5: con ugello 0,4 ogni asta usciva a un filo solo, spezzata e illeggibile. 0,8 = 2 x ugello, il minimo per due linee piene (stessa regola dei moduli del QR). Prezzo: logo da 26,7 a **24,6 mm**. L'avviso in `progettaTessera` ora scatta sotto 2 x ugello (prima 1,2 x, troppo permissivo).
 - Il font a pixel ha solo MAIUSCOLE, numeri, accentate e `- . / , # + ( ) _ ' &`: niente `:` ne' `@`.
 - **Filamento nel 3MF: `Bambu PETG Basic @BBL H2S`** (26 ott, `.05`, Nico; prima PETG Matte), su tutti e due gli estrusori. Nome verificato nei profili installati (`C:\Program Files\Bambu Studio
 esources\profiles\BBLilament`), compatibile con "Bambu Lab H2S 0.4 nozzle". ⚠ Il CLI di Bambu Studio (`--slice`) su questo PC va in segmentation fault con QUALUNQUE 3MF, anche quello di prima: non serve a verificare, si apre a mano dall'interfaccia.
