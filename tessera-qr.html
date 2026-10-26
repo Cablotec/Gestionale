@@ -3040,12 +3040,27 @@ var qrcode = function() {
       }).join("") +
       ' </object>\n <plate>\n  <metadata key="plater_id" value="1"/>\n  <metadata key="plater_name" value=""/>\n  <metadata key="locked" value="false"/>\n' +
       '  <model_instance>\n   <metadata key="object_id" value="' + idOggetto + '"/>\n   <metadata key="instance_id" value="0"/>\n  </model_instance>\n </plate>\n</config>\n';
+    // Per ogni filamento Bambu vuole anche tipo, codice, marca e diametro, e le due
+    // liste inherits_group/different_settings_to_system lunghe filamenti + 2 (processo,
+    // filamenti, stampante). Senza (26 ott, screenshot di Nico) il 2° slot non veniva
+    // riconosciuto come profilo di sistema e diventava un profilo "(nome-file)" strano.
+    // Valori presi dal 3MF salvato da Bambu Studio 2.8 e dai profili installati.
+    var pla = o.materiale === "pla", nF = 2, rip = function (v) { var a = []; for (var k = 0; k < nF; k++) a.push(v); return a; };
     var progettoJson = JSON.stringify({
+      name: "project_settings", from: "project", version: "02.08.00.09",
+      printer_technology: "FFF", printer_model: "Bambu Lab H2S",
+      filament_type: rip(pla ? "PLA" : "PETG"),
+      filament_ids: rip(pla ? "GFA00" : "GFG00"),
+      filament_vendor: rip("Bambu Lab"),
+      filament_diameter: rip("1.75"),
+      filament_map: rip("1"),
+      inherits_group: rip("").concat(["", ""]),
+      different_settings_to_system: rip("").concat(["", ""]),
       filament_colour: colori,
       // profili di sistema Bambu (H2S, ugello 0,4): riconosciuti come ufficiali, nessun avviso di preset personalizzati
       printer_settings_id: "Bambu Lab H2S 0.4 nozzle",
       print_settings_id: "0.20mm High Quality @BBL H2S",
-      filament_settings_id: o.materiale === "pla" ? ["Bambu PLA Basic @BBL H2S", "Bambu PLA Basic @BBL H2S"]
+      filament_settings_id: pla ? ["Bambu PLA Basic @BBL H2S", "Bambu PLA Basic @BBL H2S"]
                                                   : ["Bambu PETG Basic @BBL H2S", "Bambu PETG Basic @BBL H2S"],   // 26 ott, Nico: PETG Basic (prima Matte); nome verificato nei profili di Bambu Studio
       nozzle_diameter: ["0.4"],
       printable_height: "340",
