@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.03`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -749,11 +749,14 @@ La mia prima ipotesi era il **fantasma in cache**: la sessione cancellata rimast
 ## Gruppi esenti: anche il PASSATO (14 ott, `2026-10-14.07`)
 Nico: *"sblocca anche il passato per i gruppi esenti"*. **Ribalta di proposito la decisione dell'11 set** ("le date passate no!", anche per gli esenti). In `verificaAccessoAssenza` l'esenzione ora sta PRIMA del controllo sul passato: gli esenti inseriscono e modificano le proprie assenze su qualsiasi data (gestionale e telefono, stessa funzione). Restano fuori i tipi `admin` (malattia). Per tutti gli altri il passato resta chiuso. Frase in Impostazioni → Calendari aggiornata; `test-ferie-richiedibili.js` ora sorveglia l'ordine opposto. ⚠ Nessun vincolo a database sulle date: la regola sta tutta nel motore.
 
-## Tessera QR: scritta fissa "DOCUMENTS" (26 ott, `2026-10-26.02`)
+## Tessera QR: scritta fissa "DOCUMENTS" (26 ott, `2026-10-26.03`)
 Nico: *"aggiungi la scritta fissa documenti, per indicare il contenuto. magari in inglese"*, poi *"documents fra logo e qr code. tutti e tre gli elementi devono essere equidistanti"*. In `tessera-qr.html`, `FISSI.testo = "DOCUMENTS"`, alta 3,5 mm, in rilievo scuro come QR e logo.
-- **Dal basso: spazio | QR 37 | spazio | DOCUMENTS 3,5 | spazio | logo | spazio, quattro spazi UGUALI da 6,2 mm** (verificato sulla geometria generata, non sulle quote).
-- **G resta 6,2 e cede il LOGO: 30 → 20,3 mm.** Ogni spazio che tocca il QR deve contenere la zona bianca (4 moduli: 5,1 mm con i link di oggi, fino a ~6 con link piu' corti); stringere gli spazi per tenere il logo grande avrebbe messo a rischio la lettura. Avviso se il logo scende sotto i 18 mm. Senza scritta il layout torna quello di prima (3 spazi, logo 30).
-- Prima versione dello stesso giorno (`.01`): scritta in alto sopra il logo, logo 28,7. Superata.
+- **Dal basso: bordo 6,2 | QR 37 | D | DOCUMENTS 3,5 | D | logo | bordo 6,2** (`.03`, Nico: *"lascia qr com'e', aumenta logo e lascia solo spazi con il bordo uguali, documents e' equidistante da qr e logo"*). Verificato sulla geometria generata.
+- **D = zona bianca del QR** (4 moduli, al decimo per eccesso): **5,2 mm coi link di oggi** (griglia 29×29), il minimo a norma fra QR e scritta. Logo **22,3 mm** (+2 rispetto ai 20,3 della `.02`).
+- ⚠ D dipende dalla lunghezza del link: link molto corto (21×21) → D 7,1, logo 18,5; molto lungo (37×37) → D 4, logo 24,7. I link `qr.cablotec.app/s/…` danno sempre 29×29.
+- Il bordo basso (6,2) contiene zona bianca + cornice 1 mm: sotto 6,1 la cornice entrerebbe nella zona bianca. Per questo QR 37 e logo 30 insieme non ci stanno coi margini a norma: proposti QR 32 (logo 28,5) e zona bianca a 2 moduli (da provare in stampa), NON scelti.
+- Senza scritta il layout torna quello originale (3 spazi da 6,2, logo 30).
+- Versioni superate dello stesso giorno: `.01` scritta in alto sopra il logo (logo 28,7); `.02` quattro spazi uguali da 6,2 (logo 20,3).
 - Il font a pixel ha solo MAIUSCOLE, numeri, accentate e `- . / , # + ( ) _ ' &`: niente `:` ne' `@`.
 
 ## Campi e tendine: UNO stile di base (14 ott, `2026-10-14.05`)

@@ -2719,10 +2719,10 @@ var qrcode = function() {
   /* ---------- Formato fisso: tessera 85,60 x 53,98 in verticale ----------
      Tre spazi uguali: bordo alto | logo 30 mm | QR 37 mm | bordo basso.
      G = (85,60 - 30 - 37) / 3 = 6,2 mm. Il logo è la mesh originale dell'STL, solo scalata.
-     Scritta (26 ott, Nico: "DOCUMENTS", per dire cosa c'e' nella cartella) FRA QR E LOGO,
-     con quattro spazi uguali da 6,2 mm: QR, scritta e logo equidistanti fra loro e dai
-     bordi. G non scende: attorno al QR serve la zona bianca (4 moduli). Cede il logo
-     (30 -> ~20 mm). Prima versione dello stesso giorno: scritta in alto sopra il logo. */
+     Scritta (26 ott, Nico: "DOCUMENTS", per dire cosa c'e' nella cartella) FRA QR E LOGO:
+     bordi uguali a 6,2, scritta equidistante da QR e logo a D = zona bianca del QR
+     (4 moduli, 5,2 coi link di oggi). Il logo prende il resto (~22 mm). Versioni dello
+     stesso giorno: scritta in alto (.01), quattro spazi uguali da 6,2 con logo 20,3 (.02). */
   var TESSERA = { W: 53.98, H: 85.60, latoQR: 37, logo: 30 };
   TESSERA.spazio = (TESSERA.H - TESSERA.latoQR - TESSERA.logo) / 3;
 
@@ -2740,11 +2740,15 @@ var qrcode = function() {
       avvisi.push("Con questo link la zona bianca attorno al QR tocca la cornice: verifica la lettura prima di stampare, o togli la cornice.");
     if (m < 2 * ugello) avvisi.push("Ogni quadratino del QR misura " + r2(m) + " mm: con ugello da " + ugello + " servono almeno " + r2(2 * ugello) + " mm.");
 
-    // Dal basso: spazio | QR | spazio | scritta | spazio | logo | spazio, TUTTI GLI SPAZI = G
-    // (26 ott, Nico: "documents fra logo e qr code, tutti e tre equidistanti").
-    // G resta 6,2 mm: attorno al QR serve la zona bianca (4 moduli, fino a ~6 mm con
-    // link corti). A cedere e' il logo, che prende l'altezza che resta.
+    // Dal basso: bordo G | QR | D | scritta | D | logo | bordo G (26 ott, Nico: "lascia
+    // qr com'e', aumenta logo e lascia solo spazi con il bordo uguali, documents e'
+    // equidistante da qr e logo").
+    //   G = 6,2 sopra e sotto: in basso contiene zona bianca del QR + cornice.
+    //   D = la zona bianca del QR (4 moduli), arrotondata al decimo per eccesso: e' il
+    //       minimo a norma fra QR e scritta, e lo stesso D separa scritta e logo.
+    // Il logo prende tutto il resto.
     var nt = normalizzaTesto(opz.testo), testo = nt.testo, rt = [], hTesto = 0, yTesto = 0;
+    var D = testo ? Math.ceil(quiet * 10 - 1e-9) / 10 : G;
     if (nt.scartati && nt.scartati.length) avvisi.push("Caratteri non disponibili tolti dalla scritta: " + nt.scartati.join(" "));
     var i;
     if (testo) {
@@ -2753,7 +2757,7 @@ var qrcode = function() {
       var pix = Math.min((opz.altezzaTesto || 3.5) / 7, (W - 2 * (rim + 1.5)) / colonne);
       if (pix * 7 < (opz.altezzaTesto || 3.5) - 0.01) avvisi.push("Scritta ridotta a " + r2(pix * 7) + " mm di altezza per farla stare.");
       if (pix < 1.2 * ugello) avvisi.push("Le lettere sono molto piccole (" + r2(pix * 7) + " mm): potrebbero non venire nitide.");
-      hTesto = pix * 7; yTesto = yQR + T.latoQR + G;
+      hTesto = pix * 7; yTesto = yQR + T.latoQR + D;
       var xt = (W - colonne * pix) / 2, cx = 0;
       for (var t = 0; t < testo.length; t++) {
         var ch = testo[t];
@@ -2769,8 +2773,8 @@ var qrcode = function() {
     }
 
     // logo: mesh originale, scala uniforme, alto quanto la fascia che resta fra
-    // (scritta o QR) + G e il bordo alto - G. Senza scritta: 30 mm come sempre.
-    var yLogo = (testo ? yTesto + hTesto : yQR + T.latoQR) + G, altLogo = H - G - yLogo;
+    // (scritta o QR) + D e il bordo alto - G. Senza scritta: 30 mm come sempre.
+    var yLogo = (testo ? yTesto + hTesto : yQR + T.latoQR) + D, altLogo = H - G - yLogo;
     var LM = opz.logoMesh, v = LM.v, x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
     for (i = 0; i < v.length; i += 3) {
       x0 = Math.min(x0, v[i]); x1 = Math.max(x1, v[i]); y0 = Math.min(y0, v[i + 1]); y1 = Math.max(y1, v[i + 1]);
