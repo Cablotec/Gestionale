@@ -2720,9 +2720,10 @@ var qrcode = function() {
      Tre spazi uguali: bordo alto | logo 30 mm | QR 37 mm | bordo basso.
      G = (85,60 - 30 - 37) / 3 = 6,2 mm. Il logo è la mesh originale dell'STL, solo scalata.
      Scritta (26 ott, Nico: "DOCUMENTS", per dire cosa c'e' nella cartella) FRA QR E LOGO:
-     bordi uguali a 6,2, scritta equidistante da QR e logo a D = zona bianca del QR
-     (4 moduli, 5,2 coi link di oggi). Il logo prende il resto (~22 mm). Versioni dello
-     stesso giorno: scritta in alto (.01), quattro spazi uguali da 6,2 con logo 20,3 (.02). */
+     bordi uguali a 6,2, scritta a 3 mm dal QR e 3 mm dal logo (sotto la zona bianca a
+     norma: scelta di Nico, da provare in stampa). Il logo prende il resto (26,7 mm).
+     Versioni dello stesso giorno: scritta in alto (.01), quattro spazi da 6,2 con logo
+     20,3 (.02), spazi = zona bianca 5,2 con logo 22,3 (.03). */
   var TESSERA = { W: 53.98, H: 85.60, latoQR: 37, logo: 30 };
   TESSERA.spazio = (TESSERA.H - TESSERA.latoQR - TESSERA.logo) / 3;
 
@@ -2744,11 +2745,14 @@ var qrcode = function() {
     // qr com'e', aumenta logo e lascia solo spazi con il bordo uguali, documents e'
     // equidistante da qr e logo").
     //   G = 6,2 sopra e sotto: in basso contiene zona bianca del QR + cornice.
-    //   D = la zona bianca del QR (4 moduli), arrotondata al decimo per eccesso: e' il
-    //       minimo a norma fra QR e scritta, e lo stesso D separa scritta e logo.
+    //   D = 3 mm fra QR e scritta e fra scritta e logo (26 ott, Nico: "riduci spazio
+    //       documents a 3mm e allarga logo"). ⚠ SOTTO la zona bianca a norma del QR
+    //       (4 moduli = 5,1 mm coi link di oggi, cioe' ~2,3 moduli): scelta di Nico,
+    //       da confermare con una stampa letta da piu' telefoni. Prima era D = zona bianca.
     // Il logo prende tutto il resto.
     var nt = normalizzaTesto(opz.testo), testo = nt.testo, rt = [], hTesto = 0, yTesto = 0;
-    var D = testo ? Math.ceil(quiet * 10 - 1e-9) / 10 : G;
+    var D = testo ? 3 : G;
+    if (testo && D < quiet) avvisi.push("Fra QR e scritta ci sono " + r2(D) + " mm, meno della zona bianca a norma (" + r2(quiet) + " mm): prova la lettura prima di stamparne tante.");
     if (nt.scartati && nt.scartati.length) avvisi.push("Caratteri non disponibili tolti dalla scritta: " + nt.scartati.join(" "));
     var i;
     if (testo) {
