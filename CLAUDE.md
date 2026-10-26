@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -749,12 +749,12 @@ La mia prima ipotesi era il **fantasma in cache**: la sessione cancellata rimast
 ## Gruppi esenti: anche il PASSATO (14 ott, `2026-10-14.07`)
 Nico: *"sblocca anche il passato per i gruppi esenti"*. **Ribalta di proposito la decisione dell'11 set** ("le date passate no!", anche per gli esenti). In `verificaAccessoAssenza` l'esenzione ora sta PRIMA del controllo sul passato: gli esenti inseriscono e modificano le proprie assenze su qualsiasi data (gestionale e telefono, stessa funzione). Restano fuori i tipi `admin` (malattia). Per tutti gli altri il passato resta chiuso. Frase in Impostazioni → Calendari aggiornata; `test-ferie-richiedibili.js` ora sorveglia l'ordine opposto. ⚠ Nessun vincolo a database sulle date: la regola sta tutta nel motore.
 
-## Tessera QR: scritta fissa "DOCUMENTS" (26 ott, `2026-10-26.01`)
-Nico: *"aggiungi la scritta fissa documenti, per indicare il contenuto. magari in inglese"*. In `tessera-qr.html`, `FISSI.testo = "DOCUMENTS"`, alta 3,5 mm, in rilievo scuro come QR e logo.
-- **Solo nella fascia in ALTO, sopra il logo.** Sopra e sotto il QR i 6,2 mm sono quasi tutti zona bianca obbligatoria (4 moduli = 4,4–6 mm secondo il link): una scritta li' rischia la lettura del codice.
-- **Il logo cede: 30 → 28,7 mm** quando c'e' la scritta, per lasciarle 1,5 mm sopra e sotto. A logo pieno restavano 0,86 mm e la scritta toccava logo e cornice (visto nell'anteprima). QR, spazi del QR e misure della tessera invariati; senza scritta il logo torna a 30.
-- Il font a pixel ha solo MAIUSCOLE, numeri, accentate e `- . / , # + ( ) _ ' &`: niente `:` ne' `@`. Oltre ~16 caratteri le lettere si rimpiccioliscono (avviso sotto 0,48 mm di pixel).
-- Quote: la catena a sinistra mostra "Testo 3,5"; i tratti sotto i 3 mm non si etichettano (si sovrapponevano).
+## Tessera QR: scritta fissa "DOCUMENTS" (26 ott, `2026-10-26.02`)
+Nico: *"aggiungi la scritta fissa documenti, per indicare il contenuto. magari in inglese"*, poi *"documents fra logo e qr code. tutti e tre gli elementi devono essere equidistanti"*. In `tessera-qr.html`, `FISSI.testo = "DOCUMENTS"`, alta 3,5 mm, in rilievo scuro come QR e logo.
+- **Dal basso: spazio | QR 37 | spazio | DOCUMENTS 3,5 | spazio | logo | spazio, quattro spazi UGUALI da 6,2 mm** (verificato sulla geometria generata, non sulle quote).
+- **G resta 6,2 e cede il LOGO: 30 → 20,3 mm.** Ogni spazio che tocca il QR deve contenere la zona bianca (4 moduli: 5,1 mm con i link di oggi, fino a ~6 con link piu' corti); stringere gli spazi per tenere il logo grande avrebbe messo a rischio la lettura. Avviso se il logo scende sotto i 18 mm. Senza scritta il layout torna quello di prima (3 spazi, logo 30).
+- Prima versione dello stesso giorno (`.01`): scritta in alto sopra il logo, logo 28,7. Superata.
+- Il font a pixel ha solo MAIUSCOLE, numeri, accentate e `- . / , # + ( ) _ ' &`: niente `:` ne' `@`.
 
 ## Campi e tendine: UNO stile di base (14 ott, `2026-10-14.05`)
 Nico, screenshot dei filtri Riunioni: *"queste caselle bianche devono avere uno stile grafico coerente"*. Non era solo Riunioni: ~30 `<select>` e ~60 `<input>` nati FUORI dai contenitori che vestono i campi (`.field`, `.storico-toolbar`, `.op-cell-inline`…) avevano il bianco del browser e padding zero (lo azzera `*`).
