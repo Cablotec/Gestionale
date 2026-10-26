@@ -2744,23 +2744,22 @@ var qrcode = function() {
     try { sel = qrSemplice(url); } catch (e) { errori.push("Il link è troppo lungo per un QR leggibile su una tessera."); return { errori: errori, avvisi: avvisi }; }
     var qr = sel.qr, N = qr.getModuleCount(), W = T.W, H = T.H, G = T.spazio, ugello = opz.ugello || 0.4;
     var m = T.latoQR / N, quiet = 4 * m, rim = opz.cornice ? opz.corniceL : 0;
-    var xQR = (W - T.latoQR) / 2, yQR = G;                 // QR a G dal bordo basso
+    var xQR = (W - T.latoQR) / 2, yQR = G;                 // QR a G dal bordo basso (con la scritta sale sopra di lei)
     if (quiet > G - rim + 1e-6 || quiet > xQR - rim + 1e-6)
       avvisi.push("Con questo link la zona bianca attorno al QR tocca la cornice: verifica la lettura prima di stampare, o togli la cornice.");
     if (m < 2 * ugello) avvisi.push("Ogni quadratino del QR misura " + r2(m) + " mm: con ugello da " + ugello + " servono almeno " + r2(2 * ugello) + " mm.");
 
-    // Dal basso: bordo G | QR | D | scritta | D | logo | bordo G (26 ott, Nico: "lascia
-    // qr com'e', aumenta logo e lascia solo spazi con il bordo uguali, documents e'
-    // equidistante da qr e logo").
-    //   G = 6,2 sopra e sotto: in basso contiene zona bianca del QR + cornice.
-    //   D = 3 mm fra QR e scritta e fra scritta e logo (26 ott, Nico: "riduci spazio
+    // Dal basso: bordo G | scritta | D | QR | D | logo | bordo G (26 ott, Nico: "sposta
+    // in fondo"; prima la scritta stava fra QR e logo).
+    //   G = 6,2 sopra e sotto, spazi col bordo uguali.
+    //   D = 3 mm fra scritta e QR e fra QR e logo (26 ott, Nico: "riduci spazio
     //       documents a 3mm e allarga logo"). ⚠ SOTTO la zona bianca a norma del QR
-    //       (4 moduli = 5,1 mm coi link di oggi, cioe' ~2,3 moduli): scelta di Nico,
-    //       da confermare con una stampa letta da piu' telefoni. Prima era D = zona bianca.
+    //       (4 moduli = 5,1 mm coi link di oggi, cioe' ~2,3 moduli), e adesso su DUE lati
+    //       del QR: da confermare con una stampa letta da piu' telefoni.
     // Il logo prende tutto il resto.
     var nt = normalizzaTesto(opz.testo), testo = nt.testo, rt = [], hTesto = 0, yTesto = 0;
     var D = testo ? 3 : G;
-    if (testo && D < quiet) avvisi.push("Fra QR e scritta ci sono " + r2(D) + " mm, meno della zona bianca a norma (" + r2(quiet) + " mm): prova la lettura prima di stamparne tante.");
+    if (testo && D < quiet) avvisi.push("Sopra e sotto il QR ci sono " + r2(D) + " mm, meno della zona bianca a norma (" + r2(quiet) + " mm): prova la lettura prima di stamparne tante.");
     if (nt.scartati && nt.scartati.length) avvisi.push("Caratteri non disponibili tolti dalla scritta: " + nt.scartati.join(" "));
     var i;
     var poliTesto = [];
@@ -2776,7 +2775,7 @@ var qrcode = function() {
       posa.forEach(function (q) { q.g.s.forEach(function (fm) { var e = fm[0]; for (var k = 0; k < e.length; k += 2) { ix0 = Math.min(ix0, q.x + e[k]); ix1 = Math.max(ix1, q.x + e[k]); } }); });
       var alt = opz.altezzaTesto || 5.6, sc = Math.min(alt / FV.meta.cap, (W - 2 * (rim + 1.5)) / (ix1 - ix0));
       if (sc * FV.meta.cap < alt - 0.01) avvisi.push("Scritta ridotta a " + r2(sc * FV.meta.cap) + " mm di altezza per farla stare.");
-      hTesto = sc * FV.meta.cap; yTesto = yQR + T.latoQR + D;
+      hTesto = sc * FV.meta.cap; yTesto = G; yQR = G + hTesto + D;
       var xt = (W - (ix1 - ix0) * sc) / 2 - ix0 * sc;
       posa.forEach(function (q) {
         q.g.s.forEach(function (fm) {
@@ -2790,8 +2789,8 @@ var qrcode = function() {
     }
 
     // logo: mesh originale, scala uniforme, alto quanto la fascia che resta fra
-    // (scritta o QR) + D e il bordo alto - G. Senza scritta: 30 mm come sempre.
-    var yLogo = (testo ? yTesto + hTesto : yQR + T.latoQR) + D, altLogo = H - G - yLogo;
+    // QR + D e il bordo alto - G. Senza scritta: 30 mm come sempre.
+    var yLogo = yQR + T.latoQR + D, altLogo = H - G - yLogo;
     var LM = opz.logoMesh, v = LM.v, x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
     for (i = 0; i < v.length; i += 3) {
       x0 = Math.min(x0, v[i]); x1 = Math.max(x1, v[i]); y0 = Math.min(y0, v[i + 1]); y1 = Math.max(y1, v[i + 1]);
@@ -3326,10 +3325,10 @@ var qrcode = function() {
     var ys = [0, p.qr.y, p.qr.y + p.qr.lato, p.logo.y, p.logo.y + p.logo.h, H];
     var f1 = function (v) { return (Math.round(v * 10) / 10).toString().replace(".", ","); };
     var nomi = [f1(p.qr.y), "QR " + f1(p.qr.lato), f1(p.logo.y - p.qr.y - p.qr.lato), "Logo Ø " + f1(p.logo.w), f1(H - p.logo.y - p.logo.h)];
-    if (p.hTesto) {   // fra QR e logo: spazio, scritta, spazio
-      ys = [0, p.qr.y, p.qr.y + p.qr.lato, p.yTesto, p.yTesto + p.hTesto, p.logo.y, p.logo.y + p.logo.h, H];
-      nomi = [f1(p.qr.y), "QR " + f1(p.qr.lato), f1(p.yTesto - p.qr.y - p.qr.lato), "Testo " + f1(p.hTesto),
-              f1(p.logo.y - p.yTesto - p.hTesto), "Logo Ø " + f1(p.logo.w), f1(H - p.logo.y - p.logo.h)];
+    if (p.hTesto) {   // scritta in fondo, sotto il QR
+      ys = [0, p.yTesto, p.yTesto + p.hTesto, p.qr.y, p.qr.y + p.qr.lato, p.logo.y, p.logo.y + p.logo.h, H];
+      nomi = [f1(p.yTesto), "Testo " + f1(p.hTesto), f1(p.qr.y - p.yTesto - p.hTesto), "QR " + f1(p.qr.lato),
+              f1(p.logo.y - p.qr.y - p.qr.lato), "Logo Ø " + f1(p.logo.w), f1(H - p.logo.y - p.logo.h)];
     }
     ys.forEach(function (y) { seg([0, y, 0], [-8, y, 0]); tacca(-6.5, y, 0); });
     seg([-6.5, 0, 0], [-6.5, H, 0]);

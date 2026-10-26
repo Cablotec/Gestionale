@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.08`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.09`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -758,6 +758,7 @@ Nico: *"aggiungi la scritta fissa documenti, per indicare il contenuto. magari i
 - Versioni superate dello stesso giorno: `.01` scritta in alto sopra il logo (logo 28,7); `.02` quattro spazi uguali da 6,2 (logo 20,3); `.03` spazi = zona bianca 5,2 (logo 22,3).
 - **Scritta alta 5,6 mm = pixel 0,8 mm** (`.07`, foto della prima stampa, Nico: *"tutto perfetto tranne la scritta"*). A 3,5 mm il pixel era 0,5: con ugello 0,4 ogni asta usciva a un filo solo, spezzata e illeggibile. 0,8 = 2 x ugello, il minimo per due linee piene (stessa regola dei moduli del QR). Prezzo: logo da 26,7 a **24,6 mm**. L'avviso in `progettaTessera` ora scatta sotto 2 x ugello (prima 1,2 x, troppo permissivo).
 - **Scritta in font VERO, non a pixel** (`.08`, Nico: *"perche' dobbiamo scrivere documents con punti?"*): `FONT_TESSERA` = contorni di **Barlow Bold** (OFL) gia' appiattiti in poligoni, estrusi con `Mesh.prisma` (earcut, fori compresi) in `p.poliTesto`. Aste ~1,1 mm a 5,6 mm di altezza, larga 44 mm. Scelto Barlow e non Syne: Syne Bold/ExtraBold e' cosi' largo che DOCUMENTS starebbe solo a 4,1/2,8 mm. Rigenerato con opentype.js dal .woff di `@fontsource/barlow` (curve suddivise ogni ~30 unita'). La targa QR (`progetta`) usa ancora il font a pixel.
+- **Scritta IN FONDO** (`.09`, Nico: *"sposta in fondo"*). Dal basso: **bordo 6,2 | DOCUMENTS 5,6 | 3 | QR 37 | 3 | logo 24,6 | bordo 6,2**. ⚠ Ora il QR ha 3 mm (sotto la zona bianca a norma) su DUE lati, sopra e sotto: la prova di lettura con piu' telefoni conta ancora di piu'. Le righe qui sopra che parlano di scritta "fra QR e logo" descrivono le versioni precedenti.
 - Il font a pixel ha solo MAIUSCOLE, numeri, accentate e `- . / , # + ( ) _ ' &`: niente `:` ne' `@`.
 - **Filamento nel 3MF: `Bambu PETG Basic @BBL H2S`** (26 ott, `.05`, Nico; prima PETG Matte), su tutti e due gli estrusori. Nome verificato nei profili installati (`C:\Program Files\Bambu Studio
 esources\profiles\BBLilament`), compatibile con "Bambu Lab H2S 0.4 nozzle". ⚠ Il CLI di Bambu Studio (`--slice`) su questo PC va in segmentation fault con QUALUNQUE 3MF, anche quello di prima: non serve a verificare, si apre a mano dall'interfaccia.
