@@ -971,3 +971,5 @@ segue e lavoro NON iniziato, in ordine di quanto conta.
    "per commessa" della scheda Materiali sono doppioni di fonti piu forti.
    Nico li ha visti e non ha ancora detto se toglierli.
 
+## Tessera QR: scritta DOCUMENTS (26 ott, `2026-10-26.09`)
+Stato in `CLAUDE.md`, sezione "Tessera QR". In breve: dal basso bordo 6,2 | DOCUMENTS 5,6 (Barlow Bold vettoriale) | 3 | QR 37 | 3 | logo 24,6 | bordo 6,2; 3MF con PETG Basic su entrambi gli slot. **Aperto**: stampa di prova letta da piu' telefoni (margine QR 3 mm sopra e sotto, sotto norma).
