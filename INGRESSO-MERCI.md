@@ -57,7 +57,7 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
 ## Operazioni frequenti
 
 - **Aggiungere un cliente:** aggiungi la sua voce in `clienti` dentro `config.json`, con il nome che lo riconosce e il prefisso del codice. Finché manca, i suoi DDT finiscono in `DA_VERIFICARE`.
-- **Rilanciare un DDT a mano** (non crea doppioni né in Excel né nel Gestionale):
+- **Rilanciare un DDT a mano** (non crea doppioni né in Excel né nel Gestionale). Va lanciato dalla cartella locale `C:\Users\User032\Cablotec\DDT_arrivi`: da `\\SRV02\...` Node non parte (`ERR_INVALID_PACKAGE_CONFIG`) e i movimenti non arrivano.
   ```
   python registra.py estratti\<file>.json
   ```
@@ -78,6 +78,10 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
   - attivati gli scarichi di produzione;
   - le giacenze sono entrate in Materiali.
 - **28 ott:** `installa.ps1` rilanciato da Nico. Verificato: attività senza finestra, con i due trigger, in `Running`. Lo stesso giorno la cartella è passata dal Desktop a `MegaAPP\DDT_arrivi`, con il lavoro di Claude in locale. Il test di `registra.py` dai nuovi percorsi ha salvato il registro sul server e ha raggiunto il Gestionale.
+  Primo DDT nuovo dalla nuova sede: Tema 1000005135, ordine 4700000482, articolo 358010100.
+  - Claude l'ha letto bene (20 righe), ma ha lanciato `registra.py` con lo strumento PowerShell, mentre `--allowedTools` autorizzava solo quello Bash. È stato quindi bloccato, e il DDT è finito in DA_VERIFICARE.
+  - Correzione: autorizzati entrambi gli strumenti.
+  - Il DDT è stato registrato a mano (20 movimenti) e archiviato.
 
 ## Aperto al 28 ott
 
