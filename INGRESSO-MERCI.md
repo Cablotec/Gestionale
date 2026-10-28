@@ -82,6 +82,8 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
   - Claude l'ha letto bene (20 righe), ma ha lanciato `registra.py` con lo strumento PowerShell, mentre `--allowedTools` autorizzava solo quello Bash. È stato quindi bloccato, e il DDT è finito in DA_VERIFICARE.
   - Correzione: autorizzati entrambi gli strumenti.
   - Il DDT è stato registrato a mano (20 movimenti) e archiviato.
+  - Questo DDT ha portato in prova un secondo prodotto, `TS-358010100`, sulla commessa 00464/0030 (30 pz, col flag). La sua distinta C/L è il DDT diviso per 30, come indicato da Nico.
+  - In `config.json` c'è ora l'ordine 4700000482, con `distinte\distinta 358010100 ordine 4700000482.xlsx` (quantità totali per i 30 pz) per il Confronto ordini.
 
 ## Aperto al 28 ott
 
