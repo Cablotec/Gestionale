@@ -7,7 +7,7 @@ Pilota: Enviro di Tema. Sistema avviato il 13 ott 2026; prima era un progetto a 
 > **Dove sta il codice** (dal 28 ott):
 > - Script, config, registro Excel, distinte d'ordine e JSON estratti stanno in `Z:\SOFTWARE\MegaAPP\DDT_arrivi\`. È accanto a questo repository e non dentro, perché il repository è pubblicato su GitHub Pages.
 > - L'attività di Windows "Cablotec - DDT in arrivo" gira sul PC di Nico e lancia `\\SRV02\Dati\SOFTWARE\MegaAPP\DDT_arrivi\watcher.ps1`. Usa il percorso UNC, non Z:, perché all'accesso la lettera Z: può non essere ancora collegata.
-> - Claude, quando gira in background, non legge i percorsi di rete. Per questo lavora in una cartella locale, `%LOCALAPPDATA%\Cablotec\DDT_arrivi\` (`in\`, `estratti\`, `log\`):
+> - Claude, quando gira in background, non legge i percorsi di rete. Per questo lavora in una cartella locale, `C:\Users\User032\Cablotec\DDT_arrivi\` (`in\`, `estratti\`, `log\`):
 >   - a ogni elaborazione il watcher ci copia `config.json`, `registra.py` e `invia-movimenti.js`;
 >   - finita l'elaborazione, riporta sul server i JSON estratti e `ultimo_riepilogo.txt`.
 > - **Gli script si modificano solo sul server.** Le copie locali vengono sovrascritte a ogni elaborazione.
@@ -20,7 +20,7 @@ Pilota: Enviro di Tema. Sistema avviato il 13 ott 2026; prima era un progetto a 
 \\srv02\scansioni\User032\        <- lo scanner salva qui (anche i PDF dalla mail vanno messi qui)
         |  watcher.ps1 (attività di Windows "Cablotec - DDT in arrivo")
         v
-%LOCALAPPDATA%\Cablotec\DDT_arrivi\in\<file>   <- copia locale: Claude in background NON legge i percorsi di rete
+C:\Users\User032\Cablotec\DDT_arrivi\in\<file>   <- copia locale: Claude in background NON legge i percorsi di rete
         |  claude -p  con le istruzioni di prompt.txt
         v
 estratti\<CLIENTE>_<nDDT>.json     <- testata e righe lette, con le note scritte a mano
@@ -65,7 +65,7 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
   - Guarda `log\watcher.log`.
   - Lancia `Get-ScheduledTask -TaskName 'Cablotec - DDT in arrivo'`: deve dare `Running`, azione `conhost.exe --headless …`, trigger all'accesso + ogni 10 minuti.
   - Se serve, Nico rilancia `pwsh -NoProfile -File "\\SRV02\Dati\SOFTWARE\MegaAPP\DDT_arrivi\installa.ps1"`.
-  - Il log è sul PC: `%LOCALAPPDATA%\Cablotec\DDT_arrivi\log\watcher.log`.
+  - Il log è sul PC: `C:\Users\User032\Cablotec\DDT_arrivi\log\watcher.log`.
 - **Un DDT letto male:** un movimento non si modifica. Si corregge con una rettifica, per ora dal pannello Supabase.
 
 ## Storia
