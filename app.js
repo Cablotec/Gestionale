@@ -10158,7 +10158,7 @@ function renderPianificazione(root) {
     tr.append(el('td', {
       style: 'max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;',
       title: desc,
-    }, desc || '—'));
+    }, testoCopiabile(desc, 'Descrizione')));
 
     // Quantità — formato dinamico "prodotta/totale" con colore secondo stato:
     //   0/Tot   → monocromatico (nessun lotto ancora prodotto)
