@@ -112,6 +112,11 @@ Chiesto da Nico, dal file *"Riunione 01-10-2026.xlsx"*: una sezione che vedono S
     - Risposta di Nico (28 ott): le MAC `8471BVITI00619010664` (vite nylon) e `8471BVITI00000003010` (vite inox) erano un errore, perche' quelle viti le manda Tema (`TS-619010664`, `TS-619010544`). Resta MAC solo la rondella `8471BVITI00000003908`. Nico corregge la distinta a mano; poi la lista della 00464/0030 va rifatta con "⟳ Rigenera dalla distinta", che conserva il tipo C/L.
     - Le altre posizioni dell'ordine 482 (0010, 0020, 0040) sono altri articoli, senza flag.
 - **Prossimi mattoni del magazzino proprio**, in ordine: giacenze iniziali (inventario d'apertura, prima di estendere oltre Enviro) · DDT fornitori (ACQ) via la stessa cartella · PDF digitali dalla mail nella cartella scansioni (regola Outlook) · rettifiche a mano dalla UI (serve allargare la policy di INSERT) · capire se `prelievi_magazzino` e' un'uscita da magazzino e va portata in `movimenti_magazzino` come scarico.
+- **MAC senza tipo sulle righe di distinta (29 ott)**. Nico: *"perche' non vedo MAC per il 8471BVITI00000003908?"*.
+  - Il badge MAC, e il fatto che una riga non faccia fabbisogno, li decide `r.tipo` sulla RIGA di distinta, non `materiali.tipo_parte`. Le distinte travasate il 4 set non hanno il tipo, perche' il campo e' nato il 7 set.
+  - Conteggio in sola lettura: **359 righe in 62 prodotti** hanno un codice MAC in anagrafica ma tipo vuoto (es. `SZ-A09103QE_EST`, `SP-TF1286944`, `IRON-202535160`, `VR-CC25010`), e quindi oggi fanno fabbisogno.
+  - Nico ha scelto *"per ora solo quella rondella"*: corretta solo la riga di `TS-358010100` (backup in `C:\Users\User032\Cablotec\tmp\backup-358-prima-MAC.json`).
+  - Correzione in blocco: proposta, NON fatta. Prima di farla serve il backup delle 62 distinte e l'ok di Nico sui numeri.
 - **Doppie descrizioni nella distinta Cablotec mai ricontrollate**: `514000087` 4A (Tema) vs 5A; `536000653` "VRHN-3" vs "VHR-3N".
 - Scartato/rimandato: conto "per ordine" accanto al magazzino unico (14 ott, non riproporre di iniziativa).
 
