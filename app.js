@@ -198,10 +198,10 @@ const monthName = d => d.toLocaleDateString('it-IT', { month:'long', year:'numer
 const fmtE = (n) => '€ ' + Number(n || 0).toLocaleString('it-IT',
   { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function toast(msg, kind='ok') {
+function toast(msg, kind='ok', ms=2800) {
   const t = el('div', { class:'toast'+(kind==='err'?' err':'') }, msg);
   $('#toast-root').appendChild(t);
-  setTimeout(()=>t.remove(), 2800);
+  setTimeout(()=>t.remove(), ms);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -4205,7 +4205,17 @@ async function seminaSenzaDistinta(r) {
   return true;
 }
 
-async function creaMaterialiPerCommesse(righe) {
+// ⚠⚠ `conto` (29 ott): chi chiama puo' passare un oggetto e ritrovarci dentro
+// com'e' andata — `liste`, `seminate`, `senzaDistinta`, `errori` (codici delle
+// commesse). Il 23 e il 28 ott due import hanno creato 21 commesse e ZERO
+// liste, senza che nessuno se ne accorgesse: le 6 JMA di 00492 non davano
+// mancanti. Best-effort resta (un errore qui non ferma l'ordine), ma da oggi
+// un passo che non scrive niente si DICHIARA nel riepilogo: vedi
+// `avvisaListeMateriali`.
+async function creaMaterialiPerCommesse(righe, conto) {
+  const c = conto || {};
+  ['liste', 'seminate'].forEach(k => { if (!(k in c)) c[k] = 0; });
+  ['senzaDistinta', 'errori'].forEach(k => { if (!Array.isArray(c[k])) c[k] = []; });
   let scritte = 0, seminate = 0;
   for (const r of (righe || [])) {
     try {
@@ -4222,13 +4232,40 @@ async function creaMaterialiPerCommesse(righe) {
       if (art && art.codice && pezzi > 0) nuove = await generaMaterialiCommessa(art.codice, pezzi);
       if (nuove.length) {
         await salvaMaterialiCommessa(r, nuove);
-        scritte++;
+        scritte++; c.liste++;
       } else if (await seminaSenzaDistinta(r)) {
-        seminate++;
+        seminate++; c.seminate++;
+      } else {
+        c.senzaDistinta.push(codiceCommessaBreve(r));
       }
-    } catch (e) {}
+    } catch (e) {
+      c.errori.push(codiceCommessaBreve(r) + (e && e.message ? ' (' + e.message + ')' : ''));
+    }
   }
   return scritte;
+}
+
+function codiceCommessaBreve(r) {
+  return ((r && r.numero_ordine) || '—') + '/' + ((r && r.pos) || '—');
+}
+
+// La riga del riepilogo sulle liste materiali, dopo un import o un ordine
+// nuovo. Gli ERRORI si gridano (toast rosso con le commesse): sono liste
+// che dovevano nascere e non ci sono. Le commesse senza distinta si dicono
+// in grigio: non e' un guasto, ma e' il motivo per cui li' non mancano mai
+// componenti, e chi ha appena importato deve saperlo.
+function avvisaListeMateriali(c) {
+  if (!c) return;
+  const pz = [];
+  if (c.liste) pz.push(c.liste + (c.liste === 1 ? ' lista materiali creata' : ' liste materiali create'));
+  if (c.senzaDistinta && c.senzaDistinta.length) pz.push(c.senzaDistinta.length
+    + (c.senzaDistinta.length === 1 ? ' commessa senza distinta' : ' commesse senza distinta')
+    + ': ' + c.senzaDistinta.slice(0, 6).join(', ') + (c.senzaDistinta.length > 6 ? '…' : ''));
+  if (pz.length) toast(pz.join(' · '), 'ok', 6000);
+  if (c.errori && c.errori.length) toast('⚠ Lista materiali NON creata su ' + c.errori.length
+    + (c.errori.length === 1 ? ' commessa: ' : ' commesse: ')
+    + c.errori.slice(0, 4).join(', ') + (c.errori.length > 4 ? '…' : '')
+    + ' — rifarla da Materiali con «Crea le liste mancanti»', 'err', 12000);
 }
 
 // ── LISTE MATERIALI MANCANTI: il recupero in blocco ────────────────────
@@ -8088,6 +8125,7 @@ function openOperazioniImportPreviewModal(rows) {
 async function operazioniImportEsegui(piano) {
   closeModal();
   let creatiCli = 0, creatiArt = 0, inseriti = 0, aggiornati = 0, errori = 0, rinominati = 0;
+  const contoListe = {};
 
   try {
     // 0) Rinomine: Alnus detta il nome (decisione Nico 25 ago). Cambia SOLO
@@ -8195,11 +8233,12 @@ async function operazioniImportEsegui(piano) {
     // 7) La lista materiali sulle nuove, dalla stessa porta della griglia.
     // Stesso principio: best-effort. Un import che si ferma perche un
     // articolo non ha la distinta sarebbe un rimedio peggiore del male.
-    await creaMaterialiPerCommesse(nate);
+    await creaMaterialiPerCommesse(nate, contoListe);
 
   } catch (e) {
     toast('Import interrotto: ' + (e.message || e), 'err');
   }
+  avvisaListeMateriali(contoListe);
 
   const pezzi = [];
   if (inseriti)   pezzi.push(inseriti + ' commesse create');
@@ -9390,7 +9429,8 @@ function openNuovoOrdineModal() {
       (data||[]).forEach(r => { if (!state.operazioni.find(x=>x.id===r.id)) state.operazioni.push(r); });
       for (const r of (data||[])) { try { await autoGeneraFasiDaMedia(r); } catch(e){} }
       // La lista materiali nasce con l ordine, dalla distinta dell articolo.
-      await creaMaterialiPerCommesse(data || []);
+      const contoListe = {};
+      await creaMaterialiPerCommesse(data || [], contoListe);
       // Semina i minuti pagati sull'anagrafica articolo SOLO dove mancano
       // (stesso pattern del modal commessa: si popola il vuoto, mai si
       // sovrascrive uno standard già impostato). Copre i codici creati al
@@ -9410,6 +9450,7 @@ function openNuovoOrdineModal() {
         } catch (e) {}
       }
       toast('Ordine creato: ' + (data||[]).length + (data.length===1?' posizione':' posizioni'), 'ok');
+      avvisaListeMateriali(contoListe);
       if (seminati > 0) {
         toast('Minuti pagati salvati anche nell\'anagrafica di '
           + seminati + (seminati === 1 ? ' articolo' : ' articoli'));
@@ -13571,7 +13612,9 @@ function openOperazioneModal(o, opts) {
         if (isNew) {
           if (!state.operazioni.find(x => x.id === data.id)) state.operazioni.push(data);
           // Terza e ultima porta: anche di qui la lista nasce con l ordine.
-          try { await creaMaterialiPerCommesse([data]); } catch (e) {}
+          const contoListe = {};
+          try { await creaMaterialiPerCommesse([data], contoListe); } catch (e) {}
+          if (contoListe.errori && contoListe.errori.length) avvisaListeMateriali({ errori: contoListe.errori });
         } else {
           state.operazioni = state.operazioni.map(x => x.id === o.id ? data : x);
         }

@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-26.09`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-29.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -111,6 +111,10 @@ Chiesto da Nico, dal file *"Riunione 01-10-2026.xlsx"*: una sezione che vedono S
     - Nico: la distinta e' *"le quantita' del DDT 1000005135 diviso 30 pz"*. Scritte via REST come ai@: **17 righe C/L** (`tipo: 'C/L'`, prefisso TS-; i 3 codici ripetuti su due posizioni del DDT sono sommati), aggiunte alle 3 MAC che c'erano gia', sia in `articoli.distinta` sia in `operazioni.materiali` della 0030. Backup prima della scrittura in `C:\Users\User032\Cablotec\tmp\backup-358-*.json`.
     - Risposta di Nico (28 ott): le MAC `8471BVITI00619010664` (vite nylon) e `8471BVITI00000003010` (vite inox) erano un errore, perche' quelle viti le manda Tema (`TS-619010664`, `TS-619010544`). Resta MAC solo la rondella `8471BVITI00000003908`. Nico corregge la distinta a mano; poi la lista della 00464/0030 va rifatta con "⟳ Rigenera dalla distinta", che conserva il tipo C/L.
     - Le altre posizioni dell'ordine 482 (0010, 0020, 0040) sono altri articoli, senza flag.
+- **LISTE MATERIALI NON NATE all'import (29 ott, `2026-10-29.01`)**. Nico: *"i prodotti JMA aperti non mi danno mancanti"*. Gli import del 23 ott (5 commesse) e del 28 ott (16) hanno creato le commesse ma **zero liste e zero semi**: 00492/0010-0060 JMA e 00491/0010 Union hanno la distinta e non la lista, le 10 Elcotec del 28 non hanno `senza_distinta`. Fasi create, codice invariato dal 15 ott, il 19 ott andava: causa non ricostruibile (passo 7 interrotto o fallito in silenzio).
+  - Fatto: `creaMaterialiPerCommesse(righe, conto)` conta liste/semi/senza distinta/errori e `avvisaListeMateriali` lo dice nel riepilogo di import e griglia (errori in rosso 12 s, con le commesse). `toast` ha un terzo parametro, la durata.
+  - Da fare da Nico: Materiali → «⚙ Crea le liste mancanti» (7), spunta senza distinta sulle 10 Elcotec, distinta di `05 095 0605` (00494/0010).
+  - ⚠ Se la pagina si chiude durante il passo 7 nessun avviso parte: lo copre solo il riquadro giallo in Materiali.
 - **Prossimi mattoni del magazzino proprio**, in ordine: giacenze iniziali (inventario d'apertura, prima di estendere oltre Enviro) · DDT fornitori (ACQ) via la stessa cartella · PDF digitali dalla mail nella cartella scansioni (regola Outlook) · rettifiche a mano dalla UI (serve allargare la policy di INSERT) · capire se `prelievi_magazzino` e' un'uscita da magazzino e va portata in `movimenti_magazzino` come scarico.
 - **MAC senza tipo sulle righe di distinta (29 ott)**. Nico: *"perche' non vedo MAC per il 8471BVITI00000003908?"*.
   - Il badge MAC, e il fatto che una riga non faccia fabbisogno, li decide `r.tipo` sulla RIGA di distinta, non `materiali.tipo_parte`. Le distinte travasate il 4 set non hanno il tipo, perche' il campo e' nato il 7 set.
