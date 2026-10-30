@@ -194,6 +194,31 @@ function disponibilePerNoi(giacenza, impegnoAlnus, nostraDomanda) {
   return { disponibile: Math.max(0, g - riservato), riservato };
 }
 
+// QUANTO MANCA DI UN CODICE, contando ANCHE la domanda che Alnus non vede
+// (30 ott, Nico su `05 095 0155`: *"mi dice mancante 100, ma il totale da
+// ordinare e' 300"*). Alnus impegna solo gli ordini di produzione gia'
+// LANCIATI: 00433/0020 (OP 02074) 100 pz si', 00492/0060 (ancora senza OP)
+// 200 pz no. Il suo "da ordinare" diceva 100, le nostre liste 300.
+// E' il rovescio di `disponibilePerNoi`: li' la domanda che NOI non vediamo
+// (impegno > nostra) si toglie dalla giacenza; qui quella che non vede
+// ALNUS (nostra > impegno) si aggiunge al suo mancante.
+//   mancaAlnus = quello che Alnus dice di comprare (gia' al netto di
+//                giacenza e ordinato contro il SUO impegno), 0 se coperto
+//   extra      = nostra − impegno, la domanda in piu' che vediamo solo noi
+//   libero     = quanta giacenza avanza oltre l'impegno, che l'extra puo'
+//                ancora prendere. Se Alnus gia' dice che manca, non avanza
+//                niente. ⚠ L'ordinato in arrivo oltre l'impegno non si sa
+//                (l'estrazione non lo dice): si conta solo la giacenza, cioe'
+//                si sbaglia verso il "manca", che e' il verso che si vede.
+// Ritorna { manca, mancaAlnus, extra }: chi disegna dice anche da dove viene.
+function mancaSuDomanda(mancaAlnus, giacenza, impegno, nostraDomanda) {
+  const base = +Math.max(0, Number(mancaAlnus) || 0).toFixed(4);
+  const g = Number(giacenza) || 0, i = Number(impegno) || 0;
+  const extra = Math.max(0, (Number(nostraDomanda) || 0) - i);
+  const libero = base > 0 ? 0 : Math.max(0, g - i);
+  return { manca: +(base + Math.max(0, extra - libero)).toFixed(4), mancaAlnus: base, extra: +extra.toFixed(4) };
+}
+
 // ⚠⚠ IL CONTO SI FA DALLE LISTE CONGELATE, NON DALLA DISTINTA (3 set).
 // Da quando ogni commessa porta la sua `materiali`, la domanda di ogni codice
 // si ricostruisce SENZA scaricare niente: e tutta in memoria. Vuol dire che
@@ -435,5 +460,5 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
-    fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale };
+    fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda };
 }

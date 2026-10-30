@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-29.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-10-30.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -535,6 +535,12 @@ Chiesto da Nico: *"lista materiali pura con colonne giacenza, mancanti ecc (colo
 - Chiesto da Nico. La colonna **Commesse** della lista non legge piu' il `numero_op` del file (`OdL Prossimo Impegno` = la PRIMA che consumera' il codice, una sola) ma le **liste congelate** delle commesse vive (`fabbisognoDaListe`): "3 commesse", clic sul codice o sul conteggio -> dettaglio sotto la riga con qta, scadenza ed esito (coperto / manca N / disponibile).
 - ⚠ **Stesso conto della scheda commessa** (`disponibilePerNoi` + `ripartisciGiacenza`): verificato sui dati del 27 set, 1.071 coppie codice-commessa, **0 differenze** con `materialiCommessa`. 211 codici su 757 sono usati da piu' di una commessa.
 - Il file resta il **ripiego** solo dove nessuna lista contiene il codice (conto lavoro, commessa chiusa qui): la cella e' grigia e lo dice. Il filtro commesse ha due famiglie, `c:<id>` (codici della lista) e `a:<OP>` (attribuzione Alnus, marcata "da Alnus").
+
+## ⚠⚠ La colonna MANCA conta anche la domanda che Alnus non vede (30 ott, `2026-10-30.01`)
+- Nico su `05 095 0155`: *"mi dice mancante 100, ma in realta' il totale da ordinare e' 300"*. Alnus impegna solo gli ordini di produzione LANCIATI: 00433/0020 (OP 02074) 100 pz si', 00492/0060 (senza OP) 200 pz no. La colonna leggeva il `qta_da_ordinare` di Alnus cosi' com'era, mentre la scheda commessa contava gia' le nostre liste (`disponibilePerNoi`): due numeri diversi per lo stesso codice.
+- **`mancaSuDomanda(mancaAlnus, giacenza, impegno, nostra)`** in domain (10 test, `test-manca-su-domanda.js`): manca = Alnus + (nostra − impegno), meno la giacenza che avanza oltre l'impegno se Alnus non segnala gia' un buco. E' il rovescio di `disponibilePerNoi`. L'ordinato in arrivo oltre l'impegno l'estrazione non lo dice: si sbaglia verso il "manca".
+- In app: `matDomandaNostra` (riempita da `renderFabbisogno` con `fabbisognoDaListe(materialiBase().viveConLista)`, quindi a residuo e senza i C/L da DDT), `matMancaAlnus` (la regola vecchia), `matMancaDettaglio`. La cella mostra `*` e il tooltip con i due numeri quando sono diversi. Il banner **Da ordinare** prende anche i codici in arrivo/coperti per Alnus, ma solo per la parte in piu'.
+- **Sui dati del 30 ott: 33 codici su 480 cambiano, tutti al rialzo** (15 da ordinare, 16 in arrivo, 4 consumo). ⚠ Le 7 posizioni di **00442 (Teknox, OP 02134-02140)** hanno l'OP ma Alnus impegna la META' di quello che chiedono le nostre liste (es. `24512WIME0005450101S` 200 contro 400): da verificare con Nico se in Alnus le quantita' sono diverse o non tutti gli OdL sono lanciati. ⚠ I 4 MAC salgono perche' le righe di distinta non hanno il tipo (filo "MAC senza tipo").
 
 ## ⚠⚠ La domanda di materiale e' il RESIDUO da produrre (28 set, `2026-09-28.02`)
 - Mail di Claudio: *"l'OP 1165 e' completa ma da ancora 16 mancanti"*. Quattro commesse dello stesso articolo (`SP-RT0386806`); `OC/00107` aveva **2 pezzi prodotti su 4** ma la sua lista congelata chiedeva ancora il materiale per 4. Quel materiale era gia' consumato (giacenza Alnus gia' scesa), quindi contato due volte: `00107` e `00222` hanno la **stessa scadenza**, e `00222` restava a secco. Alnus impegna solo il residuo (impegno 14 = 4 + 2 + 4 + 4) e la dava coperta.

@@ -4890,13 +4890,33 @@ const MAT_CAT_ETI = {
 // zero ma la giacenza non copre l'impegno, il buco e' `impegno − giacenza`.
 // Su una riga coperta non manca niente, e dire "0" e' la risposta, non un
 // ripiego.
-function matManca(m) {
+function matMancaAlnus(m) {
   if (typeof mancanteSottoScorta === 'function' && !mancanteSottoScorta(m)) return 0;
   const d = Number(m && m.qta_da_ordinare) || 0;
   if (d > 0) return d;
   const g = Number(m && m.giacenza) || 0, i = Number(m && m.impegno) || 0;
   return Math.max(0, i - g);
 }
+
+// ⚠⚠ DAL 30 OTT LA COLONNA "MANCA" CONTA ANCHE LA DOMANDA CHE ALNUS NON VEDE
+// (Nico su `05 095 0155`: Alnus diceva 100, le commesse aperte ne vogliono
+// 300 — 00492/0060 non ha ancora l'OP e Alnus non la impegna). La regola sta
+// in `mancaSuDomanda` (domain); qui si passa la domanda delle liste congelate,
+// la STESSA su cui si ripartisce la giacenza nella scheda commessa, cosi'
+// lista e commessa dicono lo stesso numero.
+// `matDomandaNostra`: Map codice -> domanda delle commesse vive, la riempie
+// `renderFabbisogno` prima di disegnare. null = non calcolata: si torna al
+// numero di Alnus. Le righe del gestionale (`fonte: 'gestionale'`) hanno gia'
+// la nostra domanda come impegno e non passano di qui.
+let matDomandaNostra = null;
+function matMancaDettaglio(m) {
+  const alnus = matMancaAlnus(m);
+  const cod = String((m && m.codice) || '').trim();
+  if (!matDomandaNostra || (m && m.fonte === 'gestionale') || typeof mancaSuDomanda !== 'function'
+      || !matDomandaNostra.has(cod)) return { manca: alnus, mancaAlnus: alnus, extra: 0 };
+  return mancaSuDomanda(alnus, m.giacenza, m.impegno, matDomandaNostra.get(cod));
+}
+function matManca(m) { return matMancaDettaglio(m).manca; }
 
 // Le colonne della lista, in un posto solo: intestazione, allineamento,
 // valore per l'ordinamento e cella. Tenerle in una tabella di dati e non in
@@ -4948,9 +4968,16 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
       cella: (m) => el('span', { class:'mono', style:'color:var(--mut);' }, nf(m.qta_richiesta)) },
     { k:'manca', t:'Manca', tr:true, num:true, giuInizio:true, ord: m => matManca(m),
       cella: (m) => {
-        const q = matManca(m);
-        return el('span', { class:'mono', style: q > 0 ? 'color:var(--red);font-weight:700;' : 'color:var(--mut);' },
-          q > 0 ? nf(q) : '—');
+        const d = matMancaDettaglio(m), q = d.manca;
+        // Quando il numero non e' quello di Alnus si dice perche', passandoci sopra.
+        const tip = q > d.mancaAlnus
+          ? 'Alnus: ' + nf(d.mancaAlnus) + ' (impegna ' + nf(m.impegno) + ')\n'
+            + 'Commesse aperte nel gestionale: ' + nf(Number(m.impegno) + d.extra)
+            + ' — ' + nf(d.extra) + ' che Alnus non vede (ordini senza OP o non ancora lanciati)'
+          : '';
+        return el('span', { class:'mono', title: tip,
+          style: q > 0 ? 'color:var(--red);font-weight:700;' : 'color:var(--mut);' },
+          q > 0 ? nf(q) + (q > d.mancaAlnus ? ' *' : '') : '—');
       } },
     // ⚠ UNA riga del fabbisogno puo' avere fino a CINQUE previsioni di
     // entrata. In una lista ordinabile non possono stare tutte e cinque in
@@ -5095,6 +5122,14 @@ function renderFabbisogno(root) {
   const dataOra = righeAlnus.reduce((d, m) =>
     (!d || String(m.import_data || '') > d) ? (m.import_data || d) : d, null);
   const sottoScorta = righeOra.filter(m => mancanteCategoria(m) !== 'coperto');
+  // La domanda delle commesse vive per codice, prima di tutto: la usano la
+  // colonna Manca e il banner Da ordinare (`matMancaDettaglio`).
+  matDomandaNostra = null;
+  if (typeof fabbisognoDaListe === 'function') {
+    matDomandaNostra = new Map();
+    fabbisognoDaListe(materialiBase(righeAlnus).viveConLista).forEach((righe, cod) =>
+      matDomandaNostra.set(cod, righe.reduce((a, r) => a + (Number(r.qta) || 0), 0)));
+  }
 
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Materiali')));
 
@@ -5196,14 +5231,19 @@ function renderFabbisogno(root) {
   // volte e' il modo piu' diretto per far emettere tre ordini. La quantita'
   // e' la somma, e le commesse si dicono accanto — cosi' si sa anche chi
   // aspetta, senza aprire la lista.
-  const daOrdinare = righeOra.filter(mancanteBloccante);
+  // ⚠ Dal 30 ott entra anche un codice che per Alnus e' coperto o gia'
+  // ordinato, quando le commesse aperte qui ne vogliono di piu' (domanda che
+  // Alnus non vede): da ordinare e' SOLO quella parte, non quella in arrivo.
+  const daOrdinareQta = (m) => mancanteBloccante(m) ? matManca(m)
+    : (['in_arrivo', 'coperto'].includes(mancanteCategoria(m)) ? matMancaDettaglio(m).manca - matMancaDettaglio(m).mancaAlnus : 0);
+  const daOrdinare = righeOra.filter(m => daOrdinareQta(m) > 0);
   if (daOrdinare.length) {
     const perCod = new Map();
     daOrdinare.forEach(m => {
       const k = String(m.codice || '').trim();
       if (!perCod.has(k)) perCod.set(k, { codice:k, descrizione:m.descrizione, um:m.um, qta:0, op:[] });
       const g = perCod.get(k);
-      g.qta += matManca(m);
+      g.qta += daOrdinareQta(m);
       if (m.numero_op && g.op.indexOf(m.numero_op) < 0) g.op.push(m.numero_op);
       if (!g.descrizione && m.descrizione) g.descrizione = m.descrizione;
     });
