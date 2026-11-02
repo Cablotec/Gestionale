@@ -4533,7 +4533,8 @@ function materialeStatoRiga(codice, tipo, ctx) {
         + "ce n'è in magazzino, e non dipende da nessun'altra commessa." };
   }
   const q = ctx.mio && ctx.mio.get(cod);
-  const st = statoMateriale(m, ctx.oggi);
+  // Per QUESTA commessa: la merce gia' ordinata si ripartisce come la giacenza.
+  const st = statoMaterialeCommessa(m, q, ctx.oggi);
   if (!q || q.manca <= 0) {
     const quante = (ctx.viveConLista || []).filter(x => (x.materiali || [])
       .some(z => String(z.codice || '').trim() === cod)).length;
@@ -10392,23 +10393,24 @@ function renderPianificazione(root) {
       const mancanti = [...mm.entries(), ...daDdt.entries()].filter(([, q]) => q.manca > 0);
       if (mancanti.length) {
         const oggiB = toLocalISO(new Date());
-        const stati = mancanti.map(([cod]) => {
+        const stati = mancanti.map(([cod, q]) => {
           const m = manPerCodice[cod];
           return { cod, lav: typeof eLavorazione === 'function' && eLavorazione(cod),
             st: daDdt.has(cod) ? { stato:'attesa_cliente' }
-              : m ? statoMateriale(m, oggiB) : { stato:'da_ordinare' } };
+              : m ? statoMaterialeCommessa(m, q, oggiB) : { stato:'da_ordinare' } };
         });
         // Rosso se qualcosa FERMA davvero: da comprare, gia in ritardo, o
         // atteso dal cliente. Blu se il mancante e solo roba ordinata con una
-        // data davanti: manca, ma arriva.
-        const ferma = stati.some(x => x.lav || x.st.stato === 'da_ordinare'
+        // data davanti: manca, ma arriva. Una lavorazione GIA' ORDINATA non
+        // ferma piu' di un pezzo ordinato (stessa regola di `gruppoMateriale`).
+        const ferma = stati.some(x => x.st.stato === 'da_ordinare'
           || x.st.stato === 'in_ritardo' || x.st.stato === 'attesa_cliente');
         const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
         const dettaglio = mancanti.slice(0, 10).map(([cod, q]) => {
           const x = stati.find(y => y.cod === cod);
           let s = '· ' + cod + '  mancano ' + nf(q.manca);
           if (x.lav) s += '  (lavorazione)';
-          else if (x.st.stato === 'in_ritardo') s += '  in ritardo dal ' + fmtIT(x.st.data)
+          if (x.st.stato === 'in_ritardo') s += '  in ritardo dal ' + fmtIT(x.st.data)
             + (x.st.of ? ' · OF ' + x.st.of : '');
           else if (x.st.stato === 'in_arrivo' && x.st.data) s += '  arriva il ' + fmtIT(x.st.data);
           else if (x.st.stato === 'attesa_cliente') s += '  lo manda il cliente';

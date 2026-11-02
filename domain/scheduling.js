@@ -1571,6 +1571,22 @@ function statoMateriale(m, oggiIso) {
   };
 }
 
+// Lo stato di un codice PER UNA COMMESSA (2 nov). `statoMateriale` risponde
+// sul codice intero: con 300 da ordinare per le commesse che scadono dopo,
+// diceva "da ordinare" anche a quella il cui mancante e' tutto gia' ordinato.
+// `q` = la riga di `materialiCommessa` ({ manca, ordinato, arrivo }): se la
+// merce gia' ordinata, ripartita come la giacenza, copre tutto il mancante di
+// questa commessa, la parola e' quella della consegna che glielo porta.
+// Coperto solo in parte resta "da ordinare": qualcosa va ancora comprato.
+function statoMaterialeCommessa(m, q, oggiIso) {
+  const st = statoMateriale(m, oggiIso);
+  if (st.stato !== 'da_ordinare' || !q || !(q.manca > 0) || !(q.ordinato >= q.manca)) return st;
+  const oggi = oggiIso || new Date().toISOString().slice(0, 10);
+  const a = q.arrivo || {};
+  return { stato: a.data && a.data < oggi ? 'in_ritardo' : 'in_arrivo',
+    data: a.data || null, of: a.ordine || null, fornitore: a.fornitore || null, qta: null };
+}
+
 // Mancanti di una commessa + coerenza con la tendina "Preparazione materiale".
 // `incoerente` = il fabbisogno dice che manca roba ma la preparazione è
 // dichiarata completa: contraddizione da mostrare, non da nascondere.

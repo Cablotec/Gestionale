@@ -293,8 +293,52 @@ function materialiCommessa(op, commesse, mancantiPerCodice) {
     const { esito } = ripartisciGiacenza(righe, disponibile);
     const mia = esito.find(e => e.commessa.id === op.id);
     if (!mia) return;
+    // La parte riservata che la giacenza non basta a coprire si prende per
+    // prima anche la merce in arrivo: e' domanda di altri, arrivata prima.
+    const arrivi = ripartisciOrdinato(esito, m.consegne, Math.max(0, riservato - g));
+    const a = arrivi.get(op.id) || { ordinato: 0, arrivo: null };
     out.set(cod, { serve: mia.qta, coperto: mia.coperto, manca: mia.scoperto,
-      segnalato: true, giacenza: g, riservato });
+      segnalato: true, giacenza: g, riservato, ordinato: a.ordinato, arrivo: a.arrivo });
+  });
+  return out;
+}
+
+// LA MERCE GIA' ORDINATA SI RIPARTISCE COME LA GIACENZA (2 nov, Nico su
+// `30 010 0615_K` in 00385/0050: *"perche' mi dice da ordinare al terzista?
+// li ho gia' ordinati"*). La parola si decideva sul CODICE: Alnus diceva
+// "300 da ordinare" e ogni commessa a cui ne mancava anche uno diventava
+// "da ordinare" — ma i 35 che mancavano alla 00385 erano proprio i 35
+// dell'OF655, e i 300 servivano alle due 00492 che scadono dopo.
+// Stessa regola della giacenza (`ordineDiServizio`, chi viene prima serve
+// prima), consegne in ordine di data: ogni commessa sa quanto del suo
+// mancante e' gia' ordinato e con QUALE consegna arriva l'ultimo pezzo.
+// `esito`: da `ripartisciGiacenza`. `consegne`: [{ qta, data, ordine, fornitore }].
+// `primaAltri`: quanto delle consegne spetta a domanda che non vediamo.
+// Ritorna Map id commessa -> { ordinato, arrivo }.
+function ripartisciOrdinato(esito, consegne, primaAltri) {
+  const coda = (Array.isArray(consegne) ? consegne : [])
+    .filter(x => x && Number(x.qta) > 0)
+    .slice().sort((a, b) => String(a.data || '9999-12-31').localeCompare(String(b.data || '9999-12-31')))
+    .map(x => ({ resta: Number(x.qta), c: x }));
+  let salta = Number(primaAltri) || 0;
+  const prendi = (vuole) => {
+    let preso = 0, ultima = null;
+    for (const x of coda) {
+      if (preso >= vuole) break;
+      const q = Math.min(x.resta, vuole - preso);
+      if (q <= 0) continue;
+      x.resta -= q; preso += q; ultima = x.c;
+    }
+    return { preso: +preso.toFixed(4), ultima };
+  };
+  if (salta > 0) prendi(salta);
+  const out = new Map();
+  (esito || []).forEach(e => {
+    if (!(e.scoperto > 0)) return;
+    const { preso, ultima } = prendi(e.scoperto);
+    if (e.commessa && e.commessa.id != null) out.set(e.commessa.id, { ordinato: preso,
+      arrivo: ultima ? { data: ultima.data || null, ordine: ultima.ordine || null,
+        fornitore: ultima.fornitore || null } : null });
   });
   return out;
 }
@@ -460,5 +504,6 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
-    fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda };
+    fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
+    ripartisciOrdinato };
 }
