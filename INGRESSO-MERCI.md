@@ -97,3 +97,9 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
   4. rettifiche dalla UI;
   5. prelievi come scarichi.
 - **2 nov:** DDT 1000005134 (23/10) letto dalla scansione: e' il materiale di 00464/0010 (`TS-358010075`, 20 pz, gia' spedita), non della 0030. Scritte la distinta di `TS-358010075` (DDT / 20 pz, 23 C/L + rondella MAC), la lista e il flag sulla 0010, e lo scarico del lotto del 26/10 (23 righe PRODUZIONE col `lotto_id` del lotto: giacenza di quel DDT tornata a zero). In `config.json` l'ordine 482 ha ora due distinte; `registra.py` le somma. Confronto ordine 482: 0 codici aperti. Backup in `C:\Users\User032\Cablotec\tmp` (`backup-358075-prima.json`, `registra.py.bak-0211`, `config.json.bak-0211`, `Registro_arrivi.bak-0211.xlsx`).
+- **2 nov, doppioni legati all'anagrafica:** prima i tre controlli (registro Excel, `invia-movimenti.js`, indice unico) riconoscevano un DDT dal nome del mittente come lo legge la scansione, e un nome letto diverso ("Tema Sinergie SpA") lo avrebbe fatto entrare due volte. Adesso:
+  - `config.json`: ogni cliente porta `azienda_id`, la sua scheda in anagrafica (Tema = Tema Sinergie S.p.a.). Un cliente nuovo va aggiunto con il suo `azienda_id`.
+  - `invia-movimenti.js` scrive `azienda_id` su ogni carico e cerca i doppioni per azienda oppure per i nomi di `riconosci`.
+  - `registra.py` riconosce il doppione da cliente + numero DDT.
+  - Database: indice unico su tipo + azienda + numero + posizione (SQL eseguito dal pannello, vedi CLAUDE.md).
+  - Provato con il DDT 1000005134 e il mittente scritto "Tema Sinergie SpA": Excel lo salta, gestionale 26 righe gia' presenti e 0 da inserire.
