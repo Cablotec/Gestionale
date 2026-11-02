@@ -56,6 +56,7 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
 
 ## Operazioni frequenti
 
+- **Un ordine con piu' articoli** (es. Tema 4700000482: 358010100 e 358010075): in `distinte_ordini` l'ordine prende una LISTA di distinte, una per articolo, e il Confronto ordini somma le quantita'. Senza, i codici dell'articolo mancante escono "NON IN DISTINTA".
 - **Aggiungere un cliente:** aggiungi la sua voce in `clienti` dentro `config.json`, con il nome che lo riconosce e il prefisso del codice. Finché manca, i suoi DDT finiscono in `DA_VERIFICARE`.
 - **Rilanciare un DDT a mano** (non crea doppioni né in Excel né nel Gestionale). Va lanciato dalla cartella locale `C:\Users\User032\Cablotec\DDT_arrivi`: da `\\SRV02\...` Node non parte (`ERR_INVALID_PACKAGE_CONFIG`) e i movimenti non arrivano.
   ```
@@ -95,3 +96,4 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
   3. regola di Outlook per i PDF dalla mail;
   4. rettifiche dalla UI;
   5. prelievi come scarichi.
+- **2 nov:** DDT 1000005134 (23/10) letto dalla scansione: e' il materiale di 00464/0010 (`TS-358010075`, 20 pz, gia' spedita), non della 0030. Scritte la distinta di `TS-358010075` (DDT / 20 pz, 23 C/L + rondella MAC), la lista e il flag sulla 0010, e lo scarico del lotto del 26/10 (23 righe PRODUZIONE col `lotto_id` del lotto: giacenza di quel DDT tornata a zero). In `config.json` l'ordine 482 ha ora due distinte; `registra.py` le somma. Confronto ordine 482: 0 codici aperti. Backup in `C:\Users\User032\Cablotec\tmp` (`backup-358075-prima.json`, `registra.py.bak-0211`, `config.json.bak-0211`, `Registro_arrivi.bak-0211.xlsx`).
