@@ -103,3 +103,4 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
   - `registra.py` riconosce il doppione da cliente + numero DDT.
   - Database: indice unico su tipo + azienda + numero + posizione (SQL eseguito dal pannello, vedi CLAUDE.md).
   - Provato con il DDT 1000005134 e il mittente scritto "Tema Sinergie SpA": Excel lo salta, gestionale 26 righe gia' presenti e 0 da inserire.
+- **3 nov, correzione:** il DDT 1000005134 e' il materiale di **00269/0030** (OP 01338, 20 pz, da produrre), non della 00464/0010 come avevo dedotto dall'ordine stampato (482). Annullato lo scarico della 0010 con 23 rettifiche, tolto il flag della 0010. Il confronto Excel resta per ordine come scritto sul DDT (482).
