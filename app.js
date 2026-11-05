@@ -7233,7 +7233,7 @@ function openArticoloModal(a, opts) {
     distinta.forEach((r, i) => {
       const inCod = el('input', { type:'text', value: r.codice || '', placeholder:'codice materiale',
         style:'font-family:JetBrains Mono,monospace;font-size:11px;min-width:0;' });
-      const inQta = el('input', { type:'number', step:'0.001', min:'0', value: String(r.qta ?? ''),
+      const inQta = el('input', { type:'number', step:'any', min:'0', value: String(r.qta ?? ''),
         placeholder:'0', style:'text-align:right;' });
       const inUm = el('input', { type:'text', value: r.um || '', placeholder:'um' });
       [inCod, inQta, inUm].forEach(x => { x.disabled = readonly; });
@@ -7587,7 +7587,7 @@ function openArticoloModal(a, opts) {
         const inCod = el('input', { type:'text', class:'mono', value: cod, placeholder:'codice',
           'data-fe-cod': String(fi), spellcheck:'false', autocomplete:'off', style:'font-size:11px;min-width:0;' });
         inCod.disabled = readonly;
-        const inQ = el('input', { type:'number', step:'0.001', min:'0', value: r.qta == null ? '' : String(r.qta),
+        const inQ = el('input', { type:'number', step:'any', min:'0', value: r.qta == null ? '' : String(r.qta),
           style:'text-align:right;' });
         inQ.disabled = readonly;
         const info = el('span', { class:'sub', style:'font-size:11px;' });
