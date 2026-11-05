@@ -68,7 +68,6 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
   if (!out.consumo) out.consumo = new Map();   // `acc` costruito da chi chiamava prima
   if (!out.origini) out.origini = new Map();
   if (!out.tipi) out.tipi = new Map();
-  if (!out.fasi) out.fasi = new Map();
   const radice = codice;
   scendi(codice, Number(qta) || 0, new Set(), 0, null, null);
   return out;
@@ -89,19 +88,7 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     out.origini.get(cod).add(padre);
   }
 
-  // FASE ESTERNA (5 nov): quanto di un codice va al terzista, per lavorazione.
-  // Map codice -> Map(fase -> qta). Una QUANTITA' e non un sì/no: lo stesso
-  // filo puo' servire mezzo metro al terzista e mezzo in casa.
-  // La fase scende coi rami: un sottoassieme mandato fuori porta con se'
-  // tutti i suoi materiali, a meno che una riga piu' in basso dica altro.
-  function segnaFase(cod, q, fase) {
-    if (!fase) return;
-    if (!out.fasi.has(cod)) out.fasi.set(cod, new Map());
-    const m = out.fasi.get(cod);
-    m.set(fase, (m.get(fase) || 0) + q);
-  }
-
-  function scendi(cod, q, inCammino, prof, tipo, padre, fase) {
+  function scendi(cod, q, inCammino, prof, tipo, padre) {
     if (!cod || !(q > 0)) return;
     if (prof > DISTINTA_PROFONDITA_MAX) { out.tagliati++; return; }
     // CONSUMO (MAC): si ferma qui come il segnaposto e per la stessa
@@ -109,7 +96,7 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     // parte, cosi' non sparisce in silenzio e la commessa se lo ritrova.
     // Non si scende nemmeno: la minuteria non ha sottodistinta, e se un
     // domani l'avesse resterebbe comunque minuteria.
-    if (tipo === 'MAC') { daPadre(cod, padre); segnaFase(cod, q, fase); out.consumo.set(cod, (out.consumo.get(cod) || 0) + q); return; }
+    if (tipo === 'MAC') { daPadre(cod, padre); out.consumo.set(cod, (out.consumo.get(cod) || 0) + q); return; }
     const figli = figliDi.get(cod);
     if (!figli || !figli.length) {
       // ⚠⚠ LA RADICE NON E MAI UN MATERIALE (17 set). Qui sotto una foglia e
@@ -132,7 +119,6 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
       // fabbisogno. Si conta a parte, cosi non sparisce in silenzio.
       if (eSegnaposto(cod)) { daPadre(cod, padre); out.segnaposto.set(cod, (out.segnaposto.get(cod) || 0) + q); return; }
       daPadre(cod, padre);
-      segnaFase(cod, q, fase);
       out.materiali.set(cod, (out.materiali.get(cod) || 0) + q);
       // IL TIPO DELLA FOGLIA (13 ott): C/L o ACQ, come lo dice l'arco che la
       // porta qui. Serviva per sapere quali codici manda il cliente — la
@@ -151,8 +137,7 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     // diversi senza che sia un anello — e succede, e legittimo.
     if (inCammino.has(cod)) { out.cicli.add(cod); return; }
     inCammino.add(cod);
-    figli.forEach(f => scendi(f.figlio, q * (Number(f.qta) || 0), inCammino, prof + 1, f.tipo, cod,
-      f.fase || fase));
+    figli.forEach(f => scendi(f.figlio, q * (Number(f.qta) || 0), inCammino, prof + 1, f.tipo, cod));
     inCammino.delete(cod);
   }
 }
@@ -382,6 +367,49 @@ function ripartisciOrdinato(esito, consegne, primaAltri) {
 // per i soli codici C/L di `op`.
 function eCL(r) { return String((r && r.tipo) || '').trim().toUpperCase() === 'C/L'; }
 
+// ── FASI ESTERNE DEL PRODOTTO (5 nov 2026) ───────────────────────────
+// Quello che di un prodotto va a un terzista, per lavorazione, con la SUA
+// quantita' per pezzo: di 100 di un codice, 30 possono andare fuori e 70
+// restare in casa (Nico). Per questo non e' un segno sulla riga di distinta
+// ma una sezione a parte della scheda prodotto:
+//   articoli.fasi_esterne = [{ fase: <tipo_lavorazione_id>, righe: [{ codice, qta }] }]
+// `qta` e' PER PEZZO, come in distinta. La distinta resta quella che e'.
+//
+// Ritorna Map codice -> Map fase -> qta per pezzo (righe vuote o a zero scartate,
+// lo stesso codice due volte nella stessa fase si somma).
+function quoteFasiEsterne(fasiEsterne) {
+  const out = new Map();
+  (Array.isArray(fasiEsterne) ? fasiEsterne : []).forEach(f => {
+    if (!f || !f.fase) return;
+    (Array.isArray(f.righe) ? f.righe : []).forEach(r => {
+      const cod = String((r && r.codice) || '').trim();
+      const q = Number(r && r.qta);
+      if (!cod || !(q > 0)) return;
+      if (!out.has(cod)) out.set(cod, new Map());
+      const m = out.get(cod);
+      m.set(f.fase, +((m.get(f.fase) || 0) + q).toFixed(6));
+    });
+  });
+  return out;
+}
+
+// Per la sezione: di ogni codice mandato fuori, quanto ne chiede la distinta
+// per pezzo, quanto va fuori in tutto (tutte le fasi), quanto resta in casa.
+// `perPezzo`: Map codice -> qta della distinta ESPLOSA per 1 pezzo.
+// Ritorna Map codice -> { distinta, fuori, inCasa, eccede, sconosciuto }.
+//   eccede      = va fuori piu' di quanto la distinta ne chiede
+//   sconosciuto = il codice non e' (piu') nella distinta
+function ripartoFasiEsterne(perPezzo, fasiEsterne) {
+  const out = new Map();
+  quoteFasiEsterne(fasiEsterne).forEach((perFase, cod) => {
+    const fuori = +[...perFase.values()].reduce((a, q) => a + q, 0).toFixed(6);
+    const dist = perPezzo && perPezzo.has(cod) ? Number(perPezzo.get(cod)) || 0 : 0;
+    out.set(cod, { distinta: dist, fuori, inCasa: +Math.max(0, dist - fuori).toFixed(6),
+      eccede: fuori > dist + 1e-9, sconosciuto: !(perPezzo && perPezzo.has(cod)) });
+  });
+  return out;
+}
+
 // FUORI GIACENZA (5 nov): i movimenti dei materiali che il gestionale non
 // conta (MAC, ACQ) partiti per un terzista. Restano registrati — si vede
 // cosa e' partito — ma nessun conto li somma: un MAC mai caricato andrebbe
@@ -584,9 +612,7 @@ function applicaDistinteProdotti(figliDi, articoli) {
       .map(r => ({ figlio: String(r.codice).trim(), qta: Number(r.qta) || 0, um: r.um || null,
         // Il tipo sta sull'ARCO, non sul codice: e' la riga di distinta a
         // dire che quel componente li' e' di consumo.
-        tipo: r.tipo || null,
-        // Va al terzista, e per quale lavorazione (5 nov): anche lei sull'arco.
-        fase: r.fase_esterna || null })));
+        tipo: r.tipo || null })));
     locali.add(a.codice);
   });
   return locali;
@@ -597,5 +623,5 @@ if (typeof module !== 'undefined' && module.exports) {
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
-    ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto };
+    ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne };
 }

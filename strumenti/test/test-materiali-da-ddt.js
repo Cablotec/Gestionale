@@ -180,25 +180,25 @@ sez('Invio a terzista: trasferimento, non scarico (5 nov)');
   t('senza invii: presso vuoto', M.arriviDaDdt(a, [a], base).get('TS-1').presso.length === 0);
 }
 
-sez('Fase esterna nella distinta (5 nov)');
+sez('Fasi esterne del prodotto: una parte va fuori, il resto in casa (5 nov)');
 {
-  const figliDi = new Map();
-  M.applicaDistinteProdotti(figliDi, [
-    { codice: 'PROD', distinta: [
-      { codice: 'CL-1', qta: 2, tipo: 'C/L', fase_esterna: 'FILI' },
-      { codice: 'MAC-1', qta: 0.5, tipo: 'MAC', fase_esterna: 'FILI' },
-      { codice: 'MAC-1', qta: 0.3, tipo: 'MAC' },
-      { codice: 'CL-2', qta: 1, tipo: 'C/L' },
-      { codice: 'SUB', qta: 1, fase_esterna: 'CAB' }] },
-    { codice: 'SUB', distinta: [{ codice: 'CL-3', qta: 4, tipo: 'C/L' },
-      { codice: 'CL-4', qta: 1, tipo: 'C/L', fase_esterna: 'FILI' }] }]);
-  const e = M.esplodiDistinta('PROD', 10, figliDi);
-  t('C/L in fase: 20 per 10 pz', e.fasi.get('CL-1').get('FILI') === 20);
-  t('MAC in fase: solo la parte segnata (5, non 8)', Math.abs(e.fasi.get('MAC-1').get('FILI') - 5) < 1e-9
-    && Math.abs(e.consumo.get('MAC-1') - 8) < 1e-9);
-  t('riga in casa: nessuna fase', !e.fasi.has('CL-2'));
-  t('la fase scende nel sottoassieme', e.fasi.get('CL-3').get('CAB') === 40);
-  t('una riga piu in basso puo dire altro', e.fasi.get('CL-4').get('FILI') === 10 && !e.fasi.get('CL-4').has('CAB'));
+  const fasi = [
+    { fase: 'FILI', righe: [{ codice: 'CL-1', qta: 30 }, { codice: 'MAC-1', qta: 0.5 }, { codice: 'VUOTO', qta: 0 }] },
+    { fase: 'CAB', righe: [{ codice: 'CL-1', qta: 20 }, { codice: 'SPARITO', qta: 1 }] },
+    { fase: null, righe: [{ codice: 'CL-9', qta: 1 }] }];
+  const q = M.quoteFasiEsterne(fasi);
+  t('per fase e per codice', q.get('CL-1').get('FILI') === 30 && q.get('CL-1').get('CAB') === 20);
+  t('quantita zero scartata', !q.has('VUOTO'));
+  t('fase senza lavorazione scartata', !q.has('CL-9'));
+  t('nessuna sezione = nessuna quota', M.quoteFasiEsterne(null).size === 0);
+  const perPezzo = new Map([['CL-1', 100], ['MAC-1', 0.8]]);
+  const r = M.ripartoFasiEsterne(perPezzo, fasi);
+  t('100 in distinta, 50 fuori (30 + 20), 50 in casa',
+    r.get('CL-1').distinta === 100 && r.get('CL-1').fuori === 50 && r.get('CL-1').inCasa === 50 && !r.get('CL-1').eccede);
+  t('MAC: 0,5 fuori, 0,3 in casa', Math.abs(r.get('MAC-1').inCasa - 0.3) < 1e-9);
+  t('codice non piu in distinta: segnalato', r.get('SPARITO').sconosciuto && r.get('SPARITO').eccede);
+  const troppo = M.ripartoFasiEsterne(perPezzo, [{ fase: 'FILI', righe: [{ codice: 'CL-1', qta: 120 }] }]);
+  t('fuori piu della distinta: eccede, in casa 0', troppo.get('CL-1').eccede && troppo.get('CL-1').inCasa === 0);
 }
 
 sez('Movimenti fuori giacenza (MAC mandati al terzista)');
