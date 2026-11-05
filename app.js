@@ -3828,15 +3828,37 @@ async function caricaMancanti() {
 // potuto leggere, e allora la commessa col flag dice "non letto" invece di
 // "mancano tutti" — che sarebbe la bugia piu' cara, perche' manderebbe a
 // chiedere al cliente materiale gia' arrivato.
+// INVIO A TERZISTA (5 nov): `presso_id`, `operazione_id`, `invio_id` nascono
+// con `strumenti/migrazione-invio-terzista.sql`. Finche' non ci sono, la
+// lettura con quelle colonne fallirebbe e `state.movimenti` diventerebbe null
+// — cioe' "DDT non letti" su tutte le commesse Enviro per una funzione nuova.
+// Quindi si riprova senza, e `movPressoOk` spegne il bottone d'invio.
+let movPressoOk = null;   // null = da scoprire; false = migrazione mancante
 async function caricaMovimenti() {
+  const BASE = 'id,data,tipo,codice,descrizione,qta,um,mittente,documento_tipo,documento_numero,'
+    + 'documento_data,documento_pos,ordine_rif,note,lotto_id';
+  const leggi = (colonne) => fetchTutte(() =>
+    sb.from('movimenti_magazzino').select(colonne).order('data').order('id'));
   try {
-    const { data, error } = await fetchTutte(() =>
-      sb.from('movimenti_magazzino')
-        .select('id,data,tipo,codice,descrizione,qta,um,mittente,documento_tipo,documento_numero,'
-          + 'documento_data,documento_pos,ordine_rif,note,lotto_id')
-        .order('data').order('id'));
+    if (movPressoOk !== false) {
+      const { data, error } = await leggi(BASE + ',presso_id,operazione_id,invio_id');
+      if (!error) { movPressoOk = true; state.movimenti = data || []; return; }
+      // Solo "colonna che non esiste" vuol dire migrazione mancante; un errore
+      // di rete non deve spegnere il bottone per tutta la sessione.
+      if (!(error.code === '42703' || /column/i.test(error.message || ''))) {
+        state.movimenti = null; return;
+      }
+      movPressoOk = false;
+    }
+    const { data, error } = await leggi(BASE);
     state.movimenti = error ? null : (data || []);
   } catch (e) { state.movimenti = null; }
+}
+
+// Il nome di un terzista (o di qualunque azienda) dal suo id.
+function nomeAziendaDi(id) {
+  const a = id ? (state.aziende || []).find(x => x.id === id) : null;
+  return a ? a.nome : '?';
 }
 
 let oreEsterneTabellaOk = null;  // null = da scoprire; false = migrazione mancante
@@ -4431,6 +4453,176 @@ function arriviDaDdtCommessa(op) {
   return arriviDaDdt(commessaSuResiduo(op), commesseConDdtVive(), state.movimenti);
 }
 
+// ── INVIO A TERZISTA (5 nov, pilota Enviro) ─────────────────────────────
+// Da una commessa "Materiali da DDT" si mandano a un suo fornitore solo
+// alcune quantita' dei C/L. E' un TRASFERIMENTO (sede -> terzista), non uno
+// scarico: il materiale resta nostro e la commessa continua a contarlo come
+// arrivato. Lo scrive il database (`mov_invia_terzista`, solo admin), come
+// gli scarichi dei lotti: nessuno scrive movimenti a mano.
+// Vedi `strumenti/migrazione-invio-terzista.sql` per il perche'.
+// ⚠ NON passa da `openModal`, come `chiediConferma`: si appoggia sopra la
+// scheda commessa senza portarsela via.
+function invioTerzistaPossibile(o) {
+  return !!(o && o.id && o.materiali_da_ddt && movPressoOk === true && Array.isArray(state.movimenti)
+    && state.profile && state.profile.ruolo === 'admin' && Array.isArray(o.materiali)
+    && o.materiali.some(r => String((r && r.tipo) || '').trim().toUpperCase() === 'C/L'));
+}
+
+function apriInvioTerzista(o, poi) {
+  const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  const num = (v) => { const n = Number(String(v == null ? '' : v).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
+  const bg = el('div', { class:'modal-bg' });
+  const finestra = el('div', { class:'modal', style:'max-width:900px;' });
+  const chiudi = () => { window.__confermaChiudi = null; bg.remove(); };
+  window.__confermaChiudi = chiudi;
+
+  const corpo = el('div', { class:'mbody' });
+  const piede = el('div', { class:'mfoot' });
+  finestra.append(
+    el('div', { class:'mhd' },
+      el('h2', {}, 'Invio a terzista · ' + (o.numero_ordine || '') + '/' + (o.pos || '')),
+      el('button', { class:'mclose', onclick: chiudi }, '✕')),
+    corpo, piede);
+  bg.append(finestra);
+  $('#modal-root').append(bg);
+  const btnAnnulla = el('button', { class:'btng', onclick: chiudi }, 'Annulla');
+
+  // Il terzista e' uno dei fornitori GIA' assegnati alla commessa: il materiale
+  // parte con il lavoro per cui va fuori. Il database lo ricontrolla.
+  const fornitori = getOperazioneFornitoriDettaglio(o.id);
+  if (!fornitori.length) {
+    corpo.append(el('div', { class:'sub', style:'font-size:13px;line-height:1.7;' },
+      'Questa commessa non ha ancora un fornitore. Assegna prima il terzista nella scheda Dati '
+      + '(fornitori della commessa, o della fase esterna), poi torna qui.'));
+    piede.append(btnAnnulla);
+    return;
+  }
+  const faseDi = (r) => {
+    if (!r.fase_id) return 'tutta la commessa';
+    const f = (state.opFasi || []).find(x => x.id === r.fase_id);
+    const t = f && (state.tipiLav || []).find(x => x.id === f.tipo_lavorazione_id);
+    return t ? 'fase ' + t.nome : 'una fase';
+  };
+  const selTer = el('select', { style:'min-width:280px;' },
+    ...fornitori.map(r => el('option', { value: r.azienda_id }, nomeAziendaDi(r.azienda_id) + ' · ' + faseDi(r))));
+
+  // I numeri di oggi: quanto serve (a residuo), quanto e' gia' fuori per
+  // questa commessa, quanto ce n'e' in sede.
+  const conti = arriviDaDdtCommessa(o);
+  const sede = saldoInSede(state.movimenti);
+  const visti = new Set();
+  const righe = o.materiali.filter(r => {
+    const cod = String((r && r.codice) || '').trim();
+    if (!cod || visti.has(cod) || String(r.tipo || '').trim().toUpperCase() !== 'C/L') return false;
+    visti.add(cod); return true;
+  }).map(r => {
+    const cod = String(r.codice).trim();
+    const d = conti.get(cod) || { serve: 0, presso: [] };
+    const fuori = (d.presso || []).reduce((a, p) => a + p.qta, 0);
+    const origini = Array.isArray(r.da) ? r.da.filter(Boolean) : [];
+    return { cod, descr: r.descrizione || '', um: r.um || '', serve: d.serve || 0, fuori,
+      inSede: sede.get(cod) || 0, origini,
+      // Componente di una lavorazione esterna (kit fili `_KF`, `_K`): e' il caso
+      // tipico di materiale che parte, quindi si propone gia' spuntato.
+      daKit: origini.some(c => typeof eLavorazione === 'function' && eLavorazione(c)) };
+  });
+  const proposta = (x) => Math.max(0, Math.min(x.serve - x.fuori, x.inSede));
+
+  const COL = 'display:grid;grid-template-columns:22px minmax(140px,1fr) minmax(140px,1.4fr) 72px 72px 80px 90px;'
+    + 'gap:8px;align-items:center;';
+  const et = (t, dx) => el('span', { class:'sub',
+    style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const tab = el('div', { style:'max-height:52vh;overflow-y:auto;margin-top:10px;' });
+  tab.append(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);position:sticky;top:0;background:var(--sur);' },
+    el('span'), et('Codice'), et('Descrizione'), et('Serve', 1), et('In sede', 1), et('Già fuori', 1), et('Da inviare', 1)));
+
+  const scelte = [];
+  const riepilogo = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
+  const btnInvia = el('button', { class:'btnp' }, 'Invia');
+  const aggiorna = () => {
+    let n = 0, errori = 0;
+    scelte.forEach(s => {
+      const q = num(s.inp.value);
+      const male = s.chk.checked && (!(q > 0) || q > s.x.inSede + 1e-9);
+      s.inp.style.borderColor = male ? 'var(--red)' : '';
+      s.inp.title = male ? (q > s.x.inSede ? 'In sede ce ne sono ' + nf(s.x.inSede) : 'Scrivi una quantità maggiore di zero') : '';
+      if (s.chk.checked) { if (male) errori++; else n++; }
+    });
+    riepilogo.textContent = errori ? errori + (errori === 1 ? ' riga da correggere' : ' righe da correggere')
+      : (n ? n + (n === 1 ? ' codice' : ' codici') + ' da inviare' : 'Spunta i materiali da mandare');
+    riepilogo.style.color = errori ? 'var(--red)' : '';
+    btnInvia.disabled = !n || !!errori;
+    btnInvia.textContent = n ? 'Invia ' + n + (n === 1 ? ' codice' : ' codici') : 'Invia';
+  };
+
+  righe.forEach(x => {
+    const chk = el('input', { type:'checkbox', style:'width:15px;height:15px;margin:0;cursor:pointer;' });
+    const inp = el('input', { type:'text', inputmode:'decimal', class:'mono',
+      style:'width:100%;text-align:right;font-size:12px;padding:3px 6px;' });
+    chk.checked = x.daKit && x.fuori <= 0 && proposta(x) > 0;
+    if (chk.checked) inp.value = String(proposta(x));
+    inp.disabled = !chk.checked;
+    chk.onchange = () => {
+      inp.disabled = !chk.checked;
+      if (chk.checked && !inp.value) inp.value = String(proposta(x));
+      if (chk.checked) inp.focus();
+      aggiorna();
+    };
+    inp.oninput = aggiorna;
+    const cellaCod = el('div', { style:'min-width:0;display:flex;flex-direction:column;gap:1px;' },
+      el('span', { class:'mono', style:'font-size:11px;' }, x.cod));
+    if (x.origini.length) cellaCod.append(el('span', { class:'sub',
+      style:'font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+      title: x.origini.join(', ') }, '◂ da ' + x.origini[0] + (x.origini.length > 1 ? ' +' + (x.origini.length - 1) : '')));
+    tab.append(el('label', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);cursor:pointer;' },
+      chk, cellaCod,
+      el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+        title: x.descr }, x.descr || '—'),
+      el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, nf(x.serve)),
+      el('span', { class:'mono', style:'font-size:11px;text-align:right;' + (x.inSede <= 0 ? 'color:var(--red);' : '') },
+        nf(x.inSede)),
+      el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (x.fuori > 0 ? 'var(--or)' : 'var(--mut)') + ';' },
+        x.fuori > 0 ? nf(x.fuori) : '—'),
+      inp));
+    scelte.push({ x, chk, inp });
+  });
+
+  const inNota = el('input', { type:'text', placeholder:'Nota (facoltativa): cosa va a fare, riferimento…',
+    style:'width:100%;' });
+  corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Il materiale passa dalla sede al terzista e resta nostro: la commessa continua a contarlo come arrivato. '
+      + 'Quando registri un lotto di produzione si scarica prima quello che è dal terzista, poi la sede. '
+      + 'Solo i codici C/L della lista; la quantità proposta è quella che serve ancora, al massimo quanto c\'è in sede.'),
+    el('div', { class:'field' }, el('label', {}, 'Terzista'), selTer),
+    tab,
+    el('div', { class:'field', style:'margin-top:10px;' }, el('label', {}, 'Nota'), inNota));
+
+  btnInvia.onclick = async () => {
+    const righeInvio = scelte.filter(s => s.chk.checked).map(s => ({ codice: s.x.cod, qta: num(s.inp.value) }));
+    if (!righeInvio.length) return;
+    btnInvia.disabled = true; btnInvia.textContent = 'Invio…';
+    try {
+      const { data, error } = await sb.rpc('mov_invia_terzista', {
+        p_operazione: o.id, p_terzista: selTer.value, p_righe: righeInvio,
+        p_nota: inNota.value.trim() || null, p_verso: 'invio' });
+      if (error) throw new Error(error.message);
+      await caricaMovimenti();
+      chiudi();
+      toast((data || righeInvio.length) + (righeInvio.length === 1 ? ' codice inviato a ' : ' codici inviati a ')
+        + nomeAziendaDi(selTer.value), 'ok');
+      if (typeof poi === 'function') poi();
+    } catch (e) {
+      // ⚠ L'invio e' tutto-o-niente (una funzione sola nel database): se una
+      // riga non va, non e' partito niente. Lo si dice, e la finestra resta.
+      toast('Invio non registrato, non è partito niente: ' + (e.message || e), 'err', 9000);
+      aggiorna();
+    }
+  };
+  piede.append(riepilogo, btnAnnulla, btnInvia);
+  aggiorna();
+}
+
 // Le commesse vive con "Materiali da DDT", gia' a residuo: chi chiede i C/L
 // contati dal registro movimenti.
 function commesseConDdtVive() {
@@ -4506,13 +4698,21 @@ function materialeStatoRiga(codice, tipo, ctx) {
     const d = ctx.ddt.get(cod) || { serve: 0, arrivato: 0, manca: 0, documenti: [] };
     const docs = d.documenti.map(x => 'DDT ' + x.numero + (x.data ? ' del ' + fmtIT(x.data) : ''));
     const docTxt = docs.length ? ' · ' + docs[0] + (docs.length > 1 ? ' +' + (docs.length - 1) : '') : '';
-    const titolo = docs.length ? 'Arrivato con: ' + docs.join(', ') : 'Nessun DDT registrato per questo codice.';
+    // DOVE STA (5 nov): la parte gia' mandata a un terzista per questa
+    // commessa. E' arrivata e resta nostra, quindi non cambia "arrivato" ne'
+    // "mancano": si dice solo che non e' sullo scaffale.
+    const presso = (d.presso || []).filter(p => p.qta > 0);
+    const pressoTxt = presso.map(p => nf(p.qta) + ' presso ' + nomeAziendaDi(p.presso_id)).join(', ');
+    const titolo = (docs.length ? 'Arrivato con: ' + docs.join(', ') : 'Nessun DDT registrato per questo codice.')
+      + (pressoTxt ? '\nMandato al terzista per questa commessa: ' + pressoTxt
+        + ". E' nostro e conta come arrivato, ma non è sullo scaffale." : '');
+    const dove = pressoTxt ? ' · ' + pressoTxt : '';
     if (d.manca <= 0) {
-      return { stato:'disponibile', testo:'arrivato' + docTxt, colore:'var(--grn)', manca:0, titolo };
+      return { stato:'disponibile', testo:'arrivato' + dove + docTxt, colore:'var(--grn)', manca:0, titolo };
     }
     return { stato:'attesa_cliente',
       testo: (d.arrivato > 0 ? 'arrivati ' + nf(d.arrivato) + ' su ' + nf(d.serve) + ' · ' : '')
-        + 'mancano ' + nf(d.manca) + docTxt,
+        + 'mancano ' + nf(d.manca) + dove + docTxt,
       colore:'var(--or)', manca: d.manca, titolo };
   }
 
@@ -4959,7 +5159,9 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
       cella: (m) => m.fonte === 'gestionale'
         ? el('a', { href:'#', class:'badge bblu', style:'text-decoration:none;',
             title:'Giacenza = somma dei movimenti del gestionale (' + (m.n_movimenti || 0)
-              + ' movimenti). Clic: i movimenti di questo codice.',
+              + ' movimenti)' + (m.presso_terzisti > 0
+                ? ', di cui ' + nf(m.presso_terzisti) + ' presso terzisti (nostro, fuori sede)' : '')
+              + '. Clic: i movimenti di questo codice.',
             onclick:(e)=>{ e.preventDefault(); movCerca = m.codice; movFiltroDoc = ''; movQuante = 400; selectTab('movimenti'); } },
             'Gestionale')
         : el('span', { class:'sub', style:'font-size:11px;', title:"Dall'ultima estrazione del magazzino Alnus" }, 'Alnus') },
@@ -5528,11 +5730,14 @@ const MOV_TIPO_ETI = {
   carico:    { txt:'carico',    cls:'bok' },
   scarico:   { txt:'scarico',   cls:'bblu' },
   rettifica: { txt:'rettifica', cls:'byel' },
+  // Invio a terzista (5 nov): il materiale cambia posto, resta nostro.
+  trasferimento: { txt:'trasferimento', cls:'bor' },
 };
 // Un lotto di produzione e' un "documento" a se': stesso numero (la commessa)
 // per tutti i lotti di quella commessa, quindi la chiave porta anche il lotto.
+// Lo stesso vale per un invio a terzista: ogni invio e' il suo `invio_id`.
 const movChiaveDoc = (m) => [m.documento_tipo || 'DOC', m.mittente || '', m.documento_numero || '',
-  m.lotto_id || ''].join('|');
+  m.lotto_id || '', m.invio_id || ''].join('|');
 
 // ═══ RIUNIONI (14 ott, chiesto da Nico) ═══
 // Le azioni decise in riunione: cosa, chi, entro quando, fatta o no. Nasce dal
@@ -6061,6 +6266,12 @@ function renderMovimenti(root) {
         return el('span', { class:'mono', style:'font-weight:700;color:' + (q < 0 ? 'var(--red)' : 'var(--grn)') + ';' },
           (q > 0 ? '+' : '') + nf(q)); } },
     { k:'um', t:'UM', ord: m => String(m.um || ''), cella: m => el('span', { class:'sub', style:'font-size:11px;' }, m.um || '') },
+    // DOVE (5 nov): sede, o il terzista a cui il materiale e' stato mandato.
+    { k:'dove', t:'Dove', ord: m => m.presso_id ? nomeAziendaDi(m.presso_id).toUpperCase() : '',
+      cella: m => m.presso_id
+        ? el('span', { class:'badge bor', title:'Presso il terzista: materiale nostro, fuori sede' },
+            nomeAziendaDi(m.presso_id))
+        : el('span', { class:'sub', style:'font-size:11px;' }, 'sede') },
     { k:'mittente', t:'Mittente', ord: m => String(m.mittente || '').toUpperCase(),
       cella: m => el('span', { class:'sub', style:'display:block;font-size:11px;max-width:160px;overflow:hidden;'
         + 'text-overflow:ellipsis;white-space:nowrap;', title: m.mittente || '' }, m.mittente || '—') },
@@ -6160,10 +6371,18 @@ function renderMovimenti(root) {
     const codici = new Set(righe.map(m => m.codice));
     if (codici.size === 1) {
       const tot = righe.reduce((a, m) => a + (Number(m.qta) || 0), 0);
+      // Il totale per POSTO (5 nov): quanto in sede e quanto da ogni terzista.
+      const perPosto = new Map();
+      righe.forEach(m => perPosto.set(m.presso_id || '', (perPosto.get(m.presso_id || '') || 0) + (Number(m.qta) || 0)));
+      const fuori = [...perPosto].filter(([k, q]) => k && Math.abs(q) > 1e-9);
       tabWrap.append(el('div', { style:'margin-bottom:8px;font-size:12px;' },
         el('span', { class:'mono', style:'font-weight:700;' }, [...codici][0]),
         ' · totale dei movimenti in elenco: ',
-        el('span', { class:'mono', style:'font-weight:700;' }, nf(tot) + (righe[0].um ? ' ' + righe[0].um : ''))));
+        el('span', { class:'mono', style:'font-weight:700;' }, nf(tot) + (righe[0].um ? ' ' + righe[0].um : '')),
+        fuori.length
+          ? el('span', { class:'sub' }, ' · in sede ' + nf(perPosto.get('') || 0) + ' · '
+              + fuori.map(([k, q]) => nf(q) + ' presso ' + nomeAziendaDi(k)).join(' · '))
+          : ''));
     }
 
     const col = colonne.find(c => c.k === movSortKey) || colonne[0];
@@ -11566,6 +11785,14 @@ function openOperazioneModal(o, opts) {
         }
       };
       intestazione.append(btnRi);
+    }
+    // INVIO A TERZISTA (5 nov): solo dove i C/L li conta il gestionale.
+    if (!isNew && invioTerzistaPossibile(o)) {
+      intestazione.append(el('button', { type:'button', class:'btnsm',
+        style: (isAdmin && art) ? '' : 'margin-left:auto;',
+        title:'Manda a un fornitore di questa commessa una parte dei suoi C/L. '
+          + 'Il materiale resta nostro: cambia solo posto.',
+        onclick: () => apriInvioTerzista(o, renderMancanti) }, '↗ Invia a terzista'));
     }
     sezMateriali.append(intestazione);
 

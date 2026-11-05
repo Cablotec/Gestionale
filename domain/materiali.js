@@ -367,9 +367,61 @@ function ripartisciOrdinato(esito, consegne, primaAltri) {
 // per i soli codici C/L di `op`.
 function eCL(r) { return String((r && r.tipo) || '').trim().toUpperCase() === 'C/L'; }
 
+// ── MATERIALE PRESSO I TERZISTI (5 nov 2026, pilota Enviro) ───────────
+// Un invio a terzista e' un TRASFERIMENTO, non uno scarico: il materiale
+// resta nostro e cambia solo posto. Due movimenti con lo stesso `invio_id`:
+// −q in sede (`presso_id` null) e +q presso il terzista (`presso_id` = la
+// sua azienda), tutti e due con la commessa per cui parte (`operazione_id`).
+// Il totale di un codice non cambia, quindi i conti di giacenza restano
+// quelli di prima; cambia solo DOVE sta. Al lotto il trigger scarica prima
+// quello che sta dal terzista per quella commessa, poi la sede.
+// ⚠ Un movimento senza `presso_id` (tutti quelli prima del 5 nov) e' in sede.
+//
+// Ritorna Map codice -> [{ operazione_id, presso_id, qta }] con qta > 0.
+function pressoTerzisti(movimenti) {
+  const acc = new Map();
+  (movimenti || []).forEach(m => {
+    if (!m || !m.presso_id) return;
+    const cod = String(m.codice || '').trim();
+    if (!cod) return;
+    const k = cod + '\u0001' + (m.operazione_id || '') + '\u0001' + m.presso_id;
+    const x = acc.get(k) || { codice: cod, operazione_id: m.operazione_id || null,
+      presso_id: m.presso_id, qta: 0 };
+    x.qta += Number(m.qta) || 0;
+    acc.set(k, x);
+  });
+  const out = new Map();
+  acc.forEach(x => {
+    const q = +x.qta.toFixed(4);
+    if (q <= 0) return;
+    if (!out.has(x.codice)) out.set(x.codice, []);
+    out.get(x.codice).push({ operazione_id: x.operazione_id, presso_id: x.presso_id, qta: q });
+  });
+  return out;
+}
+
+// Quanto di un codice e' sullo scaffale in SEDE: i movimenti senza `presso_id`.
+// Ritorna Map codice -> qta (puo' essere negativa: un dato da guardare, non
+// da nascondere).
+function saldoInSede(movimenti) {
+  const out = new Map();
+  (movimenti || []).forEach(m => {
+    if (!m || m.presso_id) return;
+    const cod = String(m.codice || '').trim();
+    if (!cod) return;
+    out.set(cod, +((out.get(cod) || 0) + (Number(m.qta) || 0)).toFixed(4));
+  });
+  return out;
+}
+
 function arriviDaDdt(op, commesse, movimenti) {
   const out = new Map();
   if (!op || !Array.isArray(op.materiali)) return out;
+  // Quello che sta dal terzista e' gia' DI una commessa: non entra nella
+  // ripartizione del magazzino unico, va a lei e basta. Senza, la commessa
+  // che scade prima si prenderebbe sulla carta il materiale che un terzista
+  // sta lavorando per un'altra.
+  const presso = pressoTerzisti(movimenti);
   const entrato = new Map(), documenti = new Map();
   (movimenti || []).forEach(m => {
     const cod = String((m && m.codice) || '').trim();
@@ -394,10 +446,23 @@ function arriviDaDdt(op, commesse, movimenti) {
         .reduce((a, x) => a + (Number(x.qta) || 0), 0) }))
       .filter(x => x.qta > 0)
       .sort((a, b) => ordineDiServizio(a.commessa, b.commessa));
-    const { esito } = ripartisciGiacenza(righe, entrato.get(cod) || 0);
-    const mia = esito.find(e => e.commessa.id === op.id);
-    if (!mia) return;
-    out.set(cod, { serve: mia.qta, arrivato: mia.coperto, manca: mia.scoperto,
+    const pressoCod = presso.get(cod) || [];
+    const riservato = (id) => pressoCod.filter(p => p.operazione_id === id)
+      .reduce((a, p) => a + p.qta, 0);
+    const fuori = pressoCod.reduce((a, p) => a + p.qta, 0);
+    // Ognuna chiede alla sede solo quello che il suo terzista non ha gia'.
+    const daSede = righe.map(x => {
+      const ris = Math.min(x.qta, riservato(x.commessa.id));
+      return { commessa: x.commessa, qta: +(x.qta - ris).toFixed(4), ris };
+    });
+    const { esito } = ripartisciGiacenza(daSede, (entrato.get(cod) || 0) - fuori);
+    const i = esito.findIndex(e => e.commessa.id === op.id);
+    if (i < 0) return;
+    const mia = esito[i], ris = daSede[i].ris;
+    out.set(cod, { serve: +(mia.qta + ris).toFixed(4), arrivato: +(mia.coperto + ris).toFixed(4),
+      manca: mia.scoperto,
+      presso: pressoCod.filter(p => p.operazione_id === op.id)
+        .map(p => ({ presso_id: p.presso_id, qta: p.qta })),
       documenti: [...(documenti.get(cod) || new Map())]
         .map(([numero, data]) => ({ numero, data }))
         .sort((a, b) => String(a.data || '').localeCompare(String(b.data || ''))) });
@@ -424,7 +489,7 @@ function righeGiacenzaGestionale(movimenti, commesseConFlag) {
   const per = new Map();
   const prendi = (cod) => {
     if (!per.has(cod)) per.set(cod, { codice: cod, descrizione: null, um: null,
-      giacenza: 0, impegno: 0, n_movimenti: 0 });
+      giacenza: 0, impegno: 0, n_movimenti: 0, presso_terzisti: 0 });
     return per.get(cod);
   };
   (movimenti || []).forEach(m => {
@@ -432,6 +497,9 @@ function righeGiacenzaGestionale(movimenti, commesseConFlag) {
     if (!cod) return;
     const r = prendi(cod);
     r.giacenza += Number(m.qta) || 0;
+    // Il totale resta la giacenza (il materiale dal terzista e' nostro);
+    // quanto ne sta fuori si dice a parte.
+    if (m.presso_id) r.presso_terzisti += Number(m.qta) || 0;
     r.n_movimenti++;
     if (!r.descrizione && m.descrizione) r.descrizione = m.descrizione;
     if (!r.um && m.um) r.um = m.um;
@@ -449,6 +517,7 @@ function righeGiacenzaGestionale(movimenti, commesseConFlag) {
     const g = +r.giacenza.toFixed(4), i = +r.impegno.toFixed(4);
     const manca = Math.max(0, +(i - g).toFixed(4));
     return Object.assign(r, { giacenza: g, impegno: i, tipo_parte: 'C/L',
+      presso_terzisti: Math.max(0, +r.presso_terzisti.toFixed(4)),
       qta_richiesta: manca, qta_da_ordinare: manca, consegne: [], fonte: 'gestionale' });
   }).sort((a, b) => a.codice.localeCompare(b.codice));
 }
@@ -505,5 +574,5 @@ if (typeof module !== 'undefined' && module.exports) {
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
-    ripartisciOrdinato };
+    ripartisciOrdinato, pressoTerzisti, saldoInSede };
 }

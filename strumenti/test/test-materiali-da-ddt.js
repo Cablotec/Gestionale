@@ -138,5 +138,47 @@ sez('Lo stesso DDT non si conta due volte fra due commesse');
     M.arriviDaDdt(a, [a, c], [car('TS-1', 15, 'D1', '2026-09-14')]).get('TS-1').manca === 0);
 }
 
+sez('Invio a terzista: trasferimento, non scarico (5 nov)');
+{
+  // Invio di 40 per la commessa A a Botturi: −40 in sede, +40 presso.
+  const inv = (codice, qta, opId, presso) => [
+    { codice, qta: -qta, tipo: 'trasferimento', operazione_id: opId, presso_id: null, documento_numero: 'X' },
+    { codice, qta, tipo: 'trasferimento', operazione_id: opId, presso_id: presso, documento_numero: 'X' }];
+  const a = op('A', [{ codice: 'TS-1', qta: 60, tipo: 'C/L' }], { scadenza: '2026-11-30' });
+  const b = op('B', [{ codice: 'TS-1', qta: 60, tipo: 'C/L' }], { scadenza: '2026-10-16' });
+  const base = [car('TS-1', 100, 'D1', '2026-09-14')];
+  const mov = base.concat(inv('TS-1', 40, 'A', 'BOT'));
+  const p = M.pressoTerzisti(mov);
+  t('presso: 40 da BOT per A', p.get('TS-1').length === 1 && p.get('TS-1')[0].qta === 40
+    && p.get('TS-1')[0].presso_id === 'BOT' && p.get('TS-1')[0].operazione_id === 'A');
+  t('in sede: 60', M.saldoInSede(mov).get('TS-1') === 60);
+  const r0a = M.arriviDaDdt(a, [a, b], base), r0b = M.arriviDaDdt(b, [a, b], base);
+  t('prima dell invio: B (scade prima) 60 arrivati, A 40',
+    r0b.get('TS-1').arrivato === 60 && r0a.get('TS-1').arrivato === 40);
+  const ra = M.arriviDaDdt(a, [a, b], mov), rb = M.arriviDaDdt(b, [a, b], mov);
+  // Sede 60, B scade prima e se li prende tutti; ad A restano i suoi 40 dal
+  // terzista, che B non puo' toccare: prima dell'invio erano gli stessi 40.
+  t('dopo: A tiene i 40 dal terzista, mancano 20',
+    ra.get('TS-1').arrivato === 40 && ra.get('TS-1').manca === 20 && ra.get('TS-1').serve === 60);
+  t('dopo: B prende la sede, 60', rb.get('TS-1').arrivato === 60 && rb.get('TS-1').manca === 0);
+  const aPrio = Object.assign({}, a, { priorita_ordine: 1 }), bTarda = b;
+  t('A urgente: 40 dal terzista + 20 dalla sede; B ne ha 40',
+    M.arriviDaDdt(aPrio, [aPrio, bTarda], mov).get('TS-1').manca === 0
+    && M.arriviDaDdt(bTarda, [aPrio, bTarda], mov).get('TS-1').arrivato === 40);
+  const c = op('C', [{ codice: 'TS-1', qta: 100, tipo: 'C/L' }], { scadenza: '2026-09-01' });
+  t('una commessa urgentissima non si prende il materiale dal terzista di A',
+    M.arriviDaDdt(c, [a, c], mov).get('TS-1').arrivato === 60
+    && M.arriviDaDdt(a, [a, c], mov).get('TS-1').arrivato === 40);
+  t('A sa dove sta: 40 presso BOT', ra.get('TS-1').presso.length === 1 && ra.get('TS-1').presso[0].qta === 40);
+  t('B non ha niente presso terzisti', rb.get('TS-1').presso.length === 0);
+  t('il trasferimento non e un DDT di arrivo', ra.get('TS-1').documenti.map(d => d.numero).join() === 'D1');
+  // Al lotto il trigger scarica prima dal terzista: presso torna a zero.
+  const dopoLotto = mov.concat([{ codice: 'TS-1', qta: -40, tipo: 'scarico', operazione_id: 'A', presso_id: 'BOT' }]);
+  t('scaricato dal terzista: niente piu presso', !M.pressoTerzisti(dopoLotto).has('TS-1'));
+  const g = M.righeGiacenzaGestionale(mov, [a, b]).find(x => x.codice === 'TS-1');
+  t('giacenza totale invariata (100), di cui 40 presso terzisti', g.giacenza === 100 && g.presso_terzisti === 40);
+  t('senza invii: presso vuoto', M.arriviDaDdt(a, [a], base).get('TS-1').presso.length === 0);
+}
+
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);
