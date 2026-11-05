@@ -183,13 +183,13 @@ sez('Invio a terzista: trasferimento, non scarico (5 nov)');
 sez('Fasi esterne del prodotto: una parte va fuori, il resto in casa (5 nov)');
 {
   const fasi = [
-    { fase: 'FILI', righe: [{ codice: 'CL-1', qta: 30 }, { codice: 'MAC-1', qta: 0.5 }, { codice: 'VUOTO', qta: 0 }] },
-    { fase: 'CAB', righe: [{ codice: 'CL-1', qta: 20 }, { codice: 'SPARITO', qta: 1 }] },
-    { fase: null, righe: [{ codice: 'CL-9', qta: 1 }] }];
+    { fornitore: 'FILI', righe: [{ codice: 'CL-1', qta: 30 }, { codice: 'MAC-1', qta: 0.5 }, { codice: 'VUOTO', qta: 0 }] },
+    { fornitore: 'CAB', righe: [{ codice: 'CL-1', qta: 20 }, { codice: 'SPARITO', qta: 1 }] },
+    { fornitore: null, righe: [{ codice: 'CL-9', qta: 1 }] }];
   const q = M.quoteFasiEsterne(fasi);
-  t('per fase e per codice', q.get('CL-1').get('FILI') === 30 && q.get('CL-1').get('CAB') === 20);
+  t('per fornitore e per codice', q.get('CL-1').get('FILI') === 30 && q.get('CL-1').get('CAB') === 20);
   t('quantita zero scartata', !q.has('VUOTO'));
-  t('fase senza lavorazione scartata', !q.has('CL-9'));
+  t('blocco senza fornitore scartato', !q.has('CL-9'));
   t('nessuna sezione = nessuna quota', M.quoteFasiEsterne(null).size === 0);
   const perPezzo = new Map([['CL-1', 100], ['MAC-1', 0.8]]);
   const r = M.ripartoFasiEsterne(perPezzo, fasi);
@@ -197,7 +197,7 @@ sez('Fasi esterne del prodotto: una parte va fuori, il resto in casa (5 nov)');
     r.get('CL-1').distinta === 100 && r.get('CL-1').fuori === 50 && r.get('CL-1').inCasa === 50 && !r.get('CL-1').eccede);
   t('MAC: 0,5 fuori, 0,3 in casa', Math.abs(r.get('MAC-1').inCasa - 0.3) < 1e-9);
   t('codice non piu in distinta: segnalato', r.get('SPARITO').sconosciuto && r.get('SPARITO').eccede);
-  const troppo = M.ripartoFasiEsterne(perPezzo, [{ fase: 'FILI', righe: [{ codice: 'CL-1', qta: 120 }] }]);
+  const troppo = M.ripartoFasiEsterne(perPezzo, [{ fornitore: 'FILI', righe: [{ codice: 'CL-1', qta: 120 }] }]);
   t('fuori piu della distinta: eccede, in casa 0', troppo.get('CL-1').eccede && troppo.get('CL-1').inCasa === 0);
 }
 

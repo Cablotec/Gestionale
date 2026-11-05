@@ -368,41 +368,42 @@ function ripartisciOrdinato(esito, consegne, primaAltri) {
 function eCL(r) { return String((r && r.tipo) || '').trim().toUpperCase() === 'C/L'; }
 
 // ── FASI ESTERNE DEL PRODOTTO (5 nov 2026) ───────────────────────────
-// Quello che di un prodotto va a un terzista, per lavorazione, con la SUA
+// Quello che di un prodotto va a un terzista, per FORNITORE, con la SUA
 // quantita' per pezzo: di 100 di un codice, 30 possono andare fuori e 70
 // restare in casa (Nico). Per questo non e' un segno sulla riga di distinta
 // ma una sezione a parte della scheda prodotto:
-//   articoli.fasi_esterne = [{ fase: <tipo_lavorazione_id>, righe: [{ codice, qta }] }]
+//   articoli.fasi_esterne = [{ fornitore: <azienda_id>, righe: [{ codice, qta }] }]
 // `qta` e' PER PEZZO, come in distinta. La distinta resta quella che e'.
+// La lavorazione che fa il terzista non c'e': conta a chi va (Nico, 5 nov).
 //
-// Ritorna Map codice -> Map fase -> qta per pezzo (righe vuote o a zero scartate,
-// lo stesso codice due volte nella stessa fase si somma).
+// Ritorna Map codice -> Map fornitore -> qta per pezzo (righe vuote o a zero
+// scartate, lo stesso codice due volte per lo stesso fornitore si somma).
 function quoteFasiEsterne(fasiEsterne) {
   const out = new Map();
   (Array.isArray(fasiEsterne) ? fasiEsterne : []).forEach(f => {
-    if (!f || !f.fase) return;
+    if (!f || !f.fornitore) return;
     (Array.isArray(f.righe) ? f.righe : []).forEach(r => {
       const cod = String((r && r.codice) || '').trim();
       const q = Number(r && r.qta);
       if (!cod || !(q > 0)) return;
       if (!out.has(cod)) out.set(cod, new Map());
       const m = out.get(cod);
-      m.set(f.fase, +((m.get(f.fase) || 0) + q).toFixed(6));
+      m.set(f.fornitore, +((m.get(f.fornitore) || 0) + q).toFixed(6));
     });
   });
   return out;
 }
 
 // Per la sezione: di ogni codice mandato fuori, quanto ne chiede la distinta
-// per pezzo, quanto va fuori in tutto (tutte le fasi), quanto resta in casa.
+// per pezzo, quanto va fuori in tutto (tutti i terzisti), quanto resta in casa.
 // `perPezzo`: Map codice -> qta della distinta ESPLOSA per 1 pezzo.
 // Ritorna Map codice -> { distinta, fuori, inCasa, eccede, sconosciuto }.
 //   eccede      = va fuori piu' di quanto la distinta ne chiede
 //   sconosciuto = il codice non e' (piu') nella distinta
 function ripartoFasiEsterne(perPezzo, fasiEsterne) {
   const out = new Map();
-  quoteFasiEsterne(fasiEsterne).forEach((perFase, cod) => {
-    const fuori = +[...perFase.values()].reduce((a, q) => a + q, 0).toFixed(6);
+  quoteFasiEsterne(fasiEsterne).forEach((perFor, cod) => {
+    const fuori = +[...perFor.values()].reduce((a, q) => a + q, 0).toFixed(6);
     const dist = perPezzo && perPezzo.has(cod) ? Number(perPezzo.get(cod)) || 0 : 0;
     out.set(cod, { distinta: dist, fuori, inCasa: +Math.max(0, dist - fuori).toFixed(6),
       eccede: fuori > dist + 1e-9, sconosciuto: !(perPezzo && perPezzo.has(cod)) });
