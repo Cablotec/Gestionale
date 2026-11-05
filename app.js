@@ -3839,20 +3839,44 @@ async function caricaMovimenti() {
     + 'documento_data,documento_pos,ordine_rif,note,lotto_id';
   const leggi = (colonne) => fetchTutte(() =>
     sb.from('movimenti_magazzino').select(colonne).order('data').order('id'));
+  // Dalla lettura piu' ricca alla piu' povera: ogni gradino e' una migrazione
+  // (invio a terzista, poi richieste con `fuori_giacenza`).
+  const gradini = [
+    { col: BASE + ',presso_id,operazione_id,invio_id,fuori_giacenza', presso: true, fuori: true },
+    { col: BASE + ',presso_id,operazione_id,invio_id', presso: true, fuori: false },
+    { col: BASE, presso: false, fuori: false },
+  ];
   try {
-    if (movPressoOk !== false) {
-      const { data, error } = await leggi(BASE + ',presso_id,operazione_id,invio_id');
-      if (!error) { movPressoOk = true; state.movimenti = data || []; return; }
+    for (const g of gradini) {
+      if (g.fuori && movFuoriOk === false) continue;
+      if (g.presso && movPressoOk === false) continue;
+      const { data, error } = await leggi(g.col);
+      if (!error) {
+        movPressoOk = g.presso; movFuoriOk = g.fuori;
+        state.movimenti = data || []; return;
+      }
       // Solo "colonna che non esiste" vuol dire migrazione mancante; un errore
       // di rete non deve spegnere il bottone per tutta la sessione.
       if (!(error.code === '42703' || /column/i.test(error.message || ''))) {
         state.movimenti = null; return;
       }
-      movPressoOk = false;
+      if (g.fuori) movFuoriOk = false; else if (g.presso) movPressoOk = false;
     }
-    const { data, error } = await leggi(BASE);
-    state.movimenti = error ? null : (data || []);
+    state.movimenti = null;
   } catch (e) { state.movimenti = null; }
+  // `finally`: i `return` qui sopra non devono saltare le richieste.
+  finally { await caricaInviiTerzista(); }
+}
+
+// RICHIESTE PER I TERZISTI (5 nov): `invii_terzista`. undefined = mai letta,
+// null = tabella assente o illeggibile (allora niente bottoni, non "nessuna").
+let movFuoriOk = null;
+async function caricaInviiTerzista() {
+  try {
+    const { data, error } = await fetchTutte(() =>
+      sb.from('invii_terzista').select('*').order('creato_il', { ascending: false }).order('id'));
+    state.inviiTerzista = error ? null : (data || []);
+  } catch (e) { state.inviiTerzista = null; }
 }
 
 // Il nome di un terzista (o di qualunque azienda) dal suo id.
@@ -4171,6 +4195,12 @@ async function generaMaterialiCommessa(codiceArticolo, pezzi) {
         da: (e.origini && e.origini.has(codice))
           ? [...e.origini.get(codice)].sort((x, y) => x.localeCompare(y, 'it', { numeric: true }))
           : null,
+        // FASE ESTERNA (5 nov): quanto di questo codice va al terzista, PER
+        // PEZZO e per lavorazione ({ <tipo_lavorazione_id>: qta_pz }). Da qui
+        // nasce la richiesta al magazzino. null = tutto in casa.
+        fasi_esterne: (e.fasi && e.fasi.has(codice))
+          ? Object.fromEntries([...e.fasi.get(codice)].map(([f, q]) => [f, +Number(q / pezzi).toFixed(6)]))
+          : null,
       };
     })
     .sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true, sensitivity: 'base' }));
@@ -4453,174 +4483,379 @@ function arriviDaDdtCommessa(op) {
   return arriviDaDdt(commessaSuResiduo(op), commesseConDdtVive(), state.movimenti);
 }
 
-// ── INVIO A TERZISTA (5 nov, pilota Enviro) ─────────────────────────────
-// Da una commessa "Materiali da DDT" si mandano a un suo fornitore solo
-// alcune quantita' dei C/L. E' un TRASFERIMENTO (sede -> terzista), non uno
-// scarico: il materiale resta nostro e la commessa continua a contarlo come
-// arrivato. Lo scrive il database (`mov_invia_terzista`, solo admin), come
-// gli scarichi dei lotti: nessuno scrive movimenti a mano.
-// Vedi `strumenti/migrazione-invio-terzista.sql` per il perche'.
-// ⚠ NON passa da `openModal`, come `chiediConferma`: si appoggia sopra la
-// scheda commessa senza portarsela via.
-function invioTerzistaPossibile(o) {
-  return !!(o && o.id && o.materiali_da_ddt && movPressoOk === true && Array.isArray(state.movimenti)
-    && state.profile && state.profile.ruolo === 'admin' && Array.isArray(o.materiali)
-    && o.materiali.some(r => String((r && r.tipo) || '').trim().toUpperCase() === 'C/L'));
+// ── RICHIESTE AL MAGAZZINO PER I TERZISTI (5 nov, pilota Enviro) ─────────
+// Chiesto da Nico: dalla distinta di un prodotto mandare a un terzista solo
+// alcune quantita' del materiale, e farlo PREPARARE al magazzino.
+// In due tempi (vedi `strumenti/migrazione-richieste-terzista.sql`):
+//   1. RICHIESTA: dalla commessa si sceglie la fase esterna (le righe della
+//      distinta prodotto segnate con un Tipo lavorazione, C/L e MAC) e il
+//      terzista. Nasce la lista da preparare. La giacenza NON si muove.
+//   2. Il magazzino la stampa e prepara.
+//   3. CONFERMA con le quantita' reali: solo allora i movimenti. I C/L
+//      passano dalla sede al terzista (restano nostri e della commessa), i
+//      MAC si registrano FUORI GIACENZA (il gestionale non li conta).
+// Lo scrive il database (`mov_conferma_invio_terzista`, solo admin): nessuno
+// scrive movimenti a mano.
+// ⚠ Le finestre NON passano da `openModal`, come `chiediConferma`: si
+// appoggiano sopra la scheda commessa senza portarsela via.
+function richiesteTerzistaPossibili() {
+  return Array.isArray(state.inviiTerzista) && movPressoOk === true && movFuoriOk === true
+    && Array.isArray(state.movimenti);
+}
+function eAdminOra() { return !!(state.profile && state.profile.ruolo === 'admin'); }
+function nomeTipoLav(id) { return ((state.tipiLav || []).find(t => t.id === id) || {}).nome || 'fase ?'; }
+function nfIT(n) { return Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 }); }
+
+// Le fasi esterne della lista di una commessa: Map faseId -> [{ riga, qta_pz }].
+// `fasi_esterne` arriva dalla distinta del prodotto quando la lista nasce
+// (o si rigenera): una lista vecchia non ce l'ha.
+function fasiEsterneCommessa(o) {
+  const per = new Map();
+  (Array.isArray(o && o.materiali) ? o.materiali : []).forEach(r => {
+    const f = r && r.fasi_esterne;
+    if (!f || typeof f !== 'object') return;
+    Object.entries(f).forEach(([id, qpz]) => {
+      if (!(Number(qpz) > 0)) return;
+      if (!per.has(id)) per.set(id, []);
+      per.get(id).push({ riga: r, qta_pz: Number(qpz) });
+    });
+  });
+  return per;
 }
 
-function apriInvioTerzista(o, poi) {
-  const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 });
-  const num = (v) => { const n = Number(String(v == null ? '' : v).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
+// Quanto di un codice e' gia' stato chiesto (o mandato) per quella fase su
+// quella commessa: la proposta nuova parte da li', o due richieste di fila
+// chiederebbero due volte la stessa cosa.
+function giaRichiestoTerzista(opId, faseId, codice) {
+  return (state.inviiTerzista || [])
+    .filter(x => x.operazione_id === opId && (x.fase_id || null) === (faseId || null) && x.stato !== 'annullato')
+    .reduce((a, x) => a + (x.righe || []).filter(r => String(r.codice || '').trim() === codice)
+      .reduce((b, r) => b + (Number(x.stato === 'inviato' ? r.qta_inviata : r.qta) || 0), 0), 0);
+}
+
+// Un velo sopra la scheda aperta, con intestazione, corpo e piede.
+function veloTerzista(titolo, larghezza) {
   const bg = el('div', { class:'modal-bg' });
-  const finestra = el('div', { class:'modal', style:'max-width:900px;' });
+  const finestra = el('div', { class:'modal', style:'max-width:' + (larghezza || 900) + 'px;' });
   const chiudi = () => { window.__confermaChiudi = null; bg.remove(); };
   window.__confermaChiudi = chiudi;
-
   const corpo = el('div', { class:'mbody' });
   const piede = el('div', { class:'mfoot' });
-  finestra.append(
-    el('div', { class:'mhd' },
-      el('h2', {}, 'Invio a terzista · ' + (o.numero_ordine || '') + '/' + (o.pos || '')),
-      el('button', { class:'mclose', onclick: chiudi }, '✕')),
-    corpo, piede);
+  finestra.append(el('div', { class:'mhd' }, el('h2', {}, titolo),
+    el('button', { class:'mclose', onclick: chiudi }, '✕')), corpo, piede);
   bg.append(finestra);
   $('#modal-root').append(bg);
-  const btnAnnulla = el('button', { class:'btng', onclick: chiudi }, 'Annulla');
+  return { corpo, piede, chiudi };
+}
 
-  // Il terzista e' uno dei fornitori GIA' assegnati alla commessa: il materiale
-  // parte con il lavoro per cui va fuori. Il database lo ricontrolla.
-  const fornitori = getOperazioneFornitoriDettaglio(o.id);
-  if (!fornitori.length) {
-    corpo.append(el('div', { class:'sub', style:'font-size:13px;line-height:1.7;' },
-      'Questa commessa non ha ancora un fornitore. Assegna prima il terzista nella scheda Dati '
-      + '(fornitori della commessa, o della fase esterna), poi torna qui.'));
-    piede.append(btnAnnulla);
+// ── 1. LA RICHIESTA ──────────────────────────────────────────────────
+function apriRichiestaTerzista(o, poi) {
+  const v = veloTerzista('Richiesta per terzista · ' + (o.numero_ordine || '') + '/' + (o.pos || ''));
+  const annulla = el('button', { class:'btng', onclick: v.chiudi }, 'Annulla');
+  const fasi = fasiEsterneCommessa(o);
+  const art = (state.articoli || []).find(x => x.id === o.articolo_id);
+  if (!fasi.size) {
+    v.corpo.append(el('div', { class:'sub', style:'font-size:13px;line-height:1.7;' },
+      'Nella lista di questa commessa nessun materiale è segnato per una fase esterna.',
+      el('br'), 'Segna le righe in Prodotti → ', el('b', {}, art ? art.codice : 'il prodotto'),
+      ' → Distinta, colonna «Fase esterna»; poi torna qui e premi «⟳ Rigenera dalla distinta».'));
+    v.piede.append(annulla);
     return;
   }
-  const faseDi = (r) => {
-    if (!r.fase_id) return 'tutta la commessa';
-    const f = (state.opFasi || []).find(x => x.id === r.fase_id);
-    const t = f && (state.tipiLav || []).find(x => x.id === f.tipo_lavorazione_id);
-    return t ? 'fase ' + t.nome : 'una fase';
+  const fornitori = getOperazioneFornitoriDettaglio(o.id);
+  if (!fornitori.length) {
+    v.corpo.append(el('div', { class:'sub', style:'font-size:13px;line-height:1.7;' },
+      'Questa commessa non ha ancora un fornitore. Assegna prima il terzista nella scheda Dati '
+      + '(fornitori della commessa, o della fase esterna), poi torna qui.'));
+    v.piede.append(annulla);
+    return;
+  }
+  // Il fornitore assegnato a QUELLA fase sulla commessa, se c'e'.
+  const tipoDellaFaseOp = (faseOpId) => {
+    const f = (state.opFasi || []).find(x => x.id === faseOpId);
+    return f ? f.tipo_lavorazione_id : null;
   };
-  const selTer = el('select', { style:'min-width:280px;' },
-    ...fornitori.map(r => el('option', { value: r.azienda_id }, nomeAziendaDi(r.azienda_id) + ' · ' + faseDi(r))));
+  const selFase = el('select', { style:'min-width:240px;' },
+    ...[...fasi.keys()].map(id => el('option', { value: id }, nomeTipoLav(id))));
+  const selTer = el('select', { style:'min-width:240px;' },
+    ...fornitori.map(r => el('option', { value: r.azienda_id },
+      nomeAziendaDi(r.azienda_id) + ' · ' + (r.fase_id ? nomeTipoLav(tipoDellaFaseOp(r.fase_id)) : 'tutta la commessa'))));
+  const proponiTerzista = () => {
+    const giusto = fornitori.find(r => r.fase_id && tipoDellaFaseOp(r.fase_id) === selFase.value)
+      || fornitori.find(r => !r.fase_id);
+    if (giusto) selTer.value = giusto.azienda_id;
+  };
 
-  // I numeri di oggi: quanto serve (a residuo), quanto e' gia' fuori per
-  // questa commessa, quanto ce n'e' in sede.
-  const conti = arriviDaDdtCommessa(o);
+  const fatti = (typeof quantitaConsegnata === 'function') ? quantitaConsegnata(o.id) : 0;
+  const daFare = Math.max(0, (Number(o.quantita) || 0) - (Number(fatti) || 0));
   const sede = saldoInSede(state.movimenti);
-  const visti = new Set();
-  const righe = o.materiali.filter(r => {
-    const cod = String((r && r.codice) || '').trim();
-    if (!cod || visti.has(cod) || String(r.tipo || '').trim().toUpperCase() !== 'C/L') return false;
-    visti.add(cod); return true;
-  }).map(r => {
-    const cod = String(r.codice).trim();
-    const d = conti.get(cod) || { serve: 0, presso: [] };
-    const fuori = (d.presso || []).reduce((a, p) => a + p.qta, 0);
-    const origini = Array.isArray(r.da) ? r.da.filter(Boolean) : [];
-    return { cod, descr: r.descrizione || '', um: r.um || '', serve: d.serve || 0, fuori,
-      inSede: sede.get(cod) || 0, origini,
-      // Componente di una lavorazione esterna (kit fili `_KF`, `_K`): e' il caso
-      // tipico di materiale che parte, quindi si propone gia' spuntato.
-      daKit: origini.some(c => typeof eLavorazione === 'function' && eLavorazione(c)) };
-  });
-  const proposta = (x) => Math.max(0, Math.min(x.serve - x.fuori, x.inSede));
+  const conta = (r) => !!o.materiali_da_ddt && String(r.tipo || '').trim().toUpperCase() === 'C/L';
 
-  const COL = 'display:grid;grid-template-columns:22px minmax(140px,1fr) minmax(140px,1.4fr) 72px 72px 80px 90px;'
+  const COL = 'display:grid;grid-template-columns:22px minmax(140px,1fr) minmax(140px,1.4fr) 46px 80px 80px 90px;'
     + 'gap:8px;align-items:center;';
   const et = (t, dx) => el('span', { class:'sub',
     style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
-  const tab = el('div', { style:'max-height:52vh;overflow-y:auto;margin-top:10px;' });
-  tab.append(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);position:sticky;top:0;background:var(--sur);' },
-    el('span'), et('Codice'), et('Descrizione'), et('Serve', 1), et('In sede', 1), et('Già fuori', 1), et('Da inviare', 1)));
-
-  const scelte = [];
+  const tab = el('div', { style:'max-height:50vh;overflow-y:auto;margin-top:10px;padding-right:8px;' });
   const riepilogo = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
-  const btnInvia = el('button', { class:'btnp' }, 'Invia');
+  const crea = el('button', { class:'btnp' }, 'Crea richiesta');
+  let scelte = [];
+  const num = (x) => { const n = Number(String(x == null ? '' : x).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
   const aggiorna = () => {
-    let n = 0, errori = 0;
+    let n = 0, err = 0;
     scelte.forEach(s => {
       const q = num(s.inp.value);
-      const male = s.chk.checked && (!(q > 0) || q > s.x.inSede + 1e-9);
+      const male = s.chk.checked && !(q > 0);
       s.inp.style.borderColor = male ? 'var(--red)' : '';
-      s.inp.title = male ? (q > s.x.inSede ? 'In sede ce ne sono ' + nf(s.x.inSede) : 'Scrivi una quantità maggiore di zero') : '';
-      if (s.chk.checked) { if (male) errori++; else n++; }
+      if (s.chk.checked) { if (male) err++; else n++; }
     });
-    riepilogo.textContent = errori ? errori + (errori === 1 ? ' riga da correggere' : ' righe da correggere')
-      : (n ? n + (n === 1 ? ' codice' : ' codici') + ' da inviare' : 'Spunta i materiali da mandare');
-    riepilogo.style.color = errori ? 'var(--red)' : '';
-    btnInvia.disabled = !n || !!errori;
-    btnInvia.textContent = n ? 'Invia ' + n + (n === 1 ? ' codice' : ' codici') : 'Invia';
+    riepilogo.textContent = err ? err + (err === 1 ? ' riga da correggere' : ' righe da correggere')
+      : n + (n === 1 ? ' materiale' : ' materiali') + ' da preparare';
+    riepilogo.style.color = err ? 'var(--red)' : '';
+    crea.disabled = !n || !!err;
   };
-
-  righe.forEach(x => {
-    const chk = el('input', { type:'checkbox', style:'width:15px;height:15px;margin:0;cursor:pointer;' });
-    const inp = el('input', { type:'text', inputmode:'decimal', class:'mono',
-      style:'width:100%;text-align:right;font-size:12px;padding:3px 6px;' });
-    chk.checked = x.daKit && x.fuori <= 0 && proposta(x) > 0;
-    if (chk.checked) inp.value = String(proposta(x));
-    inp.disabled = !chk.checked;
-    chk.onchange = () => {
+  const disegna = () => {
+    tab.innerHTML = '';
+    tab.append(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);position:sticky;top:0;background:var(--sur);' },
+      el('span'), et('Codice'), et('Descrizione'), et('Tipo'), et('Già chiesti', 1), et('In sede', 1), et('Da preparare', 1)));
+    scelte = [];
+    (fasi.get(selFase.value) || []).forEach(({ riga, qta_pz }) => {
+      const cod = String(riga.codice || '').trim();
+      const gia = giaRichiestoTerzista(o.id, selFase.value, cod);
+      const proposta = Math.max(0, +(qta_pz * daFare - gia).toFixed(4));
+      const chk = el('input', { type:'checkbox', style:'width:15px;height:15px;margin:0;cursor:pointer;' });
+      const inp = el('input', { type:'text', inputmode:'decimal', class:'mono',
+        style:'width:100%;text-align:right;font-size:12px;padding:3px 6px;' });
+      chk.checked = proposta > 0;
+      inp.value = proposta > 0 ? String(proposta) : '';
       inp.disabled = !chk.checked;
-      if (chk.checked && !inp.value) inp.value = String(proposta(x));
-      if (chk.checked) inp.focus();
-      aggiorna();
-    };
-    inp.oninput = aggiorna;
-    const cellaCod = el('div', { style:'min-width:0;display:flex;flex-direction:column;gap:1px;' },
-      el('span', { class:'mono', style:'font-size:11px;' }, x.cod));
-    if (x.origini.length) cellaCod.append(el('span', { class:'sub',
-      style:'font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
-      title: x.origini.join(', ') }, '◂ da ' + x.origini[0] + (x.origini.length > 1 ? ' +' + (x.origini.length - 1) : '')));
-    tab.append(el('label', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);cursor:pointer;' },
-      chk, cellaCod,
-      el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
-        title: x.descr }, x.descr || '—'),
-      el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, nf(x.serve)),
-      el('span', { class:'mono', style:'font-size:11px;text-align:right;' + (x.inSede <= 0 ? 'color:var(--red);' : '') },
-        nf(x.inSede)),
-      el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (x.fuori > 0 ? 'var(--or)' : 'var(--mut)') + ';' },
-        x.fuori > 0 ? nf(x.fuori) : '—'),
-      inp));
-    scelte.push({ x, chk, inp });
-  });
+      chk.onchange = () => { inp.disabled = !chk.checked; if (chk.checked) inp.focus(); aggiorna(); };
+      inp.oninput = aggiorna;
+      const tipo = String(riga.tipo || '').trim().toUpperCase();
+      tab.append(el('label', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);cursor:pointer;' },
+        chk,
+        el('span', { class:'mono', style:'font-size:11px;' }, cod),
+        el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+          title: riga.descrizione || '' }, riga.descrizione || '—'),
+        el('span', { class:'sub', style:'font-size:10px;' + (tipo === 'MAC' ? 'color:var(--acc);font-weight:700;' : '') }, tipo || '—'),
+        el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (gia > 0 ? 'var(--or)' : 'var(--mut)') + ';' },
+          gia > 0 ? nfIT(gia) : '—'),
+        conta(riga)
+          ? el('span', { class:'mono', style:'font-size:11px;text-align:right;' + ((sede.get(cod) || 0) < proposta ? 'color:var(--red);' : '') },
+              nfIT(sede.get(cod) || 0))
+          : el('span', { class:'sub', style:'font-size:10px;text-align:right;', title:'Il gestionale non conta questo materiale: '
+              + 'partirà e resterà registrato, ma fuori giacenza.' }, 'non contato'),
+        inp));
+      scelte.push({ riga, cod, tipo, chk, inp });
+    });
+    aggiorna();
+  };
+  selFase.onchange = () => { proponiTerzista(); disegna(); };
 
-  const inNota = el('input', { type:'text', placeholder:'Nota (facoltativa): cosa va a fare, riferimento…',
-    style:'width:100%;' });
-  corpo.append(
+  const inNota = el('input', { type:'text', placeholder:'Nota per il magazzino (facoltativa)', style:'width:100%;' });
+  v.corpo.append(
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
-      'Il materiale passa dalla sede al terzista e resta nostro: la commessa continua a contarlo come arrivato. '
-      + 'Quando registri un lotto di produzione si scarica prima quello che è dal terzista, poi la sede. '
-      + 'Solo i codici C/L della lista; la quantità proposta è quella che serve ancora, al massimo quanto c\'è in sede.'),
-    el('div', { class:'field' }, el('label', {}, 'Terzista'), selTer),
+      'Prepara la lista per il magazzino: la giacenza non si muove finché non confermi la spedizione. '
+      + 'Quantità proposte per ' + nfIT(daFare) + ' pz ancora da fare, meno quanto già chiesto per questa fase.'),
+    el('div', { style:'display:flex;gap:14px;flex-wrap:wrap;' },
+      el('div', { class:'field' }, el('label', {}, 'Fase esterna'), selFase),
+      el('div', { class:'field' }, el('label', {}, 'Terzista'), selTer)),
     tab,
     el('div', { class:'field', style:'margin-top:10px;' }, el('label', {}, 'Nota'), inNota));
-
-  btnInvia.onclick = async () => {
-    const righeInvio = scelte.filter(s => s.chk.checked).map(s => ({ codice: s.x.cod, qta: num(s.inp.value) }));
-    if (!righeInvio.length) return;
-    btnInvia.disabled = true; btnInvia.textContent = 'Invio…';
+  crea.onclick = async () => {
+    const righe = scelte.filter(s => s.chk.checked).map(s => ({ codice: s.cod,
+      descrizione: s.riga.descrizione || null, um: s.riga.um || null, tipo: s.tipo || null, qta: num(s.inp.value) }));
+    if (!righe.length) return;
+    crea.disabled = true; crea.textContent = 'Salvataggio…';
     try {
-      const { data, error } = await sb.rpc('mov_invia_terzista', {
-        p_operazione: o.id, p_terzista: selTer.value, p_righe: righeInvio,
-        p_nota: inNota.value.trim() || null, p_verso: 'invio' });
+      const { data, error } = await sb.from('invii_terzista').insert({ operazione_id: o.id,
+        terzista_id: selTer.value, fase_id: selFase.value, righe, nota: inNota.value.trim() || null })
+        .select().single();
       if (error) throw new Error(error.message);
-      await caricaMovimenti();
-      chiudi();
-      toast((data || righeInvio.length) + (righeInvio.length === 1 ? ' codice inviato a ' : ' codici inviati a ')
-        + nomeAziendaDi(selTer.value), 'ok');
+      if (Array.isArray(state.inviiTerzista)) state.inviiTerzista.unshift(data);
+      v.chiudi();
+      toast('Richiesta creata: ' + righe.length + ' materiali da preparare per ' + nomeAziendaDi(selTer.value), 'ok');
       if (typeof poi === 'function') poi();
     } catch (e) {
-      // ⚠ L'invio e' tutto-o-niente (una funzione sola nel database): se una
-      // riga non va, non e' partito niente. Lo si dice, e la finestra resta.
-      toast('Invio non registrato, non è partito niente: ' + (e.message || e), 'err', 9000);
+      crea.disabled = false; crea.textContent = 'Crea richiesta';
+      toast('Richiesta non salvata: ' + (e.message || e), 'err', 9000);
+    }
+  };
+  v.piede.append(riepilogo, annulla, crea);
+  proponiTerzista();
+  disegna();
+}
+
+// ── 2. LA LISTA DA STAMPARE ──────────────────────────────────────────
+// Una pagina a se', fatta per la carta: il magazzino spunta a penna e scrive
+// quanto ha messo davvero. E' quel numero che poi si conferma.
+function stampaRichiestaTerzista(x) {
+  const o = (state.operazioni || []).find(z => z.id === x.operazione_id) || {};
+  const art = (state.articoli || []).find(z => z.id === o.articolo_id);
+  const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+  const righe = (x.righe || []).map((r, i) => '<tr><td class="c">☐</td><td>' + (i + 1) + '</td><td class="m">' + esc(r.codice)
+    + '</td><td>' + esc(r.descrizione) + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.um)
+    + '</td><td class="n">' + esc(nfIT(r.qta)) + '</td><td class="w"></td></tr>').join('');
+  const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Lista per terzista '
+    + esc((o.numero_ordine || '') + '/' + (o.pos || '')) + '</title><style>'
+    + 'body{font-family:Arial,sans-serif;font-size:12px;margin:18px;color:#000;background:#fff;}h1{font-size:18px;margin:0 0 4px;}'
+    + '.t{display:grid;grid-template-columns:repeat(3,auto);gap:4px 24px;margin:10px 0 14px;}.t b{display:block;font-size:10px;color:#555;text-transform:uppercase;}'
+    + 'table{width:100%;border-collapse:collapse;}th,td{border:1px solid #999;padding:5px 6px;text-align:left;}'
+    + 'th{background:#eee;font-size:10px;text-transform:uppercase;}.n{text-align:right;font-weight:700;}.m{font-family:monospace;}'
+    + '.c{text-align:center;font-size:16px;width:22px;}.w{width:90px;}.f{margin-top:28px;display:flex;gap:60px;}'
+    + '.f div{border-top:1px solid #000;padding-top:4px;width:220px;font-size:11px;}@media print{body{margin:8mm;}}'
+    + '</style></head><body>'
+    + '<h1>Materiale da preparare per il terzista</h1>'
+    + '<div class="t"><div><b>Commessa</b>' + esc((o.numero_ordine || '') + '/' + (o.pos || '')) + '</div>'
+    + '<div><b>Prodotto</b>' + esc(art ? art.codice : '') + (o.quantita ? ' · ' + esc(o.quantita) + ' pz' : '') + '</div>'
+    + '<div><b>Rif. cliente</b>' + esc(o.riferimento_cliente || '—') + '</div>'
+    + '<div><b>Terzista</b>' + esc(nomeAziendaDi(x.terzista_id)) + '</div>'
+    + '<div><b>Fase esterna</b>' + esc(x.fase_id ? nomeTipoLav(x.fase_id) : '—') + '</div>'
+    + '<div><b>Richiesta del</b>' + esc(fmtIT(String(x.creato_il || '').slice(0, 10))) + '</div></div>'
+    + (x.nota ? '<p><b>Nota:</b> ' + esc(x.nota) + '</p>' : '')
+    + '<table><thead><tr><th></th><th>#</th><th>Codice</th><th>Descrizione</th><th>Tipo</th><th>UM</th><th>Qtà</th><th>Messi</th></tr></thead><tbody>'
+    + righe + '</tbody></table>'
+    + '<div class="f"><div>Preparato da</div><div>Data</div></div>'
+    + '<script>window.onload=function(){window.print();}<\/script></body></html>';
+  const w = window.open('', '_blank');
+  if (!w) return toast('Il browser ha bloccato la finestra di stampa: consentila per questo sito.', 'err', 9000);
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+// ── 3. LA CONFERMA (quantita' reali -> movimenti) ───────────────────
+function apriConfermaInvioTerzista(x, poi) {
+  const o = (state.operazioni || []).find(z => z.id === x.operazione_id) || {};
+  const v = veloTerzista('Conferma spedizione a ' + nomeAziendaDi(x.terzista_id), 820);
+  const sede = saldoInSede(state.movimenti);
+  const conta = (r) => !!o.materiali_da_ddt && String(r.tipo || '').trim().toUpperCase() === 'C/L';
+  const num = (t) => { const n = Number(String(t == null ? '' : t).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
+  const COL = 'display:grid;grid-template-columns:minmax(140px,1fr) minmax(140px,1.4fr) 46px 80px 80px 90px;gap:8px;align-items:center;';
+  const et = (t, dx) => el('span', { class:'sub',
+    style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const tab = el('div', { style:'max-height:50vh;overflow-y:auto;padding-right:8px;' },
+    el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);position:sticky;top:0;background:var(--sur);' },
+      et('Codice'), et('Descrizione'), et('Tipo'), et('Richiesti', 1), et('In sede', 1), et('Partiti', 1)));
+  const riepilogo = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
+  const ok = el('button', { class:'btnp' }, 'Conferma spedizione');
+  const campi = [];
+  const aggiorna = () => {
+    let err = 0, n = 0;
+    campi.forEach(c => {
+      const q = num(c.inp.value);
+      const male = !(q >= 0) || (c.conta && q > (sede.get(c.cod) || 0) + 1e-9);
+      c.inp.style.borderColor = male ? 'var(--red)' : '';
+      c.inp.title = male ? (q >= 0 ? 'In sede ce ne sono ' + nfIT(sede.get(c.cod) || 0) : 'Quantità non valida') : '';
+      if (male) err++; else if (q > 0) n++;
+    });
+    riepilogo.textContent = err ? err + (err === 1 ? ' riga da correggere' : ' righe da correggere')
+      : n + (n === 1 ? ' materiale parte' : ' materiali partono');
+    riepilogo.style.color = err ? 'var(--red)' : '';
+    ok.disabled = !!err || !n;
+  };
+  (x.righe || []).forEach(r => {
+    const cod = String(r.codice || '').trim();
+    const inp = el('input', { type:'text', inputmode:'decimal', class:'mono', value: String(r.qta ?? ''),
+      style:'width:100%;text-align:right;font-size:12px;padding:3px 6px;' });
+    inp.oninput = aggiorna;
+    const c = conta(r);
+    tab.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
+      el('span', { class:'mono', style:'font-size:11px;' }, cod),
+      el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+        title: r.descrizione || '' }, r.descrizione || '—'),
+      el('span', { class:'sub', style:'font-size:10px;' }, r.tipo || '—'),
+      el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, nfIT(r.qta)),
+      c ? el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, nfIT(sede.get(cod) || 0))
+        : el('span', { class:'sub', style:'font-size:10px;text-align:right;' }, 'non contato'),
+      inp));
+    campi.push({ cod, inp, conta: c });
+  });
+  const inNota = el('input', { type:'text', value: x.nota || '', placeholder:'Nota (facoltativa)', style:'width:100%;' });
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Scrivi quanto è partito DAVVERO (0 = non partito). I C/L passano dalla sede al terzista e restano di questa '
+      + 'commessa; gli altri restano registrati fuori giacenza. Dopo la conferma la richiesta non si modifica più.'),
+    tab,
+    el('div', { class:'field', style:'margin-top:10px;' }, el('label', {}, 'Nota'), inNota));
+  ok.onclick = async () => {
+    ok.disabled = true; ok.textContent = 'Registrazione…';
+    try {
+      const { error } = await sb.rpc('mov_conferma_invio_terzista', { p_invio: x.id,
+        p_righe: campi.map(c => ({ codice: c.cod, qta: num(c.inp.value) })), p_nota: inNota.value.trim() || null });
+      if (error) throw new Error(error.message);
+      await caricaMovimenti();
+      v.chiudi();
+      toast('Spedizione a ' + nomeAziendaDi(x.terzista_id) + ' registrata', 'ok');
+      if (typeof poi === 'function') poi();
+    } catch (e) {
+      // Tutto-o-niente: se una riga non va, non e' partito niente.
+      ok.textContent = 'Conferma spedizione';
+      toast('Spedizione non registrata, non è partito niente: ' + (e.message || e), 'err', 9000);
       aggiorna();
     }
   };
-  piede.append(riepilogo, btnAnnulla, btnInvia);
+  v.piede.append(riepilogo, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
   aggiorna();
+}
+
+async function annullaRichiestaTerzista(x, poi) {
+  const sc = await chiediConferma({ titolo:'Annullare la richiesta?',
+    testo:'La lista per ' + nomeAziendaDi(x.terzista_id) + ' (' + (x.righe || []).length + ' materiali) non andrà più preparata. '
+      + 'Resta nello storico come annullata; la giacenza non cambia.',
+    conferma:'Annulla la richiesta', annulla:'Tienila', pericolo:true });
+  if (sc !== 'conferma') return;
+  try {
+    const { data, error } = await sb.from('invii_terzista')
+      .update({ stato:'annullato', annullato_il: new Date().toISOString() }).eq('id', x.id).select();
+    if (error) throw new Error(error.message);
+    // L'RLS rifiuta IN SILENZIO (zero righe, nessun errore): va detto.
+    if (!data || !data.length) throw new Error('il database non l\'ha aggiornata (non sei admin, o non è più da preparare)');
+    Object.assign(x, data[0]);
+    toast('Richiesta annullata', 'ok');
+    if (typeof poi === 'function') poi();
+  } catch (e) { toast('Non annullata: ' + (e.message || e), 'err', 9000); }
+}
+
+const STATO_RICH_ETI = {
+  da_preparare: { txt:'da preparare', cls:'bor' },
+  inviato:      { txt:'inviato',      cls:'bok' },
+  annullato:    { txt:'annullato',    cls:'bgry' },
+};
+
+// Una riga di richiesta, uguale nella commessa e nella lista del magazzino.
+// `conCommessa`: mostra anche di quale commessa e', con il link.
+function rigaRichiestaTerzista(x, poi, conCommessa) {
+  const e = STATO_RICH_ETI[x.stato] || { txt: x.stato, cls:'bgry' };
+  const o = (state.operazioni || []).find(z => z.id === x.operazione_id);
+  const quando = x.stato === 'inviato' && x.inviato_il ? 'inviata il ' + fmtIT(String(x.inviato_il).slice(0, 10))
+    : 'chiesta il ' + fmtIT(String(x.creato_il || '').slice(0, 10));
+  const azioni = el('span', { style:'display:flex;gap:6px;margin-left:auto;' });
+  azioni.append(el('button', { type:'button', class:'btnsm', title:'Stampa la lista per il magazzino',
+    onclick: () => stampaRichiestaTerzista(x) }, '🖨 Lista'));
+  if (x.stato === 'da_preparare' && eAdminOra()) {
+    azioni.append(
+      el('button', { type:'button', class:'btnsm', onclick: () => apriConfermaInvioTerzista(x, poi) }, '✓ Spedita'),
+      el('button', { type:'button', class:'btnsm', title:'Annulla la richiesta',
+        onclick: () => annullaRichiestaTerzista(x, poi) }, '✕'));
+  }
+  return el('div', { style:'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--brd);font-size:12px;flex-wrap:wrap;' },
+    el('span', { class:'badge ' + e.cls }, e.txt),
+    conCommessa && o ? el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);',
+      onclick: (ev) => { ev.preventDefault(); openOperazioneModal(o, { scheda:'mat' }); } },
+      (o.numero_ordine || '') + '/' + (o.pos || '')) : '',
+    el('span', { style:'font-weight:700;' }, nomeAziendaDi(x.terzista_id)),
+    el('span', { class:'sub' }, (x.fase_id ? nomeTipoLav(x.fase_id) + ' · ' : '') + (x.righe || []).length + ' materiali · ' + quando),
+    x.nota ? el('span', { class:'sub', style:'color:var(--or);' }, x.nota) : '',
+    azioni);
+}
+
+// Nella scheda Materiali della commessa: le sue richieste.
+function sezioneRichiesteTerzista(o, poi) {
+  const mie = (state.inviiTerzista || []).filter(x => x.operazione_id === o.id);
+  if (!mie.length) return null;
+  const box = el('div', { style:'margin:4px 0 14px;' },
+    el('div', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px;' },
+      'Materiale per i terzisti'));
+  mie.forEach(x => box.append(rigaRichiestaTerzista(x, poi, false)));
+  return box;
 }
 
 // Le commesse vive con "Materiali da DDT", gia' a residuo: chi chiede i C/L
@@ -6225,6 +6460,19 @@ function renderMovimenti(root) {
     onclick: async () => { ricarica.disabled = true; await caricaMovimenti(); renderMovimenti(root); } }, '⟳ Aggiorna');
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Movimenti'), ricarica));
 
+  // DA PREPARARE PER I TERZISTI (5 nov): le richieste aperte di tutte le
+  // commesse, in cima. E' la lista di lavoro del magazzino: si stampa da qui.
+  if (Array.isArray(state.inviiTerzista)) {
+    const aperte = state.inviiTerzista.filter(x => x.stato === 'da_preparare');
+    if (aperte.length) {
+      const box = el('div', { style:'margin:0 0 18px;padding:10px 14px;border:1px solid var(--or);border-radius:6px;max-width:1100px;' },
+        el('div', { style:'font-weight:700;color:var(--or);margin-bottom:4px;' },
+          '↗ Da preparare per i terzisti: ' + aperte.length + (aperte.length === 1 ? ' richiesta' : ' richieste')));
+      aperte.forEach(x => box.append(rigaRichiestaTerzista(x, () => renderMovimenti(root), true)));
+      root.append(box);
+    }
+  }
+
   // ⚠ null = non letta (tabella assente, rete, permessi): si dice, non si
   // mostra una lista vuota che sembrerebbe "non e' arrivato niente".
   if (!Array.isArray(state.movimenti)) {
@@ -6268,10 +6516,17 @@ function renderMovimenti(root) {
     { k:'um', t:'UM', ord: m => String(m.um || ''), cella: m => el('span', { class:'sub', style:'font-size:11px;' }, m.um || '') },
     // DOVE (5 nov): sede, o il terzista a cui il materiale e' stato mandato.
     { k:'dove', t:'Dove', ord: m => m.presso_id ? nomeAziendaDi(m.presso_id).toUpperCase() : '',
-      cella: m => m.presso_id
-        ? el('span', { class:'badge bor', title:'Presso il terzista: materiale nostro, fuori sede' },
-            nomeAziendaDi(m.presso_id))
-        : el('span', { class:'sub', style:'font-size:11px;' }, 'sede') },
+      cella: m => {
+        const dove = m.presso_id
+          ? el('span', { class:'badge bor', style:'white-space:nowrap;', title:'Presso il terzista: materiale nostro, fuori sede' },
+              nomeAziendaDi(m.presso_id))
+          : el('span', { class:'sub', style:'font-size:11px;' }, 'sede');
+        // MAC e simili partiti per un terzista: registrati, ma nessun conto li somma.
+        return m.fuori_giacenza
+          ? el('span', { style:'display:inline-flex;gap:4px;align-items:center;white-space:nowrap;' }, dove,
+              el('span', { class:'sub', style:'font-size:10px;', title:'Registrato ma fuori giacenza: '
+                + 'il gestionale non conta questo materiale (MAC, ACQ).' }, 'fuori giacenza'))
+          : dove; } },
     { k:'mittente', t:'Mittente', ord: m => String(m.mittente || '').toUpperCase(),
       cella: m => el('span', { class:'sub', style:'display:block;font-size:11px;max-width:160px;overflow:hidden;'
         + 'text-overflow:ellipsis;white-space:nowrap;', title: m.mittente || '' }, m.mittente || '—') },
@@ -6373,7 +6628,8 @@ function renderMovimenti(root) {
       const tot = righe.reduce((a, m) => a + (Number(m.qta) || 0), 0);
       // Il totale per POSTO (5 nov): quanto in sede e quanto da ogni terzista.
       const perPosto = new Map();
-      righe.forEach(m => perPosto.set(m.presso_id || '', (perPosto.get(m.presso_id || '') || 0) + (Number(m.qta) || 0)));
+      righe.filter(m => !m.fuori_giacenza)
+        .forEach(m => perPosto.set(m.presso_id || '', (perPosto.get(m.presso_id || '') || 0) + (Number(m.qta) || 0)));
       const fuori = [...perPosto].filter(([k, q]) => k && Math.abs(q) > 1e-9);
       tabWrap.append(el('div', { style:'margin-bottom:8px;font-size:12px;' },
         el('span', { class:'mono', style:'font-weight:700;' }, [...codici][0]),
@@ -6914,7 +7170,9 @@ function openArticoloModal(a, opts) {
   // Le tre colonne hanno una misura sola, dichiarata qui: la usano
   // l'intestazione e ogni riga. Scriverle due volte vuol dire vederle
   // scivolare alla prima modifica.
-  const COL_DIST = 'display:grid;grid-template-columns:24px minmax(170px,1fr) minmax(150px,1.3fr) 100px 60px 32px;'
+  // FASE ESTERNA (5 nov): la colonna in piu' dice quali righe vanno al
+  // terzista e per quale lavorazione (Tipi lavorazione). Vuota = in casa.
+  const COL_DIST = 'display:grid;grid-template-columns:24px minmax(170px,1fr) minmax(150px,1.3fr) 100px 60px 180px 32px;'
     + 'gap:8px;align-items:center;';
 
   function intestazioneDist() {
@@ -6922,7 +7180,45 @@ function openArticoloModal(a, opts) {
       style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (alt || '') }, t);
     return el('div', { style: COL_DIST + 'margin-bottom:2px;' },
       el('span', {}), et('Codice materiale'), et('Descrizione'),
-      et('Q.tà per pezzo', 'text-align:right;'), et('UM'), el('span', {}));
+      et('Q.tà per pezzo', 'text-align:right;'), et('UM'), et('Fase esterna'), el('span', {}));
+  }
+
+  // ── FASE ESTERNA (5 nov, chiesto da Nico) ─────────────────────────────
+  // Le righe della distinta che vanno a un terzista, raggruppate per
+  // lavorazione: e' la "fase" con la sua lista di materiali gia' pronta,
+  // C/L e MAC compresi. Si scrive qui, una volta per prodotto; ogni commessa
+  // nuova (o rigenerata) la eredita, e da li' nasce la richiesta al magazzino.
+  // Il valore e' l'id del Tipo lavorazione: un nome scritto a mano diventerebbe
+  // "Cablaggio" e "cablaggio Bellini" sullo stesso prodotto.
+  const nomeFase = (id) => ((state.tipiLav || []).find(t => t.id === id) || {}).nome || '?';
+  function selFaseEsterna(r) {
+    const sel = el('select', { style:'font-size:11px;min-width:0;' },
+      el('option', { value:'' }, '— in casa —'),
+      ...(state.tipiLav || []).filter(t => t.attivo !== false || t.id === r.fase_esterna)
+        .map(t => el('option', { value: t.id }, t.nome)));
+    sel.value = r.fase_esterna || '';
+    sel.disabled = readonly;
+    sel.onchange = () => {
+      r.fase_esterna = sel.value || null;
+      sel.dispatchEvent(new Event('input', { bubbles: true }));  // la guardia "modifiche non salvate"
+      renderRiepilogoFasi();
+    };
+    return sel;
+  }
+  const riepFasi = el('div', { class:'sub', style:'font-size:11px;margin-bottom:6px;' });
+  function renderRiepilogoFasi() {
+    riepFasi.innerHTML = '';
+    const per = new Map();
+    distinta.forEach(r => {
+      if (!r || !r.fase_esterna || !String(r.codice || '').trim()) return;
+      const x = per.get(r.fase_esterna) || { n: 0, mac: 0 };
+      x.n++; if (String(r.tipo || '').toUpperCase() === 'MAC') x.mac++;
+      per.set(r.fase_esterna, x);
+    });
+    per.forEach((x, id) => riepFasi.append(el('div', {},
+      el('span', { style:'color:var(--or);font-weight:700;' }, '↗ Fase esterna ' + nomeFase(id)),
+      ': ' + x.n + (x.n === 1 ? ' materiale' : ' materiali')
+        + (x.mac ? ' (di cui ' + x.mac + ' MAC)' : '') + (x.n === 1 ? ' va' : ' vanno') + ' al terzista')));
   }
 
   // UNA SOLA TABELLA, SEMPRE SCRIVIBILE (4 set, richiesta Nico: "trasforma
@@ -6986,6 +7282,8 @@ function openArticoloModal(a, opts) {
           + (conSotto.length === 1 ? ' è un sottoassieme' : ' sono sottoassiemi')
           + (esplosi ? ' · ' + esplosi + ' materiali una volta esploso' : '')));
     }
+    renderRiepilogoFasi();
+    distWrap.append(riepFasi);
     distWrap.append(intestazioneDist());
     // Oltre una dozzina di righe la scheda diventerebbe un rotolo: si
     // scorre dentro il riquadro invece che dentro la modale.
@@ -7039,7 +7337,7 @@ function openArticoloModal(a, opts) {
       inUm.oninput = () => { r.um = inUm.value.trim() || null; };
       lista.append(el('div', { style: COL_DIST },
         el('span', { class:'sub', style:'font-size:11px;' }, '#' + (i + 1)),
-        inCod, hint, inQta, inUm,
+        inCod, hint, inQta, inUm, selFaseEsterna(r),
         readonly ? el('span', {}) : el('button', { type:'button', class:'btnsm', style:'padding:4px 6px;',
           onclick: () => {
             distinta.splice(i, 1);
@@ -7164,6 +7462,10 @@ function openArticoloModal(a, opts) {
       if (distintaLocale() && !confirm('Sostituire le ' + distinta.length
           + ' righe scritte qui con le ' + esito.righe.length + ' del file?\n\n'
           + 'Le righe attuali vanno perse.')) return;
+      // La fase esterna non sta nel file: si tiene quella che i codici avevano
+      // gia', o un reimport cancellerebbe in silenzio le liste per il terzista.
+      const faseDi = new Map(distinta.filter(r => r && r.fase_esterna)
+        .map(r => [String(r.codice || '').trim(), r.fase_esterna]));
       distinta.length = 0;
       distintaAdottata = true;
       // ⚠ La DESCRIZIONE del file si tiene (4 set, trovato da Nico). Per un
@@ -7173,7 +7475,7 @@ function openArticoloModal(a, opts) {
       // proprio il caso in cui serve di piu.
       esito.righe.forEach(r => distinta.push({
         codice: r.codice, qta: r.qta, um: r.um, descrizione: r.descrizione || null,
-        tipo: r.tipo || null }));
+        tipo: r.tipo || null, fase_esterna: faseDi.get(String(r.codice || '').trim()) || null }));
       renderDistinta(); aggiornaNotaDistinta();
       if (typeof aggiornaEtichette === 'function') aggiornaEtichette();
       let msg = esito.righe.length + (esito.righe.length === 1 ? ' riga importata' : ' righe importate');
@@ -7401,7 +7703,9 @@ function openArticoloModal(a, opts) {
               // Stessa trappola della descrizione, un gradino piu' in la':
               // senza questa riga il MAC letto dal file muore al primo
               // salvataggio e la minuteria torna a fare fabbisogno.
-              tipo: r.tipo || null }));
+              tipo: r.tipo || null,
+              // Va al terzista, e per quale lavorazione (5 nov).
+              fase_esterna: r.fase_esterna || null }));
         })(),
       };
       if (!payload.codice) return toast('Codice obbligatorio', 'err');
@@ -11786,15 +12090,20 @@ function openOperazioneModal(o, opts) {
       };
       intestazione.append(btnRi);
     }
-    // INVIO A TERZISTA (5 nov): solo dove i C/L li conta il gestionale.
-    if (!isNew && invioTerzistaPossibile(o)) {
+    // RICHIESTA PER TERZISTA (5 nov): la lista da far preparare al magazzino
+    // per una fase esterna. Si conferma la spedizione dopo, dalla richiesta.
+    if (!isNew && isAdmin && richiesteTerzistaPossibili()) {
       intestazione.append(el('button', { type:'button', class:'btnsm',
-        style: (isAdmin && art) ? '' : 'margin-left:auto;',
-        title:'Manda a un fornitore di questa commessa una parte dei suoi C/L. '
-          + 'Il materiale resta nostro: cambia solo posto.',
-        onclick: () => apriInvioTerzista(o, renderMancanti) }, '↗ Invia a terzista'));
+        style: art ? '' : 'margin-left:auto;',
+        title:'Prepara la lista dei materiali di una fase esterna da mandare al terzista. '
+          + 'La giacenza si muove solo quando confermi la spedizione.',
+        onclick: () => apriRichiestaTerzista(o, renderMancanti) }, '↗ Richiesta per terzista'));
     }
     sezMateriali.append(intestazione);
+    if (!isNew && richiesteTerzistaPossibili()) {
+      const sezRich = sezioneRichiesteTerzista(o, renderMancanti);
+      if (sezRich) sezMateriali.append(sezRich);
+    }
 
     // ── LA SPUNTA "Materiali da DDT" (13 ott, pilota Enviro) ─────────────
     // I codici C/L di questa commessa si contano dai DDT letti in automatico

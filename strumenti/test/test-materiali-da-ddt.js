@@ -180,5 +180,38 @@ sez('Invio a terzista: trasferimento, non scarico (5 nov)');
   t('senza invii: presso vuoto', M.arriviDaDdt(a, [a], base).get('TS-1').presso.length === 0);
 }
 
+sez('Fase esterna nella distinta (5 nov)');
+{
+  const figliDi = new Map();
+  M.applicaDistinteProdotti(figliDi, [
+    { codice: 'PROD', distinta: [
+      { codice: 'CL-1', qta: 2, tipo: 'C/L', fase_esterna: 'FILI' },
+      { codice: 'MAC-1', qta: 0.5, tipo: 'MAC', fase_esterna: 'FILI' },
+      { codice: 'MAC-1', qta: 0.3, tipo: 'MAC' },
+      { codice: 'CL-2', qta: 1, tipo: 'C/L' },
+      { codice: 'SUB', qta: 1, fase_esterna: 'CAB' }] },
+    { codice: 'SUB', distinta: [{ codice: 'CL-3', qta: 4, tipo: 'C/L' },
+      { codice: 'CL-4', qta: 1, tipo: 'C/L', fase_esterna: 'FILI' }] }]);
+  const e = M.esplodiDistinta('PROD', 10, figliDi);
+  t('C/L in fase: 20 per 10 pz', e.fasi.get('CL-1').get('FILI') === 20);
+  t('MAC in fase: solo la parte segnata (5, non 8)', Math.abs(e.fasi.get('MAC-1').get('FILI') - 5) < 1e-9
+    && Math.abs(e.consumo.get('MAC-1') - 8) < 1e-9);
+  t('riga in casa: nessuna fase', !e.fasi.has('CL-2'));
+  t('la fase scende nel sottoassieme', e.fasi.get('CL-3').get('CAB') === 40);
+  t('una riga piu in basso puo dire altro', e.fasi.get('CL-4').get('FILI') === 10 && !e.fasi.get('CL-4').has('CAB'));
+}
+
+sez('Movimenti fuori giacenza (MAC mandati al terzista)');
+{
+  const a = op('A', [{ codice: 'TS-1', qta: 10, tipo: 'C/L' }]);
+  const mov = [car('TS-1', 10, 'D1', '2026-09-14'),
+    { codice: 'MAC-1', qta: -2, tipo: 'trasferimento', presso_id: null, operazione_id: 'A', fuori_giacenza: true },
+    { codice: 'MAC-1', qta: 2, tipo: 'trasferimento', presso_id: 'BOT', operazione_id: 'A', fuori_giacenza: true }];
+  t('non sono presso nei conti', !M.pressoTerzisti(mov).has('MAC-1'));
+  t('non toccano la sede', !M.saldoInSede(mov).has('MAC-1'));
+  t('non diventano una riga del gestionale', !M.righeGiacenzaGestionale(mov, [a]).some(r => r.codice === 'MAC-1'));
+  t('il C/L resta contato', M.arriviDaDdt(a, [a], mov).get('TS-1').manca === 0);
+}
+
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);

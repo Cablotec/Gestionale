@@ -68,6 +68,7 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
   if (!out.consumo) out.consumo = new Map();   // `acc` costruito da chi chiamava prima
   if (!out.origini) out.origini = new Map();
   if (!out.tipi) out.tipi = new Map();
+  if (!out.fasi) out.fasi = new Map();
   const radice = codice;
   scendi(codice, Number(qta) || 0, new Set(), 0, null, null);
   return out;
@@ -88,7 +89,19 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     out.origini.get(cod).add(padre);
   }
 
-  function scendi(cod, q, inCammino, prof, tipo, padre) {
+  // FASE ESTERNA (5 nov): quanto di un codice va al terzista, per lavorazione.
+  // Map codice -> Map(fase -> qta). Una QUANTITA' e non un sì/no: lo stesso
+  // filo puo' servire mezzo metro al terzista e mezzo in casa.
+  // La fase scende coi rami: un sottoassieme mandato fuori porta con se'
+  // tutti i suoi materiali, a meno che una riga piu' in basso dica altro.
+  function segnaFase(cod, q, fase) {
+    if (!fase) return;
+    if (!out.fasi.has(cod)) out.fasi.set(cod, new Map());
+    const m = out.fasi.get(cod);
+    m.set(fase, (m.get(fase) || 0) + q);
+  }
+
+  function scendi(cod, q, inCammino, prof, tipo, padre, fase) {
     if (!cod || !(q > 0)) return;
     if (prof > DISTINTA_PROFONDITA_MAX) { out.tagliati++; return; }
     // CONSUMO (MAC): si ferma qui come il segnaposto e per la stessa
@@ -96,7 +109,7 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     // parte, cosi' non sparisce in silenzio e la commessa se lo ritrova.
     // Non si scende nemmeno: la minuteria non ha sottodistinta, e se un
     // domani l'avesse resterebbe comunque minuteria.
-    if (tipo === 'MAC') { daPadre(cod, padre); out.consumo.set(cod, (out.consumo.get(cod) || 0) + q); return; }
+    if (tipo === 'MAC') { daPadre(cod, padre); segnaFase(cod, q, fase); out.consumo.set(cod, (out.consumo.get(cod) || 0) + q); return; }
     const figli = figliDi.get(cod);
     if (!figli || !figli.length) {
       // ⚠⚠ LA RADICE NON E MAI UN MATERIALE (17 set). Qui sotto una foglia e
@@ -119,6 +132,7 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
       // fabbisogno. Si conta a parte, cosi non sparisce in silenzio.
       if (eSegnaposto(cod)) { daPadre(cod, padre); out.segnaposto.set(cod, (out.segnaposto.get(cod) || 0) + q); return; }
       daPadre(cod, padre);
+      segnaFase(cod, q, fase);
       out.materiali.set(cod, (out.materiali.get(cod) || 0) + q);
       // IL TIPO DELLA FOGLIA (13 ott): C/L o ACQ, come lo dice l'arco che la
       // porta qui. Serviva per sapere quali codici manda il cliente — la
@@ -137,7 +151,8 @@ function esplodiDistinta(codice, qta, figliDi, acc) {
     // diversi senza che sia un anello — e succede, e legittimo.
     if (inCammino.has(cod)) { out.cicli.add(cod); return; }
     inCammino.add(cod);
-    figli.forEach(f => scendi(f.figlio, q * (Number(f.qta) || 0), inCammino, prof + 1, f.tipo, cod));
+    figli.forEach(f => scendi(f.figlio, q * (Number(f.qta) || 0), inCammino, prof + 1, f.tipo, cod,
+      f.fase || fase));
     inCammino.delete(cod);
   }
 }
@@ -367,6 +382,12 @@ function ripartisciOrdinato(esito, consegne, primaAltri) {
 // per i soli codici C/L di `op`.
 function eCL(r) { return String((r && r.tipo) || '').trim().toUpperCase() === 'C/L'; }
 
+// FUORI GIACENZA (5 nov): i movimenti dei materiali che il gestionale non
+// conta (MAC, ACQ) partiti per un terzista. Restano registrati — si vede
+// cosa e' partito — ma nessun conto li somma: un MAC mai caricato andrebbe
+// in negativo e diventerebbe un codice "del gestionale" al posto di Alnus.
+function inConto(movimenti) { return (movimenti || []).filter(m => m && !m.fuori_giacenza); }
+
 // ── MATERIALE PRESSO I TERZISTI (5 nov 2026, pilota Enviro) ───────────
 // Un invio a terzista e' un TRASFERIMENTO, non uno scarico: il materiale
 // resta nostro e cambia solo posto. Due movimenti con lo stesso `invio_id`:
@@ -380,7 +401,7 @@ function eCL(r) { return String((r && r.tipo) || '').trim().toUpperCase() === 'C
 // Ritorna Map codice -> [{ operazione_id, presso_id, qta }] con qta > 0.
 function pressoTerzisti(movimenti) {
   const acc = new Map();
-  (movimenti || []).forEach(m => {
+  inConto(movimenti).forEach(m => {
     if (!m || !m.presso_id) return;
     const cod = String(m.codice || '').trim();
     if (!cod) return;
@@ -405,7 +426,7 @@ function pressoTerzisti(movimenti) {
 // da nascondere).
 function saldoInSede(movimenti) {
   const out = new Map();
-  (movimenti || []).forEach(m => {
+  inConto(movimenti).forEach(m => {
     if (!m || m.presso_id) return;
     const cod = String(m.codice || '').trim();
     if (!cod) return;
@@ -423,7 +444,7 @@ function arriviDaDdt(op, commesse, movimenti) {
   // sta lavorando per un'altra.
   const presso = pressoTerzisti(movimenti);
   const entrato = new Map(), documenti = new Map();
-  (movimenti || []).forEach(m => {
+  inConto(movimenti).forEach(m => {
     const cod = String((m && m.codice) || '').trim();
     if (!cod) return;
     entrato.set(cod, (entrato.get(cod) || 0) + (Number(m.qta) || 0));
@@ -492,7 +513,7 @@ function righeGiacenzaGestionale(movimenti, commesseConFlag) {
       giacenza: 0, impegno: 0, n_movimenti: 0, presso_terzisti: 0 });
     return per.get(cod);
   };
-  (movimenti || []).forEach(m => {
+  inConto(movimenti).forEach(m => {
     const cod = String((m && m.codice) || '').trim();
     if (!cod) return;
     const r = prendi(cod);
@@ -563,7 +584,9 @@ function applicaDistinteProdotti(figliDi, articoli) {
       .map(r => ({ figlio: String(r.codice).trim(), qta: Number(r.qta) || 0, um: r.um || null,
         // Il tipo sta sull'ARCO, non sul codice: e' la riga di distinta a
         // dire che quel componente li' e' di consumo.
-        tipo: r.tipo || null })));
+        tipo: r.tipo || null,
+        // Va al terzista, e per quale lavorazione (5 nov): anche lei sull'arco.
+        fase: r.fase_esterna || null })));
     locali.add(a.codice);
   });
   return locali;
@@ -574,5 +597,5 @@ if (typeof module !== 'undefined' && module.exports) {
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
-    ripartisciOrdinato, pressoTerzisti, saldoInSede };
+    ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto };
 }
