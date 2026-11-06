@@ -11661,6 +11661,7 @@ function openOperazioneModal(o, opts) {
           // Pre-compila se campo vuoto o = 0 (default precedente)
           if (curVal === '' || curVal === '0' || Number(curVal) === 0) {
             minInput.value = String(art.minuti_unitari);
+            try { aggiornaPrezzoOrario(); } catch (e) {}
           }
         }
       }
@@ -12852,7 +12853,10 @@ function openOperazioneModal(o, opts) {
         el('div', { class:'sub', id:'prezzo-da-consuntivo', style:'margin-top:2px;font-size:11px;display:none;' })),
       el('div', { class:'field' }, el('label', {}, 'Totale riga'),
         el('div', { id:'prezzo-totale', style:'padding:8px 0 2px;font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;' }, '—'),
-        el('div', { class:'sub', id:'margine-riga', style:'font-size:11px;font-family:JetBrains Mono,monospace;' })),
+        el('div', { class:'sub', id:'margine-riga', style:'font-size:11px;font-family:JetBrains Mono,monospace;' }),
+        // PREZZO ORARIO (Nico, 6 nov: "a quanto stiamo lavorando sugli EN-"):
+        // prezzo ÷ minuti pagati, a colpo d'occhio. Calcolato, non salvato.
+        el('div', { id:'prezzo-orario', style:'margin-top:4px;font-size:12px;font-family:JetBrains Mono,monospace;' })),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Scadenza'),
@@ -13843,8 +13847,34 @@ function openOperazioneModal(o, opts) {
         ? '€ ' + (pz * pr).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : '—';
       aggiornaMargineRiga();
+      aggiornaPrezzoOrario();
     } catch (e) {}
   };
+  // Prezzo orario: prezzo €/pz ÷ minuti pagati × 60. Accanto, se il cliente
+  // ha una tariffa €/h, il confronto (sopra = verde, sotto = rosso).
+  function aggiornaPrezzoOrario() {
+    try {
+      const box = form.querySelector('#prezzo-orario');
+      if (!box) return;
+      const pr = parseFloat((form.querySelector('#prezzo-input')?.value || '').toString().replace(',', '.')) || 0;
+      const mi = parseFloat((form.querySelector('#minuti-input')?.value || '').toString().replace(',', '.')) || 0;
+      box.innerHTML = '';
+      if (!(pr > 0) || !(mi > 0)) {
+        box.append(el('span', { class:'sub' }, pr > 0 ? '€/h: mancano i minuti pagati' : ''));
+        return;
+      }
+      const eh = pr / mi * 60;
+      const f2 = (n) => n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const cliVal = acCliente.getValue();
+      const cli = (cliVal.mode === 'existing' && cliVal.id) ? state.aziende.find(a => a.id === cliVal.id) : null;
+      const tar = Number(cli && cli.tariffa_cliente) || 0;
+      box.append(el('span', { style:'font-weight:700;font-size:14px;' }, f2(eh) + ' €/h'),
+        el('span', { class:'sub', style:'margin-left:6px;' },
+          '(' + f2(pr) + ' € ÷ ' + String(mi).replace('.', ',') + ' min)'),
+        tar > 0 ? el('span', { style:'margin-left:6px;color:' + (eh + 0.005 >= tar ? 'var(--grn)' : 'var(--red)') + ';' },
+          (eh + 0.005 >= tar ? '≥' : '<') + ' tariffa cliente ' + f2(tar)) : '');
+    } catch (e) {}
+  }
   // Margine live sotto il totale: totale riga − costo fornitori stimato
   // (ore quota × tariffa €/h, la stessa stima della riga fornitore). Solo le
   // voci di costo NOTE: i fornitori senza tariffa vengono dichiarati, non
@@ -14179,6 +14209,7 @@ function openOperazioneModal(o, opts) {
   const minInputEl = form.querySelector('#minuti-input');
   if (minInputEl) minInputEl.addEventListener('input', aggiornaIndicatoreMinuti);
   if (minInputEl) minInputEl.addEventListener('input', aggiornaSuggDaPrezzo);
+  if (minInputEl) minInputEl.addEventListener('input', aggiornaPrezzoOrario);
   // Click sull'asterisco: ripristina il valore dell'articolo se diverso
   const starEl = form.querySelector('#minuti-diff');
   if (starEl) {
