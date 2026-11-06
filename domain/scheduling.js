@@ -158,6 +158,15 @@ function opFasiPianif(op) {
 // fase, quindi lo ripartisco sulla quota di lavoro pianificato che resta in
 // casa. Così nello Storico il confronto cons/pag è interno-contro-interno e
 // sparisce il falso "10 contro 100" di chi esternalizza una fase.
+// COMMESSA INTERA A UN FORNITORE MA LAVORATA ANCHE IN CASA (6 nov, caso
+// Elcotec 00438/0010: Angela su tutta la commessa, 17,2 h timbrate da noi,
+// il consuntivo leggeva "17,2 / 0"). Un fornitore senza fase non dice QUALE
+// parte fa: se ci sono ore nostre il lavoro e' condiviso e non si puo'
+// spezzare, quindi il riferimento e' l'INTERO, non zero (Nico: "Angela fa una
+// parte e il resto noi internamente"). Senza ore nostre resta tutta fuori.
+function lavorataAncheInCasa(op) {
+  try { return opCalcOreReali(op) > 0.05; } catch (e) { return false; }
+}
 function pagatoOreInterne(op) {
   const q = Number(op && op.quantita || 0);
   const pagWhole = (Number(op && op.minuti_unitari || 0)) * q / 60;
@@ -166,9 +175,10 @@ function pagatoOreInterne(op) {
   const fuori = new Set((state.opFornitori || [])
     .filter(r => r.operazione_id === op.id && r.fase_id).map(r => r.fase_id));
   if (fasi.length === 0) {
-    // Senza fasi: se la commessa intera è a un terzista, niente interno.
+    // Senza fasi: se la commessa intera è a un terzista, niente interno —
+    // salvo che l'abbiamo lavorata anche noi (vedi lavorataAncheInCasa).
     const tuttaFuori = (state.opFornitori || []).some(r => r.operazione_id === op.id && !r.fase_id);
-    return tuttaFuori ? 0 : pagWhole;
+    return tuttaFuori && !lavorataAncheInCasa(op) ? 0 : pagWhole;
   }
   const totMin = fasi.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
   if (totMin <= 0) return pagWhole; // fasi senza minuti: non so ripartire, tengo l'intero
@@ -190,7 +200,7 @@ function opCalcOreInterne(op) {
   const fasi = opFasiPianif(op);
   if (fasi.length === 0) {
     const tuttaFuori = (state.opFornitori || []).some(r => r.operazione_id === op.id && !r.fase_id);
-    return tuttaFuori ? 0 : opCalcOre(op);
+    return tuttaFuori && !lavorataAncheInCasa(op) ? 0 : opCalcOre(op);
   }
   const fuori = new Set((state.opFornitori || [])
     .filter(r => r.operazione_id === op.id && r.fase_id).map(r => r.fase_id));
