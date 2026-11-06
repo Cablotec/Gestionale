@@ -4548,8 +4548,9 @@ function righePerCodiceTerzista(x) {
   (x.righe || []).forEach(r => {
     const c = String(r.codice || '').trim();
     if (!per.has(c)) per.set(c, { codice: c, descrizione: r.descrizione, um: r.um, tipo: r.tipo,
-      qta: 0, mancante: 0, parti: [] });
+      qta: 0, mancante: 0, parti: [], note: [] });
     const g = per.get(c);
+    if (r.nota && !g.note.includes(r.nota)) g.note.push(r.nota);
     g.qta = +(g.qta + (Number(r.qta) || 0)).toFixed(4);
     g.mancante = +(g.mancante + (Number(r.mancante) || 0)).toFixed(4);
     g.parti.push({ op: opDiRigaTerzista(x, r), qta: Number(r.qta) || 0, mancante: Number(r.mancante) || 0 });
@@ -4631,6 +4632,14 @@ function apriRichiestaTerzista(o, poi, opts) {
   });
   const libero = (cod) => Math.max(0, +((sede.get(cod) || 0) - (impegnato.get(cod) || 0)).toFixed(4));
   const num = (x) => { const n = Number(String(x == null ? '' : x).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
+  // La NOTA di un codice per questo terzista, dalla scheda prodotto di OGGI
+  // (non serve rigenerare le liste). Prodotti diversi con note diverse: unite.
+  const notaDi = (comm, cod) => [...new Set(comm.map(c => {
+    const art = (state.articoli || []).find(z => z.id === c.articolo_id);
+    const f = ((art && art.fasi_esterne) || []).find(b => b && b.fornitore === selTer.value);
+    const r = ((f && f.righe) || []).find(z => String(z.codice || '').trim() === cod);
+    return r && r.nota ? String(r.nota).trim() : '';
+  }).filter(Boolean))].join(' · ');
 
   // ── le commesse insieme ──
   const boxCommesse = el('div', { style:'margin-top:10px;' });
@@ -4745,12 +4754,14 @@ function apriRichiestaTerzista(o, poi, opts) {
       const tipo = String(riga.tipo || '').trim().toUpperCase();
       const mc = el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, '—');
       const rip = el('div', { class:'sub', style:'font-size:10px;white-space:normal;margin-top:1px;' });
+      const inNotaR = el('input', { type:'text', value: notaDi(comm, cod), placeholder:'nota per il magazzino',
+        style:'width:100%;font-size:11px;padding:2px 6px;margin-top:3px;' });
       tab.append(el('label', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);cursor:pointer;' },
         chk,
         el('span', { class:'mono', style:'font-size:11px;' }, cod),
         el('div', { style:'min-width:0;' },
           el('div', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
-            title: riga.descrizione || '' }, riga.descrizione || '—'), rip),
+            title: riga.descrizione || '' }, riga.descrizione || '—'), rip, inNotaR),
         el('span', { class:'sub', style:'font-size:10px;' + (tipo === 'MAC' ? 'color:var(--acc);font-weight:700;' : '') }, tipo || '—'),
         el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (g.gia > 0 ? 'var(--or)' : 'var(--mut)') + ';' },
           g.gia > 0 ? nfIT(g.gia) : '—'),
@@ -4764,7 +4775,7 @@ function apriRichiestaTerzista(o, poi, opts) {
           : el('span', { class:'sub', style:'font-size:10px;text-align:right;', title:'Il gestionale non conta questo materiale: '
               + 'partirà e resterà registrato, ma fuori giacenza.' }, 'non contato'),
         inp, mc));
-      scelte.push({ riga, cod, tipo, chk, inp, mc, rip, voci: g.voci, manca });
+      scelte.push({ riga, cod, tipo, chk, inp, mc, rip, inNota: inNotaR, voci: g.voci, manca });
     });
     aggiorna();
   };
@@ -4790,7 +4801,8 @@ function apriRichiestaTerzista(o, poi, opts) {
         if (!(ass[i] > 0) && !(manc[i] > 0)) return;
         righe.push({ codice: s.cod, operazione_id: vc.commessa.id, descrizione: s.riga.descrizione || null,
           um: s.riga.um || null, tipo: s.tipo || null, qta: ass[i] > 0 ? ass[i] : 0,
-          ...(manc[i] > 0 ? { mancante: manc[i] } : {}) });
+          ...(manc[i] > 0 ? { mancante: manc[i] } : {}),
+          ...(s.inNota.value.trim() ? { nota: s.inNota.value.trim() } : {}) });
       });
     });
     const daPreparare = new Set(righe.filter(r => r.qta > 0).map(r => r.codice)).size;
@@ -4843,7 +4855,9 @@ function stampaRichiestaTerzista(x) {
       .map(p => esc(etiDi(p.op)) + ': ' + (p.qta > 0 ? '<b>' + esc(nfIT(p.qta)) + '</b>' : '—')
         + (p.mancante > 0 ? ' <span class="mc">(manca ' + esc(nfIT(p.mancante)) + ')</span>' : '')).join('<br>') : '';
     return '<tr' + (q ? '' : ' class="solo"') + '><td class="c">' + (q ? '☐' : '') + '</td><td>' + (i + 1) + '</td><td class="m">' + esc(r.codice)
-      + '</td><td>' + esc(r.descrizione) + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.um)
+      + '</td><td>' + esc(r.descrizione)
+      + (r.note.length ? '<div class="nt">▸ ' + esc(r.note.join(' · ')) + '</div>' : '')
+      + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.um)
       + '</td><td class="n">' + (q ? esc(nfIT(r.qta)) : '—') + '</td><td class="w"></td>'
       + (conManc ? '<td class="n mc">' + (mq ? esc(nfIT(r.mancante)) : '') + '</td>' : '')
       + (multi ? '<td class="p">' + parti + '</td>' : '') + '</tr>';
@@ -4854,7 +4868,7 @@ function stampaRichiestaTerzista(x) {
     + '.t{display:grid;grid-template-columns:repeat(3,auto);gap:4px 24px;margin:10px 0 14px;}.t b{display:block;font-size:10px;color:#555;text-transform:uppercase;}'
     + 'table{width:100%;border-collapse:collapse;}th,td{border:1px solid #999;padding:5px 6px;text-align:left;vertical-align:top;}'
     + 'th{background:#eee;font-size:10px;text-transform:uppercase;}.n{text-align:right;font-weight:700;}.m{font-family:monospace;}'
-    + '.p{font-size:11px;white-space:nowrap;}.p b{font-weight:700;}'
+    + '.p{font-size:11px;white-space:nowrap;}.p b{font-weight:700;}.nt{font-weight:700;font-size:11px;margin-top:3px;}'
     + '.c{text-align:center;font-size:16px;width:22px;}.w{width:90px;}.f{margin-top:28px;display:flex;gap:60px;}'
     + '.f div{border-top:1px solid #000;padding-top:4px;width:220px;font-size:11px;}@media print{body{margin:8mm;}}'
     + '</style></head><body>'
@@ -4931,8 +4945,10 @@ function apriConfermaInvioTerzista(x, poi) {
       tab.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
         el('span', { class:'mono', style:'font-size:11px;' }, cod),
         multi ? el('span', { class:'mono', style:'font-size:11px;' }, etiOpTerzista(opDi(r))) : '',
-        el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
-          title: r.descrizione || '' }, r.descrizione || '—'),
+        el('div', { style:'min-width:0;' },
+          el('div', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+            title: r.descrizione || '' }, r.descrizione || '—'),
+          r.nota ? el('div', { style:'font-size:10px;color:var(--or);white-space:normal;' }, '▸ ' + r.nota) : ''),
         el('span', { class:'sub', style:'font-size:10px;' }, r.tipo || '—'),
         el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, nfIT(r.qta)),
         c ? el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, nfIT(sede.get(cod) || 0))
@@ -7781,7 +7797,7 @@ function openArticoloModal(a, opts) {
     if (!perPezzo.size) {
       fasiEstWrap.append(el('div', { class:'sub' }, 'Scrivi prima la distinta (linguetta Materiali): i codici devono essere lì.'));
     }
-    const COL = 'display:grid;grid-template-columns:150px minmax(140px,1.4fr) 100px 44px minmax(140px,1fr) 32px;gap:8px;align-items:center;';
+    const COL = 'display:grid;grid-template-columns:140px minmax(120px,1.2fr) 90px 40px 130px minmax(160px,1.4fr) 32px;gap:8px;align-items:center;';
     fasiEst.forEach((f, fi) => {
       const box = el('div', { style:'border:1px solid var(--brd);border-radius:6px;padding:10px 12px;margin-bottom:12px;' });
       const usati = new Set(fasiEst.filter((_, i) => i !== fi).map(x => x.fornitore));
@@ -7817,7 +7833,7 @@ function openArticoloModal(a, opts) {
         const et = (t, dx) => el('span', { class:'sub',
           style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
         box.append(el('div', { style: COL + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
-          et('Codice'), et('Descrizione'), et('Fuori per pezzo', 1), et('UM'), et('In distinta · in casa'), el('span')));
+          et('Codice'), et('Descrizione'), et('Fuori per pezzo', 1), et('UM'), et('In distinta · in casa'), et('Nota per il magazzino'), el('span')));
       }
       f.righe.forEach((r, ri) => {
         const cod = String(r.codice || '').trim();
@@ -7848,11 +7864,16 @@ function openArticoloModal(a, opts) {
         };
         inCod.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); inCod.blur(); } };
         inQ.onchange = () => { r.qta = inQ.value === '' ? null : Number(inQ.value); renderFasiEsterne(); };
+        // NOTA (Nico, 6 nov): "ci sono variabili da notificare al magazzino".
+        // Va sulla richiesta e sulla lista stampata.
+        const inNota = el('input', { type:'text', value: r.nota || '', placeholder:'—', style:'font-size:11px;min-width:0;' });
+        inNota.disabled = readonly;
+        inNota.oninput = () => { r.nota = inNota.value; segnalaModifica(); };
         box.append(el('div', { style: COL + 'padding:3px 0;' }, inCod,
           el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             title: descr.get(cod) || '' }, descr.get(cod) || ''),
           inQ,
-          el('span', { class:'sub', style:'font-size:11px;' }, um.get(cod) || ''), info,
+          el('span', { class:'sub', style:'font-size:11px;' }, um.get(cod) || ''), info, inNota,
           readonly ? el('span') : el('button', { type:'button', class:'btnsm', style:'padding:4px 6px;',
             onclick: () => { f.righe.splice(ri, 1); renderFasiEsterne(); segnalaModifica(); } }, '✕')));
       });
@@ -7883,7 +7904,8 @@ function openArticoloModal(a, opts) {
   function fasiEsterneDaSalvare() {
     const out = fasiEst.filter(f => f.fornitore).map(f => ({ fornitore: f.fornitore,
       righe: f.righe.filter(r => String(r.codice || '').trim() && Number(r.qta) > 0)
-        .map(r => ({ codice: String(r.codice).trim(), qta: Number(r.qta) })) }))
+        .map(r => ({ codice: String(r.codice).trim(), qta: Number(r.qta),
+          ...(String(r.nota || '').trim() ? { nota: String(r.nota).trim() } : {}) })) }))
       .filter(f => f.righe.length);
     return out.length ? out : null;
   }
