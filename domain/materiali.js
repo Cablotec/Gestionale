@@ -411,6 +411,27 @@ function ripartoFasiEsterne(perPezzo, fasiEsterne) {
   return out;
 }
 
+// RICHIESTA PER PIU' COMMESSE (Nico, 6 nov): una quantita' da preparare
+// per un codice si divide fra le commesse con la regola di sempre
+// (`ordineDiServizio`: priorita' dell'ordine, poi scadenza). Chi viene prima
+// prende tutto quello che gli serve, poi il successivo.
+// `voci`: [{ commessa, serve }]; `quanto`: il totale da dividere.
+// Ritorna un array NELLO STESSO ORDINE di `voci` con la quota di ognuna.
+// Se `quanto` supera la somma di quello che serve, l'avanzo va alla prima
+// in ordine di servizio (si e' scelto di mandarne di piu': a qualcuno va).
+function assegnaPerServizio(voci, quanto) {
+  const lista = (Array.isArray(voci) ? voci : []).map((v, i) => ({ i, v }));
+  const ord = lista.slice().sort((a, b) => ordineDiServizio(a.v.commessa, b.v.commessa) || a.i - b.i);
+  const out = lista.map(() => 0);
+  let resta = Math.max(0, Number(quanto) || 0);
+  ord.forEach(({ i, v }) => {
+    const q = Math.min(resta, Math.max(0, Number(v.serve) || 0));
+    out[i] = +q.toFixed(4); resta = +(resta - q).toFixed(4);
+  });
+  if (resta > 0 && ord.length) out[ord[0].i] = +(out[ord[0].i] + resta).toFixed(4);
+  return out;
+}
+
 // FUORI GIACENZA (5 nov): i movimenti dei materiali che il gestionale non
 // conta (MAC, ACQ) partiti per un terzista. Restano registrati — si vede
 // cosa e' partito — ma nessun conto li somma: un MAC mai caricato andrebbe
@@ -624,5 +645,5 @@ if (typeof module !== 'undefined' && module.exports) {
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
-    ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne };
+    ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne, assegnaPerServizio };
 }

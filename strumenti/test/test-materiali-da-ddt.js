@@ -201,6 +201,23 @@ sez('Fasi esterne del prodotto: una parte va fuori, il resto in casa (5 nov)');
   t('fuori piu della distinta: eccede, in casa 0', troppo.get('CL-1').eccede && troppo.get('CL-1').inCasa === 0);
 }
 
+sez('Richiesta per piu commesse: la quantita si divide per scadenza (6 nov)');
+{
+  const c391 = { id: 391, scadenza: '2026-11-20' }, c392 = { id: 392, scadenza: '2026-11-27' }, c394 = { id: 394, scadenza: '2026-12-04' };
+  // in ordine sparso: deve contare la scadenza, non l'ordine della lista
+  const voci = [{ commessa: c394, serve: 150 }, { commessa: c391, serve: 450 }, { commessa: c392, serve: 300 }];
+  const a = M.assegnaPerServizio(voci, 600);
+  t('600 su 900: 391 tutto, 392 il resto, 394 niente', a[1] === 450 && a[2] === 150 && a[0] === 0);
+  const b = M.assegnaPerServizio(voci, 900);
+  t('basta per tutti', b[0] === 150 && b[1] === 450 && b[2] === 300);
+  const c = M.assegnaPerServizio(voci, 1000);
+  t('di piu: l avanzo alla prima che scade', c[1] === 550 && c[0] === 150);
+  t('zero: niente a nessuno', M.assegnaPerServizio(voci, 0).every(x => x === 0));
+  const pr = M.assegnaPerServizio([{ commessa: { id: 1, scadenza: '2026-12-31', priorita_ordine: 1 }, serve: 10 },
+    { commessa: { id: 2, scadenza: '2026-11-01' }, serve: 10 }], 10);
+  t('la priorita dell ordine viene prima della scadenza', pr[0] === 10 && pr[1] === 0);
+}
+
 sez('Movimenti fuori giacenza (MAC mandati al terzista)');
 {
   const a = op('A', [{ codice: 'TS-1', qta: 10, tipo: 'C/L' }]);
