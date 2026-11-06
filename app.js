@@ -4852,6 +4852,27 @@ async function annullaRichiestaTerzista(x, poi) {
   } catch (e) { toast('Non annullata: ' + (e.message || e), 'err', 9000); }
 }
 
+// Eliminare una richiesta ANNULLATA (Nico, 6 nov): non ha mai mosso la
+// giacenza, sparisce e basta. Le inviate no: sono la storia di cosa e'
+// partito. Il database lo permette solo all'admin e solo da annullata
+// (policy `invii_terzista_elimina`, strumenti/migrazione-elimina-richieste-annullate.sql).
+async function eliminaRichiestaTerzista(x, poi) {
+  const sc = await chiediConferma({ titolo:'Eliminare la richiesta annullata?',
+    testo:'La lista annullata per ' + nomeAziendaDi(x.terzista_id) + ' sparisce del tutto. La giacenza non cambia: '
+      + 'una richiesta annullata non ha mai mosso niente.',
+    conferma:'Elimina', annulla:'Tienila', pericolo:true });
+  if (sc !== 'conferma') return;
+  try {
+    const { data, error } = await sb.from('invii_terzista').delete().eq('id', x.id).select();
+    if (error) throw new Error(error.message);
+    // L'RLS rifiuta IN SILENZIO (zero righe): o manca la policy, o non sei admin.
+    if (!data || !data.length) throw new Error('il database non l’ha eliminata (manca lo SQL dell’eliminazione, o non sei admin)');
+    if (Array.isArray(state.inviiTerzista)) state.inviiTerzista = state.inviiTerzista.filter(z => z.id !== x.id);
+    toast('Richiesta eliminata', 'ok');
+    if (typeof poi === 'function') poi();
+  } catch (e) { toast('Non eliminata: ' + (e.message || e), 'err', 9000); }
+}
+
 const STATO_RICH_ETI = {
   da_preparare: { txt:'da preparare', cls:'bor' },
   inviato:      { txt:'inviato',      cls:'bok' },
@@ -4873,6 +4894,10 @@ function rigaRichiestaTerzista(x, poi, conCommessa) {
       el('button', { type:'button', class:'btnsm', onclick: () => apriConfermaInvioTerzista(x, poi) }, '✓ Spedita'),
       el('button', { type:'button', class:'btnsm', title:'Annulla la richiesta',
         onclick: () => annullaRichiestaTerzista(x, poi) }, '✕'));
+  }
+  if (x.stato === 'annullato' && eAdminOra()) {
+    azioni.append(el('button', { type:'button', class:'btnsm', title:'Elimina la richiesta annullata',
+      onclick: () => eliminaRichiestaTerzista(x, poi) }, '🗑'));
   }
   return el('div', { style:'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--brd);font-size:12px;flex-wrap:wrap;' },
     el('span', { class:'badge ' + e.cls }, e.txt),
