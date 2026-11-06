@@ -4574,8 +4574,24 @@ function apriRichiestaTerzista(o, poi) {
   const daFare = Math.max(0, (Number(o.quantita) || 0) - (Number(fatti) || 0));
   const sede = saldoInSede(state.movimenti);
   const conta = (r) => !!o.materiali_da_ddt && String(r.tipo || '').trim().toUpperCase() === 'C/L';
+  // DISPONIBILE (Nico, 6 nov): la proposta non supera quello che c'e' in
+  // sede, tolto quanto e' gia' promesso alle richieste ancora da preparare
+  // (di qualsiasi commessa): due richieste di fila non contano due volte la
+  // stessa giacenza. Solo per quello che ha giacenza (C/L su commessa col
+  // flag); MAC e ACQ si propongono interi, il gestionale non li conta.
+  const impegnato = new Map();
+  (state.inviiTerzista || []).filter(x => x.stato === 'da_preparare').forEach(x => {
+    const ox = (state.operazioni || []).find(z => z.id === x.operazione_id);
+    if (!ox || !ox.materiali_da_ddt) return;
+    (x.righe || []).forEach(r => {
+      if (String(r.tipo || '').trim().toUpperCase() !== 'C/L') return;
+      const c = String(r.codice || '').trim();
+      impegnato.set(c, (impegnato.get(c) || 0) + (Number(r.qta) || 0));
+    });
+  });
+  const libero = (cod) => Math.max(0, +((sede.get(cod) || 0) - (impegnato.get(cod) || 0)).toFixed(4));
 
-  const COL = 'display:grid;grid-template-columns:22px minmax(140px,1fr) minmax(140px,1.4fr) 46px 80px 80px 90px;'
+  const COL = 'display:grid;grid-template-columns:22px minmax(120px,1fr) minmax(120px,1.3fr) 40px 74px 74px 84px 90px;'
     + 'gap:8px;align-items:center;';
   const et = (t, dx) => el('span', { class:'sub',
     style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
@@ -4584,28 +4600,42 @@ function apriRichiestaTerzista(o, poi) {
   const crea = el('button', { class:'btnp' }, 'Crea richiesta');
   let scelte = [];
   const num = (x) => { const n = Number(String(x == null ? '' : x).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
+  // MANCANTI (Nico, 6 nov): quello che serviva ma non c'e' resta scritto
+  // nella richiesta (`mancante` sulla riga, anche con qta 0), va sulla lista
+  // stampata e informa il terzista. Non conta come "gia' chiesto": la
+  // richiesta dopo lo ripropone, quando la merce arriva.
+  const mancanteDi = (s) => {
+    if (!s.manca) return 0;
+    const q = s.chk.checked ? num(s.inp.value) : 0;
+    return Math.max(0, +(s.serve - (q > 0 ? q : 0)).toFixed(4));
+  };
   const aggiorna = () => {
-    let n = 0, err = 0;
+    let n = 0, err = 0, m = 0;
     scelte.forEach(s => {
       const q = num(s.inp.value);
       const male = s.chk.checked && !(q > 0);
       s.inp.style.borderColor = male ? 'var(--red)' : '';
       if (s.chk.checked) { if (male) err++; else n++; }
+      if (mancanteDi(s) > 0) m++;
     });
     riepilogo.textContent = err ? err + (err === 1 ? ' riga da correggere' : ' righe da correggere')
-      : n + (n === 1 ? ' materiale' : ' materiali') + ' da preparare';
+      : n + (n === 1 ? ' materiale' : ' materiali') + ' da preparare'
+        + (m ? ' · ' + m + (m === 1 ? ' mancante' : ' mancanti') + ', va scritto sulla lista' : '');
     riepilogo.style.color = err ? 'var(--red)' : '';
     crea.disabled = !n || !!err;
   };
   const disegna = () => {
     tab.innerHTML = '';
     tab.append(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);position:sticky;top:0;background:var(--sur);' },
-      el('span'), et('Codice'), et('Descrizione'), et('Tipo'), et('Già chiesti', 1), et('In sede', 1), et('Da preparare', 1)));
+      el('span'), et('Codice'), et('Descrizione'), et('Tipo'), et('Già chiesti', 1), et('Serve', 1), et('Disponibile', 1), et('Da preparare', 1)));
     scelte = [];
     (fasi.get(selTer.value) || []).forEach(({ riga, qta_pz }) => {
       const cod = String(riga.codice || '').trim();
       const gia = giaRichiestoTerzista(o.id, selTer.value, cod);
-      const proposta = Math.max(0, +(qta_pz * daFare - gia).toFixed(4));
+      const serve = Math.max(0, +(qta_pz * daFare - gia).toFixed(4));
+      const disp = conta(riga) ? libero(cod) : null;
+      const proposta = disp == null ? serve : Math.min(serve, disp);
+      const manca = disp != null && disp < serve;
       const chk = el('input', { type:'checkbox', style:'width:15px;height:15px;margin:0;cursor:pointer;' });
       const inp = el('input', { type:'text', inputmode:'decimal', class:'mono',
         style:'width:100%;text-align:right;font-size:12px;padding:3px 6px;' });
@@ -4623,13 +4653,17 @@ function apriRichiestaTerzista(o, poi) {
         el('span', { class:'sub', style:'font-size:10px;' + (tipo === 'MAC' ? 'color:var(--acc);font-weight:700;' : '') }, tipo || '—'),
         el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (gia > 0 ? 'var(--or)' : 'var(--mut)') + ';' },
           gia > 0 ? nfIT(gia) : '—'),
-        conta(riga)
-          ? el('span', { class:'mono', style:'font-size:11px;text-align:right;' + ((sede.get(cod) || 0) < proposta ? 'color:var(--red);' : '') },
-              nfIT(sede.get(cod) || 0))
+        el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, nfIT(serve)),
+        disp != null
+          ? el('span', { class:'mono', style:'font-size:11px;text-align:right;' + (manca ? 'color:var(--red);font-weight:700;' : ''),
+              title: 'In sede ' + nfIT(sede.get(cod) || 0)
+                + ((impegnato.get(cod) || 0) > 0 ? ', di cui ' + nfIT(impegnato.get(cod)) + ' già in richieste da preparare' : '')
+                + (manca ? '. Ne mancano ' + nfIT(+(serve - disp).toFixed(4)) + ': si propone quello che c’è.' : '') },
+              nfIT(disp))
           : el('span', { class:'sub', style:'font-size:10px;text-align:right;', title:'Il gestionale non conta questo materiale: '
               + 'partirà e resterà registrato, ma fuori giacenza.' }, 'non contato'),
         inp));
-      scelte.push({ riga, cod, tipo, chk, inp });
+      scelte.push({ riga, cod, tipo, chk, inp, serve, manca });
     });
     aggiorna();
   };
@@ -4639,15 +4673,20 @@ function apriRichiestaTerzista(o, poi) {
   v.corpo.append(
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
       'Prepara la lista per il magazzino: la giacenza non si muove finché non confermi la spedizione. '
-      + 'Quantità proposte per ' + nfIT(daFare) + ' pz ancora da fare, meno quanto già chiesto a questo terzista.'),
+      + 'Serve: ' + nfIT(daFare) + ' pz ancora da fare, meno quanto già chiesto a questo terzista. '
+      + 'Si propone quello che serve fin dove arriva la giacenza disponibile (in rosso quando non basta); '
+      + 'i materiali non contati (MAC) si propongono interi.'),
     el('div', { style:'display:flex;gap:14px;flex-wrap:wrap;' },
       el('div', { class:'field' }, el('label', {}, 'Terzista'), selTer)),
     tab,
     el('div', { class:'field', style:'margin-top:10px;' }, el('label', {}, 'Nota'), inNota));
   crea.onclick = async () => {
-    const righe = scelte.filter(s => s.chk.checked).map(s => ({ codice: s.cod,
-      descrizione: s.riga.descrizione || null, um: s.riga.um || null, tipo: s.tipo || null, qta: num(s.inp.value) }));
-    if (!righe.length) return;
+    const righe = scelte.map(s => ({ s, q: s.chk.checked ? num(s.inp.value) : 0, mancante: mancanteDi(s) }))
+      .filter(x => x.q > 0 || x.mancante > 0)
+      .map(({ s, q, mancante }) => ({ codice: s.cod, descrizione: s.riga.descrizione || null, um: s.riga.um || null,
+        tipo: s.tipo || null, qta: q > 0 ? q : 0, ...(mancante > 0 ? { mancante } : {}) }));
+    const daPreparare = righe.filter(r => r.qta > 0).length;
+    if (!daPreparare) return;
     crea.disabled = true; crea.textContent = 'Salvataggio…';
     try {
       const { data, error } = await sb.from('invii_terzista').insert({ operazione_id: o.id,
@@ -4656,7 +4695,9 @@ function apriRichiestaTerzista(o, poi) {
       if (error) throw new Error(error.message);
       if (Array.isArray(state.inviiTerzista)) state.inviiTerzista.unshift(data);
       v.chiudi();
-      toast('Richiesta creata: ' + righe.length + ' materiali da preparare per ' + nomeAziendaDi(selTer.value), 'ok');
+      const nm = righe.filter(r => r.mancante > 0).length;
+      toast('Richiesta creata: ' + daPreparare + ' materiali da preparare per ' + nomeAziendaDi(selTer.value)
+        + (nm ? ', ' + nm + ' mancanti segnalati' : ''), 'ok');
       if (typeof poi === 'function') poi();
     } catch (e) {
       crea.disabled = false; crea.textContent = 'Crea richiesta';
@@ -4674,12 +4715,19 @@ function stampaRichiestaTerzista(x) {
   const o = (state.operazioni || []).find(z => z.id === x.operazione_id) || {};
   const art = (state.articoli || []).find(z => z.id === o.articolo_id);
   const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
-  const righe = (x.righe || []).map((r, i) => '<tr><td class="c">☐</td><td>' + (i + 1) + '</td><td class="m">' + esc(r.codice)
+  const righe = (x.righe || []).filter(r => Number(r.qta) > 0).map((r, i) => '<tr><td class="c">☐</td><td>' + (i + 1) + '</td><td class="m">' + esc(r.codice)
     + '</td><td>' + esc(r.descrizione) + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.um)
     + '</td><td class="n">' + esc(nfIT(r.qta)) + '</td><td class="w"></td></tr>').join('');
+  // I mancanti: serviranno, ma in sede non ci sono. Per il terzista.
+  const manc = (x.righe || []).filter(r => Number(r.mancante) > 0);
+  const tabManc = manc.length ? '<h2>Mancanti — arriveranno con un invio successivo</h2>'
+    + '<table><thead><tr><th>Codice</th><th>Descrizione</th><th>Tipo</th><th>UM</th><th>Mancano</th></tr></thead><tbody>'
+    + manc.map(r => '<tr><td class="m">' + esc(r.codice) + '</td><td>' + esc(r.descrizione) + '</td><td>' + esc(r.tipo)
+      + '</td><td>' + esc(r.um) + '</td><td class="n">' + esc(nfIT(r.mancante)) + '</td></tr>').join('')
+    + '</tbody></table>' : '';
   const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Lista per terzista '
     + esc((o.numero_ordine || '') + '/' + (o.pos || '')) + '</title><style>'
-    + 'body{font-family:Arial,sans-serif;font-size:12px;margin:18px;color:#000;background:#fff;}h1{font-size:18px;margin:0 0 4px;}'
+    + 'body{font-family:Arial,sans-serif;font-size:12px;margin:18px;color:#000;background:#fff;}h1{font-size:18px;margin:0 0 4px;}h2{font-size:14px;margin:22px 0 6px;}'
     + '.t{display:grid;grid-template-columns:repeat(3,auto);gap:4px 24px;margin:10px 0 14px;}.t b{display:block;font-size:10px;color:#555;text-transform:uppercase;}'
     + 'table{width:100%;border-collapse:collapse;}th,td{border:1px solid #999;padding:5px 6px;text-align:left;}'
     + 'th{background:#eee;font-size:10px;text-transform:uppercase;}.n{text-align:right;font-weight:700;}.m{font-family:monospace;}'
@@ -4694,7 +4742,7 @@ function stampaRichiestaTerzista(x) {
     + '<div><b>Richiesta del</b>' + esc(fmtIT(String(x.creato_il || '').slice(0, 10))) + '</div></div>'
     + (x.nota ? '<p><b>Nota:</b> ' + esc(x.nota) + '</p>' : '')
     + '<table><thead><tr><th></th><th>#</th><th>Codice</th><th>Descrizione</th><th>Tipo</th><th>UM</th><th>Qtà</th><th>Messi</th></tr></thead><tbody>'
-    + righe + '</tbody></table>'
+    + righe + '</tbody></table>' + tabManc
     + '<div class="f"><div>Preparato da</div><div>Data</div></div>'
     + '<script>window.onload=function(){window.print();}<\/script></body></html>';
   const w = window.open('', '_blank');
@@ -4732,7 +4780,8 @@ function apriConfermaInvioTerzista(x, poi) {
     riepilogo.style.color = err ? 'var(--red)' : '';
     ok.disabled = !!err || !n;
   };
-  (x.righe || []).forEach(r => {
+  // Le righe solo "mancanti" (qta 0) non hanno niente da spedire.
+  (x.righe || []).filter(r => Number(r.qta) > 0).forEach(r => {
     const cod = String(r.codice || '').trim();
     const inp = el('input', { type:'text', inputmode:'decimal', class:'mono', value: String(r.qta ?? ''),
       style:'width:100%;text-align:right;font-size:12px;padding:3px 6px;' });
@@ -4779,7 +4828,7 @@ function apriConfermaInvioTerzista(x, poi) {
 
 async function annullaRichiestaTerzista(x, poi) {
   const sc = await chiediConferma({ titolo:'Annullare la richiesta?',
-    testo:'La lista per ' + nomeAziendaDi(x.terzista_id) + ' (' + (x.righe || []).length + ' materiali) non andrà più preparata. '
+    testo:'La lista per ' + nomeAziendaDi(x.terzista_id) + ' (' + (x.righe || []).filter(r => Number(r.qta) > 0).length + ' materiali) non andrà più preparata. '
       + 'Resta nello storico come annullata; la giacenza non cambia.',
     conferma:'Annulla la richiesta', annulla:'Tienila', pericolo:true });
   if (sc !== 'conferma') return;
@@ -4823,7 +4872,12 @@ function rigaRichiestaTerzista(x, poi, conCommessa) {
       onclick: (ev) => { ev.preventDefault(); openOperazioneModal(o, { scheda:'mat' }); } },
       (o.numero_ordine || '') + '/' + (o.pos || '')) : '',
     el('span', { style:'font-weight:700;' }, nomeAziendaDi(x.terzista_id)),
-    el('span', { class:'sub' }, (x.fase_id ? nomeTipoLav(x.fase_id) + ' · ' : '') + (x.righe || []).length + ' materiali · ' + quando),
+    el('span', { class:'sub' }, (x.fase_id ? nomeTipoLav(x.fase_id) + ' · ' : '')
+      + (x.righe || []).filter(r => Number(r.qta) > 0).length + ' materiali · ' + quando),
+    (x.righe || []).some(r => Number(r.mancante) > 0)
+      ? el('span', { style:'color:var(--red);font-weight:700;',
+          title: (x.righe || []).filter(r => Number(r.mancante) > 0).map(r => r.codice + ': mancano ' + nfIT(r.mancante)).join(' · ') },
+          (x.righe || []).filter(r => Number(r.mancante) > 0).length + ' mancanti') : '',
     x.nota ? el('span', { class:'sub', style:'color:var(--or);' }, x.nota) : '',
     azioni);
 }
