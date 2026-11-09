@@ -5354,6 +5354,7 @@ async function chiediFornitoreAbituale(codice, attuale) {
   try {
     await impostaFornitoreAbituale([codice], v, false);
     toast('Fornitore abituale di ' + codice + ': ' + v, 'ok');
+    if (matAbituali) { matAbituali.set(String(codice).trim(), v); if (typeof matRidisegna === 'function') matRidisegna(); }
   } catch (e) {
     toast('Fornitore abituale non salvato: ' + (e.message || e), 'err', 9000);
   }
@@ -5603,6 +5604,7 @@ function riquadroImportFabbisogno(root) {
             // codice solo dove il campo e' vuoto. Best-effort: senza la
             // migrazione la funzione non c'e' e l'import resta quello di prima.
             const seminati = await seminaFornitoriAbituali(daImportare.mancanti);
+            matAbituali = null;   // riletti al prossimo disegno della lista
             toast('Estrazione importata: ' + payload.length + ' codici'
               + (seminati > 0 ? ' · ' + seminati + ' con fornitore abituale nuovo' : ''), 'ok');
             renderFabbisogno(root);
@@ -5791,6 +5793,25 @@ function matMancaAlnus(m) {
 // numero di Alnus. Le righe del gestionale (`fonte: 'gestionale'`) hanno gia'
 // la nostra domanda come impegno e non passano di qui.
 let matDomandaNostra = null;
+// FORNITORI ABITUALI (9 nov): codice -> fornitore, da `materiali.fornitore`.
+// null = non ancora letti; letti una volta (sono poche centinaia di righe) e
+// riletti dopo un import o quando li cambia il menu.
+let matAbituali = null, matAbitualiInCorso = false, matRidisegna = null;
+function matAbitualeDi(cod) {
+  return (matAbituali && matAbituali.get(String(cod == null ? '' : cod).trim())) || null;
+}
+async function caricaFornitoriAbituali() {
+  if (matAbitualiInCorso) return;
+  matAbitualiInCorso = true;
+  try {
+    const { data, error } = await fetchTutte(() => sb.from('materiali').select('codice,fornitore')
+      .not('fornitore', 'is', null).order('codice'));
+    matAbituali = new Map();
+    if (!error) (data || []).forEach(r => matAbituali.set(String(r.codice).trim(), r.fornitore));
+  } catch (e) { matAbituali = new Map(); }
+  matAbitualiInCorso = false;
+  if (typeof matRidisegna === 'function') matRidisegna();
+}
 function matMancaDettaglio(m) {
   const alnus = matMancaAlnus(m);
   const cod = String((m && m.codice) || '').trim();
@@ -5812,8 +5833,22 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
     { k:'stato', t:'Stato', ord: m => MAT_CAT_ORDINE[mancanteCategoria(m)],
       num:true,
       cella: (m) => {
-        const eti = MAT_CAT_ETI[mancanteCategoria(m)] || MAT_CAT_ETI.da_ordinare;
-        return el('span', { class:'badge ' + eti.cls, title: eti.tip }, eti.txt);
+        const cat = mancanteCategoria(m);
+        const eti = MAT_CAT_ETI[cat] || MAT_CAT_ETI.da_ordinare;
+        // Clic = lo stesso menu della commessa (9 nov): scrivere a chi lo
+        // manda, fornitore abituale, copia codice/OF.
+        const b = el('span', { class:'badge ' + eti.cls, style:'cursor:pointer;',
+          title: eti.tip + '\nClic: scrivi al fornitore, copia codice/OF' }, eti.txt);
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const cod = String(m.codice || '').trim();
+          const c = primaCons(m);
+          const u = usiDi(cod);
+          apriMenuMateriale(b, { codice: cod, op: (u[0] && u[0].commessa) || null,
+            stato: { stato: cat, fornitore: (c && c.fornitore) || null, of: (c && c.ordine) || null,
+              lavorazione: typeof eLavorazione === 'function' && eLavorazione(cod) } });
+        };
+        return b;
       } },
     // Il codice apre il dettaglio delle commesse che lo usano, quando ce n'e'.
     { k:'codice', t:'Codice', ord: m => String(m.codice || ''),
@@ -5888,11 +5923,18 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
     { k:'ordine', t:'Ordine forn.', ord: m => { const c = primaCons(m); return (c && c.ordine) || ''; },
       cella: (m) => { const c = primaCons(m);
         return el('span', { class:'mono', style:'font-size:11px;' }, (c && c.ordine) || '—'); } },
+    // Il fornitore dell'OF; senza OF, il fornitore ABITUALE del codice (9 nov,
+    // `materiali.fornitore`) in grigio e dichiarato: non e' un ordine fatto.
     { k:'fornitore', t:'Fornitore',
-      ord: m => { const c = primaCons(m); return String((c && c.fornitore) || '').toUpperCase(); },
+      ord: m => { const c = primaCons(m); return String((c && c.fornitore) || matAbitualeDi(m.codice) || '').toUpperCase(); },
       cella: (m) => { const c = primaCons(m);
-        return el('span', { class:'sub', style:'display:block;font-size:11px;max-width:150px;overflow:hidden;'
-          + 'text-overflow:ellipsis;white-space:nowrap;', title:(c && c.fornitore) || '' }, (c && c.fornitore) || '—'); } },
+        const stile = 'display:block;font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        if (c && c.fornitore) return el('span', { class:'sub', style: stile, title: c.fornitore }, c.fornitore);
+        const ab = matAbitualeDi(m.codice);
+        if (!ab) return el('span', { class:'sub', style: stile }, '—');
+        return el('div', { style:'max-width:150px;', title:'Fornitore abituale di questo codice (nessun OF in corso)' },
+          el('span', { style: stile + 'color:var(--mut);font-style:italic;' }, ab),
+          el('span', { class:'sub', style:'font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);' }, 'abituale')); } },
     // (28 set, Nico) TUTTE le commesse che usano il codice, dalle nostre liste
     // congelate. Prima era solo la commessa che Alnus scrive accanto al codice
     // (`OdL Prossimo Impegno`): la PRIMA che lo consumera', non tutte — e le
@@ -6204,6 +6246,7 @@ function renderFabbisogno(root) {
     disegnaLista();
   };
   const colonne = matColonne(nf, oggi, opDelGest, usiDi, apriChiudi);
+  if (matAbituali === null) caricaFornitoriAbituali();
   const opConRighe = [...new Set(righeOra.map(m => m.numero_op))].filter(Boolean).sort();
   // Codici di ogni commessa, per il filtro: una commessa "ha" un codice se ce
   // l'ha nella SUA lista, non solo se Alnus gliel'ha attribuito.
@@ -6251,6 +6294,9 @@ function renderFabbisogno(root) {
     placeholder:'Cerca codice, descrizione, fornitore, OF…', value: matCerca, style:'min-width:260px;' });
 
   const tabWrap = el('div');
+  // Quando arrivano (o cambiano) i fornitori abituali si ridisegna la lista,
+  // solo se questa scheda e' ancora a schermo.
+  matRidisegna = () => { if (tabWrap.isConnected) disegnaLista(); };
   const disegnaLista = () => {
     tabWrap.innerHTML = '';
     let righe = righeOra.slice();
@@ -6269,7 +6315,7 @@ function renderFabbisogno(root) {
       righe = righe.filter(m => {
         const c = mancanteConsegne(m)[0];
         return [m.codice, m.descrizione, m.um, m.tipo_parte, m.numero_op,
-          c && c.ordine, c && c.fornitore]
+          c && c.ordine, c && c.fornitore, matAbitualeDi(m.codice)]
           .some(v => String(v == null ? '' : v).toUpperCase().includes(q));
       });
     }
