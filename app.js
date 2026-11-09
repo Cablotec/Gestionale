@@ -12127,9 +12127,11 @@ function openOperazioneModal(o, opts) {
           },
         }, '✕'));
       }
-      // Prezzo suggerito live: solo se il fornitore ha una tariffa €/h
+      // Prezzo suggerito live: solo se il fornitore ha una tariffa €/h E non
+      // c'e' gia' il suo €/pz nella scheda prodotto (9 nov, Nico): col prezzo
+      // concordato la stima ore × tariffa e' solo un secondo numero che confonde.
       const tariffa = Number(a.tariffa_oraria) || 0;
-      if (tariffa > 0) {
+      if (tariffa > 0 && !prezzoProdottoForn(sel.azienda_id)) {
         const sugg = el('div', { style:'flex-basis:100%;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--mut);' });
         const upd = () => {
           const ore = minPzFornitore(sel) * qtaCorrenteComm() / 60;
