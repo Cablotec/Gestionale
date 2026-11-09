@@ -1372,6 +1372,7 @@ async function syncOperazioneFornitori(opId, nuovi) {
       numero_ordine: n.numero_ordine || null,
       fase_id: n.fase_id || null,
       ...('importo' in n ? { importo: n.importo } : {}),
+      ...('tutta_fuori' in n ? { tutta_fuori: !!n.tutta_fuori } : {}),
     }));
     const { data, error } = await sb.from('operazioni_fornitori').insert(rows).select();
     if (error) return { error };
@@ -1387,9 +1388,12 @@ async function syncOperazioneFornitori(opId, nuovi) {
     const nuovoNum = n.numero_ordine || null;
     const conImp = 'importo' in n;
     const impUguale = !conImp || (vecchia.importo == null ? null : Number(vecchia.importo)) === (n.importo == null ? null : Number(n.importo));
-    if ((vecchia.numero_ordine || null) === nuovoNum && impUguale) continue;
+    const conTutta = 'tutta_fuori' in n;
+    const tuttaUguale = !conTutta || !!vecchia.tutta_fuori === !!n.tutta_fuori;
+    if ((vecchia.numero_ordine || null) === nuovoNum && impUguale && tuttaUguale) continue;
     const { data, error } = await sb.from('operazioni_fornitori')
-      .update({ numero_ordine: nuovoNum, ...(conImp ? { importo: n.importo } : {}) })
+      .update({ numero_ordine: nuovoNum, ...(conImp ? { importo: n.importo } : {}),
+        ...(conTutta ? { tutta_fuori: !!n.tutta_fuori } : {}) })
       .eq('id', vecchia.id).select().single();
     if (error) return { error };
     state.opFornitori = state.opFornitori.map(x => x.id === vecchia.id ? data : x);
@@ -7747,51 +7751,21 @@ function openArticoloModal(a, opts) {
   // questo prodotto. Il conto della commessa lo moltiplica per i pezzi se quel
   // fornitore e' sulla commessa (contoCommessa, fonte 'prodotto'); l'«€ ordine»
   // scritto sulla commessa resta l'eccezione che vince.
-  // `articoli.prezzi_fornitori` jsonb [{ fornitore, prezzo_pz }]: la sezione
-  // c'e' solo se la colonna c'e' (chiave presente nelle righe lette).
+  // Si scrive nella linguetta FORNITORI, in testa al blocco di quel fornitore
+  // (Nico: "per non confondersi con il prezzo del cliente"); si salva a parte
+  // in `articoli.prezzi_fornitori` jsonb [{ fornitore, prezzo_pz }], perche'
+  // `fasi_esterne` resta "materiali da mandare" per chi la legge (richieste).
+  // Il campo c'e' solo se la colonna c'e' (chiave presente nelle righe lette).
   const prezziFornAttivo = (state.articoli || []).some(x => x && 'prezzi_fornitori' in x);
-  const prezziForn = (Array.isArray(a.prezzi_fornitori) ? a.prezzi_fornitori : [])
-    .filter(p => p && p.fornitore).map(p => ({ fornitore: p.fornitore, prezzo_pz: p.prezzo_pz }));
-  const prezziFornWrap = el('div', {});
-  function renderPrezziFornitori() {
-    prezziFornWrap.innerHTML = '';
-    const fornitori = (state.aziende || []).filter(z => z.is_fornitore && z.attivo !== false)
-      .sort((x, y) => String(x.nome || '').localeCompare(String(y.nome || ''), 'it'));
-    if (!prezziForn.length) prezziFornWrap.append(el('div', { class:'sub' },
-      'Nessun prezzo concordato con un fornitore.'));
-    prezziForn.forEach((p, i) => {
-      const usati = new Set(prezziForn.filter((_, j) => j !== i).map(x => x.fornitore));
-      const sel = el('select', { style:'width:auto;min-width:240px;max-width:360px;' },
-        el('option', { value:'' }, '— scegli il fornitore —'),
-        ...fornitori.filter(z => !usati.has(z.id) || z.id === p.fornitore).map(z => el('option', { value: z.id }, z.nome)),
-        ...(p.fornitore && !fornitori.some(z => z.id === p.fornitore)
-          ? [el('option', { value: p.fornitore }, nomeAziendaDi(p.fornitore))] : []));
-      sel.value = p.fornitore || '';
-      sel.disabled = readonly;
-      sel.onchange = () => { p.fornitore = sel.value || null; renderPrezziFornitori(); };
-      const inP = el('input', { type:'number', min:'0', step:'any', value: p.prezzo_pz ?? '',
-        placeholder:'€/pz', style:'width:110px;text-align:right;' });
-      inP.disabled = readonly;
-      inP.oninput = () => { p.prezzo_pz = inP.value === '' ? null : Number(inP.value); };
-      prezziFornWrap.append(el('div', { style:'display:flex;gap:8px;align-items:center;margin-bottom:6px;' },
-        sel, inP, el('span', { class:'sub' }, '€/pz'),
-        ...(readonly ? [] : [el('button', { type:'button', class:'btnsm', title:'Togli questo fornitore',
-          onclick: () => { prezziForn.splice(i, 1); renderPrezziFornitori(); segnalaModifica(); } }, '✕')])));
-    });
-    if (!readonly) prezziFornWrap.append(el('button', { type:'button', class:'btnsm',
-      onclick: () => { prezziForn.push({ fornitore: null, prezzo_pz: null }); renderPrezziFornitori(); segnalaModifica(); } },
-      '+ Fornitore'));
-  }
-  renderPrezziFornitori();
+  const prezziIniziali = new Map((Array.isArray(a.prezzi_fornitori) ? a.prezzi_fornitori : [])
+    .filter(p => p && p.fornitore).map(p => [p.fornitore, p.prezzo_pz]));
   function prezziFornitoriDaSalvare() {
-    const out = prezziForn.filter(p => p.fornitore && Number(p.prezzo_pz) > 0)
-      .map(p => ({ fornitore: p.fornitore, prezzo_pz: Math.round(Number(p.prezzo_pz) * 10000) / 10000 }));
+    const out = fasiEst.filter(f => f.fornitore && Number(f.prezzo_pz) > 0)
+      .map(f => ({ fornitore: f.fornitore, prezzo_pz: Math.round(Number(f.prezzo_pz) * 10000) / 10000 }));
     return out.length ? out : null;
   }
   function errorePrezziFornitori() {
-    const senzaPrezzo = prezziForn.find(p => p.fornitore && !(Number(p.prezzo_pz) > 0));
-    if (senzaPrezzo) return 'Prezzi fornitori: manca il €/pz di ' + nomeAziendaDi(senzaPrezzo.fornitore) + '.';
-    if (prezziForn.some(p => !p.fornitore && Number(p.prezzo_pz) > 0)) return 'Prezzi fornitori: c’è un prezzo senza fornitore.';
+    if (fasiEst.some(f => !f.fornitore && Number(f.prezzo_pz) > 0)) return 'Fornitori: c’è un prezzo senza fornitore.';
     return null;
   }
 
@@ -7808,7 +7782,13 @@ function openArticoloModal(a, opts) {
   // Il codice si SCRIVE (niente tendina, Nico): deve essere nella distinta.
   const fasiEst = Array.isArray(a.fasi_esterne)
     ? a.fasi_esterne.filter(f => f && f.fornitore)
-        .map(f => ({ fornitore: f.fornitore, righe: (f.righe || []).map(r => ({ ...r })) })) : [];
+        .map(f => ({ fornitore: f.fornitore, prezzo_pz: prezziIniziali.get(f.fornitore) ?? null,
+          righe: (f.righe || []).map(r => ({ ...r })) })) : [];
+  // Un fornitore col solo prezzo (niente materiali da mandargli, es. Angela)
+  // ha il suo blocco anche lui.
+  prezziIniziali.forEach((pz, id) => {
+    if (!fasiEst.some(f => f.fornitore === id)) fasiEst.push({ fornitore: id, prezzo_pz: pz, righe: [] });
+  });
   const fasiEstWrap = el('div', {});
   const segnalaModifica = () => fasiEstWrap.dispatchEvent(new Event('change', { bubbles: true }));
   // La distinta di QUESTO momento (anche non salvata), esplosa per 1 pezzo:
@@ -7848,9 +7828,11 @@ function openArticoloModal(a, opts) {
     const fornitori = (state.aziende || []).filter(z => z.is_fornitore && z.attivo !== false)
       .sort((x, y) => String(x.nome || '').localeCompare(String(y.nome || ''), 'it'));
     fasiEstWrap.append(el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
-      'I materiali che vanno a un terzista (MAC compresi), per fornitore, e quanti per pezzo. Quello che non va '
-      + 'fuori resta in casa. Le commesse nuove le ereditano; quelle già nate con «⟳ Rigenera dalla distinta».'));
-    if (!perPezzo.size) {
+      'Chi lavora questo prodotto fuori: per ogni fornitore '
+      + (prezziFornAttivo ? 'il prezzo concordato a pezzo (il conto della commessa lo moltiplica per i pezzi) e ' : '')
+      + 'i materiali da mandargli (MAC compresi), quanti per pezzo. Quello che non va fuori resta in casa. '
+      + 'Le commesse nuove ereditano i materiali; quelle già nate con «⟳ Rigenera dalla distinta».'));
+    if (!perPezzo.size && fasiEst.some(f => f.righe.length)) {
       fasiEstWrap.append(el('div', { class:'sub' }, 'Scrivi prima la distinta (linguetta Materiali): i codici devono essere lì.'));
     }
     const COL = 'display:grid;grid-template-columns:140px minmax(120px,1.2fr) 90px 40px 130px minmax(160px,1.4fr) 32px;gap:8px;align-items:center;';
@@ -7866,8 +7848,17 @@ function openArticoloModal(a, opts) {
       selFor.disabled = readonly;
       selFor.onchange = () => { f.fornitore = selFor.value || null; renderFasiEsterne(); aggiornaEtichette(); };
       const testa = el('div', { style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;' },
-        el('span', { style:'font-weight:700;color:var(--or);' }, '↗ Al terzista'), selFor,
-        el('span', { class:'sub', style:'font-size:11px;' }, f.righe.length + (f.righe.length === 1 ? ' materiale' : ' materiali')));
+        el('span', { style:'font-weight:700;color:var(--or);' }, 'Fornitore'), selFor);
+      if (prezziFornAttivo) {
+        const inP = el('input', { type:'number', min:'0', step:'any', value: f.prezzo_pz ?? '', placeholder:'—',
+          title:'Prezzo concordato con questo fornitore, a pezzo', style:'width:100px;text-align:right;' });
+        inP.disabled = readonly;
+        inP.oninput = () => { f.prezzo_pz = inP.value === '' ? null : Number(inP.value); };
+        testa.append(inP, el('span', { class:'sub', style:'font-size:11px;' }, '€/pz'));
+      }
+      testa.append(el('span', { class:'sub', style:'font-size:11px;' }, f.righe.length
+        ? f.righe.length + (f.righe.length === 1 ? ' materiale da mandare' : ' materiali da mandare')
+        : 'nessun materiale da mandare'));
       if (!readonly) {
         testa.append(el('span', { style:'margin-left:auto;display:flex;gap:6px;' },
           el('button', { type:'button', class:'btnsm', title:'Aggiunge tutti i materiali della distinta con la quantità intera: poi togli o abbassi quello che resta in casa',
@@ -7881,8 +7872,8 @@ function openArticoloModal(a, opts) {
             const ult = [...fasiEstWrap.querySelectorAll('[data-fe-cod="' + fi + '"]')].pop();
             if (ult) ult.focus();
           } }, '+ riga'),
-          el('button', { type:'button', class:'btnsm', title:'Togli questo terzista',
-            onclick: () => { fasiEst.splice(fi, 1); renderFasiEsterne(); aggiornaEtichette(); segnalaModifica(); } }, '✕ terzista')));
+          el('button', { type:'button', class:'btnsm', title:'Togli questo fornitore',
+            onclick: () => { fasiEst.splice(fi, 1); renderFasiEsterne(); aggiornaEtichette(); segnalaModifica(); } }, '✕ fornitore')));
       }
       box.append(testa);
       if (f.righe.length) {
@@ -7937,22 +7928,22 @@ function openArticoloModal(a, opts) {
     });
     if (!readonly) {
       fasiEstWrap.append(el('button', { type:'button', class:'btnsm',
-        onclick: () => { fasiEst.push({ fornitore: null, righe: [] }); renderFasiEsterne(); aggiornaEtichette(); segnalaModifica(); } },
-        '+ Terzista'));
+        onclick: () => { fasiEst.push({ fornitore: null, prezzo_pz: null, righe: [] }); renderFasiEsterne(); aggiornaEtichette(); segnalaModifica(); } },
+        '+ Fornitore'));
     }
   }
   // Cosa NON si puo' salvare: materiali senza fornitore, un codice che non e'
   // in distinta, o che va fuori piu' di quanto ne chiede. Ritorna la frase, o null.
   function erroreFasiEsterne() {
     const conRighe = fasiEst.filter(f => f.righe.some(r => String(r.codice || '').trim() && Number(r.qta) > 0));
-    if (conRighe.some(f => !f.fornitore)) return 'Fasi esterne: scegli il fornitore di ogni blocco.';
+    if (conRighe.some(f => !f.fornitore)) return 'Fornitori: scegli il fornitore di ogni blocco.';
     const { perPezzo } = perPezzoOra();
     const fuoriDistinta = [...new Set(conRighe.flatMap(f => f.righe.map(r => String(r.codice || '').trim())
       .filter(c => c && !perPezzo.has(c))))];
-    if (fuoriDistinta.length) return 'Fasi esterne: ' + fuoriDistinta.slice(0, 3).join(', ') + (fuoriDistinta.length > 3 ? '…' : '')
+    if (fuoriDistinta.length) return 'Fornitori: ' + fuoriDistinta.slice(0, 3).join(', ') + (fuoriDistinta.length > 3 ? '…' : '')
       + ' non è nella distinta.';
     const troppo = [...ripartoFasiEsterne(perPezzo, fasiEst)].filter(([, x]) => x.eccede).map(([c]) => c);
-    if (troppo.length) return 'Fasi esterne: ' + troppo.slice(0, 3).join(', ') + (troppo.length > 3 ? '…' : '')
+    if (troppo.length) return 'Fornitori: ' + troppo.slice(0, 3).join(', ') + (troppo.length > 3 ? '…' : '')
       + ' va fuori più di quanto chiede la distinta.';
     return null;
   }
@@ -7979,9 +7970,9 @@ function openArticoloModal(a, opts) {
   // con FormData, e un campo tolto dal DOM sparirebbe dal salvataggio.
   const schede = [
     { id:'materiali', nome:'Materiali' },
-    { id:'fasi',      nome:'Fasi esterne' },
+    { id:'fasi',      nome:'Fornitori' },
     { id:'lavoro',    nome:'Lavorazioni e tempo' },
-    { id:'prezzi',    nome:'Prezzi' },
+    { id:'prezzi',    nome:'Prezzi cliente' },
     { id:'note',      nome:'Note' },
   ];
   const pannelli = {};
@@ -8011,8 +8002,8 @@ function openArticoloModal(a, opts) {
     const nMat = distinta.length;
     linguette.materiali.textContent = 'Materiali' + (nMat ? ' · ' + nMat : '');
     linguette.lavoro.textContent = 'Lavorazioni e tempo' + (fasi.length ? ' · ' + fasi.length : '');
-    linguette.fasi.textContent = 'Fasi esterne' + (fasiEst.length ? ' · ' + fasiEst.length : '');
-    linguette.prezzi.textContent = 'Prezzi' + (listinoRighe.length ? ' · ' + listinoRighe.length : '');
+    linguette.fasi.textContent = 'Fornitori' + (fasiEst.length ? ' · ' + fasiEst.length : '');
+    linguette.prezzi.textContent = 'Prezzi cliente' + (listinoRighe.length ? ' · ' + listinoRighe.length : '');
   }
   aggiornaEtichette();
 
@@ -8034,13 +8025,7 @@ function openArticoloModal(a, opts) {
     el('div', { class:'field' },
       listinoWrap,
       el('div', { class:'sub', style:'margin-top:6px;' },
-        'Ultimo prezzo per cliente, dagli ordini. Click per l\'andamento; pre-compila i nuovi ordini.')),
-    ...(prezziFornAttivo ? [el('div', { class:'field', style:'margin-top:18px;' },
-      el('label', {}, 'Prezzi fornitori'),
-      el('div', { class:'sub', style:'font-size:12px;margin-bottom:8px;' },
-        'Quanto ci costa questo prodotto da un fornitore, a pezzo. Il conto della commessa lo moltiplica per i pezzi '
-        + 'se quel fornitore è sulla commessa; un «€ ordine» scritto sulla commessa vale al suo posto.'),
-      prezziFornWrap)] : []));
+        'Ultimo prezzo per cliente, dagli ordini. Click per l\'andamento; pre-compila i nuovi ordini.')));
   pannelli.note.append(el('div', { class:'field' }, inNote));
 
   form.append(
@@ -11717,6 +11702,7 @@ function openOperazioneModal(o, opts) {
       // helper esistano. In quel caso non facciamo nulla — verrà chiamato
       // di nuovo dagli eventi reali (input, click) quando tutto è in piedi.
       if (typeof form === 'undefined' || !form || !form.querySelector) return;
+      try { renderForSugg(); } catch (e) {}  // fornitori suggeriti dal nuovo prodotto
       const minInput = form.querySelector('#minuti-input');
       if (!minInput) return;
       if (val.mode === 'existing' && val.id) {
@@ -11988,9 +11974,11 @@ function openOperazioneModal(o, opts) {
           numero_ordine: r.numero_ordine || '',
           allocazione: r.allocazione || 1.0,
           importo: r.importo != null ? Number(r.importo) : null,
+          tutta_fuori: false,
           fase_keys: [],
         };
       }
+      if (r.tutta_fuori === true) byAz[r.azienda_id].tutta_fuori = true;
       if (r.fase_id) byAz[r.azienda_id].fase_keys.push(r.fase_id);
       if (byAz[r.azienda_id].importo == null && r.importo != null) byAz[r.azienda_id].importo = Number(r.importo);
       if (!byAz[r.azienda_id].numero_ordine && r.numero_ordine) byAz[r.azienda_id].numero_ordine = r.numero_ordine;
@@ -12002,6 +11990,10 @@ function openOperazioneModal(o, opts) {
   // TOTALE dell'ordine. Con quello il conto della commessa sa quanto costa
   // senza bisogno di fasi. La colonna c'e' se una riga qualsiasi ce l'ha.
   const importoForAttivo = (state.opFornitori || []).some(r => r && ('importo' in r));
+  // «LA FA TUTTA LUI» (9 nov): sostituisce le fasi sul fornitore. Spenta = il
+  // fornitore e' solo un costo e le ore restano nostre; accesa = commessa
+  // tutta sua (tuttaAlFornitore in domain). C'e' se la colonna c'e'.
+  const tuttaForAttivo = (state.opFornitori || []).some(r => r && ('tutta_fuori' in r));
   // ── Prezzo fase suggerito (per fornitore): ore assegnate × tariffa €/h ──
   // Le ore sono la quota di lavoro di QUEL fornitore: somma min/pz delle sue
   // fasi (nessuna chip = tutta la commessa; commessa senza fasi = budget
@@ -12054,10 +12046,43 @@ function openOperazioneModal(o, opts) {
   forSearchInput.onfocus = () => { forDropList.classList.add('open'); renderForDropList(); };
   forSearchInput.onblur = () => { setTimeout(() => forDropList.classList.remove('open'), 180); };
 
+  // SUGGERIMENTO DAL PRODOTTO (9 nov, Nico): i fornitori scritti nella scheda
+  // prodotto (Fornitori: prezzo €/pz o materiali da mandare) che non sono
+  // ancora sulla commessa. Si propongono, non si aggiungono da soli.
+  const forSuggWrap = el('div', { style:'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;' });
+  const renderForSugg = () => {
+    forSuggWrap.innerHTML = '';
+    if (!canEdit) return;
+    const av = acArticolo.getValue();
+    const artId = (av && av.mode === 'existing' && av.id) ? av.id : o.articolo_id;
+    const art = artId ? (state.articoli || []).find(x => x.id === artId) : null;
+    if (!art) return;
+    const gia = new Set(fornitoriSel.map(s => s.azienda_id));
+    const ids = [...new Set([
+      ...(Array.isArray(art.prezzi_fornitori) ? art.prezzi_fornitori : []).map(p => p && p.fornitore),
+      ...(Array.isArray(art.fasi_esterne) ? art.fasi_esterne : []).map(f => f && f.fornitore),
+    ].filter(id => id && !gia.has(id) && aziendeFornitrici.some(a => a.id === id)))];
+    if (!ids.length) return;
+    forSuggWrap.append(el('span', { class:'sub', style:'font-size:11px;' }, 'Dal prodotto:'));
+    ids.forEach(id => {
+      const pp = prezzoProdottoForn(id);
+      forSuggWrap.append(el('button', { type:'button', class:'btnsm',
+        title:'Aggiunge il fornitore a questa commessa',
+        onclick: () => {
+          fornitoriSel.push({ azienda_id: id, numero_ordine: '', allocazione: 1.0, tutta_fuori: false, fase_keys: [] });
+          renderForSelected(); renderForDropList();
+          if (typeof renderFasiComm === 'function') renderFasiComm();
+          if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
+          if (aggiornaPreviewInizio) aggiornaPreviewInizio();
+          try { aggiornaMargineRiga(); } catch (e) {}
+        } }, '+ ' + nomeAziendaDi(id) + (pp ? ' · ' + String(pp.prezzoPz).replace('.', ',') + ' €/pz' : '')));
+    });
+  };
   const renderForSelected = () => {
     forSelectedWrap.innerHTML = '';
     suggFornitoriUpd.length = 0;
     if (typeof aggiornaDataRealistica === 'function') aggiornaDataRealistica();
+    try { renderForSugg(); } catch (e) {}
     if (fornitoriSel.length === 0) {
       forSelectedWrap.append(el('span', { class:'util-empty' }, 'Nessun fornitore'));
       return;
@@ -12119,8 +12144,30 @@ function openOperazioneModal(o, opts) {
         if (!canEdit) inputImp.disabled = true;
         row.append(inputImp, el('span', { class:'sub', style:'font-size:11px;margin-left:-4px;' }, '€'));
       }
-      // Chip multi-fase (compaiono solo se la commessa ha fasi assegnabili)
-      if (fasiAssegnabili().length >= 1) {
+      if (tuttaForAttivo) {
+        const chk = el('input', { type:'checkbox' });
+        chk.checked = !!sel.tutta_fuori;
+        chk.disabled = !canEdit;
+        chk.onchange = () => {
+          sel.tutta_fuori = chk.checked;
+          if (typeof renderFasiComm === 'function') renderFasiComm();
+          if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
+          if (aggiornaPreviewInizio) aggiornaPreviewInizio();
+        };
+        row.append(el('label', { style:'display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--txt);cursor:pointer;white-space:nowrap;',
+          title:'Spuntata: la commessa la fa tutta il fornitore, le nostre ore previste vanno a zero. '
+            + 'Vuota: il fornitore ne fa una parte ed è solo un costo; le ore restano nostre.' }, chk, 'la fa tutta lui'));
+        // Fasi gia' assegnate prima del 9 nov: visibili, togliibili, non piu' nuove.
+        if ((sel.fase_keys || []).length) {
+          row.append(el('span', { style:'display:inline-flex;gap:4px;align-items:center;font-size:11px;color:var(--mut);font-family:JetBrains Mono,monospace;' },
+            'fase: ' + sel.fase_keys.map(k => { const f = fasiComm.find(x => x._k === k); return f ? tipoNomeFase(f.tipo_lavorazione_id) : '?'; }).join(', '),
+            ...(canEdit ? [el('button', { type:'button', class:'btnsm', title:'Togli la fase: il fornitore resta sulla commessa',
+              onclick: () => { sel.fase_keys = []; renderForSelected();
+                if (typeof renderFasiComm === 'function') renderFasiComm();
+                if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm(); } }, '✕')] : [])));
+        }
+      } else if (fasiAssegnabili().length >= 1) {
+        // Prima della colonna: le chip delle fasi come prima.
         row.append(buildFornitoreFaseChips(sel));
       }
       // Bottone elimina
@@ -12183,6 +12230,7 @@ function openOperazioneModal(o, opts) {
               azienda_id: a.id,
               numero_ordine: '',
               allocazione: 1.0,
+              tutta_fuori: false,
               fase_keys: [],
             });
           }
@@ -12811,7 +12859,12 @@ function openOperazioneModal(o, opts) {
       if (!tutti.length) return null;
       return el('div', { class:'sub',
         style:'margin-top:6px;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--yel);' },
-        '⚙ Fornitore su tutta la commessa: ' + tutti.join(', ') + ' (in quota con gli interni)');
+        tuttaForAttivo
+          ? ((fornitoriSel || []).some(s => s.tutta_fuori)
+              ? '⚙ La fa tutta il fornitore: ' + (fornitoriSel || []).filter(s => s.tutta_fuori)
+                  .map(s => (state.aziende.find(a => a.id === s.azienda_id) || {}).nome || '?').join(', ')
+              : '⚙ Fornitore (solo costo, le ore restano nostre): ' + tutti.join(', '))
+          : '⚙ Fornitore su tutta la commessa: ' + tutti.join(', ') + ' (in quota con gli interni)');
     } catch (e) { return null; }
   }
   function renderFasiComm() {
@@ -13058,7 +13111,7 @@ function openOperazioneModal(o, opts) {
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Puoi assegnare più persone. Il lavoro verrà ripartito tra loro.')),
     el('div', { class:'field' }, el('label', {}, 'Fornitori esterni'),
-      forSelectedWrap, forDropWrap,
+      forSelectedWrap, forSuggWrap, forDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Ditte terze che contribuiscono alla lavorazione (con coefficiente di capacità). '
         + 'Il prezzo suggerito qui è una STIMA a preventivo: le ore realmente fatte stanno '
@@ -14854,7 +14907,8 @@ function openOperazioneModal(o, opts) {
         const fornitoriPayload = [];
         fornitoriSel.forEach(s => {
           const base = { azienda_id: s.azienda_id, numero_ordine: s.numero_ordine, allocazione: s.allocazione,
-            ...(importoForAttivo ? { importo: s.importo != null ? s.importo : null } : {}) };
+            ...(importoForAttivo ? { importo: s.importo != null ? s.importo : null } : {}),
+            ...(tuttaForAttivo ? { tutta_fuori: !!s.tutta_fuori } : {}) };
           const keys = (s.fase_keys || []).map(k => resolveFase(k)).filter(Boolean);
           if (keys.length === 0) fornitoriPayload.push({ ...base, fase_id: null });
           else keys.forEach(fid => fornitoriPayload.push({ ...base, fase_id: fid }));

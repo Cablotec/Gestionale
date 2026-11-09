@@ -167,17 +167,32 @@ function opFasiPianif(op) {
 function lavorataAncheInCasa(op) {
   try { return opCalcOreReali(op) > 0.05; } catch (e) { return false; }
 }
+// «LA FA TUTTA LUI» (9 nov, Nico: le fasi sul fornitore non le vuole piu', e
+// se un fornitore fa tutto o una parte "dipende"). Casella sulla riga
+// fornitore, colonna operazioni_fornitori.tutta_fuori:
+//   true  → la commessa e' tutta sua: ore nostre previste 0 (salvo timbri nostri)
+//   false → il fornitore e' solo un COSTO: le ore restano nostre
+//   null  → colonna non ancora creata: regola di prima (fornitore senza fase
+//           su commessa senza fasi = tutta fuori), decisa dal chiamante.
+function tuttaAlFornitore(op) {
+  const righe = (state.opFornitori || []).filter(r => r.operazione_id === (op && op.id));
+  const conColonna = (state.opFornitori || []).some(r => r && ('tutta_fuori' in r));
+  if (!conColonna) return null;
+  return righe.some(r => r.tutta_fuori === true);
+}
 function pagatoOreInterne(op) {
   const q = Number(op && op.quantita || 0);
   const pagWhole = (Number(op && op.minuti_unitari || 0)) * q / 60;
   if (pagWhole <= 0) return 0;
+  const tf = tuttaAlFornitore(op);
+  if (tf === true) return lavorataAncheInCasa(op) ? pagWhole : 0;
   const fasi = opFasiOf(op);
   const fuori = new Set((state.opFornitori || [])
     .filter(r => r.operazione_id === op.id && r.fase_id).map(r => r.fase_id));
   if (fasi.length === 0) {
     // Senza fasi: se la commessa intera è a un terzista, niente interno —
     // salvo che l'abbiamo lavorata anche noi (vedi lavorataAncheInCasa).
-    const tuttaFuori = (state.opFornitori || []).some(r => r.operazione_id === op.id && !r.fase_id);
+    const tuttaFuori = tf === null && (state.opFornitori || []).some(r => r.operazione_id === op.id && !r.fase_id);
     return tuttaFuori && !lavorataAncheInCasa(op) ? 0 : pagWhole;
   }
   const totMin = fasi.reduce((s, f) => s + (Number(f.minuti_unitari) || 0), 0);
@@ -197,9 +212,11 @@ function pagatoOreInterne(op) {
 function opCalcOreInterne(op) {
   if (!op) return 0;
   const q = Number(op.quantita || 0);
+  const tf = tuttaAlFornitore(op);
+  if (tf === true) return lavorataAncheInCasa(op) ? opCalcOre(op) : 0;
   const fasi = opFasiPianif(op);
   if (fasi.length === 0) {
-    const tuttaFuori = (state.opFornitori || []).some(r => r.operazione_id === op.id && !r.fase_id);
+    const tuttaFuori = tf === null && (state.opFornitori || []).some(r => r.operazione_id === op.id && !r.fase_id);
     return tuttaFuori && !lavorataAncheInCasa(op) ? 0 : opCalcOre(op);
   }
   const fuori = new Set((state.opFornitori || [])
