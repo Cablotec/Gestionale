@@ -3236,6 +3236,44 @@ function openClienteModal(c) {
   const sitoDisponibile = (state.aziende || []).some(a => a && ('sito' in a));
   const inSito = el('input', { type:'text', name:'sito', value:c.sito||'', placeholder:'es. it.farnell.com' });
   if (!sitoDisponibile) { inSito.disabled = true; inSito.placeholder = 'richiede la colonna aziende.sito (migrazione)'; }
+  // CONTATTI PER RUOLO (9 nov, Nico: "piu' mail per diversi contatti", "la mail
+  // principale puo' non esistere se faccio piu' ruoli"). Lista in
+  // `aziende.contatti` jsonb [{ ruolo, nome, email, telefono }]; il menu del
+  // materiale offre una voce per ogni contatto con email. L'Email qui sopra
+  // resta, facoltativa: e' quella generica (o quella venuta da Alnus).
+  const contattiDisponibili = (state.aziende || []).some(a => a && ('contatti' in a));
+  let contatti = (Array.isArray(c.contatti) ? c.contatti : []).map(x => ({ ...x }));
+  const boxContatti = el('div', { style:'display:flex;flex-direction:column;gap:6px;' });
+  const disegnaContatti = () => {
+    boxContatti.innerHTML = '';
+    if (!contattiDisponibili) {
+      boxContatti.append(el('div', { class:'sub', style:'font-size:11px;' },
+        'Richiede la colonna aziende.contatti (migrazione dal pannello Supabase).'));
+      return;
+    }
+    if (!contatti.length) boxContatti.append(el('div', { class:'sub', style:'font-size:11px;' }, 'Nessun contatto.'));
+    contatti.forEach((ct, i) => {
+      const selR = el('select', { style:'width:150px;' }, el('option', { value:'' }, '— ruolo —'),
+        ...RUOLI_CONTATTO.map(r => el('option', { value:r }, r)),
+        ...(ct.ruolo && !RUOLI_CONTATTO.includes(ct.ruolo) ? [el('option', { value:ct.ruolo }, ct.ruolo)] : []));
+      selR.value = ct.ruolo || '';
+      selR.onchange = () => { ct.ruolo = selR.value || null; };
+      const campo = (k, ph, w, tipo) => {
+        const inp = el('input', { type: tipo || 'text', value: ct[k] || '', placeholder: ph, style:'flex:' + w + ';min-width:0;' });
+        inp.oninput = () => { ct[k] = inp.value.trim() || null; };
+        if (readonly) inp.disabled = true;
+        return inp;
+      };
+      if (readonly) selR.disabled = true;
+      boxContatti.append(el('div', { style:'display:flex;gap:6px;align-items:center;' },
+        selR, campo('nome', 'nome', 1), campo('email', 'email', 1.4, 'email'), campo('telefono', 'telefono', .8),
+        readonly ? '' : el('button', { type:'button', class:'btnsm', title:'Togli il contatto',
+          onclick: () => { contatti.splice(i, 1); disegnaContatti(); } }, '✕')));
+    });
+    if (!readonly) boxContatti.append(el('button', { type:'button', class:'btnsm', style:'align-self:flex-start;',
+      onclick: () => { contatti.push({ ruolo: null, nome: null, email: null, telefono: null }); disegnaContatti(); } }, '+ Contatto'));
+  };
+  disegnaContatti();
   const inNote = el('textarea', { name:'note', rows:'2' }, c.note || '');
   const selAttivo = el('select', { name:'attivo' },
     el('option', { value:'true' }, 'Attivo'),
@@ -3365,8 +3403,9 @@ function openClienteModal(c) {
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
     ),
     el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Email'), inEmail),
+      el('div', { class:'field' }, el('label', {}, 'Email generica (facoltativa)'), inEmail),
       el('div', { class:'field' }, el('label', {}, 'Sito web (ordini online)'), inSito)),
+    el('div', { class:'field' }, el('label', {}, 'Contatti per ruolo'), boxContatti),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
 
@@ -3423,6 +3462,13 @@ function openClienteModal(c) {
       // Salva si fermava in silenzio, mentre qui la spunta non si salvava mai.
       if (contoLavoroDisponibile) {
         payload.materiale_dal_cliente = isCliente ? chkContoLav.checked : false;
+      }
+      if (contattiDisponibili) {
+        const pieni = contatti.filter(x => x.ruolo || x.nome || x.email || x.telefono)
+          .map(x => ({ ruolo: x.ruolo || null, nome: x.nome || null, email: x.email || null, telefono: x.telefono || null }));
+        const male = pieni.find(x => x.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x.email));
+        if (male) return toast('Contatto ' + (male.ruolo || male.nome || '') + ': email non valida (' + male.email + ')', 'err');
+        payload.contatti = pieni;
       }
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
       btnSave.disabled = true;
@@ -5232,6 +5278,10 @@ function materialeStatoRiga(codice, tipo, ctx) {
 // Niente testo NE' OGGETTO per ora (Nico, 9 nov): solo l'indirizzo, il resto
 // lo scrive chi manda. Idea per dopo: creare l'OF da qui, anche in massa.
 
+// I ruoli dei contatti (Nico, 9 nov: "partirei con amministrazione, acquisti e
+// logistica"). Si allunga aggiungendo qui.
+const RUOLI_CONTATTO = ['Amministrazione', 'Acquisti', 'Logistica'];
+
 function aziendaPerNome(nome) {
   const k = importOrdiniChiaveNome(nome);
   if (!k) return null;
@@ -5337,6 +5387,8 @@ async function contattaAzienda(dest, modo) {
   let email = az && az.email ? String(az.email).trim() : '';
   let sito = az && az.sito ? String(az.sito).trim() : '';
   if (modo === 'sito' && sito) return apriSito(sito);
+  const primoRuolo = ((az && Array.isArray(az.contatti)) ? az.contatti : []).find(x => x && x.email);
+  if (!email && primoRuolo) return apriMail(primoRuolo.email);
   if (!email && !sito) {
     if (state.profile?.ruolo !== 'admin') {
       toast('Nella scheda Aziende di ' + nome + ' mancano email e sito: la mail si apre senza indirizzo. Chiedi a un admin di aggiungerli.', 'err', 9000);
@@ -5370,7 +5422,10 @@ async function contattaAzienda(dest, modo) {
   } else if (!email && sito) {
     return apriSito(sito);
   }
-  const a = el('a', { href: 'mailto:' + email });
+  apriMail(email);
+}
+function apriMail(email) {
+  const a = el('a', { href: 'mailto:' + (email || '') });
   document.body.append(a); a.click(); a.remove();
 }
 
@@ -5423,9 +5478,12 @@ function apriMenuMateriale(ancora, info) {
   const contatti = (dest, nome, sub, prima) => {
     const az = dest.aziendaId ? (state.aziende || []).find(a => a.id === dest.aziendaId) : aziendaPerNome(dest.nome);
     const sito = az && az.sito, email = az && az.email;
+    const perRuolo = ((az && Array.isArray(az.contatti)) ? az.contatti : []).filter(x => x && x.email);
     if (sito) voce('🌐 Apri il sito di ' + nome, () => contattaAzienda(dest, 'sito'), sub, prima);
-    if (email) voce('✉ Scrivi a ' + nome, () => contattaAzienda(dest, 'mail'), sub, prima);
-    if (!sito && !email) voce('✉ Contatta ' + nome, () => contattaAzienda(dest, 'mail'),
+    perRuolo.forEach(ct => voce('✉ ' + nome + ' — ' + (ct.ruolo || 'contatto') + (ct.nome ? ' (' + ct.nome + ')' : ''),
+      () => apriMail(ct.email), (sub ? sub + ' · ' : '') + ct.email, prima));
+    if (email) voce('✉ Scrivi a ' + nome, () => contattaAzienda(dest, 'mail'), (sub ? sub + ' · ' : '') + email, prima);
+    if (!sito && !email && !perRuolo.length) voce('✉ Contatta ' + nome, () => contattaAzienda(dest, 'mail'),
       (sub ? sub + ' · ' : '') + 'manca email/sito: te lo chiedo', prima);
   };
 
