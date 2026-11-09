@@ -3230,6 +3230,12 @@ function openClienteModal(c) {
   const inProvincia = el('input', { type:'text', name:'provincia', value:c.provincia||'', placeholder:'MI', maxlength:'2', style:'text-transform:uppercase;' });
   const inPIva = el('input', { type:'text', name:'p_iva', value:c.p_iva||'' });
   const inEmail = el('input', { type:'email', name:'email', value:c.email||'' });
+  // SITO WEB (9 nov, Nico): per i fornitori online (Farnell, Mouser...) dove
+  // si ordina dal sito e non per mail. Il menu del materiale lo apre. Campo
+  // spento finche' la colonna `aziende.sito` non esiste (stesso patto della tariffa).
+  const sitoDisponibile = (state.aziende || []).some(a => a && ('sito' in a));
+  const inSito = el('input', { type:'text', name:'sito', value:c.sito||'', placeholder:'es. it.farnell.com' });
+  if (!sitoDisponibile) { inSito.disabled = true; inSito.placeholder = 'richiede la colonna aziende.sito (migrazione)'; }
   const inNote = el('textarea', { name:'note', rows:'2' }, c.note || '');
   const selAttivo = el('select', { name:'attivo' },
     el('option', { value:'true' }, 'Attivo'),
@@ -3324,7 +3330,7 @@ function openClienteModal(c) {
   chkCliente.addEventListener('change', aggiornaRuoli);
 
   if (readonly) {
-    [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inEmail, inNote, selAttivo,
+    [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inEmail, inSito, inNote, selAttivo,
      chkCliente, chkFornitore, inTariffa, inTariffaCli]
       .forEach(i => i.disabled = true);
   }
@@ -3358,7 +3364,9 @@ function openClienteModal(c) {
       el('div', { class:'field' }, el('label', {}, 'P. IVA / C.F.'), inPIva),
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
     ),
-    el('div', { class:'field' }, el('label', {}, 'Email'), inEmail),
+    el('div', { class:'frow' },
+      el('div', { class:'field' }, el('label', {}, 'Email'), inEmail),
+      el('div', { class:'field' }, el('label', {}, 'Sito web (ordini online)'), inSito)),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
 
@@ -3385,6 +3393,7 @@ function openClienteModal(c) {
         provincia: (fd.get('provincia')||'').trim().toUpperCase() || null,
         p_iva: (fd.get('p_iva')||'').trim() || null,
         email: (fd.get('email')||'').trim() || null,
+        ...(sitoDisponibile ? { sito: normalizzaSito(fd.get('sito')) } : {}),
         note: (fd.get('note')||'').trim() || null,
         attivo: fd.get('attivo') === 'true',
         is_cliente: isCliente,
@@ -5307,36 +5316,59 @@ function chiediTesto(opz) {
   });
 }
 
-// Apre il programma di posta. `dest` = { aziendaId } oppure { nome } (Alnus).
-// Senza email: un admin la scrive e finisce nella scheda Aziende (creata se
-// manca, ruolo Fornitore); chi non e' admin apre la mail senza indirizzo.
-async function scriviAMateriale(dest) {
+// Il sito si salva con https:// davanti: scritto "it.farnell.com" non si
+// aprirebbe (il browser lo leggerebbe come un percorso dentro il gestionale).
+function normalizzaSito(v) {
+  const t = String(v == null ? '' : v).trim();
+  if (!t) return null;
+  return /^https?:\/\//i.test(t) ? t : 'https://' + t;
+}
+function apriSito(url) { window.open(normalizzaSito(url), '_blank', 'noopener'); }
+
+// CONTATTARE CHI MANDA IL MATERIALE (9 nov): per mail, oppure sul SITO per i
+// fornitori online (Nico: "mail o direttamente link sito se fornitore online").
+// `dest` = { aziendaId } oppure { nome } (Alnus). `modo` = 'mail' | 'sito'.
+// Senza nessuno dei due: un admin scrive email O sito in una casella sola e
+// finisce nella scheda Aziende (creata se manca, ruolo Fornitore); chi non e'
+// admin apre la mail senza indirizzo.
+async function contattaAzienda(dest, modo) {
   let az = dest.aziendaId ? (state.aziende || []).find(a => a.id === dest.aziendaId) : aziendaPerNome(dest.nome);
   const nome = az ? az.nome : dest.nome;
   let email = az && az.email ? String(az.email).trim() : '';
-  if (!email) {
+  let sito = az && az.sito ? String(az.sito).trim() : '';
+  if (modo === 'sito' && sito) return apriSito(sito);
+  if (!email && !sito) {
     if (state.profile?.ruolo !== 'admin') {
-      toast('Nella scheda Aziende di ' + nome + ' manca l’email: la mail si apre senza indirizzo. Chiedi a un admin di aggiungerla.', 'err', 9000);
+      toast('Nella scheda Aziende di ' + nome + ' mancano email e sito: la mail si apre senza indirizzo. Chiedi a un admin di aggiungerli.', 'err', 9000);
     } else {
-      const v = await chiediTesto({ titolo: 'Email di ' + nome, tipo: 'email', placeholder: 'nome@fornitore.it',
-        conferma: 'Salva e scrivi',
-        testo: az ? 'La scheda di ' + nome + ' in Aziende non ha l’email. Scrivila qui: la salvo nella scheda.'
-          : nome + ' non è in anagrafica Aziende. Scrivi l’email: creo la scheda (ruolo Fornitore) e la salvo lì.' });
+      const sitoOk = (state.aziende || []).some(a => a && ('sito' in a));
+      const v = await chiediTesto({ titolo: 'Come si contatta ' + nome + '?',
+        placeholder: sitoOk ? 'nome@fornitore.it  oppure  www.fornitore.it' : 'nome@fornitore.it',
+        conferma: 'Salva e apri',
+        testo: (az ? 'La scheda di ' + nome + ' in Aziende non ha ' + (sitoOk ? 'né email né sito' : 'l’email') + '.'
+            : nome + ' non è in anagrafica Aziende: creo la scheda (ruolo Fornitore).')
+          + (sitoOk ? '\nScrivi l’email, oppure il sito se si ordina online.' : '\nScrivi l’email.') + ' La salvo nella scheda.' });
       if (v == null) return;
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return toast('Email non valida: ' + v, 'err');
-      email = v;
+      const eMail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+      const eSito = !eMail && sitoOk && /^(https?:\/\/)?[^\s@\/]+\.[^\s@]{2,}/i.test(v);
+      if (!eMail && !eSito) return toast((sitoOk ? 'Né un’email né un sito: ' : 'Email non valida: ') + v, 'err');
+      const campi = eMail ? { email: v } : { sito: normalizzaSito(v) };
+      if (eMail) email = v; else sito = campi.sito;
       try {
         const { data, error } = az
-          ? await sb.from('aziende').update({ email }).eq('id', az.id).select().single()
-          : await sb.from('aziende').insert({ nome, email, attivo: true, is_cliente: false, is_fornitore: true }).select().single();
+          ? await sb.from('aziende').update(campi).eq('id', az.id).select().single()
+          : await sb.from('aziende').insert({ nome, ...campi, attivo: true, is_cliente: false, is_fornitore: true }).select().single();
         if (error) throw new Error(error.message);
         if (az) Object.assign(az, data);
         else if (!(state.aziende || []).some(a => a.id === data.id)) state.aziende.push(data);
-        toast(az ? 'Email salvata nella scheda di ' + nome : 'Creata la scheda di ' + nome + ' in Aziende', 'ok');
+        toast((az ? (eMail ? 'Email' : 'Sito') + ' salvato nella scheda di ' : 'Creata la scheda di ') + nome, 'ok');
       } catch (e) {
-        toast('Email non salvata (' + (e.message || e) + '): la mail si apre lo stesso.', 'err', 9000);
+        toast('Non salvato in anagrafica (' + (e.message || e) + '): lo apro lo stesso.', 'err', 9000);
       }
+      if (eSito) return apriSito(sito);
     }
+  } else if (!email && sito) {
+    return apriSito(sito);
   }
   const a = el('a', { href: 'mailto:' + email });
   document.body.append(a); a.click(); a.remove();
@@ -5374,63 +5406,66 @@ function apriMenuMateriale(ancora, info) {
     if (window.__confermaChiudi === chiudi) window.__confermaChiudi = null;
   };
   const fuori = (e) => { if (!menu.contains(e.target)) chiudi(); };
-  const voce = (testo, fn, sub) => {
+  const subEl = (t) => el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' }, t);
+  // `prima` = il nodo davanti a cui inserire (per le voci che arrivano dopo).
+  const voce = (testo, fn, sub, prima) => {
     const b = el('button', { type:'button', style:'display:block;width:100%;text-align:left;background:none;border:0;'
       + 'padding:7px 10px;border-radius:4px;cursor:pointer;color:var(--txt);font-size:12px;' },
-      testo, sub ? el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' }, sub) : '');
+      testo, sub ? subEl(sub) : '');
     b.onmouseenter = () => { b.style.background = 'var(--sur2)'; };
     b.onmouseleave = () => { b.style.background = 'none'; };
     b.onclick = async (e) => { e.stopPropagation(); chiudi(); await fn(); };
-    menu.append(b);
+    if (prima) menu.insertBefore(b, prima); else menu.append(b);
     return b;
+  };
+  // Le voci per contattare UN destinatario: sito se ce l'ha, mail se ce l'ha,
+  // e se non ha niente una voce sola che chiede e salva.
+  const contatti = (dest, nome, sub, prima) => {
+    const az = dest.aziendaId ? (state.aziende || []).find(a => a.id === dest.aziendaId) : aziendaPerNome(dest.nome);
+    const sito = az && az.sito, email = az && az.email;
+    if (sito) voce('🌐 Apri il sito di ' + nome, () => contattaAzienda(dest, 'sito'), sub, prima);
+    if (email) voce('✉ Scrivi a ' + nome, () => contattaAzienda(dest, 'mail'), sub, prima);
+    if (!sito && !email) voce('✉ Contatta ' + nome, () => contattaAzienda(dest, 'mail'),
+      (sub ? sub + ' · ' : '') + 'manca email/sito: te lo chiedo', prima);
   };
 
   if (r.stato === 'attesa_cliente' && op && op.cliente_id) {
-    voce('✉ Scrivi al cliente: ' + nomeAziendaDi(op.cliente_id),
-      () => scriviAMateriale({ aziendaId: op.cliente_id }), 'materiale in conto lavoro');
+    contatti({ aziendaId: op.cliente_id }, 'il cliente ' + nomeAziendaDi(op.cliente_id), 'materiale in conto lavoro');
   } else if (r.stato !== 'segnaposto') {
     if (r.lavorazione && op) {
-      getOperazioneFornitori(op.id).forEach(id => voce('✉ Scrivi al terzista: ' + nomeAziendaDi(id),
-        () => scriviAMateriale({ aziendaId: id })));
+      getOperazioneFornitori(op.id).forEach(id => contatti({ aziendaId: id }, nomeAziendaDi(id), 'terzista della commessa'));
     }
-    if (r.fornitore) {
-      voce('✉ Scrivi a ' + r.fornitore, () => scriviAMateriale({ nome: r.fornitore }),
-        'fornitore dell’OF' + (r.of ? ' ' + r.of : ''));
-    }
+    if (r.fornitore) contatti({ nome: r.fornitore }, r.fornitore, 'fornitore dell’OF' + (r.of ? ' ' + r.of : ''));
     // Il fornitore ABITUALE si legge al momento: e' un dato del codice, non
     // della lista, e la lista non lo carica.
-    const vAb = voce('✉ Fornitore abituale…', async () => {}, 'lo cerco…');
+    const vAb = voce('… fornitore abituale', async () => {}, 'lo cerco…');
     vAb.disabled = true;
     fornitoreAbitualeDi(codice).then(ab => {
       if (!menu.isConnected) return;
       if (!ab.ok) {
-        vAb.replaceChildren('✉ Fornitore abituale', el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' },
-          'non attivo: manca la migrazione del fornitore abituale'));
+        vAb.replaceChildren('Fornitore abituale', subEl('non attivo: manca la migrazione del fornitore abituale'));
         return;
       }
       if (ab.fornitore) {
-        vAb.replaceChildren('✉ Scrivi a ' + ab.fornitore, el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' }, 'fornitore abituale'));
-        vAb.disabled = false;
-        vAb.onclick = (e) => { e.stopPropagation(); chiudi(); scriviAMateriale({ nome: ab.fornitore }); };
-        if (r.fornitore && importOrdiniChiaveNome(r.fornitore) === importOrdiniChiaveNome(ab.fornitore)) vAb.remove();
-        const vCambia = voce('✎ Cambia fornitore abituale', () => chiediFornitoreAbituale(codice, ab.fornitore));
-        menu.insertBefore(vCambia, vAb.nextSibling || primaCopia);
+        if (!(r.fornitore && importOrdiniChiaveNome(r.fornitore) === importOrdiniChiaveNome(ab.fornitore))) {
+          contatti({ nome: ab.fornitore }, ab.fornitore, 'fornitore abituale', vAb);
+        }
+        voce('✎ Cambia fornitore abituale', () => chiediFornitoreAbituale(codice, ab.fornitore), '', vAb);
+        vAb.remove();
       } else if (!ab.inAnagrafica) {
-        vAb.replaceChildren('✉ Fornitore abituale', el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' },
-          'codice non in anagrafica materiali'));
+        vAb.replaceChildren('Fornitore abituale', subEl('codice non in anagrafica materiali'));
       } else {
-        vAb.replaceChildren('✉ Scrivi al fornitore…', el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' },
-          'nessun fornitore abituale: te lo chiedo e lo ricordo'));
+        vAb.replaceChildren('✉ Contatta il fornitore…', subEl('nessun fornitore abituale: te lo chiedo e lo ricordo'));
         vAb.disabled = false;
         vAb.onclick = async (e) => {
           e.stopPropagation(); chiudi();
           const n = await chiediFornitoreAbituale(codice, '');
-          if (n) scriviAMateriale({ nome: n });
+          if (n) contattaAzienda({ nome: n }, 'mail');
         };
       }
     });
   }
-  const primaCopia = voce('⧉ Copia codice', () => copiaTesto(codice, 'Codice'));
+  voce('⧉ Copia codice', () => copiaTesto(codice, 'Codice'));
   if (r.of) voce('⧉ Copia OF ' + r.of, () => copiaTesto(r.of, 'OF'));
 
   document.body.append(menu);
