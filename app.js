@@ -4558,7 +4558,8 @@ function righePerCodiceTerzista(x) {
     g.mancante = +(g.mancante + (Number(r.mancante) || 0)).toFixed(4);
     g.parti.push({ op: opDiRigaTerzista(x, r), qta: Number(r.qta) || 0, mancante: Number(r.mancante) || 0 });
   });
-  return [...per.values()];
+  // In ordine di codice, come la conferma: lista stampata e conferma uguali.
+  return [...per.values()].sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true }));
 }
 
 // Quanto di un codice e' gia' stato chiesto (o mandato) a quel terzista per
@@ -4728,7 +4729,7 @@ function apriRichiestaTerzista(o, poi, opts) {
     tab.append(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);position:sticky;top:0;background:var(--sur);z-index:1;' },
       el('span'), et('Codice'), et('Descrizione'), et('Tipo'), et('Già chiesti', 1), et('Serve', 1),
       et('Disponibile', 1), et('Da preparare', 1), et('Mancano', 1)));
-    // per codice, nell'ordine in cui compaiono
+    // per codice
     const per = new Map();
     comm.forEach(c => (fasiDi.get(c.id).get(selTer.value) || []).forEach(({ riga, qta_pz }) => {
       const cod = String(riga.codice || '').trim();
@@ -4739,7 +4740,8 @@ function apriRichiestaTerzista(o, poi, opts) {
       g.voci.push({ commessa: c, serve: Math.max(0, +(qta_pz * daFareDi(c) - gia).toFixed(4)), conta: conta(c, riga) });
       if (conta(c, riga)) g.conta = true;
     }));
-    per.forEach(g => {
+    // in ordine di codice (con piu' commesse i codici della seconda finivano in fondo)
+    [...per.values()].sort((a, b) => a.cod.localeCompare(b.cod, 'it', { numeric: true })).forEach(g => {
       const { cod, riga } = g;
       const serve = +g.voci.reduce((a, x) => a + x.serve, 0).toFixed(4);
       const serveContato = +g.voci.filter(x => x.conta).reduce((a, x) => a + x.serve, 0).toFixed(4);
