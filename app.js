@@ -11992,7 +11992,7 @@ function openOperazioneModal(o, opts) {
     type:'text', class:'util-search',
     placeholder: aziendeFornitrici.length === 0
       ? 'Nessun fornitore in anagrafica (aggiungili dalla scheda Aziende)'
-      : 'Aggiungi fornitore esterno (clicca o cerca)…',
+      : 'Aggiungi fornitore (clicca o cerca)…',
     autocomplete:'off',
   });
   if (aziendeFornitrici.length === 0) forSearchInput.disabled = true;
@@ -12215,11 +12215,11 @@ function openOperazioneModal(o, opts) {
       { minimumFractionDigits: 1, maximumFractionDigits: 2 }) + ' h';
     wrapOreEsterne.append(el('div', { class:'sub',
       style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
-      '── Ore esterne ──'));
+      '── Ore dei fornitori ──'));
     const lista = el('div', { style:'display:flex;flex-direction:column;gap:4px;' });
     if (!r.righe.length) {
       lista.append(el('div', { class:'sub' },
-        'Nessuna ora esterna registrata su questa commessa.'));
+        'Nessuna ora dei fornitori registrata su questa commessa.'));
     }
     r.righe.forEach(x => {
       const riga = el('div', {
@@ -12347,7 +12347,7 @@ function openOperazioneModal(o, opts) {
         if (error) return toast(error.message, 'err');
         state.oreEsterne.push(data);
         inOre.value = ''; inRif.value = ''; notaTar.textContent = '';
-        toast('Ore esterne registrate');
+        toast('Ore del fornitore registrate');
         renderOreEsterne(); aggiornaMargineRiga();
         if (aggiornaTotaliCons) aggiornaTotaliCons();
         if (aggiornaBarraOre) aggiornaBarraOre();
@@ -12361,7 +12361,7 @@ function openOperazioneModal(o, opts) {
     } else if (oreEsterneTabellaOk === false) {
       wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:6px;font-size:11px;' },
         'Inserimento a mano non attivo: manca la tabella `ore_esterne` (migrazione dal pannello '
-        + 'Supabase). Le ore timbrate dagli esterni in sede si vedono comunque.'));
+        + 'Supabase). Le ore timbrate qui dagli uomini dei fornitori si vedono comunque.'));
     }
   };
 
@@ -12749,7 +12749,7 @@ function openOperazioneModal(o, opts) {
     fasiComm.forEach(f => { if (faseEsterna(f._k).length) esterne += Number(f.minuti_unitari) || 0; });
     esterne = +esterne.toFixed(2);
     const interne = +(somma - esterne).toFixed(2);
-    const dett = esterne > 0 ? ` (interne ${interne} · esterne ${esterne})` : '';
+    const dett = esterne > 0 ? ` (nostre ${interne} · fornitori ${esterne})` : '';
     const pagato = pagatoComm();
     if (pagato === null) {
       notaConfrontoComm.style.color = 'var(--mut)';
@@ -12839,7 +12839,7 @@ function openOperazioneModal(o, opts) {
           String(f.minuti_unitari).replace('.', ',') + ' min/pz'),
         est.length
           ? el('span', { style:'flex-shrink:0;font-size:11px;font-family:JetBrains Mono,monospace;color:var(--yel);font-weight:700;' },
-              '→ ' + est.join(', ') + ' (esterna)')
+              '→ ' + est.join(', ') + ' (fornitore)')
           : null,
         el('span', { class:'sub', style:'flex-shrink:0;font-size:11px;color:var(--mut);' }, fonte),
       ));
@@ -12942,7 +12942,9 @@ function openOperazioneModal(o, opts) {
         el('div', { class:'sub', id:'prezzo-da-consuntivo', style:'margin-top:2px;font-size:11px;display:none;' })),
       el('div', { class:'field' }, el('label', {}, 'Totale riga'),
         el('div', { id:'prezzo-totale', style:'padding:8px 0 2px;font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;' }, '—'),
-        el('div', { class:'sub', id:'margine-riga', style:'font-size:11px;font-family:JetBrains Mono,monospace;' }),
+        // Il MARGINE (− fornitori → margine) non sta piu' qui (9 nov, Nico): il
+        // conto completo e' nel Consuntivo. Senza #margine-riga,
+        // aggiornaMargineRiga esce subito.
         // PREZZO ORARIO (Nico, 6 nov: "a quanto stiamo lavorando sugli EN-"):
         // prezzo ÷ minuti pagati, a colpo d'occhio. Calcolato, non salvato.
         el('div', { id:'prezzo-orario', style:'margin-top:4px;font-size:12px;font-family:JetBrains Mono,monospace;' })),
@@ -13048,12 +13050,11 @@ function openOperazioneModal(o, opts) {
       addSelectedWrap, addDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Puoi assegnare più persone. Il lavoro verrà ripartito tra loro.')),
-    el('div', { class:'field' }, el('label', {}, 'Fornitori esterni'),
+    el('div', { class:'field' }, el('label', {}, 'Fornitori'),
       forSelectedWrap, forSuggWrap, forDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
-        'Ditte terze che contribuiscono alla lavorazione (con coefficiente di capacità). '
-        + 'Il prezzo suggerito qui è una STIMA a preventivo: le ore realmente fatte stanno '
-        + 'nella scheda Consuntivo, sezione "Ore esterne".')),
+        'Ditte che lavorano questa commessa con noi. Il costo viene dal €/pz della scheda prodotto '
+        + '(o dall’«€ ordine» scritto qui); il conto completo è nella scheda Consuntivo.')),
     ...(fieldRealistica ? [fieldRealistica] : []),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
@@ -13176,7 +13177,7 @@ function openOperazioneModal(o, opts) {
             '#' + (i + 1) + ' ' + (tipo?.nome || 'Fase')),
           estNomi.length
             ? el('span', { style:'color:var(--yel);flex-shrink:0;' },
-                Math.round(fPrev * 60) + ' min → ' + estNomi.join(', ') + ' (esterna)'
+                Math.round(fPrev * 60) + ' min → ' + estNomi.join(', ') + ' (fornitore)'
                 + (fCons > 0.05 ? ' · ⚠ ' + Math.round(fCons * 60) + ' min timbrati interni' : ''))
             : el('span', { style:'color:' + (sfora ? 'var(--red)' : 'var(--mut)') + ';flex-shrink:0;' },
                 Math.round(fCons * 60) + ' / ' + Math.round(fPrev * 60) + ' min'
@@ -13235,7 +13236,7 @@ function openOperazioneModal(o, opts) {
               el('span', { style:'color:var(--txt);font-weight:600;' },
                 (cons ? cons.base : orePrevInt).toFixed(2) + 'h'),
               (!cons || !cons.baseTotale) && prevEsterno > 0.05
-                ? el('span', { style:'color:var(--mut);font-size:11px;' }, ' + ' + prevEsterno.toFixed(1) + 'h esterne')
+                ? el('span', { style:'color:var(--mut);font-size:11px;' }, ' + ' + prevEsterno.toFixed(1) + 'h dei fornitori')
                 : null),
             el('div', {},
               el('span', { style:'color:var(--mut)' }, 'Ore consuntivate: '),
@@ -13250,14 +13251,14 @@ function openOperazioneModal(o, opts) {
           // sembrare tutto lavoro tuo. Timbrate e dichiarate distinte.
           (cons && cons.oreEsterne > 0.05)
             ? el('div', { style:'margin-top:6px;color:var(--mut);font-size:11px;' },
-                'di cui ' + cons.oreEsterne.toFixed(2) + 'h esterne ('
+                'di cui ' + cons.oreEsterne.toFixed(2) + 'h dei fornitori ('
                 + [cons.oreEsterneTimbrate > 0.005 ? '⏱ ' + cons.oreEsterneTimbrate.toFixed(2) + 'h timbrate qui' : null,
                    cons.oreEsterneDichiarate > 0.005 ? '📄 ' + cons.oreEsterneDichiarate.toFixed(2) + 'h da rapportino' : null]
                   .filter(Boolean).join(' · ')
-                + ') · interne ' + cons.oreInterne.toFixed(2) + 'h'
+                + ') · nostre ' + cons.oreInterne.toFixed(2) + 'h'
                 + (cons.baseTotale
-                    ? ' — il previsto qui sopra è quello TOTALE (comprende le fasi esternalizzate), '
-                      + 'perché il consuntivo comprende ore esterne'
+                    ? ' — il previsto qui sopra è quello TOTALE (comprende le fasi dei fornitori), '
+                      + 'perché il consuntivo comprende ore dei fornitori'
                     : ''))
             : null,
           overBudget
