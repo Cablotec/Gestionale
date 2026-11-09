@@ -3162,7 +3162,6 @@ function renderAziende(root) {
     el('th', { class:'tc' }, 'Ruolo'),
     el('th', {}, 'Città'),
     el('th', {}, 'P. IVA'),
-    el('th', {}, 'Email'),
     el('th', { class:'tc' }, 'Stato'),
     el('th', { class:'tc' }, 'Azioni'),
   )));
@@ -3184,8 +3183,6 @@ function renderAziende(root) {
       el('td', { class:'tc' }, ruoloBadge),
       el('td', { style:'font-size:11px;' }, c.citta ? c.citta + (c.provincia ? ' ('+c.provincia+')' : '') : ''),
       el('td', { class:'mono', style:'font-size:11px;' }, c.p_iva || ''),
-      el('td', { class:'mono', style:'font-size:11px;', title: emailAzienda(c).join('\n') },
-        (emailAzienda(c)[0] || '') + (emailAzienda(c).length > 1 ? '  +' + (emailAzienda(c).length - 1) : '')),
       el('td', { class:'tc' }, c.attivo
         ? el('span', { class:'badge bok' }, 'attivo')
         : el('span', { class:'badge bgry' }, 'disatt.')),
@@ -3215,7 +3212,8 @@ function openClienteModal(c) {
   };
   const readonly = !isAdmin;
 
-  const modal = el('div', { class:'modal' });
+  // Piu' larga del default (560): i contatti hanno quattro campi in riga.
+  const modal = el('div', { class:'modal', style:'max-width:860px;' });
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, isNew ? 'Nuova Azienda' : (readonly ? 'Azienda' : 'Modifica Azienda')),
     el('button', { class:'mclose', onclick:closeModal }, '✕'),
@@ -3265,7 +3263,14 @@ function openClienteModal(c) {
         return inp;
       };
       if (readonly) selR.disabled = true;
+      // L'ORDINE conta (Nico): e' l'ordine delle voci nel menu del materiale.
+      const sposta = (d) => { const j = i + d; if (j < 0 || j >= contatti.length) return;
+        [contatti[i], contatti[j]] = [contatti[j], contatti[i]]; disegnaContatti(); };
+      const freccia = (t, d, tit) => { const b = el('button', { type:'button', class:'btnsm', title: tit,
+        style:'padding:2px 7px;', onclick: () => sposta(d) }, t);
+        if (i + d < 0 || i + d >= contatti.length) b.disabled = true; return b; };
       boxContatti.append(el('div', { style:'display:flex;gap:6px;align-items:center;' },
+        readonly ? '' : freccia('↑', -1, 'Sposta su'), readonly ? '' : freccia('↓', 1, 'Sposta giù'),
         selR, campo('nome', 'nome', 1), campo('email', 'email', 1.4, 'email'), campo('telefono', 'telefono', .8),
         readonly ? '' : el('button', { type:'button', class:'btnsm', title:'Togli il contatto',
           onclick: () => { contatti.splice(i, 1); disegnaContatti(); } }, '✕')));
