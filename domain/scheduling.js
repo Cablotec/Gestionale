@@ -1737,10 +1737,29 @@ function consuntivoCommessa(op) {
 // Costo di un fornitore, in quest'ordine:
 //   'concordato' → l'importo fisso dell'ordine (operazioni_fornitori.importo,
 //                  TOTALE dell'ordine; non serve la fase: conta quanto costa)
+//   'prodotto'   → il suo €/pz scritto nella scheda prodotto (articoli.
+//                  prezzi_fornitori, 9 nov) × i pezzi della commessa. Conta
+//                  solo se il fornitore e' sulla commessa. Letto dal vivo:
+//                  cambiare il prezzo cambia il conto delle commesse senza
+//                  importo scritto (l'importo resta l'eccezione che vince).
 //   'ore'        → le sue ore a consuntivo × tariffa (oreEsterneCommessa)
 //   null         → nessun costo noto: si dichiara, non si conta zero in silenzio
 // Ritorna { prezzo, fornitori:[{aziendaId, nome, costo, fonte}], costoFornitori,
 //   senzaCosto, resta, oreInterne, euroOra, tariffa } — null senza prezzo.
+// €/pz concordato con un fornitore nella scheda prodotto della commessa.
+// articoli.prezzi_fornitori = [{ fornitore: <azienda_id>, prezzo_pz }].
+// Ritorna { prezzoPz, pezzi, costo } o null.
+function prezzoFornitoreProdotto(op, aziendaId) {
+  if (!op || !op.articolo_id || !aziendaId) return null;
+  const art = (state.articoli || []).find(a => a.id === op.articolo_id);
+  const voce = art && Array.isArray(art.prezzi_fornitori)
+    ? art.prezzi_fornitori.find(p => p && p.fornitore === aziendaId) : null;
+  const prezzoPz = Number(voce && voce.prezzo_pz);
+  if (!(prezzoPz > 0)) return null;
+  const pezzi = Number(op.quantita) || 0;
+  return { prezzoPz, pezzi, costo: Math.round(prezzoPz * pezzi * 100) / 100 };
+}
+
 function contoCommessa(op) {
   if (!op) return null;
   const prezzo = (Number(op.prezzo_unitario) || 0) * (Number(op.quantita) || 0);
@@ -1755,6 +1774,9 @@ function contoCommessa(op) {
     const imp = Math.max(0, ...(state.opFornitori || [])
       .filter(r => r.operazione_id === op.id && r.azienda_id === id).map(r => Number(r.importo) || 0));
     if (imp > 0) return { aziendaId: id, nome: nomeAz(id), costo: imp, fonte: 'concordato' };
+    const pp = prezzoFornitoreProdotto(op, id);
+    if (pp) return { aziendaId: id, nome: nomeAz(id), costo: pp.costo, fonte: 'prodotto',
+      prezzoPz: pp.prezzoPz, pezzi: pp.pezzi };
     const sue = oe.righe.filter(r => r.aziendaId === id);
     const conCosto = sue.filter(r => r.costo != null);
     if (conCosto.length) return { aziendaId: id, nome: nomeAz(id),

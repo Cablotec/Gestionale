@@ -7742,6 +7742,59 @@ function openArticoloModal(a, opts) {
     }
   }
 
+  // ── PREZZI FORNITORI (9 nov, Nico) ────────────────────────────────────
+  // "Angela ce lo fa a 40 € a pz": il prezzo concordato con un fornitore per
+  // questo prodotto. Il conto della commessa lo moltiplica per i pezzi se quel
+  // fornitore e' sulla commessa (contoCommessa, fonte 'prodotto'); l'«€ ordine»
+  // scritto sulla commessa resta l'eccezione che vince.
+  // `articoli.prezzi_fornitori` jsonb [{ fornitore, prezzo_pz }]: la sezione
+  // c'e' solo se la colonna c'e' (chiave presente nelle righe lette).
+  const prezziFornAttivo = (state.articoli || []).some(x => x && 'prezzi_fornitori' in x);
+  const prezziForn = (Array.isArray(a.prezzi_fornitori) ? a.prezzi_fornitori : [])
+    .filter(p => p && p.fornitore).map(p => ({ fornitore: p.fornitore, prezzo_pz: p.prezzo_pz }));
+  const prezziFornWrap = el('div', {});
+  function renderPrezziFornitori() {
+    prezziFornWrap.innerHTML = '';
+    const fornitori = (state.aziende || []).filter(z => z.is_fornitore && z.attivo !== false)
+      .sort((x, y) => String(x.nome || '').localeCompare(String(y.nome || ''), 'it'));
+    if (!prezziForn.length) prezziFornWrap.append(el('div', { class:'sub' },
+      'Nessun prezzo concordato con un fornitore.'));
+    prezziForn.forEach((p, i) => {
+      const usati = new Set(prezziForn.filter((_, j) => j !== i).map(x => x.fornitore));
+      const sel = el('select', { style:'width:auto;min-width:240px;max-width:360px;' },
+        el('option', { value:'' }, '— scegli il fornitore —'),
+        ...fornitori.filter(z => !usati.has(z.id) || z.id === p.fornitore).map(z => el('option', { value: z.id }, z.nome)),
+        ...(p.fornitore && !fornitori.some(z => z.id === p.fornitore)
+          ? [el('option', { value: p.fornitore }, nomeAziendaDi(p.fornitore))] : []));
+      sel.value = p.fornitore || '';
+      sel.disabled = readonly;
+      sel.onchange = () => { p.fornitore = sel.value || null; renderPrezziFornitori(); };
+      const inP = el('input', { type:'number', min:'0', step:'any', value: p.prezzo_pz ?? '',
+        placeholder:'€/pz', style:'width:110px;text-align:right;' });
+      inP.disabled = readonly;
+      inP.oninput = () => { p.prezzo_pz = inP.value === '' ? null : Number(inP.value); };
+      prezziFornWrap.append(el('div', { style:'display:flex;gap:8px;align-items:center;margin-bottom:6px;' },
+        sel, inP, el('span', { class:'sub' }, '€/pz'),
+        ...(readonly ? [] : [el('button', { type:'button', class:'btnsm', title:'Togli questo fornitore',
+          onclick: () => { prezziForn.splice(i, 1); renderPrezziFornitori(); segnalaModifica(); } }, '✕')])));
+    });
+    if (!readonly) prezziFornWrap.append(el('button', { type:'button', class:'btnsm',
+      onclick: () => { prezziForn.push({ fornitore: null, prezzo_pz: null }); renderPrezziFornitori(); segnalaModifica(); } },
+      '+ Fornitore'));
+  }
+  renderPrezziFornitori();
+  function prezziFornitoriDaSalvare() {
+    const out = prezziForn.filter(p => p.fornitore && Number(p.prezzo_pz) > 0)
+      .map(p => ({ fornitore: p.fornitore, prezzo_pz: Math.round(Number(p.prezzo_pz) * 10000) / 10000 }));
+    return out.length ? out : null;
+  }
+  function errorePrezziFornitori() {
+    const senzaPrezzo = prezziForn.find(p => p.fornitore && !(Number(p.prezzo_pz) > 0));
+    if (senzaPrezzo) return 'Prezzi fornitori: manca il €/pz di ' + nomeAziendaDi(senzaPrezzo.fornitore) + '.';
+    if (prezziForn.some(p => !p.fornitore && Number(p.prezzo_pz) > 0)) return 'Prezzi fornitori: c’è un prezzo senza fornitore.';
+    return null;
+  }
+
   // ── FASI ESTERNE (5 nov, chiesto da Nico) ─────────────────────────────
   // Quello che di questo prodotto va a un terzista, per FORNITORE, con la
   // SUA quantita' per pezzo: di 100 di un codice, 30 possono andare fuori e
@@ -7981,7 +8034,13 @@ function openArticoloModal(a, opts) {
     el('div', { class:'field' },
       listinoWrap,
       el('div', { class:'sub', style:'margin-top:6px;' },
-        'Ultimo prezzo per cliente, dagli ordini. Click per l\'andamento; pre-compila i nuovi ordini.')));
+        'Ultimo prezzo per cliente, dagli ordini. Click per l\'andamento; pre-compila i nuovi ordini.')),
+    ...(prezziFornAttivo ? [el('div', { class:'field', style:'margin-top:18px;' },
+      el('label', {}, 'Prezzi fornitori'),
+      el('div', { class:'sub', style:'font-size:12px;margin-bottom:8px;' },
+        'Quanto ci costa questo prodotto da un fornitore, a pezzo. Il conto della commessa lo moltiplica per i pezzi '
+        + 'se quel fornitore è sulla commessa; un «€ ordine» scritto sulla commessa vale al suo posto.'),
+      prezziFornWrap)] : []));
   pannelli.note.append(el('div', { class:'field' }, inNote));
 
   form.append(
@@ -8075,8 +8134,11 @@ function openArticoloModal(a, opts) {
         })(),
         // Fasi esterne (5 nov): cosa va al terzista, per lavorazione e per pezzo.
         fasi_esterne: fasiEsterneDaSalvare(),
+        ...(prezziFornAttivo ? { prezzi_fornitori: prezziFornitoriDaSalvare() } : {}),
       };
       if (!payload.codice) return toast('Codice obbligatorio', 'err');
+      const errPF = prezziFornAttivo ? errorePrezziFornitori() : null;
+      if (errPF) { mostraScheda('prezzi'); return toast(errPF, 'err', 9000); }
       const errFasi = erroreFasiEsterne();
       if (errFasi) { mostraScheda('fasi'); return toast(errFasi, 'err', 9000); }
       btnSave.disabled = true;
@@ -11957,6 +12019,14 @@ function openOperazioneModal(o, opts) {
     const v = inp ? parseInt(inp.value, 10) : NaN;
     return (Number.isFinite(v) && v > 0) ? v : (Number(o.quantita) || 0);
   };
+  // €/pz del fornitore scritto nella scheda prodotto (9 nov), sull'articolo e
+  // sui pezzi COME SONO ORA nel form: stessa regola di contoCommessa.
+  const prezzoProdottoForn = (aziendaId) => {
+    if (typeof prezzoFornitoreProdotto !== 'function') return null;
+    const av = acArticolo.getValue();
+    const artId = (av && av.mode === 'existing' && av.id) ? av.id : o.articolo_id;
+    return prezzoFornitoreProdotto({ articolo_id: artId, quantita: qtaCorrenteComm() }, aziendaId);
+  };
   const minPzFornitore = (sel) => {
     const fasi = fasiAssegnabili();
     if (fasi.length) {
@@ -12031,10 +12101,15 @@ function openOperazioneModal(o, opts) {
       if (!canEdit) inputNO.disabled = true;
       row.append(inputNO);
       if (importoForAttivo) {
-        const inputImp = el('input', { type:'number', min:'0', step:'any', placeholder:'€ ordine',
+        // Vuoto = vale il €/pz della scheda prodotto (se c'e'), mostrato in grigio.
+        const pp = prezzoProdottoForn(sel.azienda_id);
+        const inputImp = el('input', { type:'number', min:'0', step:'any',
+          placeholder: pp ? String(pp.costo).replace('.', ',') : '€ ordine',
           value: sel.importo != null ? String(sel.importo) : '',
-          title:'Prezzo fisso concordato: il TOTALE dell’ordine al fornitore (es. 40 € al pezzo × 10 pezzi = 400). '
-            + 'Serve al conto della commessa: dice se col prezzo al cliente ci stiamo.',
+          title: (pp ? 'Vuoto = dal prodotto: ' + String(pp.prezzoPz).replace('.', ',') + ' €/pz × ' + pp.pezzi + ' pz = '
+              + String(pp.costo).replace('.', ',') + ' €. Scrivi un importo solo se su quest’ordine il prezzo è diverso.\n'
+              : 'Il €/pz del fornitore si scrive nella scheda prodotto (Prezzi); qui solo un’eccezione per quest’ordine.\n')
+            + 'Importo = il TOTALE dell’ordine al fornitore. Serve al conto della commessa: dice se col prezzo al cliente ci stiamo.',
           style:'width:96px;padding:4px 8px;font-family:JetBrains Mono,monospace;font-size:11px;text-align:right;',
           oninput: (e) => {
             const v = parseFloat(String(e.target.value).replace(',', '.'));
@@ -13053,7 +13128,9 @@ function openOperazioneModal(o, opts) {
         el('div', { style:'color:var(--mut);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;' }, 'Conto della commessa'),
         riga('Prezzo totale', fE(c.prezzo)));
       c.fornitori.forEach(f => box.append(riga('− ' + f.nome
-          + (f.fonte === 'concordato' ? ' (ordine)' : f.fonte === 'ore' ? ' (ore × tariffa)' : ''),
+          + (f.fonte === 'concordato' ? ' (ordine)'
+            : f.fonte === 'prodotto' ? ' (' + String(f.prezzoPz).replace('.', ',') + ' €/pz × ' + f.pezzi + ')'
+            : f.fonte === 'ore' ? ' (ore × tariffa)' : ''),
         f.costo != null ? fE(f.costo) : 'costo non noto', f.costo == null ? 'color:var(--yel);' : '')));
       box.append(riga('= Resta per il lavoro nostro', fE(c.resta), 'border-top:1px solid var(--brd);margin-top:3px;padding-top:4px;'),
         riga('Ore nostre timbrate', c.oreInterne.toFixed(1).replace('.', ',') + ' h'));
@@ -13071,8 +13148,8 @@ function openOperazioneModal(o, opts) {
         box.append(el('div', { class:'sub', style:'font-size:11px;padding-top:4px;' }, 'Nessuna ora nostra timbrata: il €/h si calcola quando ci sono.'));
       }
       if (c.senzaCosto) box.append(el('div', { style:'margin-top:6px;font-size:11px;color:var(--yel);' },
-        c.senzaCosto + (c.senzaCosto === 1 ? ' fornitore senza costo: scrivi l’importo dell’ordine' : ' fornitori senza costo: scrivi l’importo dei loro ordini')
-        + ' (Lavorazione → fornitori), o il conto è più bello del vero.'));
+        c.senzaCosto + (c.senzaCosto === 1 ? ' fornitore senza costo' : ' fornitori senza costo')
+        + ': scrivi il suo €/pz nella scheda prodotto (Prezzi), o l’importo dell’ordine in Lavorazione → fornitori, o il conto è più bello del vero.'));
       boxConto.append(box);
     };
     renderConto();
@@ -13958,8 +14035,12 @@ function openOperazioneModal(o, opts) {
         ? oreEsterneCommessa(o.id) : { righe: [], costoTot: 0 };
       // L'IMPORTO CONCORDATO (9 nov) batte tutto: e' il prezzo fisso
       // dell'ordine, ne' ore vere ne' stima per quel fornitore.
-      const conImporto = new Map((fornitoriSel || []).filter(s => Number(s.importo) > 0)
-        .map(s => [s.azienda_id, Number(s.importo)]));
+      // Dopo l'importo, il €/pz della scheda prodotto × i pezzi (9 nov).
+      const conImporto = new Map((fornitoriSel || []).map(s => {
+        if (Number(s.importo) > 0) return [s.azienda_id, Number(s.importo)];
+        const pp = prezzoProdottoForn(s.azienda_id);
+        return pp && pp.costo > 0 ? [s.azienda_id, pp.costo] : null;
+      }).filter(Boolean));
       const conReale = new Set(oreEst.righe.filter(x => x.costo != null && !conImporto.has(x.aziendaId)).map(x => x.aziendaId));
       let costo = oreEst.righe.filter(x => !conImporto.has(x.aziendaId)).reduce((s, x) => s + (x.costo || 0), 0);
       let costoReale = costo, costoStima = 0, senzaTariffa = 0;

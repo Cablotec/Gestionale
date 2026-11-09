@@ -46,5 +46,19 @@ const s = ctx.contoCommessa(opP);
 t('conto: senza importo = senza costo, non zero nascosto', s.senzaCosto === 1 && s.fornitori[0].costo === null);
 t('conto: senza prezzo = null', ctx.contoCommessa({ id: 'O1', quantita: 1 }) === null);
 
+// 5. PREZZO DAL PRODOTTO: 40 €/pz scritto nella scheda prodotto × i pezzi
+ctx.state.articoli = [{ id: 'ART', prezzi_fornitori: [{ fornitore: 'ANGELA', prezzo_pz: 40 }] }];
+const opA = { id: 'O1', articolo_id: 'ART', quantita: 3, minuti_unitari: 332, prezzo_unitario: 151.2, cliente_id: 'ELC' };
+ctx.state.opFornitori = [{ operazione_id: 'O1', azienda_id: 'ANGELA', fase_id: null }];
+const p = ctx.contoCommessa(opA);
+t('prodotto: 40 × 3 pz = 120, fonte prodotto', p.costoFornitori === 120 && p.fornitori[0].fonte === 'prodotto' && p.fornitori[0].prezzoPz === 40 && p.senzaCosto === 0);
+ctx.state.opFornitori[0].importo = 100;
+t('prodotto: importo scritto sulla commessa vince', ctx.contoCommessa(opA).costoFornitori === 100 && ctx.contoCommessa(opA).fornitori[0].fonte === 'concordato');
+ctx.state.opFornitori = [];
+t('prodotto: fornitore non sulla commessa = non conta', ctx.contoCommessa(opA).costoFornitori === 0 && ctx.contoCommessa(opA).fornitori.length === 0);
+ctx.state.opFornitori = [{ operazione_id: 'O1', azienda_id: 'ALTRO', fase_id: null }];
+t('prodotto: altro fornitore senza prezzo = costo non noto', ctx.contoCommessa(opA).senzaCosto === 1);
+ctx.state.articoli = [];
+
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);
