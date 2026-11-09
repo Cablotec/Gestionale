@@ -1372,7 +1372,6 @@ async function syncOperazioneFornitori(opId, nuovi) {
       numero_ordine: n.numero_ordine || null,
       fase_id: n.fase_id || null,
       ...('importo' in n ? { importo: n.importo } : {}),
-      ...('tutta_fuori' in n ? { tutta_fuori: !!n.tutta_fuori } : {}),
     }));
     const { data, error } = await sb.from('operazioni_fornitori').insert(rows).select();
     if (error) return { error };
@@ -1388,12 +1387,9 @@ async function syncOperazioneFornitori(opId, nuovi) {
     const nuovoNum = n.numero_ordine || null;
     const conImp = 'importo' in n;
     const impUguale = !conImp || (vecchia.importo == null ? null : Number(vecchia.importo)) === (n.importo == null ? null : Number(n.importo));
-    const conTutta = 'tutta_fuori' in n;
-    const tuttaUguale = !conTutta || !!vecchia.tutta_fuori === !!n.tutta_fuori;
-    if ((vecchia.numero_ordine || null) === nuovoNum && impUguale && tuttaUguale) continue;
+    if ((vecchia.numero_ordine || null) === nuovoNum && impUguale) continue;
     const { data, error } = await sb.from('operazioni_fornitori')
-      .update({ numero_ordine: nuovoNum, ...(conImp ? { importo: n.importo } : {}),
-        ...(conTutta ? { tutta_fuori: !!n.tutta_fuori } : {}) })
+      .update({ numero_ordine: nuovoNum, ...(conImp ? { importo: n.importo } : {}) })
       .eq('id', vecchia.id).select().single();
     if (error) return { error };
     state.opFornitori = state.opFornitori.map(x => x.id === vecchia.id ? data : x);
@@ -11921,41 +11917,6 @@ function openOperazioneModal(o, opts) {
   addSearchInput.oninput = renderAddDropList;
   renderAddSelected();
 
-  // Chip multi-fase per un FORNITORE: stesso meccanismo degli addetti, ma
-  // opera su sel.fase_keys (array). Nessuna chip accesa = tutta la commessa
-  // (per i terzisti è uno stato legittimo: fanno tutto il lavoro esterno).
-  function buildFornitoreFaseChips(sel) {
-    if (!Array.isArray(sel.fase_keys)) sel.fase_keys = [];
-    const wrap = el('span', { style:'display:inline-flex;gap:3px;flex-wrap:wrap;align-items:center;' });
-    const ridisegna = () => {
-      wrap.innerHTML = '';
-      const assegnabili = fasiComm.filter(f => f.tipo_lavorazione_id);
-      assegnabili.forEach((f, i) => {
-        const on = sel.fase_keys.includes(f._k);
-        wrap.append(el('button', {
-          type:'button',
-          style:'font-size:11px;padding:2px 7px;border-radius:10px;cursor:pointer;font-family:JetBrains Mono,monospace;'
-            + (on ? 'background:var(--acc);color:var(--bg);border:1px solid var(--acc);font-weight:700;'
-                  : 'background:transparent;color:var(--mut);border:1px solid var(--brd);'),
-          title: (on ? 'Togli da' : 'Assegna a') + ' #' + (i+1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id),
-          onclick: () => {
-            if (!canEdit) return;
-            sel.fase_keys = on ? sel.fase_keys.filter(k => k !== f._k) : [...sel.fase_keys, f._k];
-            ridisegna();
-            // Il blocco fasi marca le esterne e il confronto separa
-            // interne/esterne: vanno rinfrescati a ogni spunta.
-            if (typeof renderFasiComm === 'function') renderFasiComm();
-            if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
-          },
-        }, '#' + (i + 1) + ' ' + tipoNomeFase(f.tipo_lavorazione_id)));
-      });
-      if (sel.fase_keys.length === 0) {
-        wrap.append(el('span', { style:'font-size:11px;color:var(--mut);font-family:JetBrains Mono,monospace;' }, '· tutta la commessa'));
-      }
-    };
-    ridisegna();
-    return wrap;
-  }
   // ── Fornitori esterni (aziende con is_fornitore=true) ─────────────
   // Stato locale: array di azienda_id allocati a questa commessa.
   // Stato locale fornitori esterni: lista di oggetti {azienda_id, numero_ordine, allocazione}.
@@ -11974,11 +11935,9 @@ function openOperazioneModal(o, opts) {
           numero_ordine: r.numero_ordine || '',
           allocazione: r.allocazione || 1.0,
           importo: r.importo != null ? Number(r.importo) : null,
-          tutta_fuori: false,
           fase_keys: [],
         };
       }
-      if (r.tutta_fuori === true) byAz[r.azienda_id].tutta_fuori = true;
       if (r.fase_id) byAz[r.azienda_id].fase_keys.push(r.fase_id);
       if (byAz[r.azienda_id].importo == null && r.importo != null) byAz[r.azienda_id].importo = Number(r.importo);
       if (!byAz[r.azienda_id].numero_ordine && r.numero_ordine) byAz[r.azienda_id].numero_ordine = r.numero_ordine;
@@ -11990,10 +11949,6 @@ function openOperazioneModal(o, opts) {
   // TOTALE dell'ordine. Con quello il conto della commessa sa quanto costa
   // senza bisogno di fasi. La colonna c'e' se una riga qualsiasi ce l'ha.
   const importoForAttivo = (state.opFornitori || []).some(r => r && ('importo' in r));
-  // «LA FA TUTTA LUI» (9 nov): sostituisce le fasi sul fornitore. Spenta = il
-  // fornitore e' solo un costo e le ore restano nostre; accesa = commessa
-  // tutta sua (tuttaAlFornitore in domain). C'e' se la colonna c'e'.
-  const tuttaForAttivo = (state.opFornitori || []).some(r => r && ('tutta_fuori' in r));
   // ── Prezzo fase suggerito (per fornitore): ore assegnate × tariffa €/h ──
   // Le ore sono la quota di lavoro di QUEL fornitore: somma min/pz delle sue
   // fasi (nessuna chip = tutta la commessa; commessa senza fasi = budget
@@ -12069,7 +12024,7 @@ function openOperazioneModal(o, opts) {
       forSuggWrap.append(el('button', { type:'button', class:'btnsm',
         title:'Aggiunge il fornitore a questa commessa',
         onclick: () => {
-          fornitoriSel.push({ azienda_id: id, numero_ordine: '', allocazione: 1.0, tutta_fuori: false, fase_keys: [] });
+          fornitoriSel.push({ azienda_id: id, numero_ordine: '', allocazione: 1.0, fase_keys: [] });
           renderForSelected(); renderForDropList();
           if (typeof renderFasiComm === 'function') renderFasiComm();
           if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
@@ -12144,32 +12099,19 @@ function openOperazioneModal(o, opts) {
         if (!canEdit) inputImp.disabled = true;
         row.append(inputImp, el('span', { class:'sub', style:'font-size:11px;margin-left:-4px;' }, '€'));
       }
-      if (tuttaForAttivo) {
-        const chk = el('input', { type:'checkbox' });
-        chk.checked = !!sel.tutta_fuori;
-        chk.disabled = !canEdit;
-        chk.onchange = () => {
-          sel.tutta_fuori = chk.checked;
-          if (typeof renderFasiComm === 'function') renderFasiComm();
-          if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
-          if (aggiornaPreviewInizio) aggiornaPreviewInizio();
-        };
-        row.append(el('label', { style:'display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--txt);cursor:pointer;white-space:nowrap;',
-          title:'Spuntata: la commessa la fa tutta il fornitore, le nostre ore previste vanno a zero. '
-            + 'Vuota: il fornitore ne fa una parte ed è solo un costo; le ore restano nostre.' }, chk, 'la fa tutta lui'));
-        // Fasi gia' assegnate prima del 9 nov: visibili, togliibili, non piu' nuove.
-        if ((sel.fase_keys || []).length) {
-          row.append(el('span', { style:'display:inline-flex;gap:4px;align-items:center;font-size:11px;color:var(--mut);font-family:JetBrains Mono,monospace;' },
-            'fase: ' + sel.fase_keys.map(k => { const f = fasiComm.find(x => x._k === k); return f ? tipoNomeFase(f.tipo_lavorazione_id) : '?'; }).join(', '),
-            ...(canEdit ? [el('button', { type:'button', class:'btnsm', title:'Togli la fase: il fornitore resta sulla commessa',
-              onclick: () => { sel.fase_keys = []; renderForSelected();
-                if (typeof renderFasiComm === 'function') renderFasiComm();
-                if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm(); } }, '✕')] : [])));
-        }
-      } else if (fasiAssegnabili().length >= 1) {
-        // Prima della colonna: le chip delle fasi come prima.
-        row.append(buildFornitoreFaseChips(sel));
+      // Fasi sul fornitore: non si assegnano piu' (Nico, 9 nov: conta chi e
+      // quanto costa, non quale fase). Quelle gia' assegnate restano visibili
+      // e si possono togliere.
+      if ((sel.fase_keys || []).length) {
+        row.append(el('span', { style:'display:inline-flex;gap:4px;align-items:center;font-size:11px;color:var(--mut);font-family:JetBrains Mono,monospace;' },
+          'fase: ' + sel.fase_keys.map(k => { const f = fasiComm.find(x => x._k === k) || (state.opFasi || []).find(x => x.id === k);
+              return f ? tipoNomeFase(f.tipo_lavorazione_id) : '?'; }).join(', '),
+          ...(canEdit ? [el('button', { type:'button', class:'btnsm', title:'Togli la fase: il fornitore resta sulla commessa',
+            onclick: () => { sel.fase_keys = []; renderForSelected();
+              if (typeof renderFasiComm === 'function') renderFasiComm();
+              if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm(); } }, '✕')] : [])));
       }
+
       // Bottone elimina
       if (canEdit) {
         row.append(el('button', {
@@ -12230,7 +12172,6 @@ function openOperazioneModal(o, opts) {
               azienda_id: a.id,
               numero_ordine: '',
               allocazione: 1.0,
-              tutta_fuori: false,
               fase_keys: [],
             });
           }
@@ -12859,12 +12800,7 @@ function openOperazioneModal(o, opts) {
       if (!tutti.length) return null;
       return el('div', { class:'sub',
         style:'margin-top:6px;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--yel);' },
-        tuttaForAttivo
-          ? ((fornitoriSel || []).some(s => s.tutta_fuori)
-              ? '⚙ La fa tutta il fornitore: ' + (fornitoriSel || []).filter(s => s.tutta_fuori)
-                  .map(s => (state.aziende.find(a => a.id === s.azienda_id) || {}).nome || '?').join(', ')
-              : '⚙ Fornitore (solo costo, le ore restano nostre): ' + tutti.join(', '))
-          : '⚙ Fornitore su tutta la commessa: ' + tutti.join(', ') + ' (in quota con gli interni)');
+        '⚙ Fornitore su tutta la commessa: ' + tutti.join(', ') + ' (in quota con gli interni)');
     } catch (e) { return null; }
   }
   function renderFasiComm() {
@@ -14907,8 +14843,7 @@ function openOperazioneModal(o, opts) {
         const fornitoriPayload = [];
         fornitoriSel.forEach(s => {
           const base = { azienda_id: s.azienda_id, numero_ordine: s.numero_ordine, allocazione: s.allocazione,
-            ...(importoForAttivo ? { importo: s.importo != null ? s.importo : null } : {}),
-            ...(tuttaForAttivo ? { tutta_fuori: !!s.tutta_fuori } : {}) };
+            ...(importoForAttivo ? { importo: s.importo != null ? s.importo : null } : {}) };
           const keys = (s.fase_keys || []).map(k => resolveFase(k)).filter(Boolean);
           if (keys.length === 0) fornitoriPayload.push({ ...base, fase_id: null });
           else keys.forEach(fid => fornitoriPayload.push({ ...base, fase_id: fid }));

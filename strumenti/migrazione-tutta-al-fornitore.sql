@@ -1,4 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════
+-- ⚠ NON PIU LETTA dal 9 nov sera (2026-11-09.04): la casella e stata tolta, la colonna resta.
 -- «LA FA TUTTA LUI» AL POSTO DELLE FASI SUL FORNITORE (Nico, 9 nov 2026)
 -- Nico: le fasi sul fornitore non le vuole; se un fornitore fa tutta la
 -- commessa o solo una parte "dipende". Casella sulla riga fornitore:

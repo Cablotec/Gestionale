@@ -60,20 +60,5 @@ ctx.state.opFornitori = [{ operazione_id: 'O1', azienda_id: 'ALTRO', fase_id: nu
 t('prodotto: altro fornitore senza prezzo = costo non noto', ctx.contoCommessa(opA).senzaCosto === 1);
 ctx.state.articoli = [];
 
-// 6. «LA FA TUTTA LUI» (colonna tutta_fuori presente)
-ctx.state.sessioni = [];
-const opT = { id: 'O1', quantita: 1, minuti_unitari: 332 };
-ctx.state.opFornitori = [{ operazione_id: 'O1', azienda_id: 'ANGELA', fase_id: null, tutta_fuori: false }];
-t('casella spenta: fornitore solo costo, ore nostre intere', Math.abs(ctx.opCalcOreInterne(opT) - 332 / 60) < 1e-9 && Math.abs(ctx.pagatoOreInterne(opT) - 332 / 60) < 1e-9);
-ctx.state.opFornitori[0].tutta_fuori = true;
-t('casella accesa: tutta fuori, ore nostre 0', ctx.opCalcOreInterne(opT) === 0 && ctx.pagatoOreInterne(opT) === 0);
-ctx.state.opFasi = [{ id: 'F1', operazione_id: 'O1', ordine: 1, minuti_unitari: 200 }, { id: 'F2', operazione_id: 'O1', ordine: 2, minuti_unitari: 132 }];
-t('casella accesa vale anche con le fasi', ctx.opCalcOreInterne(opT) === 0);
-ctx.state.sessioni = [{ operazione_id: 'O1', fine: '2026-10-15T10:00:00Z', durata_secondi: 3600 }];
-t('casella accesa ma timbrata da noi: intera', Math.abs(ctx.pagatoOreInterne(opT) - 332 / 60) < 1e-9);
-ctx.state.opFasi = []; ctx.state.sessioni = [];
-ctx.state.opFornitori = [{ operazione_id: 'O1', azienda_id: 'ANGELA', fase_id: null }];
-t('senza colonna: regola di prima (intera = tutta fuori)', ctx.opCalcOreInterne(opT) === 0);
-
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);
