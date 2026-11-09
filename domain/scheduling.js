@@ -1729,6 +1729,52 @@ function consuntivoCommessa(op) {
   };
 }
 
+// ── CONTO DELLA COMMESSA (9 nov, Nico) ────────────────────────────────────
+// "Dando un ordine a fornitore + ore fatte interne, ci stiamo come prezzo?"
+// Prezzo totale − quanto costano i fornitori = quello che resta per il
+// lavoro nostro; diviso le ore INTERNE timbrate = quanto ha reso davvero
+// un'ora nostra (da confrontare con la tariffa del cliente).
+// Costo di un fornitore, in quest'ordine:
+//   'concordato' → l'importo fisso dell'ordine (operazioni_fornitori.importo,
+//                  TOTALE dell'ordine; non serve la fase: conta quanto costa)
+//   'ore'        → le sue ore a consuntivo × tariffa (oreEsterneCommessa)
+//   null         → nessun costo noto: si dichiara, non si conta zero in silenzio
+// Ritorna { prezzo, fornitori:[{aziendaId, nome, costo, fonte}], costoFornitori,
+//   senzaCosto, resta, oreInterne, euroOra, tariffa } — null senza prezzo.
+function contoCommessa(op) {
+  if (!op) return null;
+  const prezzo = (Number(op.prezzo_unitario) || 0) * (Number(op.quantita) || 0);
+  if (!(prezzo > 0)) return null;
+  const nomeAz = (id) => ((state.aziende || []).find(a => a.id === id) || {}).nome || '?';
+  const oe = (typeof oreEsterneCommessa === 'function') ? oreEsterneCommessa(op.id) : { righe: [] };
+  const ids = [...new Set([
+    ...(state.opFornitori || []).filter(r => r.operazione_id === op.id).map(r => r.azienda_id),
+    ...oe.righe.map(r => r.aziendaId)].filter(Boolean))];
+  const fornitori = ids.map(id => {
+    // Un fornitore su piu' fasi ha piu' righe con lo STESSO importo: si conta una volta.
+    const imp = Math.max(0, ...(state.opFornitori || [])
+      .filter(r => r.operazione_id === op.id && r.azienda_id === id).map(r => Number(r.importo) || 0));
+    if (imp > 0) return { aziendaId: id, nome: nomeAz(id), costo: imp, fonte: 'concordato' };
+    const sue = oe.righe.filter(r => r.aziendaId === id);
+    const conCosto = sue.filter(r => r.costo != null);
+    if (conCosto.length) return { aziendaId: id, nome: nomeAz(id),
+      costo: Math.round(conCosto.reduce((s, r) => s + r.costo, 0) * 100) / 100, fonte: 'ore' };
+    return { aziendaId: id, nome: nomeAz(id), costo: null, fonte: null };
+  });
+  const costoFornitori = Math.round(fornitori.reduce((s, f) => s + (f.costo || 0), 0) * 100) / 100;
+  const cc = consuntivoCommessa(op);
+  const oreInterne = cc ? cc.oreInterne : opCalcOreReali(op);
+  const resta = Math.round((prezzo - costoFornitori) * 100) / 100;
+  const cli = (state.aziende || []).find(a => a.id === op.cliente_id);
+  return {
+    prezzo: Math.round(prezzo * 100) / 100, fornitori, costoFornitori,
+    senzaCosto: fornitori.filter(f => f.costo == null).length,
+    resta, oreInterne,
+    euroOra: oreInterne > 0.05 ? Math.round(resta / oreInterne * 100) / 100 : null,
+    tariffa: Number(cli && cli.tariffa_cliente) || 0,
+  };
+}
+
 // Scostamenti prezzo-vs-consuntivo di un cliente: per ogni suo articolo con
 // prezzo, confronta il listino vivo (ultimo prezzo praticato) col prezzo che
 // le ore realmente timbrate giustificherebbero. Ordinati per scarto assoluto:

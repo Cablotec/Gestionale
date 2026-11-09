@@ -31,5 +31,20 @@ t('consuntivo: 17,2 su 5,5 pagate, sforo', cc && Math.abs(cc.pagato - 332 / 60) 
 ctx.state.opFornitori = [];
 t('senza fornitore: pagato intero', Math.abs(ctx.pagatoOreInterne(op) - 332 / 60) < 1e-9);
 
+// 4. CONTO: prezzo − importo concordato del fornitore, diviso le ore nostre
+ctx.state.opFornitori = [{ operazione_id: 'O1', azienda_id: 'ANGELA', fase_id: null, importo: 40 }];
+ctx.state.aziende = [{ id: 'ANGELA', nome: 'Angela' }, { id: 'ELC', nome: 'Elcotec', tariffa_cliente: 27.3 }];
+const opP = { id: 'O1', quantita: 1, minuti_unitari: 332, prezzo_unitario: 151.2, cliente_id: 'ELC' };
+const c = ctx.contoCommessa(opP);
+t('conto: 151,20 − 40 = 111,20', c && c.resta === 111.2 && c.costoFornitori === 40);
+t('conto: 111,20 / 17,2 h = 6,47 euro/h', c && c.euroOra === 6.47 && c.tariffa === 27.3);
+t('conto: fonte concordato', c && c.fornitori[0].fonte === 'concordato');
+ctx.state.opFornitori.push({ operazione_id: 'O1', azienda_id: 'ANGELA', fase_id: 'F2', importo: 40 });
+t('conto: fornitore su due fasi contato una volta', ctx.contoCommessa(opP).costoFornitori === 40);
+ctx.state.opFornitori = [{ operazione_id: 'O1', azienda_id: 'ANGELA', fase_id: null }];
+const s = ctx.contoCommessa(opP);
+t('conto: senza importo = senza costo, non zero nascosto', s.senzaCosto === 1 && s.fornitori[0].costo === null);
+t('conto: senza prezzo = null', ctx.contoCommessa({ id: 'O1', quantita: 1 }) === null);
+
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);

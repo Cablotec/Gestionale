@@ -1371,6 +1371,7 @@ async function syncOperazioneFornitori(opId, nuovi) {
       allocazione: 1.0,
       numero_ordine: n.numero_ordine || null,
       fase_id: n.fase_id || null,
+      ...('importo' in n ? { importo: n.importo } : {}),
     }));
     const { data, error } = await sb.from('operazioni_fornitori').insert(rows).select();
     if (error) return { error };
@@ -1384,9 +1385,11 @@ async function syncOperazioneFornitori(opId, nuovi) {
     const vecchia = vecchieByKey[chiave(n)];
     if (!vecchia) continue; // già gestito da insert
     const nuovoNum = n.numero_ordine || null;
-    if ((vecchia.numero_ordine || null) === nuovoNum) continue;
+    const conImp = 'importo' in n;
+    const impUguale = !conImp || (vecchia.importo == null ? null : Number(vecchia.importo)) === (n.importo == null ? null : Number(n.importo));
+    if ((vecchia.numero_ordine || null) === nuovoNum && impUguale) continue;
     const { data, error } = await sb.from('operazioni_fornitori')
-      .update({ numero_ordine: nuovoNum })
+      .update({ numero_ordine: nuovoNum, ...(conImp ? { importo: n.importo } : {}) })
       .eq('id', vecchia.id).select().single();
     if (error) return { error };
     state.opFornitori = state.opFornitori.map(x => x.id === vecchia.id ? data : x);
@@ -11922,15 +11925,21 @@ function openOperazioneModal(o, opts) {
           azienda_id: r.azienda_id,
           numero_ordine: r.numero_ordine || '',
           allocazione: r.allocazione || 1.0,
+          importo: r.importo != null ? Number(r.importo) : null,
           fase_keys: [],
         };
       }
       if (r.fase_id) byAz[r.azienda_id].fase_keys.push(r.fase_id);
+      if (byAz[r.azienda_id].importo == null && r.importo != null) byAz[r.azienda_id].importo = Number(r.importo);
       if (!byAz[r.azienda_id].numero_ordine && r.numero_ordine) byAz[r.azienda_id].numero_ordine = r.numero_ordine;
     });
     fornitoriSel = Object.values(byAz);
   }
   const aziendeFornitrici = state.aziende.filter(a => a.is_fornitore && a.attivo);
+  // IMPORTO ORDINE (9 nov, Nico): il prezzo fisso concordato col fornitore,
+  // TOTALE dell'ordine. Con quello il conto della commessa sa quanto costa
+  // senza bisogno di fasi. La colonna c'e' se una riga qualsiasi ce l'ha.
+  const importoForAttivo = (state.opFornitori || []).some(r => r && ('importo' in r));
   // ── Prezzo fase suggerito (per fornitore): ore assegnate × tariffa €/h ──
   // Le ore sono la quota di lavoro di QUEL fornitore: somma min/pz delle sue
   // fasi (nessuna chip = tutta la commessa; commessa senza fasi = budget
@@ -12021,6 +12030,20 @@ function openOperazioneModal(o, opts) {
       });
       if (!canEdit) inputNO.disabled = true;
       row.append(inputNO);
+      if (importoForAttivo) {
+        const inputImp = el('input', { type:'number', min:'0', step:'any', placeholder:'€ ordine',
+          value: sel.importo != null ? String(sel.importo) : '',
+          title:'Prezzo fisso concordato: il TOTALE dell’ordine al fornitore (es. 40 € al pezzo × 10 pezzi = 400). '
+            + 'Serve al conto della commessa: dice se col prezzo al cliente ci stiamo.',
+          style:'width:96px;padding:4px 8px;font-family:JetBrains Mono,monospace;font-size:11px;text-align:right;',
+          oninput: (e) => {
+            const v = parseFloat(String(e.target.value).replace(',', '.'));
+            sel.importo = Number.isFinite(v) && v >= 0 ? v : null;
+            try { aggiornaMargineRiga(); } catch (err) {}
+          } });
+        if (!canEdit) inputImp.disabled = true;
+        row.append(inputImp, el('span', { class:'sub', style:'font-size:11px;margin-left:-4px;' }, '€'));
+      }
       // Chip multi-fase (compaiono solo se la commessa ha fasi assegnabili)
       if (fasiAssegnabili().length >= 1) {
         row.append(buildFornitoreFaseChips(sel));
@@ -13014,7 +13037,46 @@ function openOperazioneModal(o, opts) {
     // rigira a ogni riga di ore esterne aggiunta o rimossa.
     const prevEsterno = Math.max(0, orePrev - orePrevInt);
 
-    pCons.append(
+    // ── CONTO DELLA COMMESSA (9 nov, Nico: "dando un ordine a fornitore +
+    // ore fatte interne ci stiamo come prezzo finale?"). Prezzo − fornitori
+    // = quello che resta per noi; ÷ ore nostre = quanto ha reso un'ora.
+    // Legge i dati SALVATI (prezzo, importi): si aggiorna salvando.
+    const boxConto = el('div');
+    const renderConto = () => {
+      boxConto.innerHTML = '';
+      const c = (typeof contoCommessa === 'function') ? contoCommessa(o) : null;
+      if (!c) return;
+      const fE = (n) => '€ ' + Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const riga = (et, val, stile) => el('div', { style:'display:flex;justify-content:space-between;gap:16px;padding:2px 0;' + (stile || '') },
+        el('span', { style:'color:var(--mut);' }, et), el('span', { style:'font-weight:600;' }, val));
+      const box = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin:14px 0 10px;max-width:560px;' },
+        el('div', { style:'color:var(--mut);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;' }, 'Conto della commessa'),
+        riga('Prezzo totale', fE(c.prezzo)));
+      c.fornitori.forEach(f => box.append(riga('− ' + f.nome
+          + (f.fonte === 'concordato' ? ' (ordine)' : f.fonte === 'ore' ? ' (ore × tariffa)' : ''),
+        f.costo != null ? fE(f.costo) : 'costo non noto', f.costo == null ? 'color:var(--yel);' : '')));
+      box.append(riga('= Resta per il lavoro nostro', fE(c.resta), 'border-top:1px solid var(--brd);margin-top:3px;padding-top:4px;'),
+        riga('Ore nostre timbrate', c.oreInterne.toFixed(1).replace('.', ',') + ' h'));
+      if (c.euroOra != null) {
+        const sotto = c.tariffa > 0 && c.euroOra + 0.005 < c.tariffa;
+        const sopra = c.tariffa > 0 && !sotto;
+        box.append(el('div', { style:'display:flex;justify-content:space-between;gap:16px;padding:6px 0 0;margin-top:4px;border-top:1px solid var(--brd);' },
+          el('span', { style:'font-weight:700;' }, '€/h reale nostro'),
+          el('span', { style:'font-weight:700;font-size:15px;color:' + (sotto ? 'var(--red)' : sopra ? 'var(--grn)' : 'var(--txt)') + ';' },
+            c.euroOra.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €/h')));
+        if (c.tariffa > 0) box.append(el('div', { style:'text-align:right;font-size:11px;color:' + (sotto ? 'var(--red)' : 'var(--grn)') + ';' },
+          (sotto ? 'sotto' : 'sopra') + ' la tariffa cliente ' + c.tariffa.toLocaleString('it-IT', { minimumFractionDigits: 2 }) + ' €/h'
+          + (sotto ? ' · in pari con ' + (c.resta / c.tariffa).toFixed(1).replace('.', ',') + ' h nostre' : '')));
+      } else {
+        box.append(el('div', { class:'sub', style:'font-size:11px;padding-top:4px;' }, 'Nessuna ora nostra timbrata: il €/h si calcola quando ci sono.'));
+      }
+      if (c.senzaCosto) box.append(el('div', { style:'margin-top:6px;font-size:11px;color:var(--yel);' },
+        c.senzaCosto + (c.senzaCosto === 1 ? ' fornitore senza costo: scrivi l’importo dell’ordine' : ' fornitori senza costo: scrivi l’importo dei loro ordini')
+        + ' (Lavorazione → fornitori), o il conto è più bello del vero.'));
+      boxConto.append(box);
+    };
+    renderConto();
+    pCons.append(boxConto,
       el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
         '── Sessioni di lavoro ──'),
     );
@@ -13139,7 +13201,8 @@ function openOperazioneModal(o, opts) {
         renderTotali();
         // La sezione ore esterne ora sa ridisegnare anche i totali: aggiungere o
         // togliere un rapportino li muove all'istante, senza salvare e riaprire.
-        aggiornaTotaliCons = renderTotali;
+        // Il conto dipende dalle stesse ore: si muove con loro.
+        aggiornaTotaliCons = () => { renderTotali(); try { renderConto(); } catch (e) {} };
         boxSessioni.append(boxTotali);
 
         // Lista sessioni
@@ -13893,10 +13956,17 @@ function openOperazioneModal(o, opts) {
       // senza mai sommare stima e consuntivo della stessa ditta.
       const oreEst = (typeof oreEsterneCommessa === 'function' && !isNew)
         ? oreEsterneCommessa(o.id) : { righe: [], costoTot: 0 };
-      const conReale = new Set(oreEst.righe.filter(x => x.costo != null).map(x => x.aziendaId));
-      let costo = oreEst.righe.reduce((s, x) => s + (x.costo || 0), 0);
+      // L'IMPORTO CONCORDATO (9 nov) batte tutto: e' il prezzo fisso
+      // dell'ordine, ne' ore vere ne' stima per quel fornitore.
+      const conImporto = new Map((fornitoriSel || []).filter(s => Number(s.importo) > 0)
+        .map(s => [s.azienda_id, Number(s.importo)]));
+      const conReale = new Set(oreEst.righe.filter(x => x.costo != null && !conImporto.has(x.aziendaId)).map(x => x.aziendaId));
+      let costo = oreEst.righe.filter(x => !conImporto.has(x.aziendaId)).reduce((s, x) => s + (x.costo || 0), 0);
       let costoReale = costo, costoStima = 0, senzaTariffa = 0;
+      const costoConcordato = [...conImporto.values()].reduce((s, x) => s + x, 0);
+      costo += costoConcordato;
       (fornitoriSel || []).forEach(sel => {
+        if (conImporto.has(sel.azienda_id)) return;  // prezzo fisso: gia' contato
         if (conReale.has(sel.azienda_id)) return;   // per lei il vero c'è già
         const az = state.aziende.find(x => x.id === sel.azienda_id);
         const tariffa = Number(az && az.tariffa_oraria) || 0;
@@ -13913,6 +13983,7 @@ function openOperazioneModal(o, opts) {
       // La composizione va dichiarata: un margine mezzo stimato non deve
       // sembrare un dato consolidato.
       const comp = [];
+      if (costoConcordato > 0) comp.push('concordato ' + fmtE(costoConcordato));
       if (costoReale > 0) comp.push('ore vere ' + fmtE(costoReale));
       if (costoStima > 0) comp.push('stima ' + fmtE(costoStima));
       box.textContent = '− esterni ' + (costoStima > 0 ? '≈ ' : '') + fmtE(costo)
@@ -14701,7 +14772,8 @@ function openOperazioneModal(o, opts) {
         //    Nessuna fase selezionata = una riga con fase_id null (tutta la commessa).
         const fornitoriPayload = [];
         fornitoriSel.forEach(s => {
-          const base = { azienda_id: s.azienda_id, numero_ordine: s.numero_ordine, allocazione: s.allocazione };
+          const base = { azienda_id: s.azienda_id, numero_ordine: s.numero_ordine, allocazione: s.allocazione,
+            ...(importoForAttivo ? { importo: s.importo != null ? s.importo : null } : {}) };
           const keys = (s.fase_keys || []).map(k => resolveFase(k)).filter(Boolean);
           if (keys.length === 0) fornitoriPayload.push({ ...base, fase_id: null });
           else keys.forEach(fid => fornitoriPayload.push({ ...base, fase_id: fid }));
