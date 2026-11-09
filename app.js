@@ -11679,7 +11679,6 @@ function openOperazioneModal(o, opts) {
     entityLabel: 'cliente',
     onChange: () => {
       if (typeof aggiornaPrezzoListino === 'function') aggiornaPrezzoListino();
-      if (typeof aggiornaSuggDaConsuntivo === 'function') aggiornaSuggDaConsuntivo();
     },
   });
 
@@ -11725,8 +11724,6 @@ function openOperazioneModal(o, opts) {
       // Prezzo: pre-compila dall'ultimo usato (articolo+cliente) se il campo è
       // ancora vuoto — non sovrascrive un prezzo già digitato a mano.
       if (typeof aggiornaPrezzoListino === 'function') aggiornaPrezzoListino();
-      // Prezzo consigliato dalle ore realmente timbrate su questo articolo
-      if (typeof aggiornaSuggDaConsuntivo === 'function') aggiornaSuggDaConsuntivo();
       // Aggiorna indicatore divergenza (se la funzione è già definita)
       if (typeof aggiornaIndicatoreMinuti === 'function') aggiornaIndicatoreMinuti();
       // Trigga il refresh del preview (se la funzione è già definita)
@@ -12936,8 +12933,7 @@ function openOperazioneModal(o, opts) {
           value: String(o.prezzo_unitario != null ? o.prezzo_unitario : ''),
           min:'0', step:'0.01', placeholder:'€ per pezzo' }),
         el('div', { class:'sub', id:'prezzo-hint', style:'margin-top:4px;font-size:11px;color:var(--mut);' },
-          'Ultimo prezzo per articolo+cliente (modificabile).'),
-        el('div', { class:'sub', id:'prezzo-da-consuntivo', style:'margin-top:2px;font-size:11px;display:none;' })),
+          'Ultimo prezzo per articolo+cliente (modificabile).')),
       el('div', { class:'field' }, el('label', {}, 'Totale riga'),
         // Margine e €/h NON stanno piu' qui (9 nov, Nico): il conto della
         // commessa e' nel Consuntivo. Il €/h pagato (prezzo ÷ minuti) era
@@ -14065,52 +14061,6 @@ function openOperazioneModal(o, opts) {
     } catch (e) {}
   };
 
-  // Verso opposto: il tempo DAVVERO timbrato propone il prezzo da chiedere
-  // (ore effettive × tariffa cliente). Come sopra, MAI automatico: propone e
-  // dichiara su quante commesse poggia. Una sola commessa = giallo, perché a
-  // campione 1 un timbro storto sposta il prezzo più di una trattativa.
-  const aggiornaSuggDaConsuntivo = () => {
-    try {
-      const box = form.querySelector('#prezzo-da-consuntivo');
-      const prezzoInput = form.querySelector('#prezzo-input');
-      if (!box || !prezzoInput) return;
-      const artVal = acArticolo.getValue();
-      const cliVal = acCliente.getValue();
-      const artId = (artVal.mode === 'existing' && artVal.id) ? artVal.id : null;
-      const cliId = (cliVal.mode === 'existing' && cliVal.id) ? cliVal.id : null;
-      const s = (artId && cliId && typeof prezzoDaTempoEffettivo === 'function')
-        ? prezzoDaTempoEffettivo(artId, cliId) : null;
-      if (!s) { box.style.display = 'none'; box.innerHTML = ''; return; }
-      const fmtE = (n) => '€ ' + Number(n).toLocaleString('it-IT',
-        { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const cur = parseFloat((prezzoInput.value || '').toString().replace(',', '.')) || 0;
-      const scarto = cur > 0 ? Math.round((s.prezzo / cur - 1) * 100) : null;
-      box.style.display = '';
-      box.innerHTML = '';
-      box.append(
-        el('span', { class: s.debole ? 'etl-debole' : '', style:'font-family:JetBrains Mono,monospace;'
-            + (s.debole ? '' : 'color:var(--mut);') },
-          'da consuntivo: ' + fmtE(s.prezzo)
-          + ' (' + s.ore.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-          + ' h × ' + String(s.tariffa).replace('.', ',') + ' €/h · '
-          + s.nCommesse + (s.nCommesse === 1 ? ' commessa' : ' commesse') + ')'
-          + (scarto != null && scarto !== 0 ? ' · ' + (scarto > 0 ? '+' : '') + scarto + '%' : '')
-          + (s.fasiSenzaStorico > 0
-              ? ' · ' + s.fasiSenzaStorico
-                + (s.fasiSenzaStorico === 1 ? ' fase senza consuntivo, esclusa' : ' fasi senza consuntivo, escluse')
-              : '')),
-        ...(canEdit ? [el('button', { type:'button', class:'btnsm', style:'padding:1px 8px;margin-left:8px;',
-          onclick: () => {
-            prezzoInput.value = String(s.prezzo);
-            prezzoInput.dispatchEvent(new Event('input', { bubbles: true }));
-          } }, 'usa')] : []),
-      );
-      if (s.debole) box.title = 'Media su UNA sola commessa chiusa: indicativa, non una base di trattativa.';
-      else box.title = 'Ore realmente timbrate (ultime ' + MEDIA_ULTIME_COMMESSE
-        + ' commesse chiuse) × tariffa del cliente.';
-    } catch (e) {}
-  };
-
   const refreshPreview = () => {
     const fd = new FormData(form);
     const tmp = {
@@ -14247,10 +14197,8 @@ function openOperazioneModal(o, opts) {
     form.querySelector('[name=quantita]')?.addEventListener('input', aggiornaTotalePrezzo);
     form.querySelector('#prezzo-input')?.addEventListener('input', aggiornaTotalePrezzo);
     form.querySelector('#prezzo-input')?.addEventListener('input', aggiornaSuggDaPrezzo);
-    form.querySelector('#prezzo-input')?.addEventListener('input', aggiornaSuggDaConsuntivo);
     aggiornaPrezzoListino();
     aggiornaSuggDaPrezzo();
-    aggiornaSuggDaConsuntivo();
   }
   // Ore esterne: solo su commesse esistenti (una nuova non ha consuntivo).
   if (!isNew) renderOreEsterne();
