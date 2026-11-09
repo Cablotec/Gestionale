@@ -3160,7 +3160,6 @@ function renderAziende(root) {
   tbl.append(el('thead', {}, el('tr', {},
     el('th', {}, 'Nome'),
     el('th', { class:'tc' }, 'Ruolo'),
-    el('th', { class:'tr' }, 'Coeff.'),
     el('th', {}, 'Città'),
     el('th', {}, 'P. IVA'),
     el('th', {}, 'Email'),
@@ -3183,8 +3182,6 @@ function renderAziende(root) {
     tb.append(el('tr', {},
       el('td', {}, c.nome || '—'),
       el('td', { class:'tc' }, ruoloBadge),
-      el('td', { class:'tr mono', style:'font-size:11px;' },
-        c.is_fornitore ? Number(c.coefficiente || 1.0).toFixed(2) : '—'),
       el('td', { style:'font-size:11px;' }, c.citta ? c.citta + (c.provincia ? ' ('+c.provincia+')' : '') : ''),
       el('td', { class:'mono', style:'font-size:11px;' }, c.p_iva || ''),
       el('td', { class:'mono', style:'font-size:11px;' }, c.email || ''),
@@ -3213,7 +3210,7 @@ function openClienteModal(c) {
   c = c || {
     nome:'', via:'', citta:'', cap:'', provincia:'',
     p_iva:'', email:'', note:'', attivo:true,
-    is_cliente:true, is_fornitore:false, coefficiente:1.0,
+    is_cliente:true, is_fornitore:false,
   };
   const readonly = !isAdmin;
 
@@ -3245,20 +3242,6 @@ function openClienteModal(c) {
   const chkFornitore = el('input', { type:'checkbox', name:'is_fornitore' });
   chkFornitore.checked = !!c.is_fornitore;
 
-  // Coefficiente (visibile solo se fornitore)
-  const inCoeff = el('input', {
-    type:'number', name:'coefficiente', step:'0.05', min:'0', max:'10',
-    value: String(c.coefficiente != null ? c.coefficiente : 1.0),
-    style:'width:100px;',
-  });
-  const coeffRow = el('div', { class:'field' },
-    el('label', {}, 'Coefficiente fornitore'),
-    el('div', { style:'display:flex;align-items:center;gap:10px;' },
-      inCoeff,
-      el('span', { style:'font-size:11px;color:var(--mut);' },
-        'capacità relativa rispetto a 1 operatore interno (1.0 = uguale)'),
-    ),
-  );
   // Tariffa oraria fornitore (€/h): base del prezzo fase suggerito nel modal
   // commessa (ore fase × tariffa). Colonna nuova su aziende: finché la
   // migrazione non è eseguita il campo resta spento e il salvataggio non la
@@ -3331,19 +3314,18 @@ function openClienteModal(c) {
   );
 
   // Visibilità dei campi legata ai checkbox ruolo
-  const aggiornaCoeff = () => {
-    coeffRow.style.display = chkFornitore.checked ? '' : 'none';
+  const aggiornaRuoli = () => {
     tariffaRow.style.display = chkFornitore.checked ? '' : 'none';
     tariffaCliRow.style.display = chkCliente.checked ? '' : 'none';
     contoLavRow.style.display = chkCliente.checked ? '' : 'none';
   };
-  aggiornaCoeff();
-  chkFornitore.addEventListener('change', aggiornaCoeff);
-  chkCliente.addEventListener('change', aggiornaCoeff);
+  aggiornaRuoli();
+  chkFornitore.addEventListener('change', aggiornaRuoli);
+  chkCliente.addEventListener('change', aggiornaRuoli);
 
   if (readonly) {
     [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inEmail, inNote, selAttivo,
-     chkCliente, chkFornitore, inCoeff, inTariffa, inTariffaCli]
+     chkCliente, chkFornitore, inTariffa, inTariffaCli]
       .forEach(i => i.disabled = true);
   }
 
@@ -3359,7 +3341,6 @@ function openClienteModal(c) {
       el('label', { style:'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:8px 12px;border:1px solid var(--brd);border-radius:4px;flex:1;' },
         chkFornitore, 'Fornitore'),
     ),
-    coeffRow,
     tariffaRow,
     tariffaCliRow,
     contoLavRow,
@@ -3396,10 +3377,6 @@ function openClienteModal(c) {
       if (!isCliente && !isFornitore) {
         return toast('Seleziona almeno un ruolo (Cliente o Fornitore)', 'err');
       }
-      const coeff = Number(fd.get('coefficiente') || 1.0);
-      if (isFornitore && (!Number.isFinite(coeff) || coeff < 0 || coeff > 10)) {
-        return toast('Coefficiente deve essere tra 0 e 10', 'err');
-      }
       const payload = {
         nome: (fd.get('nome')||'').trim(),
         via: (fd.get('via')||'').trim() || null,
@@ -3412,7 +3389,6 @@ function openClienteModal(c) {
         attivo: fd.get('attivo') === 'true',
         is_cliente: isCliente,
         is_fornitore: isFornitore,
-        coefficiente: isFornitore ? coeff : 1.0,
       };
       // tariffa_oraria solo se la colonna esiste (migrazione eseguita)
       if (tariffaDisponibile) {
@@ -12046,10 +12022,9 @@ function openOperazioneModal(o, opts) {
       const row = el('div', {
         style:'display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 10px;background:rgba(212,140,40,.08);border:1px solid rgba(212,140,40,.3);border-radius:4px;',
       });
-      // Nome fornitore + coefficiente: mai sotto i 140px, come le righe addetti
+      // Nome fornitore: mai sotto i 140px, come le righe addetti
       row.append(el('div', { style:'flex:1 1 auto;min-width:140px;color:var(--yel);font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
-        a.nome + (a.coefficiente && a.coefficiente !== 1
-          ? ` · coef ${Number(a.coefficiente).toFixed(2)}` : '')));
+        a.nome));
       // Input numero ordine fornitore.
       // Accetta sia OF (Ordine Fornitore) sia OL (Ordine Lavorazione).
       // Precompilo con OF perché caso più frequente; l'utente sostituisce
@@ -12179,9 +12154,7 @@ function openOperazioneModal(o, opts) {
         },
       },
         el('span', { class:'util-row-chk' }, isSel ? '✓' : ''),
-        el('span', { class:'util-row-name' }, a.nome
-          + (a.coefficiente && a.coefficiente !== 1
-              ? ` (coef ${Number(a.coefficiente).toFixed(2)})` : '')),
+        el('span', { class:'util-row-name' }, a.nome),
       ));
     });
   };
@@ -19538,7 +19511,7 @@ async function kioskStopSessione(sess, modalita) {
   }
 }
 
-// [→ domain/scheduling.js] carico%: distribuisciOreOperazione, pesiEntitaCommessa, calcolaCaricoUtenteRange, calcolaCaricoFornitoreRange
+// [→ domain/scheduling.js] carico%: distribuisciOreOperazione, pesiEntitaCommessa, calcolaCaricoUtenteRange
 
 
 
@@ -20552,7 +20525,6 @@ function renderGanttCommesse(root) {
     legVoce(legChip('background:var(--sur2);border-left:2px dashed var(--red);border-radius:0;width:10px;'), 'scadenza'),
     legVoce(legChip('background:linear-gradient(to right, var(--blu) 0 35%, var(--sur) 35% 65%, var(--blu) 65%);border:1px solid var(--brd);'),
       'buco = giorni non lavorati'),
-    legVoce(legChip('background:rgba(212,140,40,.35);border:1px solid rgba(212,140,40,.6);'), 'fornitori esterni (righe in fondo) · ⚙ = fornitore in quota'),
   ));
 
   const operatori = state.utenti
@@ -20831,12 +20803,11 @@ function renderGanttCommesse(root) {
         style:`width:${Math.min(100, perc*100)}%;`,
       });
       if (!c.ritardo) bar.append(fill);
-      // etichetta (il fornitore è scritto in chiaro, non solo nel tooltip)
+      // etichetta (il fornitore resta solo nel tooltip: spiega la quota divisa)
       bar.append(el('div', { class:'gantt-cmbar-txt' },
         (c.ritardo ? '⚠ RIT. ' + c.ritardo + 'g · ' : '')
         + (art && art.codice ? art.codice : 'OP')
-        + '  ' + Math.round(cons) + '/' + Math.round(prev) + 'h'
-        + (fornNomi.length ? ' · ⚙ ' + fornNomi.join(', ') : '')));
+        + '  ' + Math.round(cons) + '/' + Math.round(prev) + 'h'));
       track.append(bar);
 
       // Interruzioni: la barra NON tira dritto sui giorni in cui non si
@@ -20890,166 +20861,6 @@ function renderGanttCommesse(root) {
     }, sez.label));
     sez.utenti.forEach(buildRigaCom);
   });
-
-  // ── Sezione FORNITORI ESTERNI ──
-  // Costruisco righe per ogni azienda con is_fornitore=true e attiva che ha
-  // almeno una assegnazione in operazioni_fornitori. Le altre non hanno senso
-  // mostrarle qui (sezione vuota se nessuno è coinvolto).
-  const fornitoriCoinvolti = state.aziende
-    .filter(a => a.is_fornitore && a.attivo)
-    .filter(a => state.opFornitori.some(r => r.azienda_id === a.id))
-    .sort((a, b) => a.nome.localeCompare(b.nome));
-
-  if (fornitoriCoinvolti.length > 0) {
-    grid.append(el('div', {
-      class: 'gruppo-hd',
-      style: 'grid-column:1 / -1;',
-    }, 'FORNITORI ESTERNI'));
-
-    const buildRigaForCom = (a) => {
-      // Calcolo carico % del fornitore (considera coefficiente capacità)
-      const carico = calcolaCaricoFornitoreRange(a.id, rangeStartIso, rangeEndIso);
-      const percRound = Math.round(carico.perc * 100);
-      const percTxt = percRound + '%';
-      const coloreCarico = {
-        libero: 'var(--grn)',
-        normale: 'var(--blu)',
-        pieno: 'var(--yel)',
-        sovraccarico: 'var(--red)',
-      }[carico.livello];
-      const barW = Math.min(100, percRound);
-
-      grid.append(el('div', {
-        class:'gantt-row-nome',
-        // Lo stile differenzia visivamente i fornitori (sfondo arancione tenue)
-        style:'flex-direction:column;align-items:stretch;justify-content:center;gap:4px;'
-          + 'background:rgba(212,140,40,.06);border-left:2px solid rgba(212,140,40,.45);',
-        title: `${a.nome} (fornitore, coef ${carico.coefficiente.toFixed(2)}): `
-          + `${carico.oreCarico.toFixed(1)}h di lavoro residuo su `
-          + `${carico.oreCapacita.toFixed(0)}h di capacità nel periodo visibile (${percTxt})`,
-      },
-        el('div', { style:'font-weight:600;line-height:1.1;color:var(--yel);' },
-          a.nome + (carico.coefficiente !== 1
-            ? ` · ${carico.coefficiente.toFixed(2)}` : '')),
-        el('div', {
-          style: 'position:relative;height:14px;background:var(--sur2);border-radius:3px;overflow:hidden;border:1px solid var(--brd);',
-        },
-          el('div', {
-            style: `position:absolute;left:0;top:0;bottom:0;width:${barW}%;background:${coloreCarico};transition:width .2s;`,
-          }),
-          el('div', {
-            style: 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
-              + `font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:700;`
-              + 'color:var(--bg);letter-spacing:.02em;text-shadow:0 0 2px rgba(255,255,255,.4);',
-          }, percTxt),
-        ),
-      ));
-
-      // Commesse in cui il fornitore è coinvolto
-      const commesse = [];
-      state.operazioni.forEach(o => {
-        if (!o.scadenza) return;
-        const for_ids = getOperazioneFornitori(o.id);
-        if (!for_ids.includes(a.id)) return;
-        // In ritardo: ancorata a oggi come nelle righe operatore
-        if (o.scadenza < oggiISO && o.stato !== 'spedita' && o.stato !== 'completata'
-            && opCalcOreResidue(o) > 0) {
-          const fineR = opFineLavoro(o, oggiISO);
-          if (fineR < rangeStartIso || oggiISO > rangeEndIso) return;
-          const dopoScad = parseISODate(o.scadenza); dopoScad.setDate(dopoScad.getDate() + 1);
-          commesse.push({ op:o, inizio:oggiISO, scadenza:o.scadenza, fine:fineR,
-            ritardo: contaGiorniLavorativi(toLocalISO(dopoScad), oggiISO) });
-          return;
-        }
-        const inizio = opInizio(o) || o.scadenza;
-        const fine = opFineLavoro(o, inizio);
-        if (fine < rangeStartIso || inizio > rangeEndIso) return;
-        commesse.push({ op:o, inizio, scadenza:o.scadenza, fine });
-      });
-
-      const track = el('div', {
-        class:'gantt-cmrow',
-        style:`grid-column: 2 / span ${slots.length}; position:relative;`
-          + 'background:rgba(212,140,40,.03);',
-      });
-
-      // Colonne sfondo (weekend, oggi, festivi/chiusure)
-      slots.forEach((slot, i) => {
-        const cls = ['gantt-cmcol'];
-        if (slot.weekend) cls.push('weekend');
-        const nomeNonLav = !slot.weekend && nonLavMap[slot.dateISO];
-        if (nomeNonLav) cls.push('nonlav');
-        if (slot.dateISO === oggiISO || slot.isOggi) cls.push('oggi');
-        track.append(el('div', {
-          class:cls.join(' '),
-          style:`left:${i*slotWidth}px;width:${slotWidth}px;`,
-          title: nomeNonLav || undefined,
-        }));
-      });
-
-      const BAR_H = 18;
-      const GAP = 4;
-
-      // Disegno le barre delle commesse (stesso pattern degli utenti)
-      commesse.sort((a, b) => (a.inizio || '').localeCompare(b.inizio || ''));
-      commesse.forEach((c, idx) => {
-        // Clip ai bordi del range visibile: una commessa che attraversa tutto
-        // il mese ha inizio/scadenza fuori dagli slot, ma deve comunque
-        // mostrare la barra a tutta larghezza. Usiamo lo stesso pattern
-        // del blocco utenti sopra.
-        let i0 = slotIndexOfIso(c.inizio < rangeStartIso ? rangeStartIso : c.inizio);
-        let i1 = slotIndexOfIso(c.fine > rangeEndIso ? rangeEndIso : c.fine);
-        if (i0 < 0) i0 = 0;
-        if (i1 < 0) i1 = slots.length - 1;
-        const left = i0 * slotWidth;
-        const width = Math.max(slotWidth * 0.6, (i1 - i0 + 1) * slotWidth - 4);
-
-        const art = state.articoli.find(x => x.id === c.op.articolo_id);
-        const cli = state.aziende.find(x => x.id === c.op.cliente_id);
-        const prev = opCalcOre(c.op);
-
-        const bar = el('div', {
-          class: 'gantt-cmbar' + (c.ritardo ? ' inritardo' : '') + (c.op.id === state.ganttHighlightOp ? ' evidenzia' : ''),
-          'data-op-id': c.op.id,
-          style: `left:${left}px;width:${width}px;top:${idx*(BAR_H+GAP)}px;`
-            + (c.ritardo ? '' : 'border-color:rgba(212,140,40,.6);'),
-          title:
-            'Commessa ' + (c.op.numero_ordine || '')
-            + (cli ? '\nCliente: ' + cli.nome : '')
-            + (art ? '\nArticolo: ' + (art.codice || '') : '')
-            + (c.ritardo ? '\n⚠ IN RITARDO di ' + c.ritardo + ' giorn' + (c.ritardo === 1 ? 'o' : 'i')
-                + ' lavorativ' + (c.ritardo === 1 ? 'o' : 'i') + ' — barra ancorata a oggi' : '')
-            + '\nPreventivo: ' + prev.toFixed(1) + ' h'
-            + '\nLavoro: ' + fmtIT(c.inizio) + ' → ' + fmtIT(c.fine)
-            + '\nScadenza: ' + fmtIT(c.scadenza)
-            + '\n(clic per aprire la commessa)',
-          onclick: () => { if (typeof openOperazioneModal === 'function') openOperazioneModal(c.op); },
-        });
-        bar.append(el('div', { class:'gantt-cmbar-txt' },
-          (c.ritardo ? '⚠ RIT. ' + c.ritardo + 'g · ' : '')
-          + (art && art.codice ? art.codice : 'OP') + '  ' + Math.round(prev) + 'h'));
-        track.append(bar);
-
-        // Marcatore scadenza (vedi blocco operatori)
-        if (c.scadenza !== c.fine && c.scadenza >= rangeStartIso && c.scadenza <= rangeEndIso) {
-          const iScad = slotIndexOfIso(c.scadenza);
-          if (iScad >= 0) {
-            track.append(el('div', {
-              class: 'gantt-cmdeadline',
-              style: `left:${iScad*slotWidth}px;top:${idx*(BAR_H+GAP)}px;height:${BAR_H}px;`,
-              title: 'Scadenza: ' + fmtIT(c.scadenza),
-            }));
-          }
-        }
-      });
-
-      const hRiga = Math.max(38, commesse.length * (BAR_H+GAP) + 8);
-      track.style.minHeight = hRiga + 'px';
-      grid.append(track);
-    };
-
-    fornitoriCoinvolti.forEach(buildRigaForCom);
-  }
 
   wrap.append(grid);
   root.append(wrap);

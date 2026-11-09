@@ -74,16 +74,16 @@ function capacitaGiorno(dateObj, addettiIds, fornitoriRows) {
     const assenti = oreAssenzaUtenteGiorno(uid, iso);
     cap += Math.max(0, ORE_STANDARD_GIORNO - assenti);
   });
-  // Contributo fornitori esterni: 8h × coefficiente × allocazione.
+  // Contributo fornitori esterni: 8h × allocazione (il coefficiente
+  // d'anagrafica e' stato tolto il 9 nov: valeva 1 per tutti).
   // fornitoriRows è array di {azienda_id, allocazione} (formato di state.opFornitori
   // o equivalente passato dal modal di creazione). Niente assenze per i fornitori.
   if (fornitoriRows && fornitoriRows.length) {
     fornitoriRows.forEach(r => {
       const az = state.aziende.find(a => a.id === r.azienda_id);
       if (!az || !az.is_fornitore) return;
-      const coef = Number(az.coefficiente != null ? az.coefficiente : 1.0);
       const alloc = Number(r.allocazione != null ? r.allocazione : 1.0);
-      cap += ORE_STANDARD_GIORNO * coef * alloc;
+      cap += ORE_STANDARD_GIORNO * alloc;
     });
   }
   return cap;
@@ -696,9 +696,9 @@ function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
 // Calcola i pesi di ripartizione di una commessa tra addetti e fornitori.
 // Modello: ogni entità riceve quota proporzionale al proprio peso di capacità.
 //   - Addetto interno → peso 1.0 (capacità piena)
-//   - Fornitore → peso (coefficiente × allocazione)
+//   - Fornitore → peso = allocazione
 // Ritorna: { totale, addetti: Map<utente_id, peso>, fornitori: Map<azienda_id, peso> }
-// Usato sia da calcolaCaricoUtenteRange sia da calcolaCaricoFornitoreRange,
+// Usato da calcolaCaricoUtenteRange e dalle quote del Gantt,
 // così la ripartizione è SEMPRE coerente: l'aggiunta di un fornitore alleggerisce
 // gli addetti, e viceversa.
 function pesiEntitaCommessa(opId) {
@@ -717,9 +717,7 @@ function pesiEntitaCommessa(opId) {
     azViste.add(r.azienda_id);
     const az = state.aziende.find(a => a.id === r.azienda_id);
     if (!az) return;
-    const coef = Number(az.coefficiente != null ? az.coefficiente : 1.0);
-    const alloc = Number(r.allocazione != null ? r.allocazione : 1.0);
-    const peso = coef * alloc;
+    const peso = Number(r.allocazione != null ? r.allocazione : 1.0);
     pesiFor.set(r.azienda_id, peso);
     totale += peso;
   });
@@ -785,14 +783,10 @@ function calcolaCaricoUtenteRange(uid, isoStart, isoEnd) {
           if (!f || !w) return;
           const oreFase = (pezzi * (Number(f.minuti_unitari) || 0)) / 60;
           if (oreFase <= 0) return;
-          // Peso della fase: addetti (1 cad.) + fornitori (coef × allocazione)
+          // Peso della fase: addetti (1 cad.) + fornitori (allocazione)
           const { addetti, fornitori } = faseAssegnatari(o, fid);
           let totFase = addetti.length * 1.0;
-          fornitori.forEach(fr => {
-            const az = state.aziende.find(a => a.id === fr.azienda_id);
-            const coef = az ? Number(az.coefficiente != null ? az.coefficiente : 1.0) : 1.0;
-            totFase += coef * Number(fr.allocazione != null ? fr.allocazione : 1.0);
-          });
+          fornitori.forEach(fr => { totFase += Number(fr.allocazione != null ? fr.allocazione : 1.0); });
           if (totFase <= 0) return;
           const quota = oreFase * (1.0 / totFase);
           const distrib = distribuisciOreOperazione(w.inizio, w.fine, quota);
@@ -828,66 +822,11 @@ function calcolaCaricoUtenteRange(uid, isoStart, isoEnd) {
   return { oreCarico, oreCapacita: capacitaNetta, perc, livello };
 }
 
-// Calcola il carico % di un'azienda fornitrice in una finestra temporale.
-// Capacità: giorni lavorativi × 8h × coefficiente. Niente assenze (le aziende
-// non hanno ferie nel modello).
-// Carico: usa la stessa ripartizione per pesi di calcolaCaricoUtenteRange,
-// garantendo coerenza (somma quote = ore_totali residue).
-function calcolaCaricoFornitoreRange(aziendaId, isoStart, isoEnd) {
-  const az = state.aziende.find(a => a.id === aziendaId);
-  const coef = Number((az && az.coefficiente != null) ? az.coefficiente : 1.0);
-
-  // Capacità: giorni lavorativi nel range × 8h × coefficiente
-  let giorniLav = 0;
-  const d = parseISODate(isoStart);
-  const fine = parseISODate(isoEnd);
-  let guard = 0;
-  while (d <= fine && guard < 1500) {
-    if (!isGiornoNonLavorativo(d)) giorniLav++;
-    d.setDate(d.getDate() + 1);
-    guard++;
-  }
-  const oreCapacita = giorniLav * 8 * coef;
-
-  // Carico: occupazione PIANIFICATA — ore previste intere ripartite per peso,
-  // tutte le commesse la cui finestra cade nel periodo (qualsiasi stato).
-  let oreCarico = 0;
-  state.operazioni
-    .filter(o => o.scadenza)
-    .forEach(o => {
-      const pesi = pesiEntitaCommessa(o.id);
-      const pesoFornitore = pesi.fornitori.get(aziendaId);
-      if (!pesoFornitore || pesi.totale <= 0) return;
-      const oreTot = opCalcOre(o); // ore PREVISTE intere (non residue)
-      if (oreTot <= 0) return;
-      const inizio = o.inizio_manuale || opCalcInizio(o, null, null, Number(o.quantita || 0)); // finestra pianificata
-      if (!inizio) return;
-      if (o.scadenza < isoStart || inizio > isoEnd) return;
-      const orePerFornitore = oreTot * (pesoFornitore / pesi.totale);
-      const distrib = distribuisciOreOperazione(inizio, o.scadenza, orePerFornitore);
-      Object.keys(distrib).forEach(iso => {
-        if (iso >= isoStart && iso <= isoEnd) {
-          oreCarico += distrib[iso];
-        }
-      });
-    });
-
-  const perc = oreCapacita > 0 ? (oreCarico / oreCapacita) : 0;
-  let livello;
-  if (perc < 0.60) livello = 'libero';
-  else if (perc < 0.95) livello = 'normale';
-  else if (perc < 1.10) livello = 'pieno';
-  else livello = 'sovraccarico';
-
-  return { oreCarico, oreCapacita, perc, livello, coefficiente: coef };
-}
-
-
 // ════════════════════════════════════════════════════════════
 // QUOTE PER-OPERATORE (Gantt): la SUA parte, non l'intera fase
 // ════════════════════════════════════════════════════════════
 // Ore di UN addetto su una fase: ore intere della fase divise per il peso
-// totale degli assegnatari (addetti = 1, fornitori = coefficiente × allocazione).
+// totale degli assegnatari (addetti = 1, fornitori = allocazione).
 // Stessa ripartizione di calcolaCaricoUtenteRange: barre e carico% coerenti.
 function faseQuotaOreAddetto(op, fase) {
   const pezzi = Number(op && op.quantita || 0);
@@ -895,11 +834,7 @@ function faseQuotaOreAddetto(op, fase) {
   if (oreFase <= 0) return 0;
   const { addetti, fornitori } = faseAssegnatari(op, fase.id);
   let tot = addetti.length * 1.0;
-  fornitori.forEach(fr => {
-    const az = state.aziende.find(a => a.id === fr.azienda_id);
-    const coef = az ? Number(az.coefficiente != null ? az.coefficiente : 1.0) : 1.0;
-    tot += coef * Number(fr.allocazione != null ? fr.allocazione : 1.0);
-  });
+  fornitori.forEach(fr => { tot += Number(fr.allocazione != null ? fr.allocazione : 1.0); });
   return tot > 0 ? oreFase / tot : oreFase;
 }
 // Quota dell'utente sulle ore INTERE della commessa (modello aggregato,
@@ -975,11 +910,7 @@ function livellaOperatore(uid, oggiIso) {
         if (oreFase <= 0) return;
         const { addetti, fornitori } = faseAssegnatari(o, fid);
         let totFase = addetti.length * 1.0;
-        fornitori.forEach(fr => {
-          const az = state.aziende.find(a => a.id === fr.azienda_id);
-          const coef = az ? Number(az.coefficiente != null ? az.coefficiente : 1.0) : 1.0;
-          totFase += coef * Number(fr.allocazione != null ? fr.allocazione : 1.0);
-        });
+        fornitori.forEach(fr => { totFase += Number(fr.allocazione != null ? fr.allocazione : 1.0); });
         items.push({ op: o, faseId: fid, ordineFase: Number(f.ordine) || 0,
           ore: totFase > 0 ? oreFase / totFase : oreFase });
       });
