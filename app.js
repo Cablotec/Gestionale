@@ -11708,7 +11708,6 @@ function openOperazioneModal(o, opts) {
           // Pre-compila se campo vuoto o = 0 (default precedente)
           if (curVal === '' || curVal === '0' || Number(curVal) === 0) {
             minInput.value = String(art.minuti_unitari);
-            try { aggiornaPrezzoOrario(); } catch (e) {}
           }
         }
       }
@@ -11959,7 +11958,6 @@ function openOperazioneModal(o, opts) {
     suggFornitoriUpd.forEach(fn => { try { fn(); } catch (e) {} });
     // Stesse leve = stesso refresh: il margine sotto il totale riga usa
     // le medesime stime (hoisted, esce zitta finché il form non è pronto).
-    try { aggiornaMargineRiga(); } catch (e) {}
   };
   const qtaCorrenteComm = () => {
     const inp = form.querySelector('[name="quantita"]');
@@ -12029,8 +12027,7 @@ function openOperazioneModal(o, opts) {
           if (typeof renderFasiComm === 'function') renderFasiComm();
           if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
           if (aggiornaPreviewInizio) aggiornaPreviewInizio();
-          try { aggiornaMargineRiga(); } catch (e) {}
-        } }, '+ ' + nomeAziendaDi(id) + (pp ? ' · ' + String(pp.prezzoPz).replace('.', ',') + ' €/pz' : '')));
+              } }, '+ ' + nomeAziendaDi(id) + (pp ? ' · ' + String(pp.prezzoPz).replace('.', ',') + ' €/pz' : '')));
     });
   };
   const renderForSelected = () => {
@@ -12094,7 +12091,6 @@ function openOperazioneModal(o, opts) {
           oninput: (e) => {
             const v = parseFloat(String(e.target.value).replace(',', '.'));
             sel.importo = Number.isFinite(v) && v >= 0 ? v : null;
-            try { aggiornaMargineRiga(); } catch (err) {}
           } });
         if (!canEdit) inputImp.disabled = true;
         row.append(inputImp, el('span', { class:'sub', style:'font-size:11px;margin-left:-4px;' }, '€'));
@@ -12259,7 +12255,7 @@ function openOperazioneModal(o, opts) {
             if (error) return toast(error.message, 'err');
             state.oreEsterne = state.oreEsterne.filter(y => y.id !== x.id);
             toast('Riga eliminata');
-            renderOreEsterne(); aggiornaMargineRiga();
+            renderOreEsterne();
             if (aggiornaTotaliCons) aggiornaTotaliCons();
             if (aggiornaBarraOre) aggiornaBarraOre();
           } }, '✕'));
@@ -12348,7 +12344,7 @@ function openOperazioneModal(o, opts) {
         state.oreEsterne.push(data);
         inOre.value = ''; inRif.value = ''; notaTar.textContent = '';
         toast('Ore del fornitore registrate');
-        renderOreEsterne(); aggiornaMargineRiga();
+        renderOreEsterne();
         if (aggiornaTotaliCons) aggiornaTotaliCons();
         if (aggiornaBarraOre) aggiornaBarraOre();
       } }, '+ Aggiungi ore');
@@ -12941,13 +12937,10 @@ function openOperazioneModal(o, opts) {
           'Ultimo prezzo per articolo+cliente (modificabile).'),
         el('div', { class:'sub', id:'prezzo-da-consuntivo', style:'margin-top:2px;font-size:11px;display:none;' })),
       el('div', { class:'field' }, el('label', {}, 'Totale riga'),
-        el('div', { id:'prezzo-totale', style:'padding:8px 0 2px;font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;' }, '—'),
-        // Il MARGINE (− fornitori → margine) non sta piu' qui (9 nov, Nico): il
-        // conto completo e' nel Consuntivo. Senza #margine-riga,
-        // aggiornaMargineRiga esce subito.
-        // PREZZO ORARIO (Nico, 6 nov: "a quanto stiamo lavorando sugli EN-"):
-        // prezzo ÷ minuti pagati, a colpo d'occhio. Calcolato, non salvato.
-        el('div', { id:'prezzo-orario', style:'margin-top:4px;font-size:12px;font-family:JetBrains Mono,monospace;' })),
+        // Margine e €/h NON stanno piu' qui (9 nov, Nico): il conto della
+        // commessa e' nel Consuntivo. Il €/h pagato (prezzo ÷ minuti) era
+        // sbagliato dove il prezzo comprende materiale che compriamo noi.
+        el('div', { id:'prezzo-totale', style:'padding:8px 0 2px;font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;' }, '—')),
     ),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Scadenza'),
@@ -13393,7 +13386,6 @@ function openOperazioneModal(o, opts) {
         renderSessioni();
         if (typeof aggiornaTotaliCons === 'function') aggiornaTotaliCons();
         if (typeof aggiornaBarraOre === 'function') aggiornaBarraOre();
-        if (typeof aggiornaMargineRiga === 'function') aggiornaMargineRiga();
       };
 
       pCons.append(el('div', { style:'display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap;' },
@@ -13978,95 +13970,8 @@ function openOperazioneModal(o, opts) {
       tot.textContent = (pz > 0 && pr > 0)
         ? '€ ' + (pz * pr).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : '—';
-      aggiornaMargineRiga();
-      aggiornaPrezzoOrario();
     } catch (e) {}
   };
-  // Prezzo orario: prezzo €/pz ÷ minuti pagati × 60. Accanto, se il cliente
-  // ha una tariffa €/h, il confronto (sopra = verde, sotto = rosso).
-  function aggiornaPrezzoOrario() {
-    try {
-      const box = form.querySelector('#prezzo-orario');
-      if (!box) return;
-      const pr = parseFloat((form.querySelector('#prezzo-input')?.value || '').toString().replace(',', '.')) || 0;
-      const mi = parseFloat((form.querySelector('#minuti-input')?.value || '').toString().replace(',', '.')) || 0;
-      box.innerHTML = '';
-      if (!(pr > 0) || !(mi > 0)) {
-        box.append(el('span', { class:'sub' }, pr > 0 ? '€/h: mancano i minuti pagati' : ''));
-        return;
-      }
-      const eh = pr / mi * 60;
-      const f2 = (n) => n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const cliVal = acCliente.getValue();
-      const cli = (cliVal.mode === 'existing' && cliVal.id) ? state.aziende.find(a => a.id === cliVal.id) : null;
-      const tar = Number(cli && cli.tariffa_cliente) || 0;
-      box.append(el('span', { style:'font-weight:700;font-size:14px;' }, f2(eh) + ' €/h'),
-        el('span', { class:'sub', style:'margin-left:6px;' },
-          '(' + f2(pr) + ' € ÷ ' + String(mi).replace('.', ',') + ' min)'),
-        tar > 0 ? el('span', { style:'margin-left:6px;color:' + (eh + 0.005 >= tar ? 'var(--grn)' : 'var(--red)') + ';' },
-          (eh + 0.005 >= tar ? '≥' : '<') + ' tariffa cliente ' + f2(tar)) : '');
-    } catch (e) {}
-  }
-  // Margine live sotto il totale: totale riga − costo fornitori stimato
-  // (ore quota × tariffa €/h, la stessa stima della riga fornitore). Solo le
-  // voci di costo NOTE: i fornitori senza tariffa vengono dichiarati, non
-  // ignorati in silenzio. Function declaration (hoisted): chiamabile anche
-  // dal primo renderForSelected, prima che il form sia completo (esce zitta).
-  function aggiornaMargineRiga() {
-    try {
-      const box = form.querySelector('#margine-riga');
-      if (!box) return;
-      const pz = parseFloat((form.querySelector('[name=quantita]')?.value || '').toString().replace(',', '.')) || 0;
-      const pr = parseFloat((form.querySelector('#prezzo-input')?.value || '').toString().replace(',', '.')) || 0;
-      const tot = pz * pr;
-      // Le ore ESTERNE VERE (timbrate o da rapportino) battono la stima, ditta
-      // per ditta: dove il consuntivo c'è si usa quello, dove manca resta il
-      // preventivo. Così il margine diventa vero man mano che i dati arrivano,
-      // senza mai sommare stima e consuntivo della stessa ditta.
-      const oreEst = (typeof oreEsterneCommessa === 'function' && !isNew)
-        ? oreEsterneCommessa(o.id) : { righe: [], costoTot: 0 };
-      // L'IMPORTO CONCORDATO (9 nov) batte tutto: e' il prezzo fisso
-      // dell'ordine, ne' ore vere ne' stima per quel fornitore.
-      // Dopo l'importo, il €/pz della scheda prodotto × i pezzi (9 nov).
-      const conImporto = new Map((fornitoriSel || []).map(s => {
-        if (Number(s.importo) > 0) return [s.azienda_id, Number(s.importo)];
-        const pp = prezzoProdottoForn(s.azienda_id);
-        return pp && pp.costo > 0 ? [s.azienda_id, pp.costo] : null;
-      }).filter(Boolean));
-      const conReale = new Set(oreEst.righe.filter(x => x.costo != null && !conImporto.has(x.aziendaId)).map(x => x.aziendaId));
-      let costo = oreEst.righe.filter(x => !conImporto.has(x.aziendaId)).reduce((s, x) => s + (x.costo || 0), 0);
-      let costoReale = costo, costoStima = 0, senzaTariffa = 0;
-      const costoConcordato = [...conImporto.values()].reduce((s, x) => s + x, 0);
-      costo += costoConcordato;
-      (fornitoriSel || []).forEach(sel => {
-        if (conImporto.has(sel.azienda_id)) return;  // prezzo fisso: gia' contato
-        if (conReale.has(sel.azienda_id)) return;   // per lei il vero c'è già
-        const az = state.aziende.find(x => x.id === sel.azienda_id);
-        const tariffa = Number(az && az.tariffa_oraria) || 0;
-        if (tariffa > 0) {
-          const q = minPzFornitore(sel) * qtaCorrenteComm() / 60 * tariffa;
-          costo += q; costoStima += q;
-        } else senzaTariffa++;
-      });
-      if (tot <= 0 || (costo <= 0 && senzaTariffa === 0)) { box.textContent = ''; return; }
-      const fmtE = (n) => '€ ' + n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const margine = tot - costo;
-      const perc = Math.round(margine / tot * 100);
-      box.style.color = margine >= 0 ? 'var(--grn)' : 'var(--red)';
-      // La composizione va dichiarata: un margine mezzo stimato non deve
-      // sembrare un dato consolidato.
-      const comp = [];
-      if (costoConcordato > 0) comp.push('concordato ' + fmtE(costoConcordato));
-      if (costoReale > 0) comp.push('ore vere ' + fmtE(costoReale));
-      if (costoStima > 0) comp.push('stima ' + fmtE(costoStima));
-      box.textContent = '− esterni ' + (costoStima > 0 ? '≈ ' : '') + fmtE(costo)
-        + ' → margine ' + (costoStima > 0 ? '≈ ' : '') + fmtE(margine) + ' (' + perc + '%)'
-        + (comp.length > 1 ? ' · ' + comp.join(' + ') : '')
-        + (senzaTariffa > 0
-            ? ' · ' + senzaTariffa + (senzaTariffa === 1 ? ' fornitore' : ' fornitori') + ' senza tariffa'
-            : '');
-    } catch (e) {}
-  }
   // Pre-compila il prezzo dall'ultimo usato (listino vivo, articolo+cliente)
   // solo se il campo è vuoto; aggiorna sempre il suggerimento e il totale.
   const aggiornaPrezzoListino = () => {
@@ -14353,7 +14258,6 @@ function openOperazioneModal(o, opts) {
   const minInputEl = form.querySelector('#minuti-input');
   if (minInputEl) minInputEl.addEventListener('input', aggiornaIndicatoreMinuti);
   if (minInputEl) minInputEl.addEventListener('input', aggiornaSuggDaPrezzo);
-  if (minInputEl) minInputEl.addEventListener('input', aggiornaPrezzoOrario);
   // Click sull'asterisco: ripristina il valore dell'articolo se diverso
   const starEl = form.querySelector('#minuti-diff');
   if (starEl) {
