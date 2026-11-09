@@ -5208,7 +5208,239 @@ function materialeStatoRiga(codice, tipo, ctx) {
   else if (lav) { t += ' · da ordinare a terzista'; c = 'var(--vio)'; }
   else t += ' · da ordinare';
   return { stato: st.stato, testo: t, colore: c, manca: q.manca, lavorazione: lav,
-    titolo: st.fornitore || '' };
+    titolo: st.fornitore || '', fornitore: st.fornitore || null, of: st.of || null };
+}
+
+// ── IL MENU SUL MATERIALE (9 nov, Nico) ────────────────────────────────
+// Clic sullo stato di un materiale nella commessa: scrivere a chi lo deve
+// mandare, copiare codice e OF. Per TUTTI i tipi di codice.
+//   A chi: fornitore dell'OF (da Alnus) > fornitore ABITUALE del codice
+//   (`materiali.fornitore`, seminato all'import) > si chiede. Il C/L va al
+//   cliente della commessa, la lavorazione `_K` ai fornitori della commessa.
+//   L'EMAIL sta nella scheda Aziende (Nico: "le mail vere vanno in anagrafica
+//   fornitori"): il nome di Alnus la trova con `importOrdiniChiaveNome`, e se
+//   la scheda non c'e' un admin la crea al primo clic.
+// Niente testo preimpostato per ora (Nico): oggetto con codice e OF, il corpo
+// lo scrive chi manda. Idea per dopo: creare l'OF da qui, anche in massa.
+
+function aziendaPerNome(nome) {
+  const k = importOrdiniChiaveNome(nome);
+  if (!k) return null;
+  return (state.aziende || []).find(a => importOrdiniChiaveNome(a.nome) === k) || null;
+}
+
+// { ok:false } se la colonna non c'e' (migrazione non eseguita): chi chiama
+// lo dice invece di far finta che il fornitore non ci sia.
+async function fornitoreAbitualeDi(codice) {
+  try {
+    const { data, error } = await sb.from('materiali').select('fornitore')
+      .eq('codice', String(codice || '').trim()).limit(1);
+    if (error) return { ok: false };
+    return { ok: true, fornitore: (data && data[0] && data[0].fornitore) || null, inAnagrafica: !!(data && data.length) };
+  } catch (e) { return { ok: false }; }
+}
+
+async function impostaFornitoreAbituale(codici, nome, soloVuoti) {
+  const { data, error } = await sb.rpc('materiali_imposta_fornitore',
+    { p_codici: codici, p_fornitore: nome, p_solo_vuoti: !!soloVuoti });
+  if (error) throw new Error(error.message);
+  return Number(data) || 0;
+}
+
+// All'import: per ogni codice il fornitore della consegna piu' vicina, a
+// gruppi per fornitore. Ritorna quanti codici hanno preso un abituale nuovo
+// (0 anche se la funzione non esiste ancora).
+async function seminaFornitoriAbituali(righe) {
+  const perForn = new Map();
+  (righe || []).forEach(m => {
+    const cons = (Array.isArray(m.consegne) ? m.consegne : []).filter(c => c && c.fornitore)
+      .sort((a, b) => String(a.data || '').localeCompare(String(b.data || '')));
+    const f = cons.length ? String(cons[0].fornitore).trim() : '';
+    const cod = String(m.codice || '').trim();
+    if (!f || !cod) return;
+    if (!perForn.has(f)) perForn.set(f, new Set());
+    perForn.get(f).add(cod);
+  });
+  let n = 0;
+  try {
+    for (const [f, cods] of perForn) n += await impostaFornitoreAbituale([...cods], f, true);
+  } catch (e) { console.warn('seme fornitore abituale non fatto:', e.message || e); }
+  return n;
+}
+
+// Una casella di testo in un secondo velo (come `chiediConferma`: non tocca
+// il modal sotto). Ritorna il testo, o null se si annulla.
+function chiediTesto(opz) {
+  const o = opz || {};
+  return new Promise((risolvi) => {
+    const bg = el('div', { class:'modal-bg' });
+    const finestra = el('div', { class:'modal', style:'max-width:470px;' });
+    const inp = el('input', { type: o.tipo || 'text', value: o.valore || '', placeholder: o.placeholder || '',
+      style:'width:100%;' });
+    const chiudi = (v) => { window.__confermaChiudi = null; bg.remove(); risolvi(v); };
+    const ok = () => { const v = inp.value.trim(); if (v) chiudi(v); else inp.focus(); };
+    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
+    // Suggerimenti come bottoni nostri, non un <datalist>: quello apre la
+    // tendina bianca del browser (regola di casa: niente campi del browser).
+    const sugg = el('div', { style:'display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;' });
+    const disegnaSugg = () => {
+      sugg.innerHTML = '';
+      const q = importOrdiniChiaveNome(inp.value);
+      (o.suggerimenti || []).filter(s => !q || importOrdiniChiaveNome(s).includes(q)).slice(0, 10)
+        .forEach(s => sugg.append(el('button', { type:'button', class:'btnsm', style:'font-size:11px;',
+          onclick: () => { inp.value = s; inp.focus(); disegnaSugg(); } }, s)));
+    };
+    inp.oninput = disegnaSugg;
+    disegnaSugg();
+    finestra.append(
+      el('div', { class:'mhd' }, el('h2', {}, o.titolo || '')),
+      el('div', { class:'mbody' },
+        o.testo ? el('div', { class:'sub', style:'font-size:13px;line-height:1.6;white-space:pre-line;margin-bottom:10px;' }, o.testo) : '',
+        inp, sugg),
+      el('div', { class:'mfoot' },
+        el('button', { class:'btng', onclick: () => chiudi(null) }, 'Annulla'),
+        el('button', { class:'btnp', onclick: ok }, o.conferma || 'OK')));
+    bg.append(finestra);
+    $('#modal-root').append(bg);
+    window.__confermaChiudi = () => chiudi(null);
+    setTimeout(() => inp.focus(), 0);
+  });
+}
+
+// Apre il programma di posta. `dest` = { aziendaId } oppure { nome } (Alnus).
+// Senza email: un admin la scrive e finisce nella scheda Aziende (creata se
+// manca, ruolo Fornitore); chi non e' admin apre la mail senza indirizzo.
+async function scriviAMateriale(dest, oggetto) {
+  let az = dest.aziendaId ? (state.aziende || []).find(a => a.id === dest.aziendaId) : aziendaPerNome(dest.nome);
+  const nome = az ? az.nome : dest.nome;
+  let email = az && az.email ? String(az.email).trim() : '';
+  if (!email) {
+    if (state.profile?.ruolo !== 'admin') {
+      toast('Nella scheda Aziende di ' + nome + ' manca l’email: la mail si apre senza indirizzo. Chiedi a un admin di aggiungerla.', 'err', 9000);
+    } else {
+      const v = await chiediTesto({ titolo: 'Email di ' + nome, tipo: 'email', placeholder: 'nome@fornitore.it',
+        conferma: 'Salva e scrivi',
+        testo: az ? 'La scheda di ' + nome + ' in Aziende non ha l’email. Scrivila qui: la salvo nella scheda.'
+          : nome + ' non è in anagrafica Aziende. Scrivi l’email: creo la scheda (ruolo Fornitore) e la salvo lì.' });
+      if (v == null) return;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return toast('Email non valida: ' + v, 'err');
+      email = v;
+      try {
+        const { data, error } = az
+          ? await sb.from('aziende').update({ email }).eq('id', az.id).select().single()
+          : await sb.from('aziende').insert({ nome, email, attivo: true, is_cliente: false, is_fornitore: true }).select().single();
+        if (error) throw new Error(error.message);
+        if (az) Object.assign(az, data);
+        else if (!(state.aziende || []).some(a => a.id === data.id)) state.aziende.push(data);
+        toast(az ? 'Email salvata nella scheda di ' + nome : 'Creata la scheda di ' + nome + ' in Aziende', 'ok');
+      } catch (e) {
+        toast('Email non salvata (' + (e.message || e) + '): la mail si apre lo stesso.', 'err', 9000);
+      }
+    }
+  }
+  const a = el('a', { href: 'mailto:' + email + '?subject=' + encodeURIComponent(oggetto || '') });
+  document.body.append(a); a.click(); a.remove();
+}
+
+// Chiede da chi si compra un codice e lo salva come abituale. Ritorna il nome.
+async function chiediFornitoreAbituale(codice, attuale) {
+  const nomi = new Set((state.aziende || []).filter(a => a.is_fornitore && a.attivo !== false).map(a => a.nome));
+  (state.mancanti || []).forEach(m => (m.consegne || []).forEach(c => { if (c && c.fornitore) nomi.add(c.fornitore); }));
+  const v = await chiediTesto({ titolo: 'Da chi compri ' + codice + '?', valore: attuale || '',
+    placeholder: 'nome del fornitore', conferma: 'Salva',
+    suggerimenti: [...nomi].sort((x, y) => x.localeCompare(y, 'it')),
+    testo: 'Diventa il fornitore abituale del codice: le prossime volte la mail parte già indirizzata.' });
+  if (v == null) return null;
+  try {
+    await impostaFornitoreAbituale([codice], v, false);
+    toast('Fornitore abituale di ' + codice + ': ' + v, 'ok');
+  } catch (e) {
+    toast('Fornitore abituale non salvato: ' + (e.message || e), 'err', 9000);
+  }
+  return v;
+}
+
+// Il menu vero e proprio, sotto la cella cliccata.
+//   info = { codice, stato (da materialeStatoRiga), op (la commessa) }
+function apriMenuMateriale(ancora, info) {
+  document.querySelectorAll('.menu-mat').forEach(m => m.remove());
+  const { codice, stato: r, op } = info;
+  const menu = el('div', { class:'menu-mat', style:'position:fixed;z-index:3000;min-width:240px;max-width:360px;'
+    + 'background:var(--sur);border:1px solid var(--brd);border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.35);padding:4px;' });
+  const chiudi = () => {
+    menu.remove();
+    document.removeEventListener('mousedown', fuori, true);
+    if (window.__confermaChiudi === chiudi) window.__confermaChiudi = null;
+  };
+  const fuori = (e) => { if (!menu.contains(e.target)) chiudi(); };
+  const voce = (testo, fn, sub) => {
+    const b = el('button', { type:'button', style:'display:block;width:100%;text-align:left;background:none;border:0;'
+      + 'padding:7px 10px;border-radius:4px;cursor:pointer;color:var(--txt);font-size:12px;' },
+      testo, sub ? el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' }, sub) : '');
+    b.onmouseenter = () => { b.style.background = 'var(--sur2)'; };
+    b.onmouseleave = () => { b.style.background = 'none'; };
+    b.onclick = async (e) => { e.stopPropagation(); chiudi(); await fn(); };
+    menu.append(b);
+    return b;
+  };
+  const oggetto = 'Codice ' + codice + (r.of ? ' – OF ' + r.of : '');
+  const conRif = (s) => s + (op && op.riferimento_cliente ? ' – vs. ordine ' + op.riferimento_cliente : '');
+
+  if (r.stato === 'attesa_cliente' && op && op.cliente_id) {
+    voce('✉ Scrivi al cliente: ' + nomeAziendaDi(op.cliente_id),
+      () => scriviAMateriale({ aziendaId: op.cliente_id }, conRif('Codice ' + codice)), 'materiale in conto lavoro');
+  } else if (r.stato !== 'segnaposto') {
+    if (r.lavorazione && op) {
+      getOperazioneFornitori(op.id).forEach(id => voce('✉ Scrivi al terzista: ' + nomeAziendaDi(id),
+        () => scriviAMateriale({ aziendaId: id }, 'Codice ' + codice + ' – commessa ' + (op.numero_ordine || '') + '/' + (op.pos || ''))));
+    }
+    if (r.fornitore) {
+      voce('✉ Scrivi a ' + r.fornitore, () => scriviAMateriale({ nome: r.fornitore }, oggetto),
+        'fornitore dell’OF' + (r.of ? ' ' + r.of : ''));
+    }
+    // Il fornitore ABITUALE si legge al momento: e' un dato del codice, non
+    // della lista, e la lista non lo carica.
+    const vAb = voce('✉ Fornitore abituale…', async () => {}, 'lo cerco…');
+    vAb.disabled = true;
+    fornitoreAbitualeDi(codice).then(ab => {
+      if (!menu.isConnected) return;
+      if (!ab.ok) {
+        vAb.replaceChildren('✉ Fornitore abituale', el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' },
+          'non attivo: manca la migrazione del fornitore abituale'));
+        return;
+      }
+      if (ab.fornitore) {
+        vAb.replaceChildren('✉ Scrivi a ' + ab.fornitore, el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' }, 'fornitore abituale'));
+        vAb.disabled = false;
+        vAb.onclick = (e) => { e.stopPropagation(); chiudi(); scriviAMateriale({ nome: ab.fornitore }, oggetto); };
+        if (r.fornitore && importOrdiniChiaveNome(r.fornitore) === importOrdiniChiaveNome(ab.fornitore)) vAb.remove();
+        const vCambia = voce('✎ Cambia fornitore abituale', () => chiediFornitoreAbituale(codice, ab.fornitore));
+        menu.insertBefore(vCambia, vAb.nextSibling || primaCopia);
+      } else if (!ab.inAnagrafica) {
+        vAb.replaceChildren('✉ Fornitore abituale', el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' },
+          'codice non in anagrafica materiali'));
+      } else {
+        vAb.replaceChildren('✉ Scrivi al fornitore…', el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' },
+          'nessun fornitore abituale: te lo chiedo e lo ricordo'));
+        vAb.disabled = false;
+        vAb.onclick = async (e) => {
+          e.stopPropagation(); chiudi();
+          const n = await chiediFornitoreAbituale(codice, '');
+          if (n) scriviAMateriale({ nome: n }, oggetto);
+        };
+      }
+    });
+  }
+  const primaCopia = voce('⧉ Copia codice', () => copiaTesto(codice, 'Codice'));
+  if (r.of) voce('⧉ Copia OF ' + r.of, () => copiaTesto(r.of, 'OF'));
+
+  document.body.append(menu);
+  const rc = ancora.getBoundingClientRect();
+  const h = menu.offsetHeight, w = menu.offsetWidth;
+  menu.style.top = Math.max(4, rc.bottom + 4 + h > innerHeight ? rc.top - h - 4 : rc.bottom + 4) + 'px';
+  menu.style.left = Math.max(4, Math.min(rc.left, innerWidth - w - 8)) + 'px';
+  setTimeout(() => document.addEventListener('mousedown', fuori, true), 0);
+  window.__confermaChiudi = chiudi;
 }
 
 // ── IMPORT DELL'ESTRAZIONE ─────────────────────────────────────────────
@@ -5367,7 +5599,12 @@ function riquadroImportFabbisogno(root) {
               if (error) throw new Error(error.message);
             }
             await caricaMancanti();
-            toast('Estrazione importata: ' + payload.length + ' codici', 'ok');
+            // SEME del fornitore abituale (9 nov): il fornitore dell'OF va sul
+            // codice solo dove il campo e' vuoto. Best-effort: senza la
+            // migrazione la funzione non c'e' e l'import resta quello di prima.
+            const seminati = await seminaFornitoriAbituali(daImportare.mancanti);
+            toast('Estrazione importata: ' + payload.length + ' codici'
+              + (seminati > 0 ? ' · ' + seminati + ' con fornitore abituale nuovo' : ''), 'ok');
             renderFabbisogno(root);
           } catch (err) {
             toast('Errore import: ' + (err.message || err), 'err');
@@ -12675,7 +12912,11 @@ function openOperazioneModal(o, opts) {
         if (r.manca > 0) nMancano++;
         cella.textContent = r.testo;
         cella.style.color = r.colore;
-        cella.title = r.titolo || '';
+        // Clic = menu del materiale (scrivere a chi lo manda, copiare codice e OF)
+        cella.title = (r.titolo ? r.titolo + '\n' : '') + 'Clic: scrivi al fornitore, copia codice/OF';
+        cella.style.cursor = 'pointer';
+        cella.classList.add('stato-mat');
+        cella.onclick = (e) => { e.stopPropagation(); apriMenuMateriale(cella, { codice, stato: r, op: o }); };
       });
       if (nMancano) {
         intestazione.append(document.createTextNode(' · '),
