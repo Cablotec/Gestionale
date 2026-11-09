@@ -5220,7 +5220,7 @@ function materialeStatoRiga(codice, tipo, ctx) {
 //   L'EMAIL sta nella scheda Aziende (Nico: "le mail vere vanno in anagrafica
 //   fornitori"): il nome di Alnus la trova con `importOrdiniChiaveNome`, e se
 //   la scheda non c'e' un admin la crea al primo clic.
-// Niente testo preimpostato per ora (Nico): oggetto con codice e OF, il corpo
+// Niente testo NE' OGGETTO per ora (Nico, 9 nov): solo l'indirizzo, il resto
 // lo scrive chi manda. Idea per dopo: creare l'OF da qui, anche in massa.
 
 function aziendaPerNome(nome) {
@@ -5310,7 +5310,7 @@ function chiediTesto(opz) {
 // Apre il programma di posta. `dest` = { aziendaId } oppure { nome } (Alnus).
 // Senza email: un admin la scrive e finisce nella scheda Aziende (creata se
 // manca, ruolo Fornitore); chi non e' admin apre la mail senza indirizzo.
-async function scriviAMateriale(dest, oggetto) {
+async function scriviAMateriale(dest) {
   let az = dest.aziendaId ? (state.aziende || []).find(a => a.id === dest.aziendaId) : aziendaPerNome(dest.nome);
   const nome = az ? az.nome : dest.nome;
   let email = az && az.email ? String(az.email).trim() : '';
@@ -5338,7 +5338,7 @@ async function scriviAMateriale(dest, oggetto) {
       }
     }
   }
-  const a = el('a', { href: 'mailto:' + email + '?subject=' + encodeURIComponent(oggetto || '') });
+  const a = el('a', { href: 'mailto:' + email });
   document.body.append(a); a.click(); a.remove();
 }
 
@@ -5384,19 +5384,17 @@ function apriMenuMateriale(ancora, info) {
     menu.append(b);
     return b;
   };
-  const oggetto = 'Codice ' + codice + (r.of ? ' – OF ' + r.of : '');
-  const conRif = (s) => s + (op && op.riferimento_cliente ? ' – vs. ordine ' + op.riferimento_cliente : '');
 
   if (r.stato === 'attesa_cliente' && op && op.cliente_id) {
     voce('✉ Scrivi al cliente: ' + nomeAziendaDi(op.cliente_id),
-      () => scriviAMateriale({ aziendaId: op.cliente_id }, conRif('Codice ' + codice)), 'materiale in conto lavoro');
+      () => scriviAMateriale({ aziendaId: op.cliente_id }), 'materiale in conto lavoro');
   } else if (r.stato !== 'segnaposto') {
     if (r.lavorazione && op) {
       getOperazioneFornitori(op.id).forEach(id => voce('✉ Scrivi al terzista: ' + nomeAziendaDi(id),
-        () => scriviAMateriale({ aziendaId: id }, 'Codice ' + codice + ' – commessa ' + (op.numero_ordine || '') + '/' + (op.pos || ''))));
+        () => scriviAMateriale({ aziendaId: id })));
     }
     if (r.fornitore) {
-      voce('✉ Scrivi a ' + r.fornitore, () => scriviAMateriale({ nome: r.fornitore }, oggetto),
+      voce('✉ Scrivi a ' + r.fornitore, () => scriviAMateriale({ nome: r.fornitore }),
         'fornitore dell’OF' + (r.of ? ' ' + r.of : ''));
     }
     // Il fornitore ABITUALE si legge al momento: e' un dato del codice, non
@@ -5413,7 +5411,7 @@ function apriMenuMateriale(ancora, info) {
       if (ab.fornitore) {
         vAb.replaceChildren('✉ Scrivi a ' + ab.fornitore, el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' }, 'fornitore abituale'));
         vAb.disabled = false;
-        vAb.onclick = (e) => { e.stopPropagation(); chiudi(); scriviAMateriale({ nome: ab.fornitore }, oggetto); };
+        vAb.onclick = (e) => { e.stopPropagation(); chiudi(); scriviAMateriale({ nome: ab.fornitore }); };
         if (r.fornitore && importOrdiniChiaveNome(r.fornitore) === importOrdiniChiaveNome(ab.fornitore)) vAb.remove();
         const vCambia = voce('✎ Cambia fornitore abituale', () => chiediFornitoreAbituale(codice, ab.fornitore));
         menu.insertBefore(vCambia, vAb.nextSibling || primaCopia);
@@ -5427,7 +5425,7 @@ function apriMenuMateriale(ancora, info) {
         vAb.onclick = async (e) => {
           e.stopPropagation(); chiudi();
           const n = await chiediFornitoreAbituale(codice, '');
-          if (n) scriviAMateriale({ nome: n }, oggetto);
+          if (n) scriviAMateriale({ nome: n });
         };
       }
     });
