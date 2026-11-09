@@ -4814,8 +4814,9 @@ function apriRichiestaTerzista(o, poi, opts) {
 }
 
 // ── 2. LA LISTA DA STAMPARE ──────────────────────────────────────────
-// Una pagina a se', fatta per la carta: il magazzino spunta a penna e scrive
-// quanto ha messo davvero. E' quel numero che poi si conferma.
+// Una pagina a se', fatta per la carta (A4 orizzontale): il magazzino spunta
+// a penna. Le quantita' reali si scrivono poi nella conferma «Spedita»
+// (colonna «Messi» tolta il 9 nov, Nico). Le note hanno la loro colonna.
 // Una riga per CODICE (il magazzino prepara un pacco solo); con piu'
 // commesse, accanto, quanto ne va a ognuna.
 function stampaRichiestaTerzista(x) {
@@ -4837,11 +4838,11 @@ function stampaRichiestaTerzista(x) {
         + (p.mancante > 0 ? ' <span class="mc">(manca ' + esc(nfIT(p.mancante)) + ')</span>' : '')).join('<br>') : '';
     return '<tr' + (q ? '' : ' class="solo"') + '><td class="c">' + (q ? '☐' : '') + '</td><td>' + (i + 1) + '</td><td class="m">' + esc(r.codice)
       + '</td><td>' + esc(r.descrizione)
-      + (r.note.length ? '<div class="nt">▸ ' + esc(r.note.join(' · ')) + '</div>' : '')
       + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.um)
-      + '</td><td class="n">' + (q ? esc(nfIT(r.qta)) : '—') + '</td><td class="w"></td>'
+      + '</td><td class="n">' + (q ? esc(nfIT(r.qta)) : '—') + '</td>'
       + (conManc ? '<td class="n mc">' + (mq ? esc(nfIT(r.mancante)) : '') + '</td>' : '')
-      + (multi ? '<td class="p">' + parti + '</td>' : '') + '</tr>';
+      + (multi ? '<td class="p">' + parti + '</td>' : '')
+      + '<td class="nt">' + esc(r.note.join(' · ')) + '</td></tr>';
   }).join('');
   const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Lista per terzista '
     + esc(comm.map(etiOpTerzista).join(' ')) + '</title><style>'
@@ -4849,9 +4850,9 @@ function stampaRichiestaTerzista(x) {
     + '.t{display:grid;grid-template-columns:repeat(3,auto);gap:4px 24px;margin:10px 0 14px;}.t b{display:block;font-size:10px;color:#555;text-transform:uppercase;}'
     + 'table{width:100%;border-collapse:collapse;}th,td{border:1px solid #999;padding:5px 6px;text-align:left;vertical-align:top;}'
     + 'th{background:#eee;font-size:10px;text-transform:uppercase;}.n{text-align:right;font-weight:700;}.m{font-family:monospace;}'
-    + '.p{font-size:11px;white-space:nowrap;}.p b{font-weight:700;}.nt{font-weight:700;font-size:11px;margin-top:3px;}'
-    + '.c{text-align:center;font-size:16px;width:22px;}.w{width:90px;}.f{margin-top:28px;display:flex;gap:60px;}'
-    + '.f div{border-top:1px solid #000;padding-top:4px;width:220px;font-size:11px;}@media print{body{margin:8mm;}}'
+    + '.p{font-size:11px;white-space:nowrap;}.p b{font-weight:700;}.nt{font-weight:700;font-size:11px;width:22%;}tr{page-break-inside:avoid;}thead{display:table-header-group;}'
+    + '.c{text-align:center;font-size:16px;width:22px;}.f{margin-top:28px;display:flex;gap:60px;}'
+    + '.f div{border-top:1px solid #000;padding-top:4px;width:220px;font-size:11px;}@page{size:A4 landscape;margin:10mm;}@media print{body{margin:0;}}'
     + '</style></head><body>'
     + '<h1>Materiale da preparare per il terzista</h1>'
     + '<div class="t"><div><b>' + (multi ? 'Commesse' : 'Commessa') + '</b>' + esc(comm.map(etiOpTerzista).join(' · ')) + '</div>'
@@ -4861,8 +4862,8 @@ function stampaRichiestaTerzista(x) {
     + '<div><b>Terzista</b>' + esc(nomeAziendaDi(x.terzista_id)) + '</div>'
     + '<div><b>Richiesta del</b>' + esc(fmtIT(String(x.creato_il || '').slice(0, 10))) + '</div></div>'
     + (x.nota ? '<p><b>Nota:</b> ' + esc(x.nota) + '</p>' : '')
-    + '<table><thead><tr><th></th><th>#</th><th>Codice</th><th>Descrizione</th><th>Tipo</th><th>UM</th><th>Qtà</th><th>Messi</th>'
-    + (conManc ? '<th>Mancano</th>' : '') + (multi ? '<th>Per commessa</th>' : '') + '</tr></thead><tbody>'
+    + '<table><thead><tr><th></th><th>#</th><th>Codice</th><th>Descrizione</th><th>Tipo</th><th>UM</th><th>Qtà</th>'
+    + (conManc ? '<th>Mancano</th>' : '') + (multi ? '<th>Per commessa</th>' : '') + '<th>Note</th></tr></thead><tbody>'
     + righe + '</tbody></table>'
     + (conManc ? '<div class="leg">Mancano: materiale che serve ma oggi non c’è; arriverà con un invio successivo.</div>' : '')
     + '<div class="f"><div>Preparato da</div><div>Data</div></div>'
