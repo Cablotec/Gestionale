@@ -3184,7 +3184,8 @@ function renderAziende(root) {
       el('td', { class:'tc' }, ruoloBadge),
       el('td', { style:'font-size:11px;' }, c.citta ? c.citta + (c.provincia ? ' ('+c.provincia+')' : '') : ''),
       el('td', { class:'mono', style:'font-size:11px;' }, c.p_iva || ''),
-      el('td', { class:'mono', style:'font-size:11px;' }, c.email || ''),
+      el('td', { class:'mono', style:'font-size:11px;', title: emailAzienda(c).join('\n') },
+        (emailAzienda(c)[0] || '') + (emailAzienda(c).length > 1 ? '  +' + (emailAzienda(c).length - 1) : '')),
       el('td', { class:'tc' }, c.attivo
         ? el('span', { class:'badge bok' }, 'attivo')
         : el('span', { class:'badge bgry' }, 'disatt.')),
@@ -3229,7 +3230,6 @@ function openClienteModal(c) {
   const inCap = el('input', { type:'text', name:'cap', value:c.cap||'', placeholder:'20100', maxlength:'5' });
   const inProvincia = el('input', { type:'text', name:'provincia', value:c.provincia||'', placeholder:'MI', maxlength:'2', style:'text-transform:uppercase;' });
   const inPIva = el('input', { type:'text', name:'p_iva', value:c.p_iva||'' });
-  const inEmail = el('input', { type:'email', name:'email', value:c.email||'' });
   // SITO WEB (9 nov, Nico): per i fornitori online (Farnell, Mouser...) dove
   // si ordina dal sito e non per mail. Il menu del materiale lo apre. Campo
   // spento finche' la colonna `aziende.sito` non esiste (stesso patto della tariffa).
@@ -3368,7 +3368,7 @@ function openClienteModal(c) {
   chkCliente.addEventListener('change', aggiornaRuoli);
 
   if (readonly) {
-    [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inEmail, inSito, inNote, selAttivo,
+    [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inSito, inNote, selAttivo,
      chkCliente, chkFornitore, inTariffa, inTariffaCli]
       .forEach(i => i.disabled = true);
   }
@@ -3402,9 +3402,7 @@ function openClienteModal(c) {
       el('div', { class:'field' }, el('label', {}, 'P. IVA / C.F.'), inPIva),
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
     ),
-    el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'Email generica (facoltativa)'), inEmail),
-      el('div', { class:'field' }, el('label', {}, 'Sito web (ordini online)'), inSito)),
+    el('div', { class:'field' }, el('label', {}, 'Sito web (ordini online)'), inSito),
     el('div', { class:'field' }, el('label', {}, 'Contatti per ruolo'), boxContatti),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
@@ -3431,7 +3429,6 @@ function openClienteModal(c) {
         cap: (fd.get('cap')||'').trim() || null,
         provincia: (fd.get('provincia')||'').trim().toUpperCase() || null,
         p_iva: (fd.get('p_iva')||'').trim() || null,
-        email: (fd.get('email')||'').trim() || null,
         ...(sitoDisponibile ? { sito: normalizzaSito(fd.get('sito')) } : {}),
         note: (fd.get('note')||'').trim() || null,
         attivo: fd.get('attivo') === 'true',
@@ -3705,7 +3702,7 @@ function aziendeExportExcel() {
     cap: c.cap || '',
     provincia: c.provincia || '',
     p_iva: c.p_iva || '',
-    email: c.email || '',
+    email: emailAzienda(c).join('; '),
     note: c.note || '',
     attivo: c.attivo ? 'sì' : 'no',
   }));
@@ -5278,6 +5275,13 @@ function materialeStatoRiga(codice, tipo, ctx) {
 // Niente testo NE' OGGETTO per ora (Nico, 9 nov): solo l'indirizzo, il resto
 // lo scrive chi manda. Idea per dopo: creare l'OF da qui, anche in massa.
 
+// Gli indirizzi di un'azienda: i contatti per ruolo, poi la vecchia email
+// generica se c'e' ancora (tolta dalla scheda il 9 nov, spostata in Acquisti).
+function emailAzienda(a) {
+  const l = ((a && Array.isArray(a.contatti)) ? a.contatti : []).map(x => x && x.email).filter(Boolean);
+  if (a && a.email && !l.includes(a.email)) l.push(a.email);
+  return l;
+}
 // I ruoli dei contatti (Nico, 9 nov: "partirei con amministrazione, acquisti e
 // logistica"). Si allunga aggiungendo qui.
 const RUOLI_CONTATTO = ['Amministrazione', 'Acquisti', 'Logistica'];
@@ -5397,14 +5401,18 @@ async function contattaAzienda(dest, modo) {
       const v = await chiediTesto({ titolo: 'Come si contatta ' + nome + '?',
         placeholder: sitoOk ? 'nome@fornitore.it  oppure  www.fornitore.it' : 'nome@fornitore.it',
         conferma: 'Salva e apri',
-        testo: (az ? 'La scheda di ' + nome + ' in Aziende non ha ' + (sitoOk ? 'né email né sito' : 'l’email') + '.'
+        testo: (az ? 'La scheda di ' + nome + ' in Aziende non ha ' + (sitoOk ? 'né email né sito' : 'l’email') + '. L’email va fra i contatti, come Acquisti.'
             : nome + ' non è in anagrafica Aziende: creo la scheda (ruolo Fornitore).')
           + (sitoOk ? '\nScrivi l’email, oppure il sito se si ordina online.' : '\nScrivi l’email.') + ' La salvo nella scheda.' });
       if (v == null) return;
       const eMail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
       const eSito = !eMail && sitoOk && /^(https?:\/\/)?[^\s@\/]+\.[^\s@]{2,}/i.test(v);
       if (!eMail && !eSito) return toast((sitoOk ? 'Né un’email né un sito: ' : 'Email non valida: ') + v, 'err');
-      const campi = eMail ? { email: v } : { sito: normalizzaSito(v) };
+      const conContatti = (state.aziende || []).some(a => a && ('contatti' in a));
+      const campi = !eMail ? { sito: normalizzaSito(v) }
+        : conContatti ? { contatti: [...((az && Array.isArray(az.contatti)) ? az.contatti : []),
+            { ruolo: 'Acquisti', nome: null, email: v, telefono: null }] }
+        : { email: v };
       if (eMail) email = v; else sito = campi.sito;
       try {
         const { data, error } = az
