@@ -3241,7 +3241,8 @@ function openClienteModal(c) {
   // resta, facoltativa: e' quella generica (o quella venuta da Alnus).
   const contattiDisponibili = (state.aziende || []).some(a => a && ('contatti' in a));
   let contatti = (Array.isArray(c.contatti) ? c.contatti : []).map(x => ({ ...x }));
-  const boxContatti = el('div', { style:'display:flex;flex-direction:column;gap:6px;' });
+  const boxContatti = el('div', { style:'display:flex;flex-direction:column;gap:4px;' });
+  let trascinato = null;   // indice della riga che si sta trascinando
   const disegnaContatti = () => {
     boxContatti.innerHTML = '';
     if (!contattiDisponibili) {
@@ -3264,16 +3265,45 @@ function openClienteModal(c) {
       };
       if (readonly) selR.disabled = true;
       // L'ORDINE conta (Nico): e' l'ordine delle voci nel menu del materiale.
-      const sposta = (d) => { const j = i + d; if (j < 0 || j >= contatti.length) return;
-        [contatti[i], contatti[j]] = [contatti[j], contatti[i]]; disegnaContatti(); };
-      const freccia = (t, d, tit) => { const b = el('button', { type:'button', class:'btnsm', title: tit,
-        style:'padding:2px 7px;', onclick: () => sposta(d) }, t);
-        if (i + d < 0 || i + d >= contatti.length) b.disabled = true; return b; };
-      boxContatti.append(el('div', { style:'display:flex;gap:6px;align-items:center;' },
-        readonly ? '' : freccia('↑', -1, 'Sposta su'), readonly ? '' : freccia('↓', 1, 'Sposta giù'),
-        selR, campo('nome', 'nome', 1), campo('email', 'email', 1.4, 'email'), campo('telefono', 'telefono', .8),
+      // Si trascina dalla maniglia ⋮⋮ (Nico, 10 nov: "i 3 puntini da trascinare
+      // invece delle frecce"). La riga diventa trascinabile SOLO mentre si
+      // tiene premuta la maniglia: altrimenti selezionare il testo dentro una
+      // casella partirebbe come un trascinamento.
+      const riga = el('div', { style:'display:flex;gap:6px;align-items:center;border-top:2px solid transparent;border-bottom:2px solid transparent;' });
+      if (!readonly) {
+        const maniglia = el('span', { title:'Trascina per cambiare l’ordine',
+          style:'cursor:grab;user-select:none;color:var(--mut);font-size:16px;line-height:1;padding:0 2px;' }, '⋮⋮');
+        maniglia.onmousedown = () => { riga.draggable = true; };
+        maniglia.onmouseup = () => { riga.draggable = false; };
+        riga.addEventListener('dragstart', (e) => { trascinato = i; riga.style.opacity = '.4';
+          try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)); } catch (_) {} });
+        riga.addEventListener('dragend', () => { riga.draggable = false; riga.style.opacity = ''; trascinato = null;
+          boxContatti.querySelectorAll('div').forEach(d => { d.style.borderTopColor = 'transparent'; d.style.borderBottomColor = 'transparent'; }); });
+        riga.addEventListener('dragover', (e) => {
+          if (trascinato == null || trascinato === i) return;
+          e.preventDefault();
+          const r = riga.getBoundingClientRect(), sopra = e.clientY < r.top + r.height / 2;
+          riga.style.borderTopColor = sopra ? 'var(--acc)' : 'transparent';
+          riga.style.borderBottomColor = sopra ? 'transparent' : 'var(--acc)';
+        });
+        riga.addEventListener('dragleave', () => { riga.style.borderTopColor = 'transparent'; riga.style.borderBottomColor = 'transparent'; });
+        riga.addEventListener('drop', (e) => {
+          if (trascinato == null || trascinato === i) return;
+          e.preventDefault();
+          const r = riga.getBoundingClientRect(), sopra = e.clientY < r.top + r.height / 2;
+          const [mosso] = contatti.splice(trascinato, 1);
+          let dove = i + (sopra ? 0 : 1);
+          if (trascinato < i) dove -= 1;
+          contatti.splice(dove, 0, mosso);
+          trascinato = null;
+          disegnaContatti();
+        });
+        riga.append(maniglia);
+      }
+      riga.append(selR, campo('nome', 'nome', 1), campo('email', 'email', 1.4, 'email'), campo('telefono', 'telefono', .8),
         readonly ? '' : el('button', { type:'button', class:'btnsm', title:'Togli il contatto',
-          onclick: () => { contatti.splice(i, 1); disegnaContatti(); } }, '✕')));
+          onclick: () => { contatti.splice(i, 1); disegnaContatti(); } }, '✕'));
+      boxContatti.append(riga);
     });
     if (!readonly) boxContatti.append(el('button', { type:'button', class:'btnsm', style:'align-self:flex-start;',
       onclick: () => { contatti.push({ ruolo: null, nome: null, email: null, telefono: null }); disegnaContatti(); } }, '+ Contatto'));
@@ -5396,8 +5426,8 @@ async function contattaAzienda(dest, modo) {
   let email = az && az.email ? String(az.email).trim() : '';
   let sito = az && az.sito ? String(az.sito).trim() : '';
   if (modo === 'sito' && sito) return apriSito(sito);
-  const primoRuolo = ((az && Array.isArray(az.contatti)) ? az.contatti : []).find(x => x && x.email);
-  if (!email && primoRuolo) return apriMail(primoRuolo.email);
+  const primoGruppo = contattiPerRuolo(((az && Array.isArray(az.contatti)) ? az.contatti : []).filter(x => x && x.email))[0];
+  if (!email && primoGruppo) return apriMail(primoGruppo.contatti.map(x => x.email));
   if (!email && !sito) {
     if (state.profile?.ruolo !== 'admin') {
       toast('Nella scheda Aziende di ' + nome + ' mancano email e sito: la mail si apre senza indirizzo. Chiedi a un admin di aggiungerli.', 'err', 9000);
@@ -5437,8 +5467,21 @@ async function contattaAzienda(dest, modo) {
   }
   apriMail(email);
 }
+// I contatti raggruppati per ruolo, nell'ordine in cui il ruolo compare per
+// primo. Senza ruolo: un gruppo per contatto (non si mettono insieme a caso).
+function contattiPerRuolo(lista) {
+  const out = [];
+  (lista || []).forEach((ct, i) => {
+    const r = ct.ruolo || null;
+    const g = r && out.find(x => x.ruolo === r);
+    if (g) g.contatti.push(ct); else out.push({ ruolo: r || 'contatto', contatti: [ct] });
+  });
+  return out;
+}
+// Uno o piu' indirizzi: piu' destinatari separati da virgola (mailto standard).
 function apriMail(email) {
-  const a = el('a', { href: 'mailto:' + (email || '') });
+  const lista = (Array.isArray(email) ? email : [email]).map(x => String(x || '').trim()).filter(Boolean);
+  const a = el('a', { href: 'mailto:' + lista.join(',') });
   document.body.append(a); a.click(); a.remove();
 }
 
@@ -5493,8 +5536,14 @@ function apriMenuMateriale(ancora, info) {
     const sito = az && az.sito, email = az && az.email;
     const perRuolo = ((az && Array.isArray(az.contatti)) ? az.contatti : []).filter(x => x && x.email);
     if (sito) voce('🌐 Apri il sito di ' + nome, () => contattaAzienda(dest, 'sito'), sub, prima);
-    perRuolo.forEach(ct => voce('✉ ' + nome + ' — ' + (ct.ruolo || 'contatto') + (ct.nome ? ' (' + ct.nome + ')' : ''),
-      () => apriMail(ct.email), (sub ? sub + ' · ' : '') + ct.email, prima));
+    // UNA voce per ruolo, con TUTTI gli indirizzi di quel ruolo (Nico, 10 nov:
+    // "piu' contatti in acquisti: che vengano presi tutti"). Nell'ordine dei
+    // contatti; un contatto senza ruolo resta una voce sua.
+    contattiPerRuolo(perRuolo).forEach(g => voce(
+      '✉ ' + nome + ' — ' + g.ruolo + (g.contatti.length > 1 ? ' (' + g.contatti.length + ')'
+        : (g.contatti[0].nome ? ' (' + g.contatti[0].nome + ')' : '')),
+      () => apriMail(g.contatti.map(x => x.email)),
+      (sub ? sub + ' · ' : '') + g.contatti.map(x => x.email).join(', '), prima));
     if (email) voce('✉ Scrivi a ' + nome, () => contattaAzienda(dest, 'mail'), (sub ? sub + ' · ' : '') + email, prima);
     if (!sito && !email && !perRuolo.length) voce('✉ Contatta ' + nome, () => contattaAzienda(dest, 'mail'),
       (sub ? sub + ' · ' : '') + 'manca email/sito: te lo chiedo', prima);
