@@ -5531,7 +5531,17 @@ function apriMenuMateriale(ancora, info) {
   };
   // Le voci per contattare UN destinatario: sito se ce l'ha, mail se ce l'ha,
   // e se non ha niente una voce sola che chiede e salva.
+  // UN'AZIENDA UNA VOLTA SOLA (Nico, 10 nov: "perche' Simone ha due opzioni
+  // con la stessa mail?"). Botturi era sia terzista della commessa sia
+  // fornitore dell'OF della lavorazione `_K`: stessa scheda, stesso indirizzo.
+  // La chiave e' la scheda Aziende (id), o il nome di Alnus se una scheda non c'e'.
+  const chiaveDest = (dest) => {
+    const az = dest.aziendaId ? (state.aziende || []).find(a => a.id === dest.aziendaId) : aziendaPerNome(dest.nome);
+    return az ? 'id:' + az.id : 'n:' + importOrdiniChiaveNome(dest.nome);
+  };
+  const giaMostrate = new Set();
   const contatti = (dest, nome, sub, prima) => {
+    giaMostrate.add(chiaveDest(dest));
     const az = dest.aziendaId ? (state.aziende || []).find(a => a.id === dest.aziendaId) : aziendaPerNome(dest.nome);
     const sito = az && az.sito, email = az && az.email;
     const perRuolo = ((az && Array.isArray(az.contatti)) ? az.contatti : []).filter(x => x && x.email);
@@ -5552,10 +5562,20 @@ function apriMenuMateriale(ancora, info) {
   if (r.stato === 'attesa_cliente' && op && op.cliente_id) {
     contatti({ aziendaId: op.cliente_id }, 'il cliente ' + nomeAziendaDi(op.cliente_id), 'materiale in conto lavoro');
   } else if (r.stato !== 'segnaposto') {
+    // Prima si raccolgono i destinatari, poi si disegnano: se la stessa
+    // azienda arriva da due strade, una voce sola con tutte e due le ragioni.
+    const dests = [];
+    const aggiungi = (dest, nome, perche) => {
+      const k = chiaveDest(dest);
+      const g = dests.find(x => x.k === k);
+      if (g) { if (!g.perche.includes(perche)) g.perche.push(perche); }
+      else dests.push({ k, dest, nome, perche: [perche] });
+    };
     if (r.lavorazione && op) {
-      getOperazioneFornitori(op.id).forEach(id => contatti({ aziendaId: id }, nomeAziendaDi(id), 'terzista della commessa'));
+      getOperazioneFornitori(op.id).forEach(id => aggiungi({ aziendaId: id }, nomeAziendaDi(id), 'terzista della commessa'));
     }
-    if (r.fornitore) contatti({ nome: r.fornitore }, r.fornitore, 'fornitore dell’OF' + (r.of ? ' ' + r.of : ''));
+    if (r.fornitore) aggiungi({ nome: r.fornitore }, r.fornitore, 'fornitore dell’OF' + (r.of ? ' ' + r.of : ''));
+    dests.forEach(d => contatti(d.dest, d.nome, d.perche.join(' · ')));
     // Il fornitore ABITUALE si legge al momento: e' un dato del codice, non
     // della lista, e la lista non lo carica.
     const vAb = voce('… fornitore abituale', async () => {}, 'lo cerco…');
@@ -5567,7 +5587,7 @@ function apriMenuMateriale(ancora, info) {
         return;
       }
       if (ab.fornitore) {
-        if (!(r.fornitore && importOrdiniChiaveNome(r.fornitore) === importOrdiniChiaveNome(ab.fornitore))) {
+        if (!giaMostrate.has(chiaveDest({ nome: ab.fornitore }))) {
           contatti({ nome: ab.fornitore }, ab.fornitore, 'fornitore abituale', vAb);
         }
         voce('✎ Cambia fornitore abituale', () => chiediFornitoreAbituale(codice, ab.fornitore), '', vAb);
