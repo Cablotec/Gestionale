@@ -4636,6 +4636,67 @@ function giaRichiestoTerzista(opId, terzistaId, codice) {
       .reduce((b, r) => b + (Number(x.stato === 'inviato' ? r.qta_inviata : r.qta) || 0), 0), 0);
 }
 
+// Pezzi ancora da fare di una commessa (ordinati − gia' prodotti).
+function daFareTerzista(x) {
+  const fatti = (typeof quantitaConsegnata === 'function') ? quantitaConsegnata(x.id) : 0;
+  return Math.max(0, (Number(x.quantita) || 0) - (Number(fatti) || 0));
+}
+// Un C/L di una commessa col flag ha giacenza nel gestionale; il resto no.
+function contaTerzista(x, r) {
+  return !!(x && x.materiali_da_ddt) && String((r && r.tipo) || '').trim().toUpperCase() === 'C/L';
+}
+// DISPONIBILE per una nuova richiesta: la sede meno quanto e' gia' promesso
+// alle richieste ancora da preparare (di qualsiasi commessa). Ritorna una
+// funzione codice -> quantita', piu' sede e impegnato per i tooltip.
+function liberoTerzista() {
+  const sede = saldoInSede(state.movimenti);
+  const impegnato = new Map();
+  (state.inviiTerzista || []).filter(x => x.stato === 'da_preparare').forEach(x => {
+    (x.righe || []).forEach(r => {
+      const ox = (state.operazioni || []).find(z => z.id === opDiRigaTerzista(x, r));
+      if (!contaTerzista(ox, r)) return;
+      const c = String(r.codice || '').trim();
+      impegnato.set(c, (impegnato.get(c) || 0) + (Number(r.qta) || 0));
+    });
+  });
+  const libero = (cod) => Math.max(0, +((sede.get(cod) || 0) - (impegnato.get(cod) || 0)).toFixed(4));
+  return { libero, sede, impegnato };
+}
+
+// PROMEMORIA (16 nov, Nico): i MANCANTI di una richiesta gia' fatta che
+// adesso sono in sede. Un codice entra solo se: una richiesta (non annullata)
+// a quel terzista l'aveva segnato mancante per questa commessa, alla commessa
+// ne serve ancora (pezzi da fare × quota − gia' chiesto) e in sede ce n'e'
+// di libero. Nessuno lo scrive: si ricalcola, e sparisce da solo quando la
+// richiesta nuova lo copre. Ritorna [{ terzista, righe:[{ codice, serve, libero }] }].
+function mancantiTerzistaInSede(o) {
+  if (!o || !o.materiali_da_ddt || !Array.isArray(o.materiali) || !richiesteTerzistaPossibili()) return [];
+  if (o.stato !== 'aperta' && o.stato !== 'sospesa') return [];
+  const fasi = fasiEsterneCommessa(o);
+  if (!fasi.size) return [];
+  const { libero } = liberoTerzista();
+  const daFare = daFareTerzista(o);
+  const out = [];
+  fasi.forEach((voci, ter) => {
+    const segnati = new Set();
+    (state.inviiTerzista || []).filter(x => x.terzista_id === ter && x.stato !== 'annullato')
+      .forEach(x => (x.righe || []).forEach(r => {
+        if (opDiRigaTerzista(x, r) === o.id && Number(r.mancante) > 0) segnati.add(String(r.codice || '').trim());
+      }));
+    if (!segnati.size) return;
+    const righe = [];
+    voci.forEach(({ riga, qta_pz }) => {
+      const cod = String(riga.codice || '').trim();
+      if (!segnati.has(cod) || !contaTerzista(o, riga)) return;
+      const serve = Math.max(0, +(qta_pz * daFare - giaRichiestoTerzista(o.id, ter, cod)).toFixed(4));
+      const lib = libero(cod);
+      if (serve > 0 && lib > 0) righe.push({ codice: cod, serve, libero: lib });
+    });
+    if (righe.length) out.push({ terzista: ter, righe });
+  });
+  return out;
+}
+
 // Un velo sopra la scheda aperta, con intestazione, corpo e piede.
 function veloTerzista(titolo, larghezza) {
   const bg = el('div', { class:'modal-bg' });
@@ -4679,25 +4740,13 @@ function apriRichiestaTerzista(o, poi, opts) {
     ...terzisti.map(id => el('option', { value: id }, nomeAziendaDi(id)))
       .sort((a, b) => a.textContent.localeCompare(b.textContent, 'it')));
   if (o) selTer.value = terzisti[0];
+  if (opts.terzista && terzisti.includes(opts.terzista)) selTer.value = opts.terzista;
 
-  const daFareDi = (x) => {
-    const fatti = (typeof quantitaConsegnata === 'function') ? quantitaConsegnata(x.id) : 0;
-    return Math.max(0, (Number(x.quantita) || 0) - (Number(fatti) || 0));
-  };
-  const sede = saldoInSede(state.movimenti);
-  const conta = (x, r) => !!(x && x.materiali_da_ddt) && String(r.tipo || '').trim().toUpperCase() === 'C/L';
+  const daFareDi = daFareTerzista;
+  const conta = contaTerzista;
   // DISPONIBILE: la sede meno quanto e' gia' promesso alle richieste ancora
   // da preparare (di qualsiasi commessa), solo per quello che ha giacenza.
-  const impegnato = new Map();
-  (state.inviiTerzista || []).filter(x => x.stato === 'da_preparare').forEach(x => {
-    (x.righe || []).forEach(r => {
-      const ox = (state.operazioni || []).find(z => z.id === opDiRigaTerzista(x, r));
-      if (!conta(ox, r)) return;
-      const c = String(r.codice || '').trim();
-      impegnato.set(c, (impegnato.get(c) || 0) + (Number(r.qta) || 0));
-    });
-  });
-  const libero = (cod) => Math.max(0, +((sede.get(cod) || 0) - (impegnato.get(cod) || 0)).toFixed(4));
+  const { libero, sede, impegnato } = liberoTerzista();
   const num = (x) => { const n = Number(String(x == null ? '' : x).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
   // La NOTA di un codice per questo terzista, dalla scheda prodotto di OGGI
   // (non serve rigenerare le liste). Prodotti diversi con note diverse: unite.
@@ -4867,7 +4916,10 @@ function apriRichiestaTerzista(o, poi, opts) {
       const { ass, manc } = ripartoDi(s);
       s.voci.forEach((vc, i) => {
         if (!(ass[i] > 0) && !(manc[i] > 0)) return;
-        righe.push({ codice: s.cod, operazione_id: vc.commessa.id, descrizione: s.riga.descrizione || null,
+        // `pz`: i pezzi del prodotto per cui si prepara (da fare oggi), per la
+        // testata della stampa (16 nov, Nico). Fotografato qui: domani cambia.
+        righe.push({ codice: s.cod, operazione_id: vc.commessa.id, pz: daFareDi(vc.commessa),
+          descrizione: s.riga.descrizione || null,
           um: s.riga.um || null, tipo: s.tipo || null, qta: ass[i] > 0 ? ass[i] : 0,
           ...(manc[i] > 0 ? { mancante: manc[i] } : {}),
           ...(s.inNota.value.trim() ? { nota: s.inNota.value.trim() } : {}) });
@@ -4913,6 +4965,28 @@ function stampaRichiestaTerzista(x) {
   const arts = [...new Set(comm.map(c => { const a = (state.articoli || []).find(z => z.id === c.articolo_id); return a ? a.codice : ''; }).filter(Boolean))];
   const rifs = [...new Set(comm.map(c => c.riferimento_cliente).filter(Boolean))];
   const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+  // PER QUANTI PEZZI si prepara (16 nov, Nico: "16+31+15=62"). Il dato e'
+  // `pz` sulle righe, fotografato quando la richiesta nasce; le richieste
+  // di prima non ce l'hanno e prendono i pezzi ordinati della commessa.
+  // Prodotti diversi non si sommano: una riga per prodotto.
+  const pzDi = (c) => {
+    const r = (x.righe || []).find(z => opDiRigaTerzista(x, z) === c.id && Number(z.pz) >= 0 && z.pz != null);
+    return r ? Number(r.pz) : (Number(c.quantita) || 0);
+  };
+  const perArt = new Map();
+  comm.forEach(c => {
+    const a = (state.articoli || []).find(z => z.id === c.articolo_id);
+    const k = a ? a.codice : '?';
+    if (!perArt.has(k)) perArt.set(k, []);
+    perArt.get(k).push({ eti: etiOpCortaTerzista(c), pz: pzDi(c) });
+  });
+  const pezziHtml = [...perArt.entries()].map(([art, v]) => {
+    const tot = v.reduce((a, z) => a + z.pz, 0);
+    const testa = perArt.size > 1 ? esc(art) + ': ' : '';
+    return testa + (v.length > 1
+      ? v.map(z => esc(z.eti) + ' <span class="pz">' + esc(nfIT(z.pz)) + '</span>').join(' + ') + ' = <b class="tot">' + esc(nfIT(tot)) + ' pz</b>'
+      : '<b class="tot">' + esc(nfIT(tot)) + ' pz</b>');
+  }).join('<br>');
   // Accanto alla quantita' da preparare, quanto MANCA (Nico, 6 nov: in
   // colonna, non in fondo). Una riga tutta mancante non ha casella ne'
   // quantita': c'e' solo per informare il terzista.
@@ -4934,7 +5008,8 @@ function stampaRichiestaTerzista(x) {
   const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Lista per terzista '
     + esc(comm.map(etiOpTerzista).join(' ')) + '</title><style>'
     + 'body{font-family:Arial,sans-serif;font-size:12px;margin:18px;color:#000;background:#fff;}h1{font-size:18px;margin:0 0 4px;}.mc{color:#b00;}tr.solo td{color:#555;}.leg{font-size:11px;color:#555;margin-top:6px;}'
-    + '.t{display:grid;grid-template-columns:repeat(3,auto);gap:4px 24px;margin:10px 0 14px;}.t b{display:block;font-size:10px;color:#555;text-transform:uppercase;}'
+    + '.t{display:grid;grid-template-columns:repeat(3,auto);gap:4px 24px;margin:10px 0 14px;}.t>div>b:first-child{display:block;font-size:10px;color:#555;text-transform:uppercase;}'
+    + '.pezzi{font-size:13px;}.pezzi .pz{font-weight:700;}.pezzi .tot{font-size:15px;}'
     + 'table{width:100%;border-collapse:collapse;}th,td{border:1px solid #999;padding:5px 6px;text-align:left;vertical-align:top;}'
     + 'th{background:#eee;font-size:10px;text-transform:uppercase;}.n{text-align:right;font-weight:700;}.m{font-family:monospace;}'
     + '.p{font-size:11px;white-space:nowrap;}.p b{font-weight:700;}.nt{font-weight:700;font-size:11px;width:22%;}tr{page-break-inside:avoid;}thead{display:table-header-group;}'
@@ -4943,9 +5018,9 @@ function stampaRichiestaTerzista(x) {
     + '</style></head><body>'
     + '<h1>Materiale da preparare per il terzista</h1>'
     + '<div class="t"><div><b>' + (multi ? 'Commesse' : 'Commessa') + '</b>' + esc(comm.map(etiOpTerzista).join(' · ')) + '</div>'
-    + '<div><b>Prodotto</b>' + esc(arts.join(' · '))
-      + (!multi && comm[0] && comm[0].quantita ? ' · ' + esc(comm[0].quantita) + ' pz' : '') + '</div>'
+    + '<div><b>Prodotto</b>' + esc(arts.join(' · ')) + '</div>'
     + '<div><b>Rif. cliente</b>' + esc(rifs.join(' · ') || '—') + '</div>'
+    + '<div class="pezzi"><b>Si prepara per</b>' + pezziHtml + '</div>'
     + '<div><b>Terzista</b>' + esc(nomeAziendaDi(x.terzista_id)) + '</div>'
     + '<div><b>Richiesta del</b>' + esc(fmtIT(String(x.creato_il || '').slice(0, 10))) + '</div></div>'
     + (x.nota ? '<p><b>Nota:</b> ' + esc(x.nota) + '</p>' : '')
@@ -5150,6 +5225,23 @@ function sezioneRichiesteTerzista(o, poi) {
   const box = el('div', { style:'margin:4px 0 14px;' },
     el('div', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px;' },
       'Materiale per i terzisti'));
+  // Promemoria: i mancanti di prima adesso ci sono (`mancantiTerzistaInSede`).
+  mancantiTerzistaInSede(o).forEach(p => {
+    const n = p.righe.length;
+    box.append(el('div', { class:'promemoria-terzista',
+      style:'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 6px;padding:7px 10px;'
+        + 'border:1px solid var(--grn);border-radius:6px;font-size:12px;' },
+      el('span', { style:'font-weight:700;color:var(--grn);' },
+        '🔔 Arrivati i mancanti per ' + nomeAziendaDi(p.terzista) + ': '
+        + n + (n === 1 ? ' materiale ora in sede' : ' materiali ora in sede')),
+      el('span', { class:'sub', style:'font-size:11px;' },
+        p.righe.map(r => r.codice + ' (serve ' + nfIT(r.serve) + ', in sede ' + nfIT(r.libero) + ')').join(' · ')),
+      eAdminOra()
+        ? el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
+            title:'Nuova richiesta per questo terzista: propone solo quello che manca ancora',
+            onclick: () => apriRichiestaTerzista(o, poi, { terzista: p.terzista }) }, '↗ Prepara la richiesta')
+        : ''));
+  });
   mie.forEach(x => box.append(rigaRichiestaTerzista(x, poi, false, o.id)));
   return box;
 }
