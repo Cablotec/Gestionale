@@ -33,6 +33,11 @@
 -- ── 1. L'anagrafica del reparto ─────────────────────────────────────
 alter table aziende add column if not exists is_reparto boolean not null default false;
 create unique index if not exists aziende_un_solo_reparto on aziende (is_reparto) where is_reparto;
+-- Un'azienda deve essere cliente o fornitore (`aziende_almeno_un_ruolo`): il
+-- reparto non e' nessuno dei due, e' il terzo ruolo ammesso.
+alter table aziende drop constraint if exists aziende_almeno_un_ruolo;
+alter table aziende add constraint aziende_almeno_un_ruolo
+  check (is_cliente or is_fornitore or is_reparto);
 insert into aziende (nome, attivo, is_cliente, is_fornitore, is_reparto)
 select 'Reparto', true, false, false, true
 where not exists (select 1 from aziende where is_reparto);
