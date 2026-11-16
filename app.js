@@ -13074,35 +13074,12 @@ function openOperazioneModal(o, opts) {
         stato));
     });
 
-    // ARRIVATO MA NON IN LISTA (13 ott): un DDT di questo ordine che porta un
-    // codice che la lista non chiede. Puo' essere un codice sostituito dal
-    // cliente, un errore di lettura o materiale in piu': in ogni caso va
-    // detto, non lasciato fuori in silenzio perche' "non ci riguarda".
-    if (o.materiali_da_ddt && Array.isArray(state.movimenti) && o.riferimento_cliente) {
-      const inLista = new Set(righe.map(r => String(r.codice || '').trim()));
-      const fuori = new Map();
-      state.movimenti
-        .filter(m => String(m.ordine_rif || '') === String(o.riferimento_cliente)
-          && !inLista.has(String(m.codice || '').trim()))
-        .forEach(m => {
-          const k = String(m.codice || '').trim();
-          const x = fuori.get(k) || { qta: 0, um: m.um, docs: new Set() };
-          x.qta += Number(m.qta) || 0;
-          if (m.documento_numero) x.docs.add(m.documento_numero);
-          fuori.set(k, x);
-        });
-      if (fuori.size) {
-        sezMateriali.append(el('div', { class:'sub',
-          style:'margin-top:12px;font-size:11px;color:var(--or);font-weight:700;' },
-          '⚠ Arrivati con i DDT dell\'ordine ' + o.riferimento_cliente + ' ma non in questa lista: ' + fuori.size));
-        fuori.forEach((x, k) => sezMateriali.append(el('div', { style: COL + 'padding:3px 0;' },
-          el('span', { class:'mono', style:'font-size:11px;' }, k),
-          el('span', { class:'sub', style:'font-size:11px;' }, 'DDT ' + [...x.docs].join(', ')),
-          el('span', {}), el('span', { class:'mono', style:'font-size:11px;text-align:right;font-weight:700;' }, nf(x.qta)),
-          el('span', { class:'sub', style:'font-size:11px;' }, x.um || ''),
-          el('span', { class:'sub', style:'font-size:11px;' }, 'non richiesto dalla distinta'))));
-      }
-    }
+    // Il riquadro «Arrivati con i DDT dell'ordine ma non in questa lista»
+    // (13 ott) e' stato TOLTO il 16 nov (Nico): legava i DDT alle commesse
+    // col numero d'ordine stampato, che non regge. Un ordine puo' avere piu'
+    // prodotti (Tema 4700000482: tre) e un DDT puo' coprire piu' ordini o
+    // riportarne uno sbagliato (1000005134). Il materiale va per codice nel
+    // magazzino unico, ripartito con `ordineDiServizio`.
 
     // Lo stato di OGGI, appoggiato sopra le quantita fisse.
     // ⚠⚠ NIENTE `async` E NIENTE GUARDIA `isConnected` QUI (3 set, difetto

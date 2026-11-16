@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-11-10.02`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-11-16.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -84,7 +84,7 @@ Chiesto da Nico: *"voglio vedere nel gestionale cosa e' arrivato e cosa manca"*,
   - L'app rilegge i movimenti dopo ogni lotto (`caricaMovimenti`) e fra i "DDT" di una riga mette solo i CARICHI.
   - ⚠ Lotti registrati prima del 14 ott o prima della spunta non scaricano: le due Enviro non ne avevano.
 - `state.movimenti`: **`null` se non letta**, e allora la riga dice *"DDT non letti"*, non "mancano" — mandare a chiedere al cliente materiale gia' arrivato e' la bugia piu' cara.
-- **Arrivati ma non in lista**: riquadro sotto la tabella, per i movimenti con `ordine_rif` = riferimento cliente e codice fuori lista. Su Enviro sono 5 (rele, FRAM, DC/DC, rondella nylon, pennino): Tema li manda, la distinta Cablotec non li chiede.
+- ~~**Arrivati ma non in lista**~~ **TOLTO il 16 nov** (`2026-11-16.01`, Nico): legava i DDT alle commesse col numero d'ordine stampato. Su un ordine con piu' prodotti (Tema 4700000482: 358010100, 358010075, 376001134) mostrava come "non richiesti" i materiali delle sorelle, e un DDT puo' coprire piu' ordini o riportarne uno sbagliato (1000005134). Il materiale va per codice nel magazzino unico, ripartito con `ordineDiServizio` (priorita', poi scadenza). Non riproporlo.
 - **La lista porta ora il tipo C/L/ACQ** (`esplodiDistinta` → `tipi`, per foglia; due tipi diversi sullo stesso codice = `null`). Prima portava solo MAC: le liste generate prima del 13 ott hanno `tipo: null` sui C/L e vanno **rigenerate** per funzionare col flag.
 - ⚠ Su Enviro restano "mancano 15" tre C/L che **Tema non manda** (sono solo nella distinta Cablotec): `TS-510000184` kit PVC, `TS-517000374` cavo alimentazione, `TS-536000652` Bulgin. Da chiarire con Nico se sono davvero C/L.
 - **GIACENZE DEL GESTIONALE DENTRO MATERIALI (14 ott, `2026-10-14.02`)**. Nico: *"la vista giacenze integrata a materiali? non e' la stessa cosa in fondo?"* — si': una scheda Giacenze a parte sarebbe stata il secondo posto con un'altra giacenza per lo stesso codice. `righeGiacenzaGestionale` (domain, 9 test) costruisce per i codici del gestionale (con movimenti, o C/L di commesse "da DDT" vive) righe con la STESSA FORMA di `mancanti`: giacenza = saldo movimenti, impegno = quanto chiedono le commesse col flag (a residuo), `qta_da_ordinare` = la differenza → `mancanteCategoria` le chiama "attesa cliente" senza un caso nuovo.
