@@ -8288,7 +8288,7 @@ function openArticoloModal(a, opts) {
     return out.length ? out : null;
   }
   function errorePrezziFornitori() {
-    if (fasiEst.some(f => !f.fornitore && Number(f.prezzo_pz) > 0)) return 'Fornitori: c’è un prezzo senza fornitore.';
+    if (fasiEst.some(f => !f.fornitore && Number(f.prezzo_pz) > 0)) return 'Terzisti e reparto: c’è un prezzo senza fornitore.';
     return null;
   }
 
@@ -8459,14 +8459,14 @@ function openArticoloModal(a, opts) {
   // in distinta, o che va fuori piu' di quanto ne chiede. Ritorna la frase, o null.
   function erroreFasiEsterne() {
     const conRighe = fasiEst.filter(f => f.righe.some(r => String(r.codice || '').trim() && Number(r.qta) > 0));
-    if (conRighe.some(f => !f.fornitore)) return 'Fornitori: scegli il fornitore di ogni blocco.';
+    if (conRighe.some(f => !f.fornitore)) return 'Terzisti e reparto: scegli il fornitore di ogni blocco.';
     const { perPezzo } = perPezzoOra();
     const fuoriDistinta = [...new Set(conRighe.flatMap(f => f.righe.map(r => String(r.codice || '').trim())
       .filter(c => c && !perPezzo.has(c))))];
-    if (fuoriDistinta.length) return 'Fornitori: ' + fuoriDistinta.slice(0, 3).join(', ') + (fuoriDistinta.length > 3 ? '…' : '')
+    if (fuoriDistinta.length) return 'Terzisti e reparto: ' + fuoriDistinta.slice(0, 3).join(', ') + (fuoriDistinta.length > 3 ? '…' : '')
       + ' non è nella distinta.';
     const troppo = [...ripartoFasiEsterne(perPezzo, fasiEst)].filter(([, x]) => x.eccede).map(([c]) => c);
-    if (troppo.length) return 'Fornitori: ' + troppo.slice(0, 3).join(', ') + (troppo.length > 3 ? '…' : '')
+    if (troppo.length) return 'Terzisti e reparto: ' + troppo.slice(0, 3).join(', ') + (troppo.length > 3 ? '…' : '')
       + ' va fuori più di quanto chiede la distinta.';
     return null;
   }
@@ -8493,7 +8493,10 @@ function openArticoloModal(a, opts) {
   // con FormData, e un campo tolto dal DOM sparirebbe dal salvataggio.
   const schede = [
     { id:'materiali', nome:'Materiali' },
-    { id:'fasi',      nome:'Fornitori' },
+    // «Terzisti e reparto» (16 nov, Nico): era «Fornitori»; con la WIP la
+    // linguetta dice cosa va fuori e cosa resta in casa. Non «Fasi»: si
+    // confonderebbe con Lavorazioni e tempo.
+    { id:'fasi',      nome:'Terzisti e reparto' },
     { id:'lavoro',    nome:'Lavorazioni e tempo' },
     { id:'prezzi',    nome:'Prezzi cliente' },
     { id:'note',      nome:'Note' },
@@ -8525,7 +8528,7 @@ function openArticoloModal(a, opts) {
     const nMat = distinta.length;
     linguette.materiali.textContent = 'Materiali' + (nMat ? ' · ' + nMat : '');
     linguette.lavoro.textContent = 'Lavorazioni e tempo' + (fasi.length ? ' · ' + fasi.length : '');
-    linguette.fasi.textContent = 'Fornitori' + (fasiEst.length ? ' · ' + fasiEst.length : '');
+    linguette.fasi.textContent = 'Terzisti e reparto' + (fasiEst.length ? ' · ' + fasiEst.length : '');
     linguette.prezzi.textContent = 'Prezzi cliente' + (listinoRighe.length ? ' · ' + listinoRighe.length : '');
   }
   aggiornaEtichette();
