@@ -1099,10 +1099,10 @@ function opCampiMancanti(op) {
   if (fasi.length > 0) {
     fasi.forEach(f => {
       const tipo = (state.tipiLav || []).find(t => t.id === f.tipo_lavorazione_id);
-      const nome = tipo?.nome || 'fase';
+      const nome = tipo?.nome || 'lavorazione';
       const ass = faseAssegnatari(op, f.id);
       if (ass.addetti.length === 0 && ass.fornitori.length === 0) {
-        mancanti.push('Fase «' + nome + '»: nessun addetto/fornitore');
+        mancanti.push('Lavorazione «' + nome + '»: nessun addetto/fornitore');
       }
     });
   } else {
@@ -3338,7 +3338,7 @@ function openClienteModal(c) {
       inTariffa,
       el('span', { style:'font-size:11px;color:var(--mut);' },
         tariffaDisponibile
-          ? 'per il prezzo fase suggerito nelle commesse: ore fase × tariffa (vuoto = niente suggerimento)'
+          ? 'per il prezzo lavorazione suggerito nelle commesse: ore lavorazione × tariffa (vuoto = niente suggerimento)'
           : 'richiede la colonna aziende.tariffa_oraria (migrazione dal pannello Supabase)'),
     ),
   );
@@ -4572,7 +4572,7 @@ function richiesteTerzistaPossibili() {
     && Array.isArray(state.movimenti);
 }
 function eAdminOra() { return !!(state.profile && state.profile.ruolo === 'admin'); }
-function nomeTipoLav(id) { return ((state.tipiLav || []).find(t => t.id === id) || {}).nome || 'fase ?'; }
+function nomeTipoLav(id) { return ((state.tipiLav || []).find(t => t.id === id) || {}).nome || 'lavorazione ?'; }
 function nfIT(n) { return Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 }); }
 
 // Le fasi esterne della lista di una commessa: Map terzistaId -> [{ riga, qta_pz }].
@@ -4732,7 +4732,7 @@ function apriRichiestaTerzista(o, poi, opts) {
       o ? 'Nella lista di questa commessa nessun materiale va a un terzista.'
         : 'Nessuna commessa aperta ha materiale da mandare a un terzista.',
       el('br'), 'Compila Prodotti → ', el('b', {}, art ? art.codice : 'il prodotto'),
-      ' → linguetta «Fasi esterne»; poi premi «⟳ Rigenera dalla distinta» nelle commesse.'));
+      ' → linguetta «Fasi»; poi premi «⟳ Rigenera dalla distinta» nelle commesse.'));
     v.piede.append(annulla);
     return;
   }
@@ -7825,20 +7825,20 @@ function openArticoloModal(a, opts) {
     const pagato = pagatoCorrente();
     if (pagato === null) {
       notaConfronto.style.color = 'var(--mut)';
-      notaConfronto.textContent = `Somma fasi: ${somma} min/pz · tempo pagato non impostato`;
+      notaConfronto.textContent = `Somma lavorazioni: ${somma} min/pz · tempo pagato non impostato`;
     } else if (somma > pagato) {
       notaConfronto.style.color = 'var(--red)';
-      notaConfronto.textContent = `⚠ Somma fasi ${somma} · pagato ${pagato} · sfori di ${+(somma - pagato).toFixed(2)} min/pz`;
+      notaConfronto.textContent = `⚠ Somma lavorazioni ${somma} · pagato ${pagato} · sfori di ${+(somma - pagato).toFixed(2)} min/pz`;
     } else {
       notaConfronto.style.color = 'var(--grn)';
-      notaConfronto.textContent = `Somma fasi ${somma} · pagato ${pagato} · margine ${+(pagato - somma).toFixed(2)} min/pz`;
+      notaConfronto.textContent = `Somma lavorazioni ${somma} · pagato ${pagato} · margine ${+(pagato - somma).toFixed(2)} min/pz`;
     }
   }
   if (!readonly) inMinuti.oninput = aggiornaConfronto;
   function renderFasi() {
     fasiWrap.innerHTML = '';
     if (fasi.length === 0) {
-      fasiWrap.append(el('div', { class:'sub' }, "Nessuna fase: l'articolo usa il solo tempo pagato qui sopra."));
+      fasiWrap.append(el('div', { class:'sub' }, "Nessuna lavorazione: l'articolo usa il solo tempo pagato qui sopra."));
     }
     fasi.forEach((f, i) => {
       const sel = el('select', { style:'flex:1;min-width:0;' },
@@ -7898,7 +7898,7 @@ function openArticoloModal(a, opts) {
   const btnAddFase = readonly ? null : el('button', {
     type:'button', class:'btnsm', style:'margin-top:8px;align-self:flex-start;',
     onclick: () => { fasi.push({ tipo_lavorazione_id:null, minuti_unitari:0 }); renderFasi(); aggiornaConfronto(); }
-  }, '+ Aggiungi fase');
+  }, '+ Aggiungi lavorazione');
   renderFasi();
   aggiornaConfronto();
 
@@ -8493,10 +8493,10 @@ function openArticoloModal(a, opts) {
   // con FormData, e un campo tolto dal DOM sparirebbe dal salvataggio.
   const schede = [
     { id:'materiali', nome:'Materiali' },
-    // «Terzisti e reparto» (16 nov, Nico): era «Fornitori»; con la WIP la
-    // linguetta dice cosa va fuori e cosa resta in casa. Non «Fasi»: si
-    // confonderebbe con Lavorazioni e tempo.
-    { id:'fasi',      nome:'Terzisti e reparto' },
+    // «Fasi» (16 nov, Nico): era «Fornitori»; con la WIP la
+    // linguetta dice cosa va fuori e cosa resta in casa. I passi del ciclo
+    // nei testi si chiamano «lavorazioni» (vedi CLAUDE.md, VOCABOLARIO).
+    { id:'fasi',      nome:'Fasi' },
     { id:'lavoro',    nome:'Lavorazioni e tempo' },
     { id:'prezzi',    nome:'Prezzi cliente' },
     { id:'note',      nome:'Note' },
@@ -8528,7 +8528,7 @@ function openArticoloModal(a, opts) {
     const nMat = distinta.length;
     linguette.materiali.textContent = 'Materiali' + (nMat ? ' · ' + nMat : '');
     linguette.lavoro.textContent = 'Lavorazioni e tempo' + (fasi.length ? ' · ' + fasi.length : '');
-    linguette.fasi.textContent = 'Terzisti e reparto' + (fasiEst.length ? ' · ' + fasiEst.length : '');
+    linguette.fasi.textContent = 'Fasi' + (fasiEst.length ? ' · ' + fasiEst.length : '');
     linguette.prezzi.textContent = 'Prezzi cliente' + (listinoRighe.length ? ' · ' + listinoRighe.length : '');
   }
   aggiornaEtichette();
@@ -8543,7 +8543,7 @@ function openArticoloModal(a, opts) {
   pannelli.lavoro.append(
     el('div', { class:'field' }, el('label', {}, 'Tempo pagato (min/pz)'), inMinuti, notaMinuti),
     el('div', { class:'field' },
-      el('label', {}, 'Fasi (opzionale)'),
+      el('label', {}, 'Lavorazioni (opzionale)'),
       fasiWrap, btnAddFase, notaConfronto,
       el('div', { class:'sub', style:'margin-top:6px;' },
         'Auto-compilate dalla media storica. La somma dovrebbe stare entro il tempo pagato.')));
@@ -9369,7 +9369,7 @@ function openOperazioniImportPreviewModal(rows) {
       + 'ce l\'ha: una riga senza riferimento non cancella quello già scritto. '
       + 'La SCADENZA e il PREZZO no: nascono da Alnus, ma da lì in poi sono '
       + 'decisioni prese qui, e restano quelle che avete messo voi. '
-      + 'Stato, fasi, addetti, note, gruppi e ore restano come sono.'));
+      + 'Stato, lavorazioni, addetti, note, gruppi e ore restano come sono.'));
   }
 
   dest = bScrive;
@@ -12315,7 +12315,7 @@ function openOperazioneModal(o, opts) {
     // accese. Più chiaro a video e, al salvataggio, una riga per fase.
     Object.keys(haNull).forEach(uid => { addettoFase[uid] = tutteKeys(); });
   }
-  const tipoNomeFase = (id) => (tipiAttiviComm.find(t => t.id === id) || {}).nome || 'fase';
+  const tipoNomeFase = (id) => (tipiAttiviComm.find(t => t.id === id) || {}).nome || 'lavorazione';
   const fasiAssegnabili = () => fasiComm.filter(f => f.tipo_lavorazione_id);
   // Chip multi-fase per un ADDETTO: ogni fase è un interruttore on/off.
   // Nessuna fase accesa = assegnato a tutta la commessa. Un operatore può
@@ -12337,7 +12337,7 @@ function openOperazioneModal(o, opts) {
           onclick: () => {
             if (!canEdit) return;
             if (on && keys().length === 1) {
-              toast('Almeno una fase: per toglierlo dalla commessa usa la \u2715', 'err');
+              toast('Almeno una lavorazione: per toglierlo dalla commessa usa la \u2715', 'err');
               return;
             }
             addettoFase[uid] = on ? keys().filter(k => k !== f._k) : [...keys(), f._k];
@@ -12626,9 +12626,9 @@ function openOperazioneModal(o, opts) {
       // e si possono togliere.
       if ((sel.fase_keys || []).length) {
         row.append(el('span', { style:'display:inline-flex;gap:4px;align-items:center;font-size:11px;color:var(--mut);font-family:JetBrains Mono,monospace;' },
-          'fase: ' + sel.fase_keys.map(k => { const f = fasiComm.find(x => x._k === k) || (state.opFasi || []).find(x => x.id === k);
+          'lavorazione: ' + sel.fase_keys.map(k => { const f = fasiComm.find(x => x._k === k) || (state.opFasi || []).find(x => x.id === k);
               return f ? tipoNomeFase(f.tipo_lavorazione_id) : '?'; }).join(', '),
-          ...(canEdit ? [el('button', { type:'button', class:'btnsm', title:'Togli la fase: il fornitore resta sulla commessa',
+          ...(canEdit ? [el('button', { type:'button', class:'btnsm', title:'Togli la lavorazione: il fornitore resta sulla commessa',
             onclick: () => { sel.fase_keys = []; renderForSelected();
               if (typeof renderFasiComm === 'function') renderFasiComm();
               if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm(); } }, '✕')] : [])));
@@ -12808,7 +12808,7 @@ function openOperazioneModal(o, opts) {
       .reduce((s, x) => s + x.ore, 0);
     if (oreTimbrate > 0 || oreDich > 0) {
       const parti = [];
-      if (oreTimbrate > 0) parti.push('⏱ ' + fmtH(oreTimbrate) + ' sono già dentro il riepilogo per fase qui sopra');
+      if (oreTimbrate > 0) parti.push('⏱ ' + fmtH(oreTimbrate) + ' sono già dentro il riepilogo per lavorazione qui sopra');
       if (oreDich > 0) parti.push('📄 ' + fmtH(oreDich) + ' non sono timbrate da nessuno: si sommano a quelle ore');
       wrapOreEsterne.append(el('div', { class:'sub', style:'margin-top:6px;font-size:11px;' },
         parti.join(' · ')));
@@ -13254,13 +13254,13 @@ function openOperazioneModal(o, opts) {
     const pagato = pagatoComm();
     if (pagato === null) {
       notaConfrontoComm.style.color = 'var(--mut)';
-      notaConfrontoComm.textContent = `Somma fasi: ${somma} min/pz${dett} · tempo pagato non impostato`;
+      notaConfrontoComm.textContent = `Somma lavorazioni: ${somma} min/pz${dett} · tempo pagato non impostato`;
     } else if (somma > pagato) {
       notaConfrontoComm.style.color = 'var(--red)';
-      notaConfrontoComm.textContent = `⚠ Somma fasi ${somma}${dett} · pagato ${pagato} · sfori di ${+(somma - pagato).toFixed(2)} min/pz`;
+      notaConfrontoComm.textContent = `⚠ Somma lavorazioni ${somma}${dett} · pagato ${pagato} · sfori di ${+(somma - pagato).toFixed(2)} min/pz`;
     } else {
       notaConfrontoComm.style.color = 'var(--grn)';
-      notaConfrontoComm.textContent = `Somma fasi ${somma}${dett} · pagato ${pagato} · margine ${+(pagato - somma).toFixed(2)} min/pz`;
+      notaConfrontoComm.textContent = `Somma lavorazioni ${somma}${dett} · pagato ${pagato} · margine ${+(pagato - somma).toFixed(2)} min/pz`;
     }
     // Le stesse azioni che cambiano il confronto (chip fasi, fornitori,
     // riallineamento fasi) spostano anche il prezzo suggerito dei fornitori.
@@ -13309,14 +13309,14 @@ function openOperazioneModal(o, opts) {
   function renderFasiComm() {
     fasiWrapComm.innerHTML = '';
     if (fasiComm.length === 0) {
-      let msg = 'Nessuna fase in anagrafica: la commessa usa il solo tempo pagato.';
+      let msg = 'Nessuna lavorazione in anagrafica: la commessa usa il solo tempo pagato.';
       if (isNew) {
         let selId = null;
         try {
           const v = acArticolo.getValue();
           selId = (v.mode === 'existing' && v.id) ? v.id : null;
         } catch (e) {}
-        if (!selId) msg = 'Le fasi compaiono scegliendo l\'articolo (dalla sua anagrafica).';
+        if (!selId) msg = 'Le lavorazioni compaiono scegliendo l\'articolo (dalla sua anagrafica).';
       }
       fasiWrapComm.append(el('div', { class:'sub' }, msg));
       const b0 = badgeFornitoriTuttaCommessa();
@@ -13528,7 +13528,7 @@ function openOperazioneModal(o, opts) {
     if (!art) return null;
     return el('div', { style:'margin-top:6px;' },
       el('button', { type:'button', class:'btnsm',
-        title:'Apre la scheda articolo: le fasi si modificano lì. Valgono per questa commessa (al salvataggio) e per le future.',
+        title:'Apre la scheda articolo: le lavorazioni si modificano lì. Valgono per questa commessa (al salvataggio) e per le future.',
         // Anche di qui si lascia la scheda: `openArticoloModal` passa da
         // `openModal`, che svuota la radice dei modal e si porta via questa
         // commessa con tutto quello che c'e scritto dentro. Prima si chiede.
@@ -13538,7 +13538,7 @@ function openOperazioneModal(o, opts) {
       }, '✎ Modifica in anagrafica'));
   })();
   pLav.append(
-    el('div', { class:'field' }, el('label', {}, 'Fasi (da anagrafica articolo)'),
+    el('div', { class:'field' }, el('label', {}, 'Lavorazioni (da anagrafica articolo)'),
       fasiWrapComm, notaConfrontoComm, btnFasiAnagrafica,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Gestite in automatico dall\'anagrafica: media storica dei consuntivi, valori manuali solo per i tipi senza storico. '
@@ -13653,7 +13653,7 @@ function openOperazioneModal(o, opts) {
       .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
     if (fasiOp.length > 0) {
       const box = el('div', { style:'background:var(--sur2);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;' });
-      box.append(el('div', { style:'color:var(--mut);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;' }, 'Riepilogo per fase'));
+      box.append(el('div', { style:'color:var(--mut);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;' }, 'Riepilogo per lavorazione'));
       // Totali di fase in MINUTI (i minuti/pezzo delle fasi sono in minuti:
       // stessa unità, confronto immediato senza conversioni a mente).
       let sommaConsFasi = 0;
@@ -13671,7 +13671,7 @@ function openOperazioneModal(o, opts) {
         box.append(el('div', { style:'display:flex;align-items:center;gap:10px;padding:3px 0;' },
           el('span', { style:'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + (tipo?.colore || '#6b6b64') + ';' }),
           el('span', { style:'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' },
-            '#' + (i + 1) + ' ' + (tipo?.nome || 'Fase')),
+            '#' + (i + 1) + ' ' + (tipo?.nome || 'Lavorazione')),
           estNomi.length
             ? el('span', { style:'color:var(--yel);flex-shrink:0;' },
                 Math.round(fPrev * 60) + ' min → ' + estNomi.join(', ') + ' (fornitore)'
@@ -13687,7 +13687,7 @@ function openOperazioneModal(o, opts) {
       if (fuori > 0.05) {
         box.append(el('div', { style:'display:flex;align-items:center;gap:10px;padding:3px 0;color:var(--yel);' },
           el('span', { style:'width:10px;height:10px;flex-shrink:0;text-align:center;' }, '?'),
-          el('span', { style:'flex:1;' }, 'Fuori fase (tipo non riconducibile)'),
+          el('span', { style:'flex:1;' }, 'Senza lavorazione (tipo non riconducibile)'),
           el('span', { style:'flex-shrink:0;' }, Math.round(fuori * 60) + ' min'),
         ));
       }
@@ -13754,7 +13754,7 @@ function openOperazioneModal(o, opts) {
                   .filter(Boolean).join(' · ')
                 + ') · nostre ' + cons.oreInterne.toFixed(2) + 'h'
                 + (cons.baseTotale
-                    ? ' — il previsto qui sopra è quello TOTALE (comprende le fasi dei fornitori), '
+                    ? ' — il previsto qui sopra è quello TOTALE (comprende le lavorazioni dei fornitori), '
                       + 'perché il consuntivo comprende ore dei fornitori'
                     : ''))
             : null,
@@ -14648,9 +14648,9 @@ function openOperazioneModal(o, opts) {
       ),
       el('div', { style:'margin-top:4px;font-size:11px;color:var(--mut);' },
         conFasi
-          ? ('Inizio calcolato per fase — ognuna sulla capacità dei suoi assegnatari — '
+          ? ('Inizio calcolato per lavorazione — ognuna sulla capacità dei suoi assegnatari — '
              + 'in sequenza'
-             + ', a ritroso dalla scadenza. Le ore sono la somma delle fasi (il tempo pagato resta solo budget).')
+             + ', a ritroso dalla scadenza. Le ore sono la somma delle lavorazioni (il tempo pagato resta solo budget).')
           : (conAddetti
             ? 'Inizio calcolato a ritroso dalla scadenza in base alla capacità reale degli addetti assegnati (8h a testa, meno le loro ferie), escludendo weekend, festivi e chiusure aziendali.'
             : 'Calcolato come quantità × minuti / 60 ore, divisi in giornate da 8h, escludendo weekend, festivi nazionali e chiusure aziendali. Assegna degli addetti per tener conto delle loro ferie.'))
@@ -14808,7 +14808,7 @@ function openOperazioneModal(o, opts) {
               + (overOre ? ' · +' + (cons - pagatoOre).toFixed(1) + 'h oltre' : '')
             : cons.toFixed(1) + '/' + prev.toFixed(1) + 'h')
             + (cc && cc.oreEsterne > 0.05 ? ' · di cui est. ' + cc.oreEsterne.toFixed(1) : '')
-            + (oreEsterneHd > 0.05 ? ' · fasi est. ' + oreEsterneHd.toFixed(1) : ''))),
+            + (oreEsterneHd > 0.05 ? ' · lavoraz. est. ' + oreEsterneHd.toFixed(1) : ''))),
       ),
     );
     };
@@ -15123,7 +15123,7 @@ function openOperazioneModal(o, opts) {
               .update({ fasi: templateFasi }).eq('id', art.id).select().single();
             if (!errArtF && artF) {
               state.articoli = state.articoli.map(x => x.id === artF.id ? artF : x);
-              toast('Fasi salvate anche nell\'anagrafica articolo');
+              toast('Lavorazioni salvate anche nell\'anagrafica articolo');
             }
           }
         } catch (e) { /* best-effort */ }
@@ -15136,7 +15136,7 @@ function openOperazioneModal(o, opts) {
         if (syncFasi.error) {
           stopWatchdog();
           btnSave.disabled = false; btnSave.textContent = 'Salva';
-          return toast('Operazione salvata, ma errore fasi: '+syncFasi.error.message, 'err');
+          return toast('Operazione salvata, ma errore lavorazioni: '+syncFasi.error.message, 'err');
         }
         const faseIdByK = syncFasi.keyToId || {};
         const resolveFase = (k) => (k && faseIdByK[k]) ? faseIdByK[k] : null;
@@ -15149,8 +15149,8 @@ function openOperazioneModal(o, opts) {
             const gen = await autoGeneraFasiDaMedia(data);
             if (gen && gen.creato > 0) {
               toast(gen.debole
-                ? '⚠ Fasi generate da storico/anagrafica (media debole: 1 sola commessa)'
-                : 'Fasi generate automaticamente da storico/anagrafica');
+                ? '⚠ Lavorazioni generate da storico/anagrafica (media debole: 1 sola commessa)'
+                : 'Lavorazioni generate automaticamente da storico/anagrafica');
             }
           } catch (e) { /* best-effort: l'automatismo non deve mai bloccare il salvataggio */ }
         }
@@ -15179,7 +15179,7 @@ function openOperazioneModal(o, opts) {
           } else if (prop.toccate > 0) {
             toast('Addetti applicati anche alle altre ' + prop.toccate
               + (prop.toccate === 1 ? ' commessa' : ' commesse') + ' del gruppo'
-              + (prop.saltate ? ' · ' + prop.saltate + ' assegnazioni per fase saltate (fase assente lì)' : ''));
+              + (prop.saltate ? ' · ' + prop.saltate + ' assegnazioni per lavorazione saltate (lavorazione assente lì)' : ''));
           }
         } catch (e) { toast('Addetti salvati, ma propagazione al gruppo non riuscita', 'err'); }
         // Normalizza i numeri ordine fornitore: padding zero a 5 cifre,
@@ -15792,7 +15792,7 @@ function renderStorico(root) {
         return el('td', {
           class:'tr mono',
           style: sfora ? 'color:var(--red);font-weight:700;' : 'color:var(--mut);',
-          title: haEsterne ? 'Pagato sulla sola parte interna (fasi a terzisti escluse)' : '',
+          title: haEsterne ? 'Pagato sulla sola parte interna (lavorazioni a terzisti escluse)' : '',
         }, cons.toFixed(1) + '/' + pagatoOre.toFixed(1) + (sfora ? ' ⚠' : '') + (haEsterne ? ' ·int' : ''));
       })(),
       el('td', { class:'tc' }, esitoBadge),
@@ -18286,11 +18286,11 @@ function opCompletataDaUtente(uid, opId) {
 }
 // Etichetta leggibile della fase di una riga addetto (nome del tipo lavorazione).
 function etichettaFaseAddetto(riga) {
-  if (!riga || !riga.fase_id) return 'la tua fase';
+  if (!riga || !riga.fase_id) return 'la tua lavorazione';
   const fase = (state.opFasi || []).find(f => f.id === riga.fase_id);
-  if (!fase) return 'la tua fase';
+  if (!fase) return 'la tua lavorazione';
   const tipo = (state.tipiLav || []).find(t => t.id === fase.tipo_lavorazione_id);
-  return tipo?.nome || 'la tua fase';
+  return tipo?.nome || 'la tua lavorazione';
 }
 
 // Stato per-operatore delle fasi su una commessa: cosa ha chiuso, cosa resta.
@@ -18303,7 +18303,7 @@ function kioskFasiUtente(uid, opId) {
     return {
       fase_id: r.fase_id || null,
       ordine: f ? (f.ordine || 0) : 0,
-      nome: t?.nome || (r.fase_id ? 'Fase' : 'Tutta la commessa'),
+      nome: t?.nome || (r.fase_id ? 'Lavorazione' : 'Tutta la commessa'),
       colore: t?.colore || '#6b6b64',
       fatta: !!r.completata_il,
     };
@@ -18528,7 +18528,7 @@ async function kioskFineFase(sess) {
         q = q.eq('operazione_id', sess.operazione_id).eq('utente_id', uid);
         return (riga.fase_id ? q.eq('fase_id', riga.fase_id) : q.is('fase_id', null)).select();
       };
-      const { data: upd, error } = await eseguiConRetry(buildQ, { label: 'completamento fase' });
+      const { data: upd, error } = await eseguiConRetry(buildQ, { label: 'completamento lavorazione' });
       if (error) { kioskBeep('err'); kioskShowError('Errore: ' + error.message); return; }
       markOk = Array.isArray(upd) && upd.length > 0;
       if (markOk) {
@@ -18543,7 +18543,7 @@ async function kioskFineFase(sess) {
         () => sb.from('operazioni_addetti')
           .insert({ operazione_id: sess.operazione_id, utente_id: uid, fase_id: fid, completata_il: ora })
           .select().single(),
-        { label: 'completamento fase' }
+        { label: 'completamento lavorazione' }
       );
       if (error) { kioskBeep('err'); kioskShowError('Errore: ' + error.message); return; }
       markOk = !!data;
@@ -18573,11 +18573,11 @@ async function kioskFineFase(sess) {
         const restano = conFasiVere.filter(r => !r.fatta).map(r => r.nome);
         extra = restano.length
           ? '\nTi resta: ' + restano.join(', ')
-          : '\n✓ Hai chiuso tutte le tue fasi su questa commessa';
+          : '\n✓ Hai chiuso tutte le tue lavorazioni su questa commessa';
       }
-      kioskShowDone({ title: 'Fase completata ✓', detail: (t?.nome || 'Lavorazione') + '\nDurata: ' + dur + extra, ok: true });
+      kioskShowDone({ title: 'Lavorazione completata ✓', detail: (t?.nome || 'Lavorazione') + '\nDurata: ' + dur + extra, ok: true });
     } else {
-      kioskShowDone({ title: 'Sessione chiusa', detail: 'Durata: ' + dur + '\n⚠ Fase NON marcata come finita: permessi DB (UPDATE) mancanti su questo account.', ok: false });
+      kioskShowDone({ title: 'Sessione chiusa', detail: 'Durata: ' + dur + '\n⚠ Lavorazione NON marcata come finita: permessi DB (UPDATE) mancanti su questo account.', ok: false });
     }
   } catch (e) {
     kioskBeep('err'); kioskShowError('Errore di rete: ' + (e.message || e));
@@ -18639,7 +18639,7 @@ async function kioskRiapriFaseSeCompletata(uid, opId, faseId) {
         q = q.eq('operazione_id', opId).eq('utente_id', uid);
         return r.fase_id ? q.eq('fase_id', r.fase_id) : q.is('fase_id', null);
       };
-      const { error } = await eseguiConRetry(buildQ, { label: 'riapertura fase' });
+      const { error } = await eseguiConRetry(buildQ, { label: 'riapertura lavorazione' });
       if (error) continue;
       state.opAddetti = state.opAddetti.map(x =>
         (r.id ? x.id === r.id
@@ -19002,7 +19002,7 @@ function kioskOpCard(o, opts = {}) {
           title: r.nome + (r.fatta ? ' — completata da te' : ' — ancora da fare'),
         }, (r.fatta ? '✓ ' : '⏳ ') + r.nome));
         fasiStrip = el('div', { class:'kop-fasi-strip' },
-          el('span', { class:'kop-fasi-label' }, 'Le tue fasi:'),
+          el('span', { class:'kop-fasi-label' }, 'Le tue lavorazioni:'),
           ...chips);
       }
     }
@@ -19410,9 +19410,9 @@ function kioskRenderTipo() {
 
     const daFare = mieFasiIds.size - fatteFasiIds.size;
     root.append(el('div', { class:'kiosk-tipo-hint' },
-      'Scegli la fase su cui timbri'
+      'Scegli la lavorazione su cui timbri'
       + (daFare > 0 ? ' (★ le tue ancora da fare in cima)'
-                    : mieFasiIds.size ? ' (le tue fasi le hai già chiuse tutte)' : '') + ':'));
+                    : mieFasiIds.size ? ' (le tue lavorazioni le hai già chiuse tutte)' : '') + ':'));
 
     const grid = el('div', { class:'kiosk-tipo-grid' });
     ordinate.forEach(f => {
@@ -19426,10 +19426,10 @@ function kioskRenderTipo() {
         onclick: () => kioskSelectFase(f),
       },
         el('div', { class:'ktipo-color-bar', style:'background:'+col+';' }),
-        el('div', { class:'ktipo-name' }, tipo?.nome || 'Fase'),
+        el('div', { class:'ktipo-name' }, tipo?.nome || 'Lavorazione'),
         el('div', { class:'ktipo-meta' }, (Number(f.minuti_unitari) > 0 ? f.minuti_unitari + ' min/pz' : '—')),
         fatta ? el('div', { class:'ktipo-fatta-badge' }, '✓ Completata da te')
-              : (mia ? el('div', { class:'ktipo-mia-badge' }, '★ La tua fase') : null),
+              : (mia ? el('div', { class:'ktipo-mia-badge' }, '★ La tua lavorazione') : null),
       ));
     });
     root.append(grid);
@@ -19563,8 +19563,8 @@ async function kioskAvviaSessione(tipoId, faseId) {
     if (rigaFatta) {
       const fObj = (state.opFasi || []).find(ff => ff.id === fid);
       const tObj = fObj && state.tipiLav.find(tt => tt.id === fObj.tipo_lavorazione_id);
-      const nf = tObj?.nome || 'questa fase';
-      const ok = confirm('Hai già marcato finita la fase "' + nf + '" su questa commessa.\n\n'
+      const nf = tObj?.nome || 'questa lavorazione';
+      const ok = confirm('Hai già marcato finita la lavorazione "' + nf + '" su questa commessa.\n\n'
         + 'Vuoi riaprirla e ricominciare a timbrarci?');
       if (!ok) { kioskGoToTipo(); return; }
     }
@@ -19623,7 +19623,7 @@ async function kioskRisolviOCreaFase(opId, tipoId) {
       () => sb.from('operazioni_fasi')
         .insert({ operazione_id: opId, tipo_lavorazione_id: tipoId, minuti_unitari: 0, ordine })
         .select().single(),
-      { label: 'creazione fase al volo' }
+      { label: 'creazione lavorazione al volo' }
     );
     if (error || !data) return null;
     if (!state.opFasi.find(x => x.id === data.id)) state.opFasi.push(data);
@@ -19932,7 +19932,7 @@ function kioskRenderAttiva() {
     actions.append(el('button', {
       class:'kiosk-attiva-btn', style:'background:var(--grn);color:var(--bg);',
       onclick: () => kioskFineFase(sess),
-    }, '✅ Ho finito la mia fase'));
+    }, '✅ Ho finito la mia lavorazione'));
     actions.append(el('button', {
       class:'kiosk-attiva-btn pause',
       onclick: () => kioskStopSessione(sess, 'pause'),
@@ -21319,7 +21319,7 @@ function renderGanttCommesse(root) {
               + ' lavorativ' + (c.ritardo === 1 ? 'o' : 'i') + ' — barra ancorata a oggi' : '')
           + '\nQuota operatore: ' + prev.toFixed(1) + ' h'
           + (Math.abs(prevTot - prev) > 0.05
-              ? ' (' + (isFase ? 'fase intera' : 'commessa intera') + ': ' + prevTot.toFixed(1) + ' h)' : '')
+              ? ' (' + (isFase ? 'lavorazione intera' : 'commessa intera') + ': ' + prevTot.toFixed(1) + ' h)' : '')
           + '\nSuo consuntivo: ' + cons.toFixed(1) + ' h'
           + (prev > 0 ? '  (' + Math.round(perc*100) + '%)' : '')
           + (sfora ? '\n⚠ SFORAMENTO quota: +' + (cons-prev).toFixed(1) + ' h' : '')
@@ -21697,12 +21697,12 @@ function openSessioneModal(s, onDone) {
       const orfane = (op && typeof fasiOrfaneCommessa === 'function') ? fasiOrfaneCommessa(op) : [];
       for (const f of orfane) {
         const { error: eF } = await eseguiConRetry(
-          () => sb.from('operazioni_fasi').delete().eq('id', f.id), { label: 'pulizia fase vuota' });
+          () => sb.from('operazioni_fasi').delete().eq('id', f.id), { label: 'pulizia lavorazione vuota' });
         if (!eF) { state.opFasi = state.opFasi.filter(x => x.id !== f.id); fasiTolte++; }
       }
     } catch (e) { /* best-effort: la sessione è già eliminata, questo è contorno */ }
     toast('Sessione eliminata'
-      + (fasiTolte ? ' · tolta anche ' + fasiTolte + (fasiTolte === 1 ? ' fase rimasta vuota' : ' fasi rimaste vuote') : ''));
+      + (fasiTolte ? ' · tolta anche ' + fasiTolte + (fasiTolte === 1 ? ' lavorazione rimasta vuota' : ' lavorazioni rimaste vuote') : ''));
     finalize();
   } }, '🗑 Elimina'));
   // ⚠ Anche annullare passa da `finalize()`: USCIRE DA QUESTA SCHEDA E' SEMPRE

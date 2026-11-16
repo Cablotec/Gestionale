@@ -10,12 +10,12 @@
 <title>Cablotec Mobile</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-11-16.03"></script>
+<script src="core/db.js?v=2026-11-16.04"></script>
 <!-- Il MOTORE (30 set): il telefono usa le regole del gestionale invece di copiarle. -->
-<script src="domain/calendario.js?v=2026-11-16.03"></script>
-<script src="domain/mezzi.js?v=2026-11-16.03"></script>
-<script src="domain/scheduling.js?v=2026-11-16.03"></script>
-<script src="core/timbri.js?v=2026-11-16.03"></script>
+<script src="domain/calendario.js?v=2026-11-16.04"></script>
+<script src="domain/mezzi.js?v=2026-11-16.04"></script>
+<script src="domain/scheduling.js?v=2026-11-16.04"></script>
+<script src="core/timbri.js?v=2026-11-16.04"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -1594,7 +1594,7 @@ async function riapriFase(opId) {
       () => sb.from('operazioni_addetti')
         .update({ completata_il: null })
         .eq('operazione_id', opId).eq('utente_id', u.id),
-      { label: 'riapertura fase' }
+      { label: 'riapertura lavorazione' }
     );
     if (error) throw error;
     state.opAddetti = state.opAddetti.map(x =>
@@ -1615,7 +1615,7 @@ function goFase(o) {
   const fasi = fasiDi(o);
   if (fasi.length > 0) {
     const mieFasiIds = new Set(righeAddetto(u.id, o.id).map(r => r.fase_id).filter(Boolean));
-    hint.textContent = 'Scegli la fase su cui timbri' + (mieFasiIds.size ? ' (le tue sono evidenziate)' : '') + ':';
+    hint.textContent = 'Scegli la lavorazione su cui timbri' + (mieFasiIds.size ? ' (le tue sono evidenziate)' : '') + ':';
     const ordinate = fasi.slice().sort((a, b) => {
       const am = mieFasiIds.has(a.id), bm = mieFasiIds.has(b.id);
       if (am && !bm) return -1;
@@ -1628,8 +1628,8 @@ function goFase(o) {
       const mia = mieFasiIds.has(f.id);
       list.append(elx('button', { class:'fase-btn' + (mia ? ' mia' : ''), onclick: () => avvia(f.tipo_lavorazione_id, f.id) },
         elx('div', { class:'fase-color', style:'background:' + col + ';' }),
-        elx('div', { class:'fase-name' }, tipo?.nome || 'Fase'),
-        mia ? elx('div', { class:'fase-mia-tag' }, '★ LA TUA FASE') : null,
+        elx('div', { class:'fase-name' }, tipo?.nome || 'Lavorazione'),
+        mia ? elx('div', { class:'fase-mia-tag' }, '★ LA TUA LAVORAZIONE') : null,
       ));
     });
 
@@ -1812,7 +1812,7 @@ async function risolviOCreaFase(opId, tipoId) {
       () => sb.from('operazioni_fasi')
         .insert({ operazione_id: opId, tipo_lavorazione_id: tipoId, minuti_unitari: 0, ordine })
         .select().single(),
-      { label: 'creazione fase al volo' }
+      { label: 'creazione lavorazione al volo' }
     );
     if (error || !data) return null;
     if (!state.opFasi.find(x => x.id === data.id)) state.opFasi.push(data);
@@ -1827,7 +1827,7 @@ async function riapriFaseSilenziosa(uid, opId, riga) {
       q = q.eq('operazione_id', opId).eq('utente_id', uid);
       return riga?.fase_id ? q.eq('fase_id', riga.fase_id) : q;
     };
-    await eseguiConRetry(buildQ, { label: 'riapertura fase' });
+    await eseguiConRetry(buildQ, { label: 'riapertura lavorazione' });
     state.opAddetti = state.opAddetti.map(x =>
       (riga?.id ? x.id === riga.id
         : (x.operazione_id === opId && x.utente_id === uid
@@ -1899,7 +1899,7 @@ function goAttiva() {
   const actions = elx('div', { class:'att-actions' });
   if (!isExtra) {
     actions.append(
-      elx('button', { class:'att-btn fine', onclick: () => fineFase(sess) }, '✅ Ho finito la mia fase'),
+      elx('button', { class:'att-btn fine', onclick: () => fineFase(sess) }, '✅ Ho finito la mia lavorazione'),
       elx('button', { class:'att-btn pausa', onclick: () => stopSessione(sess) }, '⏸ Sospendo (continuerò dopo)'),
     );
   } else {
@@ -2013,7 +2013,7 @@ async function fineFase(sess) {
         q = q.eq('operazione_id', sess.operazione_id).eq('utente_id', uid);
         return riga.fase_id ? q.eq('fase_id', riga.fase_id) : q.is('fase_id', null);
       };
-      const { error: e1 } = await eseguiConRetry(buildQ, { label: 'completamento fase' });
+      const { error: e1 } = await eseguiConRetry(buildQ, { label: 'completamento lavorazione' });
       if (e1) throw e1;
       state.opAddetti = state.opAddetti.map(x =>
         (riga.id ? x.id === riga.id
@@ -2025,7 +2025,7 @@ async function fineFase(sess) {
         () => sb.from('operazioni_addetti')
           .insert({ operazione_id: sess.operazione_id, utente_id: uid, fase_id: fid, completata_il: ora })
           .select().single(),
-        { label: 'completamento fase' }
+        { label: 'completamento lavorazione' }
       );
       if (error) throw error;
       if (data && !state.opAddetti.find(x => x.id === data.id)) state.opAddetti.push(data);
@@ -2037,7 +2037,7 @@ async function fineFase(sess) {
     const esito = await chiudiConSplitGruppo(sess, ora, nota);
     state.sessioni = state.sessioni.filter(s => s.id !== sess.id && !s.fine);
     beep('ok');
-    showDone(true, 'Fase completata ✓', esito.giaChiusa
+    showDone(true, 'Lavorazione completata ✓', esito.giaChiusa
       ? 'Il timbro era già stato chiuso da un\'altra postazione.'
       : dettaglioChiusura(sess, ora, esito), goHome);
   } catch (e) {
