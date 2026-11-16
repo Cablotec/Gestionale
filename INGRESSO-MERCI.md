@@ -17,7 +17,7 @@ Pilota: Enviro di Tema. Sistema avviato il 13 ott 2026; prima era un progetto a 
 ## Come funziona
 
 ```
-\\srv02\scansioni\User032\        <- lo scanner salva qui (anche i PDF dalla mail vanno messi qui)
+\\srv02\Scansioni\DDT\            <- lo scanner salva qui (anche i PDF dalla mail vanno messi qui)
         |  watcher.ps1 (attività di Windows "Cablotec - DDT in arrivo")
         v
 C:\Users\User032\Cablotec\DDT_arrivi\in\<file>   <- copia locale: Claude in background NON legge i percorsi di rete
@@ -67,6 +67,7 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
   - Lancia `Get-ScheduledTask -TaskName 'Cablotec - DDT in arrivo'`: deve dare `Running`, azione `conhost.exe --headless …`, trigger all'accesso + ogni 10 minuti.
   - Se serve, Nico rilancia `pwsh -NoProfile -File "\\SRV02\Dati\SOFTWARE\MegaAPP\DDT_arrivi\installa.ps1"`.
   - Il log è sul PC: `C:\Users\User032\Cablotec\DDT_arrivi\log\watcher.log`.
+- **Login di Claude scaduto:** nel `run_*.txt` compare `Failed to authenticate: OAuth session expired`, e `%USERPROFILE%\.local\bin\claude.exe auth status` dice `loggedIn: false`. Dopo 2 tentativi falliti il watcher non riprova più quel file finché non lo si riavvia (`Stop-ScheduledTask` + `Start-ScheduledTask`, non serve admin). Rimedio duraturo, con l'abbonamento e senza API a consumo: `claude setup-token` (token di un anno) salvato in `CLAUDE_CODE_OAUTH_TOKEN` dell'utente, poi riavviare l'attività.
 - **Un DDT letto male:** un movimento non si modifica. Si corregge con una rettifica, per ora dal pannello Supabase.
 
 ## Storia
@@ -104,3 +105,4 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
   - Database: indice unico su tipo + azienda + numero + posizione (SQL eseguito dal pannello, vedi CLAUDE.md).
   - Provato con il DDT 1000005134 e il mittente scritto "Tema Sinergie SpA": Excel lo salta, gestionale 26 righe gia' presenti e 0 da inserire.
 - **3 nov, correzione:** il DDT 1000005134 e' il materiale di **00269/0030** (OP 01338, 20 pz, da produrre), non della 00464/0010 come avevo dedotto dall'ordine stampato (482). Annullato lo scarico della 0010 con 23 rettifiche, tolto il flag della 0010. Il confronto Excel resta per ordine come scritto sul DDT (482).
+- **16 nov:** la cartella sorvegliata passa da `\srv02\scansioni\User032` a **`\srv02\Scansioni\DDT`**, dedicata ai DDT. Cambiati `$Scansioni` in `watcher.ps1` e `cartella_scansioni` in `config.json` (backup `.bak-1116`); `ELABORATI` e `DA_VERIFICARE` stanno ora lì dentro. Lo stesso giorno il DDT Tema 1000005137 è fallito due volte per login di Claude scaduto. Valutato il watcher su srv02 per non dipendere dal PC: l'installazione di Node, Python e Claude si fa senza admin, ma un'attività che parte all'avvio con nessuno collegato richiede l'admin del server. Per ora resta sul PC.
