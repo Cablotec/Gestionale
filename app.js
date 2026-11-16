@@ -735,7 +735,11 @@ async function loadAllData() {
   state.prenotazioni = prenotazioni.data || [];
   state.consegne = consegne.data || [];
   state.prenOp = prenOp.data || [];
-  state.aziende = aziende.data || [];
+  // REPARTO (16 nov): l'anagrafica speciale che fa da «posto» del WIP
+  // interno (strumenti/migrazione-reparto.sql). Fuori da TUTTI gli elenchi:
+  // si tiene a parte, e `nomeAziendaDi` la riconosce.
+  state.reparto = (aziende.data || []).find(a => a && a.is_reparto) || null;
+  state.aziende = (aziende.data || []).filter(a => !(a && a.is_reparto));
   state.articoli = articoli.data || [];
   state.tipiLav = tipiLav.data || [];
   state.chiusure = chiusure.data || [];
@@ -880,7 +884,8 @@ function applyChange(tabella, payload) {
     } else if (ev === 'DELETE') state.prenOp = state.prenOp.filter(x =>
       !(x.prenotazione_id === oldRow.prenotazione_id && x.utente_id === oldRow.utente_id));
   } else if (tabella === 'aziende') {
-    if (ev === 'INSERT') {
+    if (row && row.is_reparto) { state.reparto = row; }
+    else if (ev === 'INSERT') {
       if (!state.aziende.find(x => x.id === row.id)) state.aziende.push(row);
     } else if (ev === 'UPDATE') {
       state.aziende = state.aziende.map(x => x.id === row.id ? row : x);
@@ -3947,6 +3952,7 @@ async function caricaInviiTerzista() {
 
 // Il nome di un terzista (o di qualunque azienda) dal suo id.
 function nomeAziendaDi(id) {
+  if (id && state.reparto && id === state.reparto.id) return 'Reparto';
   const a = id ? (state.aziende || []).find(x => x.id === id) : null;
   return a ? a.nome : '?';
 }
@@ -4592,6 +4598,138 @@ function fasiEsterneCommessa(o) {
   return per;
 }
 
+// ── REPARTO (16 nov, Nico): la FASE interna, il WIP ──────────────────
+// Il reparto e' un POSTO come il terzista (anagrafica `is_reparto`, vedi
+// strumenti/migrazione-reparto.sql): una richiesta «Prepara per il reparto»
+// sposta i C/L sede -> reparto per la commessa, e da li' il lotto li scarica.
+// Senza la migrazione `state.reparto` e' null e tutto resta come prima.
+function repartoId() { return (state.reparto && state.reparto.id) || null; }
+function eReparto(id) { return !!id && id === repartoId(); }
+// "in reparto" / "presso Bellini": dove sta il materiale fuori sede.
+function dovePosto(id) { return eReparto(id) ? 'in reparto' : 'presso ' + nomeAziendaDi(id); }
+// Il nome di una fase nelle frasi ("Arrivati i mancanti per …").
+function nomeFase(id) { return eReparto(id) ? 'il reparto' : nomeAziendaDi(id); }
+// Le FASI di una commessa: i terzisti (`fasiEsterneCommessa`) piu' il REPARTO,
+// la cui quota per pezzo e' quello che resta in casa (quota − terzisti).
+// Solo commesse "Materiali da DDT", come la prova del terzista: le altre
+// hanno la giacenza su Alnus. Tutti i tipi (C/L, ACQ, MAC): la stampa e' la
+// lista di prelievo completa; solo i C/L muovono la giacenza.
+function fasiCommessa(o) {
+  const per = fasiEsterneCommessa(o);
+  const rep = repartoId();
+  if (!rep || !o || !o.materiali_da_ddt || !Array.isArray(o.materiali)) return per;
+  const pezzi = Number(o.quantita) || 0;
+  const voci = [];
+  o.materiali.forEach(r => {
+    if (!r || !String(r.codice || '').trim()) return;
+    const qpz = Number(r.qta_pz) > 0 ? Number(r.qta_pz) : (pezzi > 0 ? (Number(r.qta) || 0) / pezzi : 0);
+    const fuori = (r.fasi_esterne && typeof r.fasi_esterne === 'object')
+      ? Object.values(r.fasi_esterne).reduce((a, x) => a + (Number(x) || 0), 0) : 0;
+    const q = +(qpz - fuori).toFixed(6);
+    if (q > 0) voci.push({ riga: r, qta_pz: q });
+  });
+  if (voci.length) per.set(rep, voci);
+  return per;
+}
+// Il materiale di una commessa fuori sede, posto per posto:
+// [{ presso_id, righe:[{ codice, qta }] }] (solo i C/L contati).
+function fuoriSedeCommessa(o) {
+  if (!o || !Array.isArray(state.movimenti) || typeof pressoTerzisti !== 'function') return [];
+  const per = new Map();
+  pressoTerzisti(state.movimenti).forEach((voci, cod) => voci.forEach(v => {
+    if (v.operazione_id !== o.id || !(v.qta > 0)) return;
+    if (!per.has(v.presso_id)) per.set(v.presso_id, []);
+    per.get(v.presso_id).push({ codice: cod, qta: v.qta });
+  }));
+  return [...per.entries()].map(([presso_id, righe]) => ({ presso_id,
+    righe: righe.sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true })) }))
+    .sort((a, b) => (eReparto(a.presso_id) ? 0 : 1) - (eReparto(b.presso_id) ? 0 : 1));
+}
+// PROMEMORIA WIP: la lavorazione e' partita (un timbro o un lotto) ma per
+// questa commessa non c'e' nessuna richiesta per il reparto. Si ricalcola.
+function repartoDaPreparare(o) {
+  const rep = repartoId();
+  if (!rep || !o || !o.materiali_da_ddt || (o.stato !== 'aperta' && o.stato !== 'sospesa')) return false;
+  if (!fasiCommessa(o).has(rep) || !(daFareTerzista(o) > 0)) return false;
+  const partita = (state.sessioni || []).some(s => s.operazione_id === o.id)
+    || ((typeof quantitaConsegnata === 'function') && quantitaConsegnata(o.id) > 0);
+  if (!partita) return false;
+  return !(state.inviiTerzista || []).some(x => x.terzista_id === rep && x.stato !== 'annullato'
+    && (x.operazione_id === o.id || (x.righe || []).some(r => opDiRigaTerzista(x, r) === o.id)));
+}
+
+// ── RIENTRO IN SEDE (16 nov): gli avanzi tornano sullo scaffale ─────
+// Dal reparto o da un terzista, per QUESTA commessa. `mov_rientro_in_sede`
+// (security definer, admin, tutto-o-niente) scrive i trasferimenti.
+function apriRientroInSede(o, presso, poi) {
+  const gruppo = fuoriSedeCommessa(o).find(g => g.presso_id === presso);
+  if (!gruppo) return toast('Niente da far rientrare.', 'err');
+  const v = veloTerzista('Rientro in sede ' + (eReparto(presso) ? 'dal reparto' : 'da ' + nomeAziendaDi(presso))
+    + ' · ' + etiOpTerzista(o), 720);
+  const num = (t) => { const n = Number(String(t == null ? '' : t).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
+  const COL = 'display:grid;grid-template-columns:minmax(130px,1fr) minmax(150px,1.6fr) 90px 100px;gap:8px;align-items:center;';
+  const et = (t, dx) => el('span', { class:'sub',
+    style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const tab = el('div', { style:'max-height:50vh;overflow-y:auto;padding-right:8px;' },
+    el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);position:sticky;top:0;background:var(--sur);' },
+      et('Codice'), et('Descrizione'), et(eReparto(presso) ? 'In reparto' : 'Presso', 1), et('Rientrano', 1)));
+  const riepilogo = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
+  const ok = el('button', { class:'btnp' }, 'Registra il rientro');
+  const campi = [];
+  const aggiorna = () => {
+    let err = 0, n = 0;
+    campi.forEach(c => {
+      const q = num(c.inp.value);
+      const male = !(q >= 0) || q > c.max + 1e-9;
+      c.inp.style.borderColor = male ? 'var(--red)' : '';
+      if (male) err++; else if (q > 0) n++;
+    });
+    riepilogo.textContent = err ? err + (err === 1 ? ' riga da correggere' : ' righe da correggere')
+      : n + (n === 1 ? ' materiale rientra' : ' materiali rientrano');
+    riepilogo.style.color = err ? 'var(--red)' : '';
+    ok.disabled = !!err || !n;
+  };
+  gruppo.righe.forEach(r => {
+    const riga = (o.materiali || []).find(z => String(z.codice || '').trim() === r.codice) || {};
+    const inp = el('input', { type:'text', inputmode:'decimal', class:'mono', value: String(r.qta),
+      style:'width:100%;text-align:right;font-size:12px;padding:3px 6px;' });
+    inp.oninput = aggiorna;
+    tab.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
+      el('span', { class:'mono', style:'font-size:11px;' }, r.codice),
+      el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+        title: riga.descrizione || '' }, riga.descrizione || '—'),
+      el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, nfIT(r.qta) + (riga.um ? ' ' + riga.um : '')),
+      inp));
+    campi.push({ cod: r.codice, inp, max: r.qta });
+  });
+  const inNota = el('input', { type:'text', placeholder:'Nota (facoltativa)', style:'width:100%;' });
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Quello che torna sullo scaffale e smette di essere riservato a questa commessa. '
+      + 'Proposto tutto: abbassa le righe che restano dove sono (0 = resta).'),
+    tab,
+    el('div', { class:'field', style:'margin-top:10px;' }, el('label', {}, 'Nota'), inNota));
+  ok.onclick = async () => {
+    ok.disabled = true; ok.textContent = 'Registrazione…';
+    try {
+      const { error } = await sb.rpc('mov_rientro_in_sede', { p_operazione: o.id, p_presso: presso,
+        p_righe: campi.map(c => ({ codice: c.cod, qta: num(c.inp.value) })).filter(x => x.qta > 0),
+        p_nota: inNota.value.trim() || null });
+      if (error) throw new Error(error.message);
+      await caricaMovimenti();
+      v.chiudi();
+      toast('Rientro in sede registrato', 'ok');
+      if (typeof poi === 'function') poi();
+    } catch (e) {
+      ok.textContent = 'Registra il rientro';
+      toast('Rientro non registrato, non si è mosso niente: ' + (e.message || e), 'err', 9000);
+      aggiorna();
+    }
+  };
+  v.piede.append(riepilogo, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+  aggiorna();
+}
+
 // PIU' COMMESSE IN UNA RICHIESTA (Nico, 6 nov): ogni riga porta la SUA
 // commessa (`operazione_id`); le richieste di prima non ce l'hanno e
 // valgono per quella della richiesta.
@@ -4672,7 +4810,7 @@ function liberoTerzista() {
 function mancantiTerzistaInSede(o) {
   if (!o || !o.materiali_da_ddt || !Array.isArray(o.materiali) || !richiesteTerzistaPossibili()) return [];
   if (o.stato !== 'aperta' && o.stato !== 'sospesa') return [];
-  const fasi = fasiEsterneCommessa(o);
+  const fasi = fasiCommessa(o);
   if (!fasi.size) return [];
   const { libero } = liberoTerzista();
   const daFare = daFareTerzista(o);
@@ -4718,12 +4856,13 @@ function veloTerzista(titolo, larghezza) {
 // Dalla commessa partono NON spuntate: unire e' una scelta (Nico, 6 nov).
 function apriRichiestaTerzista(o, poi, opts) {
   opts = opts || {};
-  const v = veloTerzista('Richiesta per terzista' + (o ? ' · ' + etiOpTerzista(o) : ''), 1040);
+  const v = veloTerzista('Richiesta di preparazione' + (o ? ' · ' + etiOpTerzista(o) : ''), 1040);
   const annulla = el('button', { class:'btng', onclick: v.chiudi }, 'Annulla');
   const vive = (state.operazioni || []).filter(x => (x.stato === 'aperta' || x.stato === 'sospesa')
     && Array.isArray(x.materiali));
   if (o && !vive.some(x => x.id === o.id)) vive.push(o);
-  const fasiDi = new Map(vive.map(x => [x.id, fasiEsterneCommessa(x)]));
+  // Le fasi: i terzisti e, per le commesse col flag, il REPARTO (16 nov).
+  const fasiDi = new Map(vive.map(x => [x.id, fasiCommessa(x)]));
   const terzisti = o ? [...fasiDi.get(o.id).keys()]
     : [...new Set(vive.flatMap(x => [...fasiDi.get(x.id).keys()]))];
   if (!terzisti.length) {
@@ -4737,9 +4876,11 @@ function apriRichiestaTerzista(o, poi, opts) {
     return;
   }
   const selTer = el('select', { style:'min-width:260px;' },
-    ...terzisti.map(id => el('option', { value: id }, nomeAziendaDi(id)))
-      .sort((a, b) => a.textContent.localeCompare(b.textContent, 'it')));
-  if (o) selTer.value = terzisti[0];
+    ...terzisti.map(id => el('option', { value: id }, eReparto(id) ? 'Reparto (in casa)' : nomeAziendaDi(id)))
+      // il reparto in fondo: i terzisti in ordine di nome, poi casa nostra
+      .sort((a, b) => (eReparto(a.value) ? 1 : 0) - (eReparto(b.value) ? 1 : 0)
+        || a.textContent.localeCompare(b.textContent, 'it')));
+  if (o) selTer.value = terzisti.find(id => !eReparto(id)) || terzisti[0];
   if (opts.terzista && terzisti.includes(opts.terzista)) selTer.value = opts.terzista;
 
   const daFareDi = daFareTerzista;
@@ -4766,7 +4907,7 @@ function apriRichiestaTerzista(o, poi, opts) {
   const disegnaCommesse = () => {
     boxCommesse.innerHTML = '';
     const cand = candidati();
-    spunte = new Map(cand.map(x => [x.id, (o && x.id === o.id) || !!opts.tutte || (!o && cand.length === 1)]));
+    spunte = new Map(cand.map(x => [x.id, (o && x.id === o.id) || (!!opts.tutte && !eReparto(selTer.value)) || (!o && cand.length === 1)]));
     if (cand.length <= 1 && o) return;  // da sola: niente da scegliere
     boxCommesse.append(el('div', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;' },
       'Commesse insieme' + (o ? ' — spunta le altre per una lista sola' : '')));
@@ -4902,11 +5043,12 @@ function apriRichiestaTerzista(o, poi, opts) {
   v.corpo.append(
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
       'Prepara la lista per il magazzino: la giacenza non si muove finché non confermi la spedizione. '
-      + 'Serve = pezzi ancora da fare × quota per pezzo, meno quanto già chiesto a questo terzista. '
+      + 'Serve = pezzi ancora da fare × quota per pezzo, meno quanto già chiesto per questa fase. '
+      + 'Il reparto prende quello che resta in casa (la quota dei terzisti esclusa). '
       + 'Si propone fin dove arriva la giacenza disponibile (in rosso quando non basta): con più commesse '
       + 'va prima a chi scade prima. I materiali non contati (MAC) si propongono interi.'),
     el('div', { style:'display:flex;gap:14px;flex-wrap:wrap;' },
-      el('div', { class:'field' }, el('label', {}, 'Terzista'), selTer)),
+      el('div', { class:'field' }, el('label', {}, 'Fase'), selTer)),
     boxCommesse,
     tab,
     el('div', { class:'field', style:'margin-top:10px;' }, el('label', {}, 'Nota'), inNota));
@@ -4938,7 +5080,7 @@ function apriRichiestaTerzista(o, poi, opts) {
       if (Array.isArray(state.inviiTerzista)) state.inviiTerzista.unshift(data);
       v.chiudi();
       const nm = new Set(righe.filter(r => r.mancante > 0).map(r => r.codice)).size;
-      toast('Richiesta creata: ' + daPreparare + ' materiali da preparare per ' + nomeAziendaDi(selTer.value)
+      toast('Richiesta creata: ' + daPreparare + ' materiali da preparare per ' + nomeFase(selTer.value)
         + (comm.length > 1 ? ' (' + comm.length + ' commesse)' : '')
         + (nm ? ', ' + nm + (nm === 1 ? ' mancante segnalato' : ' mancanti segnalati') : ''), 'ok');
       if (typeof poi === 'function') poi();
@@ -5005,7 +5147,8 @@ function stampaRichiestaTerzista(x) {
       + (multi ? '<td class="p">' + parti + '</td>' : '')
       + '<td class="nt">' + esc(r.note.join(' · ')) + '</td></tr>';
   }).join('');
-  const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Lista per terzista '
+  const rep = eReparto(x.terzista_id);
+  const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>' + (rep ? 'Lista per il reparto ' : 'Lista per terzista ')
     + esc(comm.map(etiOpTerzista).join(' ')) + '</title><style>'
     + 'body{font-family:Arial,sans-serif;font-size:12px;margin:18px;color:#000;background:#fff;}h1{font-size:18px;margin:0 0 4px;}.mc{color:#b00;}tr.solo td{color:#555;}.leg{font-size:11px;color:#555;margin-top:6px;}'
     + '.t{display:grid;grid-template-columns:repeat(3,auto);gap:4px 24px;margin:10px 0 14px;}.t>div>b:first-child{display:block;font-size:10px;color:#555;text-transform:uppercase;}'
@@ -5016,12 +5159,12 @@ function stampaRichiestaTerzista(x) {
     + '.c{text-align:center;font-size:16px;width:22px;}.f{margin-top:28px;display:flex;gap:60px;}'
     + '.f div{border-top:1px solid #000;padding-top:4px;width:220px;font-size:11px;}@page{size:A4 landscape;margin:10mm;}@media print{body{margin:0;}}'
     + '</style></head><body>'
-    + '<h1>Materiale da preparare per il terzista</h1>'
+    + '<h1>Materiale da preparare per ' + (rep ? 'il reparto' : 'il terzista') + '</h1>'
     + '<div class="t"><div><b>' + (multi ? 'Commesse' : 'Commessa') + '</b>' + esc(comm.map(etiOpTerzista).join(' · ')) + '</div>'
     + '<div><b>Prodotto</b>' + esc(arts.join(' · ')) + '</div>'
     + '<div><b>Rif. cliente</b>' + esc(rifs.join(' · ') || '—') + '</div>'
     + '<div class="pezzi"><b>Si prepara per</b>' + pezziHtml + '</div>'
-    + '<div><b>Terzista</b>' + esc(nomeAziendaDi(x.terzista_id)) + '</div>'
+    + '<div><b>' + (rep ? 'Fase' : 'Terzista') + '</b>' + esc(rep ? 'Reparto (in casa)' : nomeAziendaDi(x.terzista_id)) + '</div>'
     + '<div><b>Richiesta del</b>' + esc(fmtIT(String(x.creato_il || '').slice(0, 10))) + '</div></div>'
     + (x.nota ? '<p><b>Nota:</b> ' + esc(x.nota) + '</p>' : '')
     + '<table><thead><tr><th></th><th>#</th><th>Codice</th><th>Descrizione</th><th>Tipo</th><th>UM</th><th>Qtà</th>'
@@ -5042,7 +5185,8 @@ function apriConfermaInvioTerzista(x, poi) {
   const comm = commesseDiRichiesta(x);
   const multi = comm.length > 1;
   const opDi = (r) => comm.find(c => c.id === opDiRigaTerzista(x, r)) || {};
-  const v = veloTerzista('Conferma spedizione a ' + nomeAziendaDi(x.terzista_id), multi ? 920 : 820);
+  const rep = eReparto(x.terzista_id);
+  const v = veloTerzista(rep ? 'Conferma: materiale portato in reparto' : 'Conferma spedizione a ' + nomeAziendaDi(x.terzista_id), multi ? 920 : 820);
   const sede = saldoInSede(state.movimenti);
   const conta = (r) => !!opDi(r).materiali_da_ddt && String(r.tipo || '').trim().toUpperCase() === 'C/L';
   const num = (t) => { const n = Number(String(t == null ? '' : t).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
@@ -5052,9 +5196,10 @@ function apriConfermaInvioTerzista(x, poi) {
     style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
   const tab = el('div', { style:'max-height:50vh;overflow-y:auto;padding-right:8px;' },
     el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);position:sticky;top:0;background:var(--sur);' },
-      et('Codice'), multi ? et('Commessa') : '', et('Descrizione'), et('Tipo'), et('Richiesti', 1), et('In sede', 1), et('Partiti', 1)));
+      et('Codice'), multi ? et('Commessa') : '', et('Descrizione'), et('Tipo'), et('Richiesti', 1), et('In sede', 1), et(rep ? 'Portati' : 'Partiti', 1)));
   const riepilogo = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
-  const ok = el('button', { class:'btnp' }, 'Conferma spedizione');
+  const testoOk = rep ? 'Conferma' : 'Conferma spedizione';
+  const ok = el('button', { class:'btnp' }, testoOk);
   const campi = [];
   const aggiorna = () => {
     let err = 0, n = 0;
@@ -5072,7 +5217,7 @@ function apriConfermaInvioTerzista(x, poi) {
       if (male) err++; else if (q > 0) n++;
     });
     riepilogo.textContent = err ? err + (err === 1 ? ' riga da correggere' : ' righe da correggere')
-      : n + (n === 1 ? ' riga parte' : ' righe partono');
+      : n + (rep ? (n === 1 ? ' riga va in reparto' : ' righe vanno in reparto') : (n === 1 ? ' riga parte' : ' righe partono'));
     riepilogo.style.color = err ? 'var(--red)' : '';
     ok.disabled = !!err || !n;
   };
@@ -5103,7 +5248,8 @@ function apriConfermaInvioTerzista(x, poi) {
   const inNota = el('input', { type:'text', value: x.nota || '', placeholder:'Nota (facoltativa)', style:'width:100%;' });
   v.corpo.append(
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
-      'Scrivi quanto è partito DAVVERO (0 = non partito). I C/L passano dalla sede al terzista e restano della '
+      (rep ? 'Scrivi quanto hai portato DAVVERO in reparto (0 = non portato). I C/L passano dalla sede al reparto e restano della '
+        : 'Scrivi quanto è partito DAVVERO (0 = non partito). I C/L passano dalla sede al terzista e restano della ')
       + (multi ? 'loro commessa' : 'commessa') + '; gli altri restano registrati fuori giacenza. '
       + 'Dopo la conferma la richiesta non si modifica più.'),
     tab,
@@ -5117,12 +5263,12 @@ function apriConfermaInvioTerzista(x, poi) {
       if (error) throw new Error(error.message);
       await caricaMovimenti();
       v.chiudi();
-      toast('Spedizione a ' + nomeAziendaDi(x.terzista_id) + ' registrata', 'ok');
+      toast(rep ? 'Materiale in reparto registrato' : 'Spedizione a ' + nomeAziendaDi(x.terzista_id) + ' registrata', 'ok');
       if (typeof poi === 'function') poi();
     } catch (e) {
       // Tutto-o-niente: se una riga non va, non e' partito niente.
-      ok.textContent = 'Conferma spedizione';
-      toast('Spedizione non registrata, non è partito niente: ' + (e.message || e), 'err', 9000);
+      ok.textContent = testoOk;
+      toast((rep ? 'Non registrato, non si è mosso niente: ' : 'Spedizione non registrata, non è partito niente: ') + (e.message || e), 'err', 9000);
       aggiorna();
     }
   };
@@ -5179,21 +5325,22 @@ const STATO_RICH_ETI = {
 // `conCommessa`: mostra anche di quale commessa e', con il link.
 // `opQui`: la commessa della scheda aperta (le altre si dicono "insieme a").
 function rigaRichiestaTerzista(x, poi, conCommessa, opQui) {
-  const e = STATO_RICH_ETI[x.stato] || { txt: x.stato, cls:'bgry' };
+  const rep = eReparto(x.terzista_id);
+  const e = (rep && x.stato === 'inviato') ? { txt:'in reparto', cls:'bok' } : (STATO_RICH_ETI[x.stato] || { txt: x.stato, cls:'bgry' });
   const comm = commesseDiRichiesta(x);
   const perCod = righePerCodiceTerzista(x);
   const manc = perCod.filter(r => r.mancante > 0);
   const linkOp = (c) => c.numero_ordine != null ? el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);',
     onclick: (ev) => { ev.preventDefault(); openOperazioneModal(c, { scheda:'mat' }); } }, etiOpTerzista(c)) : '';
   const altre = comm.filter(c => c.id !== opQui);
-  const quando = x.stato === 'inviato' && x.inviato_il ? 'inviata il ' + fmtIT(String(x.inviato_il).slice(0, 10))
+  const quando = x.stato === 'inviato' && x.inviato_il ? (rep ? 'portata il ' : 'inviata il ') + fmtIT(String(x.inviato_il).slice(0, 10))
     : 'chiesta il ' + fmtIT(String(x.creato_il || '').slice(0, 10));
   const azioni = el('span', { style:'display:flex;gap:6px;margin-left:auto;' });
   azioni.append(el('button', { type:'button', class:'btnsm', title:'Stampa la lista per il magazzino',
     onclick: () => stampaRichiestaTerzista(x) }, '🖨 Lista'));
   if (x.stato === 'da_preparare' && eAdminOra()) {
     azioni.append(
-      el('button', { type:'button', class:'btnsm', onclick: () => apriConfermaInvioTerzista(x, poi) }, '✓ Spedita'),
+      el('button', { type:'button', class:'btnsm', onclick: () => apriConfermaInvioTerzista(x, poi) }, rep ? '✓ In reparto' : '✓ Spedita'),
       el('button', { type:'button', class:'btnsm', title:'Annulla la richiesta',
         onclick: () => annullaRichiestaTerzista(x, poi) }, '✕'));
   }
@@ -5204,7 +5351,7 @@ function rigaRichiestaTerzista(x, poi, conCommessa, opQui) {
   return el('div', { style:'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--brd);font-size:12px;flex-wrap:wrap;' },
     el('span', { class:'badge ' + e.cls }, e.txt),
     conCommessa ? el('span', { style:'display:flex;gap:6px;flex-wrap:wrap;' }, ...comm.map(linkOp)) : '',
-    el('span', { style:'font-weight:700;' }, nomeAziendaDi(x.terzista_id)),
+    el('span', { style:'font-weight:700;' }, rep ? 'Reparto' : nomeAziendaDi(x.terzista_id)),
     el('span', { class:'sub' }, (x.fase_id ? nomeTipoLav(x.fase_id) + ' · ' : '')
       + perCod.filter(r => r.qta > 0).length + ' materiali · ' + quando),
     !conCommessa && altre.length ? el('span', { class:'sub', style:'display:flex;gap:6px;align-items:center;' },
@@ -5221,18 +5368,47 @@ function rigaRichiestaTerzista(x, poi, conCommessa, opQui) {
 function sezioneRichiesteTerzista(o, poi) {
   const mie = (state.inviiTerzista || []).filter(x => x.operazione_id === o.id
     || (x.righe || []).some(r => opDiRigaTerzista(x, r) === o.id));
-  if (!mie.length) return null;
+  const mancanti = mancantiTerzistaInSede(o);
+  const wip = repartoDaPreparare(o);
+  const fuori = fuoriSedeCommessa(o);
+  if (!mie.length && !mancanti.length && !wip && !fuori.length) return null;
   const box = el('div', { style:'margin:4px 0 14px;' },
     el('div', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px;' },
-      'Materiale per i terzisti'));
+      'Fasi: terzisti e reparto'));
+  const riquadro = (colore, testo, dett, bottone) => el('div', {
+    style:'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 6px;padding:7px 10px;'
+      + 'border:1px solid ' + colore + ';border-radius:6px;font-size:12px;' },
+    el('span', { style:'font-weight:700;color:' + colore + ';' }, testo),
+    dett ? el('span', { class:'sub', style:'font-size:11px;' }, dett) : '',
+    bottone || '');
+  // WIP (16 nov): la lavorazione e' partita ma il materiale non e' in reparto.
+  if (wip) {
+    box.append(riquadro('var(--or)', '🔔 Lavorazione avviata ma materiale non in reparto',
+      'Per il gestionale è ancora sullo scaffale, libero per le altre commesse.',
+      eAdminOra() ? el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
+        onclick: () => apriRichiestaTerzista(o, poi, { terzista: repartoId() }) }, '↗ Prepara per il reparto') : ''));
+  }
+  // FUORI SEDE per questa commessa: in reparto o dal terzista. A commessa
+  // chiusa e' un AVANZO (resterebbe riservato per sempre): avviso rosso.
+  const viva = o.stato === 'aperta' || o.stato === 'sospesa';
+  fuori.forEach(g => {
+    const dett = g.righe.slice(0, 4).map(r => r.codice + ' ' + nfIT(r.qta)).join(' · ')
+      + (g.righe.length > 4 ? ' · +' + (g.righe.length - 4) : '');
+    const n = g.righe.length;
+    const testo = (viva ? '' : '⚠ Commessa chiusa: ') + n + (n === 1 ? ' materiale ' : ' materiali ') + dovePosto(g.presso_id);
+    box.append(riquadro(viva ? 'var(--brd)' : 'var(--red)', testo, dett,
+      eAdminOra() ? el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
+        title:'Fa tornare in sede gli avanzi di questa commessa',
+        onclick: () => apriRientroInSede(o, g.presso_id, poi) }, '↩ Rientro in sede') : ''));
+  });
   // Promemoria: i mancanti di prima adesso ci sono (`mancantiTerzistaInSede`).
-  mancantiTerzistaInSede(o).forEach(p => {
+  mancanti.forEach(p => {
     const n = p.righe.length;
     box.append(el('div', { class:'promemoria-terzista',
       style:'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 6px;padding:7px 10px;'
         + 'border:1px solid var(--grn);border-radius:6px;font-size:12px;' },
       el('span', { style:'font-weight:700;color:var(--grn);' },
-        '🔔 Arrivati i mancanti per ' + nomeAziendaDi(p.terzista) + ': '
+        '🔔 Arrivati i mancanti per ' + nomeFase(p.terzista) + ': '
         + n + (n === 1 ? ' materiale ora in sede' : ' materiali ora in sede')),
       el('span', { class:'sub', style:'font-size:11px;' },
         p.righe.map(r => r.codice + ' (serve ' + nfIT(r.serve) + ', in sede ' + nfIT(r.libero) + ')').join(' · ')),
@@ -5325,9 +5501,9 @@ function materialeStatoRiga(codice, tipo, ctx) {
     // commessa. E' arrivata e resta nostra, quindi non cambia "arrivato" ne'
     // "mancano": si dice solo che non e' sullo scaffale.
     const presso = (d.presso || []).filter(p => p.qta > 0);
-    const pressoTxt = presso.map(p => nf(p.qta) + ' presso ' + nomeAziendaDi(p.presso_id)).join(', ');
+    const pressoTxt = presso.map(p => nf(p.qta) + ' ' + dovePosto(p.presso_id)).join(', ');
     const titolo = (docs.length ? 'Arrivato con: ' + docs.join(', ') : 'Nessun DDT registrato per questo codice.')
-      + (pressoTxt ? '\nMandato al terzista per questa commessa: ' + pressoTxt
+      + (pressoTxt ? '\nFuori sede per questa commessa: ' + pressoTxt
         + ". E' nostro e conta come arrivato, ma non è sullo scaffale." : '');
     const dove = pressoTxt ? ' · ' + pressoTxt : '';
     if (d.manca <= 0) {
@@ -7228,9 +7404,9 @@ function renderMovimenti(root) {
       const box = el('div', { style:'margin:0 0 18px;padding:10px 14px;border:1px solid var(--or);border-radius:6px;max-width:1100px;' },
         el('div', { style:'display:flex;align-items:center;gap:10px;margin-bottom:4px;' },
           el('span', { style:'font-weight:700;color:var(--or);' },
-            '↗ Da preparare per i terzisti: ' + (aperte.length ? aperte.length + (aperte.length === 1 ? ' richiesta' : ' richieste') : 'niente')),
+            '↗ Da preparare per terzisti e reparto: ' + (aperte.length ? aperte.length + (aperte.length === 1 ? ' richiesta' : ' richieste') : 'niente')),
           puoCreare ? el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
-            title:'Una lista per un terzista, con tutte le sue commesse aperte',
+            title:'Una lista per un terzista (con tutte le sue commesse aperte) o per il reparto',
             onclick: () => apriRichiestaTerzista(null, () => renderMovimenti(root), { tutte: true }) }, '+ Nuova richiesta') : ''));
       aperte.forEach(x => box.append(rigaRichiestaTerzista(x, () => renderMovimenti(root), true)));
       root.append(box);
@@ -7282,7 +7458,8 @@ function renderMovimenti(root) {
     { k:'dove', t:'Dove', ord: m => m.presso_id ? nomeAziendaDi(m.presso_id).toUpperCase() : '',
       cella: m => {
         const dove = m.presso_id
-          ? el('span', { class:'badge bor', style:'white-space:nowrap;', title:'Presso il terzista: materiale nostro, fuori sede' },
+          ? el('span', { class:'badge bor', style:'white-space:nowrap;', title: eReparto(m.presso_id)
+              ? 'In reparto: materiale riservato alla sua commessa, fuori dallo scaffale' : 'Presso il terzista: materiale nostro, fuori sede' },
               nomeAziendaDi(m.presso_id))
           : el('span', { class:'sub', style:'font-size:11px;' }, 'sede');
         // MAC e simili partiti per un terzista: registrati, ma nessun conto li somma.
@@ -7401,7 +7578,7 @@ function renderMovimenti(root) {
         el('span', { class:'mono', style:'font-weight:700;' }, nf(tot) + (righe[0].um ? ' ' + righe[0].um : '')),
         fuori.length
           ? el('span', { class:'sub' }, ' · in sede ' + nf(perPosto.get('') || 0) + ' · '
-              + fuori.map(([k, q]) => nf(q) + ' presso ' + nomeAziendaDi(k)).join(' · '))
+              + fuori.map(([k, q]) => nf(q) + ' ' + dovePosto(k)).join(' · '))
           : ''));
     }
 
@@ -13075,6 +13252,13 @@ function openOperazioneModal(o, opts) {
         title:'Prepara la lista dei materiali di una fase esterna da mandare al terzista. '
           + 'La giacenza si muove solo quando confermi la spedizione.',
         onclick: () => apriRichiestaTerzista(o, renderMancanti) }, '↗ Richiesta per terzista'));
+      // REPARTO (16 nov): la stessa richiesta, per la quota che resta in casa.
+      if (repartoId() && o.materiali_da_ddt) {
+        intestazione.append(el('button', { type:'button', class:'btnsm',
+          title:'Prepara la lista del materiale che resta in casa e va in lavorazione. '
+            + 'Alla conferma i C/L passano dalla sede al reparto, riservati a questa commessa.',
+          onclick: () => apriRichiestaTerzista(o, renderMancanti, { terzista: repartoId() }) }, '↗ Prepara per il reparto'));
+      }
     }
     sezMateriali.append(intestazione);
     if (!isNew && richiesteTerzistaPossibili()) {
@@ -17263,7 +17447,7 @@ async function kioskLoadAll() {
   state.mezzi = mezzi.data || [];
   state.utenti = util.data || [];
   state.utentiById = Object.fromEntries(state.utenti.map(u => [u.id, u]));
-  state.aziende = clienti.data || [];
+  state.aziende = (clienti.data || []).filter(a => !(a && a.is_reparto));
   state.articoli = articoli.data || [];
   state.tipiLav = tipiLav.data || [];
   state.operazioni = operazioni.data || [];
