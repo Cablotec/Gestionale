@@ -174,6 +174,7 @@ Chiesto da Nico, dal file *"Riunione 01-10-2026.xlsx"*: una sezione che vedono S
   - Conteggio in sola lettura: **359 righe in 62 prodotti** hanno un codice MAC in anagrafica ma tipo vuoto (es. `SZ-A09103QE_EST`, `SP-TF1286944`, `IRON-202535160`, `VR-CC25010`), e quindi oggi fanno fabbisogno.
   - Nico ha scelto *"per ora solo quella rondella"*: corretta solo la riga di `TS-358010100` (backup in `C:\Users\User032\Cablotec\tmp\backup-358-prima-MAC.json`).
   - Correzione in blocco: proposta, NON fatta. Prima di farla serve il backup delle 62 distinte e l'ok di Nico sui numeri.
+- **⚠ Codice SOSPETTO su `TS-376001134` (16 nov)**: `TS-357500021` «B.M. CABLAGGIO Multiport USB-C PD», 6 pz, arrivato da solo col DDT Tema 1000005139 (ordine 4700000482). Non era in distinta né in anagrafica. Nico: *"sospetto, non capisco se esista davvero"*. L'ho aggiunto come C/L, 1 per pezzo, CON NOTA: la descrizione inizia con «⚠ DA VERIFICARE», la riga ha il campo `nota` (in distinta e nelle liste di 00499/0020 e 00464/0040) e c'è un avviso nelle Note del prodotto. Aggiornata anche la distinta d'ordine Excel. Backup in `C:\Users\User032\Cablotec\tmp\backup-376001134-prima-357500021.json`. Da chiarire con Tema. Se non serve: togliere la riga da distinta e liste e renderlo, registrando il reso come scarico sul gestionale.
 - **Doppie descrizioni nella distinta Cablotec mai ricontrollate**: `514000087` 4A (Tema) vs 5A; `536000653` "VRHN-3" vs "VHR-3N".
 - Scartato/rimandato: conto "per ordine" accanto al magazzino unico (14 ott, non riproporre di iniziativa).
 
