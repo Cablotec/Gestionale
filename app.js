@@ -5178,6 +5178,147 @@ function stampaRichiestaTerzista(x) {
   w.document.open(); w.document.write(html); w.document.close();
 }
 
+// ── DDT FAC SIMILE AL TERZISTA (17 nov, Nico) ────────────────────────
+// "Emettilo come se oggi fossimo autonomi senza Alnus. Scrivici fac simile
+// per riconoscerlo che non e' ufficiale." Nasce dalla conferma «✓ Spedita»
+// (decisione del 6 nov: i dati del DDT sono gia' tutti li'), mai da un
+// modulo nuovo. Solo terzisti: il reparto e' un giro interno, niente DDT.
+// ⚠ NIENTE SI SALVA NEL DATABASE. Il NUMERO si ricava: progressivo dell'anno
+// fra gli invii confermati ai terzisti, in ordine di conferma. Regge perche'
+// un invio confermato non si elimina mai (solo gli annullati, che non
+// contano). La testata (colli, peso, vettore…) resta nel browser che l'ha
+// scritta; l'intestazione del mittente sta in `impostazioni.ddt_mittente`
+// (non nel codice: il repo e' pubblico).
+function numeroDdtFacSimile(x) {
+  if (!x || x.stato !== 'inviato' || eReparto(x.terzista_id) || !x.inviato_il) return null;
+  const anno = String(x.inviato_il).slice(0, 4);
+  const lista = (state.inviiTerzista || []).filter(z => z.stato === 'inviato' && !eReparto(z.terzista_id)
+      && z.inviato_il && String(z.inviato_il).slice(0, 4) === anno)
+    .sort((a, b) => String(a.inviato_il).localeCompare(String(b.inviato_il)) || String(a.id).localeCompare(String(b.id)));
+  const i = lista.findIndex(z => z.id === x.id);
+  return i < 0 ? null : 'FS ' + (i + 1) + '/' + anno;
+}
+
+// Le righe del documento: quello che e' PARTITO davvero, per codice.
+function righeDdtTerzista(x) {
+  const per = new Map();
+  (x.righe || []).forEach(r => {
+    const q = Number(r.qta_inviata != null ? r.qta_inviata : r.qta) || 0;
+    if (!(q > 0)) return;
+    const c = String(r.codice || '').trim();
+    if (!per.has(c)) per.set(c, { codice: c, descrizione: r.descrizione || '', um: r.um || '', qta: 0 });
+    per.get(c).qta = +(per.get(c).qta + q).toFixed(4);
+  });
+  return [...per.values()].sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true }));
+}
+
+function apriDdtTerzista(x) {
+  const num = numeroDdtFacSimile(x);
+  if (!num) return toast('Il DDT nasce dalla spedizione confermata a un terzista.', 'err');
+  const chiaveLoc = 'ddt-testata-' + x.id;
+  let salvata = {};
+  try { salvata = JSON.parse(localStorage.getItem(chiaveLoc) || '{}') || {}; } catch (e) { salvata = {}; }
+  const v = veloTerzista('DDT fac simile ' + num + ' · ' + nomeAziendaDi(x.terzista_id), 760);
+  const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
+  const mittIniziale = (state.impostazioni && state.impostazioni.ddt_mittente) || '';
+  const inMitt = el('textarea', { rows:'3', style:'width:100%;font-size:12px;',
+    placeholder:'Ragione sociale, indirizzo, P.IVA del mittente' });
+  inMitt.value = mittIniziale;
+  const inCaus = el('input', { type:'text', value: salvata.causale || 'Conto lavorazione' });
+  const inAsp = el('input', { type:'text', value: salvata.aspetto || 'Sfuso' });
+  const inColli = el('input', { type:'text', inputmode:'numeric', value: salvata.colli || '' });
+  const inPeso = el('input', { type:'text', inputmode:'decimal', value: salvata.peso || '' });
+  const inPorto = el('input', { type:'text', value: salvata.porto || 'Franco' });
+  const selCura = el('select', {}, ...['Mittente', 'Destinatario', 'Vettore'].map(t => el('option', { value: t }, t)));
+  selCura.value = salvata.cura || 'Mittente';
+  const inVett = el('input', { type:'text', value: salvata.vettore || '', placeholder:'Solo se a cura del vettore' });
+  const d = new Date(x.inviato_il);
+  const pad = (n) => String(n).padStart(2, '0');
+  const inizioDef = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  const inInizio = el('input', { type:'datetime-local', value: salvata.inizio || inizioDef });
+  const inAnn = el('textarea', { rows:'2', style:'width:100%;font-size:12px;' });
+  inAnn.value = salvata.annotazioni != null ? salvata.annotazioni : (x.nota || '');
+  const righe = righeDdtTerzista(x);
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Documento di prova: esce con la scritta FAC SIMILE e non vale come DDT. '
+      + righe.length + (righe.length === 1 ? ' riga' : ' righe') + ', con le quantità confermate alla spedizione.'),
+    campo('Mittente (intestazione)', inMitt),
+    el('div', { class:'frow' }, campo('Causale del trasporto', inCaus), campo('Aspetto dei beni', inAsp)),
+    el('div', { class:'frow' }, campo('N. colli', inColli), campo('Peso kg', inPeso), campo('Porto', inPorto)),
+    el('div', { class:'frow' }, campo('Trasporto a cura del', selCura), campo('Vettore', inVett), campo('Inizio trasporto', inInizio)),
+    campo('Annotazioni', inAnn));
+  const ok = el('button', { class:'btnp' }, '🖨 Stampa DDT');
+  ok.onclick = async () => {
+    const t = { causale: inCaus.value.trim(), aspetto: inAsp.value.trim(), colli: inColli.value.trim(),
+      peso: inPeso.value.trim(), porto: inPorto.value.trim(), cura: selCura.value, vettore: inVett.value.trim(),
+      inizio: inInizio.value, annotazioni: inAnn.value.trim() };
+    try { localStorage.setItem(chiaveLoc, JSON.stringify(t)); } catch (e) { /* solo comodita' */ }
+    const mitt = inMitt.value.trim();
+    // La finestra si apre SUBITO, dentro il clic: dopo un `await` il browser la blocca.
+    stampaDdtTerzista(x, num, mitt, t);
+    if (mitt !== mittIniziale && eAdminOra()) {
+      try {
+        const { error } = await sb.from('impostazioni').upsert([{ chiave:'ddt_mittente', valore: mitt,
+          aggiornato_il: new Date().toISOString() }], { onConflict:'chiave' });
+        if (error) throw new Error(error.message);
+        state.impostazioni.ddt_mittente = mitt;
+        toast('Intestazione del mittente salvata', 'ok');
+      } catch (e) { toast('Intestazione non salvata: ' + (e.message || e), 'err', 9000); }
+    }
+  };
+  v.piede.append(el('button', { class:'btng', onclick: v.chiudi }, 'Chiudi'), ok);
+}
+
+function stampaDdtTerzista(x, num, mittente, t) {
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+  const az = (state.aziende || []).find(a => a.id === x.terzista_id) || {};
+  const dest = [az.nome || nomeAziendaDi(x.terzista_id), az.via,
+    [az.cap, az.citta, az.provincia ? '(' + az.provincia + ')' : ''].filter(Boolean).join(' '),
+    az.p_iva ? 'P.IVA ' + az.p_iva : ''].filter(Boolean);
+  const comm = commesseDiRichiesta(x);
+  const arts = [...new Set(comm.map(c => { const a = (state.articoli || []).find(z => z.id === c.articolo_id); return a ? a.codice : ''; }).filter(Boolean))];
+  const rifs = [...new Set(comm.map(c => c.riferimento_cliente).filter(Boolean))];
+  const righe = righeDdtTerzista(x);
+  const inizio = t.inizio ? new Date(t.inizio) : null;
+  const inizioTxt = inizio && !isNaN(inizio) ? inizio.toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+  const cella = (et, val) => '<div class="c"><b>' + esc(et) + '</b>' + (esc(val) || '&nbsp;') + '</div>';
+  const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>DDT fac simile ' + esc(num) + '</title><style>'
+    + 'body{font-family:Arial,sans-serif;font-size:11px;margin:18px;color:#000;background:#fff;position:relative;}'
+    + '.wm{position:fixed;top:40%;left:0;right:0;text-align:center;font-size:110px;font-weight:700;color:rgba(200,0,0,.12);transform:rotate(-30deg);pointer-events:none;z-index:0;}'
+    + '.fs{border:2px solid #b00;color:#b00;font-weight:700;text-align:center;padding:4px;margin-bottom:10px;letter-spacing:.1em;}'
+    + '.top{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}.box{border:1px solid #000;padding:6px 8px;min-height:70px;white-space:pre-line;}'
+    + '.box b{display:block;font-size:9px;text-transform:uppercase;color:#444;margin-bottom:3px;}h1{font-size:15px;margin:0 0 2px;}'
+    + '.g{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #000;border-bottom:none;}.c{border-right:1px solid #000;border-bottom:1px solid #000;padding:4px 6px;}'
+    + '.c:nth-child(4n){border-right:none;}.c b{display:block;font-size:9px;text-transform:uppercase;color:#444;}'
+    + 'table{width:100%;border-collapse:collapse;margin-top:10px;}th,td{border:1px solid #000;padding:4px 6px;text-align:left;vertical-align:top;}'
+    + 'th{background:#eee;font-size:9px;text-transform:uppercase;}.n{text-align:right;}.m{font-family:monospace;}tr{page-break-inside:avoid;}thead{display:table-header-group;}'
+    + '.ann{border:1px solid #000;padding:6px 8px;margin-top:10px;min-height:30px;white-space:pre-line;}.ann b{display:block;font-size:9px;text-transform:uppercase;color:#444;}'
+    + '.f{margin-top:30px;display:flex;gap:40px;}.f div{border-top:1px solid #000;padding-top:4px;flex:1;font-size:10px;}'
+    + '@page{size:A4 portrait;margin:10mm;}@media print{body{margin:0;}}'
+    + '</style></head><body><div class="wm">FAC SIMILE</div>'
+    + '<div class="fs">FAC SIMILE — documento di prova, non valido come documento di trasporto</div>'
+    + '<div class="top"><div class="box"><b>Mittente</b>' + (esc(mittente) || 'Cablotec') + '</div>'
+    + '<div class="box"><b>Destinatario e luogo di destinazione</b>' + dest.map(esc).join('\n') + '</div></div>'
+    + '<h1>Documento di trasporto ' + esc(num) + ' del ' + esc(fmtIT(String(x.inviato_il).slice(0, 10))) + '</h1>'
+    + '<div class="g" style="margin-top:6px;">'
+    + cella('Causale del trasporto', t.causale) + cella('Aspetto dei beni', t.aspetto) + cella('N. colli', t.colli) + cella('Peso kg', t.peso)
+    + cella('Porto', t.porto) + cella('Trasporto a cura del', t.cura) + cella('Vettore', t.vettore) + cella('Inizio trasporto', inizioTxt)
+    + '</div>'
+    + '<table><thead><tr><th>#</th><th>Codice</th><th>Descrizione</th><th>UM</th><th class="n">Quantità</th></tr></thead><tbody>'
+    + righe.map((r, i) => '<tr><td>' + (i + 1) + '</td><td class="m">' + esc(r.codice) + '</td><td>' + esc(r.descrizione)
+      + '</td><td>' + esc(r.um) + '</td><td class="n">' + esc(nfIT(r.qta)) + '</td></tr>').join('')
+    + '</tbody></table>'
+    + '<div class="ann"><b>Annotazioni</b>'
+    + esc(['Rif. commessa: ' + comm.map(etiOpTerzista).join(', '), arts.length ? 'Prodotto: ' + arts.join(', ') : '',
+      rifs.length ? 'Rif. cliente: ' + rifs.join(', ') : '', t.annotazioni].filter(Boolean).join('\n')) + '</div>'
+    + '<div class="f"><div>Firma conducente</div><div>Firma vettore</div><div>Firma destinatario</div></div>'
+    + '<script>window.onload=function(){window.print();}<\/script></body></html>';
+  const w = window.open('', '_blank');
+  if (!w) return toast('Il browser ha bloccato la finestra di stampa: consentila per questo sito.', 'err', 9000);
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
 // ── 3. LA CONFERMA (quantita' reali -> movimenti) ───────────────────
 // Una riga per codice E commessa: i movimenti vanno sulla commessa giusta,
 // il materiale presso il terzista resta riservato al suo ordine.
@@ -5265,6 +5406,9 @@ function apriConfermaInvioTerzista(x, poi) {
       v.chiudi();
       toast(rep ? 'Materiale in reparto registrato' : 'Spedizione a ' + nomeAziendaDi(x.terzista_id) + ' registrata', 'ok');
       if (typeof poi === 'function') poi();
+      // DDT FAC SIMILE (17 nov): nasce dalla conferma, si propone da solo.
+      const fresca = !rep && (state.inviiTerzista || []).find(z => z.id === x.id);
+      if (fresca && fresca.stato === 'inviato') apriDdtTerzista(fresca);
     } catch (e) {
       // Tutto-o-niente: se una riga non va, non e' partito niente.
       ok.textContent = testoOk;
@@ -5338,6 +5482,10 @@ function rigaRichiestaTerzista(x, poi, conCommessa, opQui) {
   const azioni = el('span', { style:'display:flex;gap:6px;margin-left:auto;' });
   azioni.append(el('button', { type:'button', class:'btnsm', title:'Stampa la lista per il magazzino',
     onclick: () => stampaRichiestaTerzista(x) }, '🖨 Lista'));
+  if (x.stato === 'inviato' && !rep) {
+    azioni.append(el('button', { type:'button', class:'btnsm', title:'DDT fac simile di questa spedizione',
+      onclick: () => apriDdtTerzista(x) }, '📄 DDT ' + (numeroDdtFacSimile(x) || '')));
+  }
   if (x.stato === 'da_preparare' && eAdminOra()) {
     azioni.append(
       el('button', { type:'button', class:'btnsm', onclick: () => apriConfermaInvioTerzista(x, poi) }, rep ? '✓ In reparto' : '✓ Spedita'),
@@ -5437,8 +5585,10 @@ function passiFase(o, f, poi) {
     passi.push({ nome: nomeUscita, stato:'ora', dett: inviate.length ? 'un\'altra parte già uscita' : 'da confermare',
       azione: btn(rep ? '✓ In reparto' : '✓ Spedita', () => apriConfermaInvioTerzista(x, poi)) });
   } else if (ultimaInv) {
-    passi.push({ nome: nomeUscita, stato:'fatto', dett: (rep ? 'il ' : 'partita il ') + giorno(ultimaInv.inviato_il)
-      + (inviate.length > 1 ? ' · ' + inviate.length + ' volte' : '') });
+    passi.push({ nome: nomeUscita, stato:'fatto', dett: (rep ? 'il ' : (numeroDdtFacSimile(ultimaInv) || 'partita') + ' del ')
+      + giorno(ultimaInv.inviato_il) + (inviate.length > 1 ? ' · ' + inviate.length + ' volte' : ''),
+      azione: rep ? '' : el('button', { type:'button', class:'btnsm', style:'margin-top:4px;font-size:11px;padding:2px 8px;',
+        title:'DDT fac simile dell\'ultima spedizione', onclick: () => apriDdtTerzista(ultimaInv) }, '📄 DDT') });
   } else passi.push({ nome: nomeUscita, stato:'poi', dett:'' });
 
   // 3. LA LAVORAZIONE
