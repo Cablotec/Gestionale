@@ -5565,9 +5565,8 @@ function passiFase(o, f, poi) {
   // 1. LA LISTA (la richiesta al magazzino)
   if (daPrep.length) {
     const x = daPrep[daPrep.length - 1];
-    passi.push({ nome:'Lista preparata', stato:'fatto', dett:'chiesta il ' + giorno(x.creato_il),
-      azione: el('button', { type:'button', class:'btnsm', style:'margin-top:4px;font-size:11px;padding:2px 8px;',
-        title:'Stampa la lista per il magazzino', onclick: () => stampaRichiestaTerzista(x) }, '🖨 Lista') });
+    // La stampa sta in «Documenti», sotto i passi: qui solo lo stato.
+    passi.push({ nome:'Lista preparata', stato:'fatto', dett:'chiesta il ' + giorno(x.creato_il) });
   } else if (vive.length) {
     passi.push({ nome:'Lista preparata', stato:'fatto', dett:'chiesta il ' + giorno(vive[vive.length - 1].creato_il) });
   } else if (rep && repartoDaPreparare(o)) {
@@ -5586,9 +5585,7 @@ function passiFase(o, f, poi) {
       azione: btn(rep ? '✓ In reparto' : '✓ Spedita', () => apriConfermaInvioTerzista(x, poi)) });
   } else if (ultimaInv) {
     passi.push({ nome: nomeUscita, stato:'fatto', dett: (rep ? 'il ' : (numeroDdtFacSimile(ultimaInv) || 'partita') + ' del ')
-      + giorno(ultimaInv.inviato_il) + (inviate.length > 1 ? ' · ' + inviate.length + ' volte' : ''),
-      azione: rep ? '' : el('button', { type:'button', class:'btnsm', style:'margin-top:4px;font-size:11px;padding:2px 8px;',
-        title:'DDT fac simile dell\'ultima spedizione', onclick: () => apriDdtTerzista(ultimaInv) }, '📄 DDT') });
+      + giorno(ultimaInv.inviato_il) + (inviate.length > 1 ? ' · ' + inviate.length + ' volte' : '') });
   } else passi.push({ nome: nomeUscita, stato:'poi', dett:'' });
 
   // 3. LA LAVORAZIONE
@@ -5696,13 +5693,46 @@ function sezioneCicloProduttivo(o, art, poi) {
           title:'Nuova richiesta: propone solo quello che manca ancora',
           onclick: () => apriRichiestaTerzista(o, poi, { terzista: f.id }) }, '↗ Prepara la richiesta') : ''));
     }
-    // Il dettaglio, chiuso: materiali della fase e storico delle richieste.
-    const nRich = f.richieste.length;
+    // I DOCUMENTI SEMPRE IN VISTA (17 nov, Nico: "senza che rimangano
+    // nascosti"): ogni lista di preparazione e il suo DDT, in ordine di data,
+    // con la stampa a un clic. Le annullate restano nel dettaglio chiuso.
+    const docVive = f.richieste.filter(x => x.stato !== 'annullato');
+    if (docVive.length) {
+      const docs = el('div', { style:'margin-top:10px;' },
+        el('div', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px;' }, 'Documenti'));
+      const rigaDoc = (icona, testo, dett, ...bottoni) => el('div', {
+        style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0;border-bottom:1px solid var(--brd);font-size:12px;' },
+        el('span', { style:'font-weight:700;' }, icona + ' ' + testo),
+        dett ? el('span', { class:'sub', style:'font-size:11px;' }, dett) : '',
+        el('span', { style:'display:flex;gap:6px;margin-left:auto;' }, ...bottoni.filter(Boolean)));
+      const bt = (txt, fn, titolo) => el('button', { type:'button', class:'btnsm', style:'font-size:11px;padding:2px 8px;',
+        title: titolo || '', onclick: fn }, txt);
+      docVive.forEach(x => {
+        const pc = righePerCodiceTerzista(x);
+        const nM = pc.filter(r => r.qta > 0).length, nMan = pc.filter(r => r.mancante > 0).length;
+        const inv = x.stato === 'inviato';
+        docs.append(rigaDoc('📋', 'Lista di preparazione del ' + fmtIT(String(x.creato_il || '').slice(0, 10)),
+          nM + (nM === 1 ? ' materiale' : ' materiali') + (nMan ? ' · ' + nMan + (nMan === 1 ? ' mancante' : ' mancanti') : '')
+            + ' · ' + (inv ? (rep ? 'portata in reparto' : 'spedita') : 'da preparare'),
+          bt('🖨 Stampa', () => stampaRichiestaTerzista(x), 'Stampa la lista per il magazzino'),
+          (!inv && eAdminOra()) ? bt('✕', () => annullaRichiestaTerzista(x, poi), 'Annulla la richiesta') : null));
+        if (inv && !rep) {
+          const nR = righeDdtTerzista(x).length;
+          docs.append(rigaDoc('📄', 'DDT ' + (numeroDdtFacSimile(x) || '') + ' del ' + fmtIT(String(x.inviato_il || '').slice(0, 10)),
+            nR + (nR === 1 ? ' riga' : ' righe') + ' · fac simile',
+            bt('🖨 DDT', () => apriDdtTerzista(x), 'Apri e stampa il DDT fac simile')));
+        }
+      });
+      card.append(docs);
+    }
+    // Il dettaglio, chiuso: materiali della fase e richieste annullate.
+    const annullate = f.richieste.filter(x => x.stato === 'annullato');
+    const nRich = annullate.length;
     if (nMat || nRich) {
       const dett = el('div', { style:'display:none;margin-top:8px;' });
       const etich = () => (dett.style.display === 'none' ? '▸ ' : '▾ ')
         + [nMat ? nMat + (nMat === 1 ? ' materiale' : ' materiali') : '',
-          nRich ? nRich + (nRich === 1 ? ' richiesta' : ' richieste') : ''].filter(Boolean).join(' · ');
+          nRich ? nRich + (nRich === 1 ? ' richiesta annullata' : ' richieste annullate') : ''].filter(Boolean).join(' · ');
       const tog = el('button', { type:'button', class:'btnsm', style:'margin-top:8px;font-size:11px;' });
       tog.textContent = etich();
       tog.onclick = () => { dett.style.display = dett.style.display === 'none' ? '' : 'none'; tog.textContent = etich(); };
@@ -5723,8 +5753,8 @@ function sezioneCicloProduttivo(o, art, poi) {
       }
       if (nRich) {
         dett.append(el('div', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin:10px 0 2px;' },
-          'Richieste'));
-        f.richieste.forEach(x => dett.append(rigaRichiestaTerzista(x, poi, false, o.id)));
+          'Richieste annullate'));
+        annullate.forEach(x => dett.append(rigaRichiestaTerzista(x, poi, false, o.id)));
       }
       card.append(tog, dett);
     }
