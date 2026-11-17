@@ -5167,7 +5167,7 @@ function stampaRichiestaTerzista(x) {
     + '<div><b>' + (rep ? 'Fase' : 'Terzista') + '</b>' + esc(rep ? 'Reparto (in casa)' : nomeAziendaDi(x.terzista_id)) + '</div>'
     + '<div><b>Richiesta del</b>' + esc(fmtIT(String(x.creato_il || '').slice(0, 10))) + '</div></div>'
     + (x.nota ? '<p><b>Nota:</b> ' + esc(x.nota) + '</p>' : '')
-    + '<table><thead><tr><th></th><th>#</th><th>Codice</th><th>Descrizione</th><th>Tipo</th><th>UM</th><th>Qtà</th>'
+    + '<table><thead><tr><th></th><th>#</th><th>Codice</th><th>Descrizione</th><th>Tipo</th><th>UM</th><th>Da preparare</th>'
     + (conManc ? '<th>Mancano</th>' : '') + (multi ? '<th>Per commessa</th>' : '') + '<th>Note</th></tr></thead><tbody>'
     + righe + '</tbody></table>'
     + (conManc ? '<div class="leg">Mancano: materiale che serve ma oggi non c’è; arriverà con un invio successivo.</div>' : '')
