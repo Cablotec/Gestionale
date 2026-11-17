@@ -5811,6 +5811,10 @@ function sezioneCicloProduttivo(o, art, poi) {
           nM + (nM === 1 ? ' materiale' : ' materiali') + (nMan ? ' · ' + nMan + (nMan === 1 ? ' mancante' : ' mancanti') : '')
             + ' · ' + (inv ? (rep ? 'portata in reparto' : 'spedita') : 'da preparare'),
           bt('🖨 Stampa', () => stampaRichiestaTerzista(x), 'Stampa la lista per il magazzino'),
+          // La conferma anche QUI, sulla sua lista (17 nov, Nico: "come la
+          // confermo?"): il passo «Uscita» conferma solo la piu' vecchia.
+          (!inv && eAdminOra()) ? bt(rep ? '✓ In reparto' : '✓ Spedita', () => apriConfermaInvioTerzista(x, poi),
+            rep ? 'Conferma cosa hai portato in reparto' : 'Conferma cosa è partito: poi si apre il DDT') : null,
           (!inv && eAdminOra()) ? bt('✕', () => annullaRichiestaTerzista(x, poi), 'Annulla la richiesta') : null));
         if (inv && !rep) {
           const nR = righeDdtTerzista(x).length;
