@@ -54,3 +54,47 @@ revoke all on function public.mov_rettifica(text, numeric, text, uuid, uuid, dat
 grant execute on function public.mov_rettifica(text, numeric, text, uuid, uuid, date) to authenticated;
 
 select 'RETTIFICHE MANUALI PRONTE' as esito;
+
+-- ── MODIFICARE UNA RETTIFICA A MANO (17 nov, Nico) ─────────────────────
+-- "vorrei poter modificare la rettifica anche una volta fatta". Eccezione
+-- dichiarata alla regola "un movimento non si modifica": vale SOLO per le
+-- rettifiche scritte a mano (documento_tipo RETTIFICA, tipo rettifica),
+-- mai per carichi DDT, scarichi di lotto, invii o rettifiche dei trigger.
+-- La traccia resta nella nota: "· modificata il gg/mm/aaaa da <chi> (era +3)".
+create or replace function public.mov_modifica_rettifica(p_id uuid, p_qta numeric, p_motivo text,
+  p_data date default null)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_m     record;
+  v_trac  text;
+  v_chi   text := lower(coalesce(auth.jwt() ->> 'email', ''));
+begin
+  if not exists (select 1 from profili where id = auth.uid() and ruolo = 'admin') then
+    raise exception 'Solo un amministratore puo'' modificare una rettifica';
+  end if;
+  select * into v_m from movimenti_magazzino where id = p_id for update;
+  if not found then raise exception 'Movimento non trovato'; end if;
+  if v_m.tipo <> 'rettifica' or coalesce(v_m.documento_tipo, '') <> 'RETTIFICA' then
+    raise exception 'Si modificano solo le rettifiche fatte a mano';
+  end if;
+  if p_qta is null or p_qta = 0 then raise exception 'La quantita'' non puo'' essere zero'; end if;
+  if nullif(trim(coalesce(p_motivo, '')), '') is null then raise exception 'Scrivi il motivo'; end if;
+
+  v_trac := coalesce(substring(v_m.note from ' · modificata .*$'), '')
+    || ' · modificata il ' || to_char(current_date, 'DD/MM/YYYY') || ' da ' || v_chi
+    || ' (era ' || case when v_m.qta > 0 then '+' else '' end || rtrim(to_char(v_m.qta, 'FM999999990.###'), '.')
+    || case when coalesce(p_data, v_m.data) <> v_m.data then ' del ' || to_char(v_m.data, 'DD/MM/YYYY') else '' end || ')';
+  update movimenti_magazzino
+     set qta = p_qta, data = coalesce(p_data, v_m.data),
+         note = 'Rettifica a mano · ' || trim(p_motivo) || v_trac
+   where id = p_id;
+  return p_id;
+end $$;
+revoke all on function public.mov_modifica_rettifica(uuid, numeric, text, date) from public;
+grant execute on function public.mov_modifica_rettifica(uuid, numeric, text, date) to authenticated;
+
+select 'MODIFICA RETTIFICHE PRONTA' as esito;

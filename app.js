@@ -7956,6 +7956,58 @@ function apriRettificaMagazzino(codiceIniziale, poi) {
   (codiceIniziale ? inQta : inCod).focus();
 }
 
+// MODIFICARE UNA RETTIFICA FATTA A MANO (17 nov, Nico). Solo quelle col
+// documento RETTIFICA: carichi, scarichi di lotto e invii restano intoccabili.
+// La traccia del valore di prima la scrive il database nella nota.
+function eRettificaManuale(m) {
+  return !!m && m.tipo === 'rettifica' && m.documento_tipo === 'RETTIFICA';
+}
+function apriModificaRettifica(m, poi) {
+  const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  const v = veloTerzista('✎ Modifica rettifica · ' + m.codice, 560);
+  const campo = (et, inp, w) => el('div', { class:'field', style: w ? 'flex:' + w + ';' : '' }, el('label', {}, et), inp);
+  const nota = String(m.note || '');
+  const motivo0 = nota.replace(/^Rettifica a mano · /, '').replace(/ · modificata .*$/, '');
+  const storia = (nota.match(/ · modificata .*$/) || [''])[0].replace(/^ · /, '');
+  const inQta = el('input', { type:'text', inputmode:'decimal', value: String(m.qta).replace('.', ',') });
+  const inData = el('input', { type:'date', value: String(m.data || '').slice(0, 10) });
+  const inMotivo = el('input', { type:'text', value: motivo0 });
+  const msg = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      (m.descrizione || '') + ' · ' + (m.presso_id ? dovePosto(m.presso_id) : 'in sede')
+      + '. Oggi vale ' + (m.qta > 0 ? '+' : '') + nf(m.qta) + ': il valore di prima resta scritto nella nota.'),
+    el('div', { class:'frow' }, campo('Quantità (−3 per togliere)', inQta, 2), campo('Data', inData, 1)),
+    campo('Motivo', inMotivo),
+    storia ? el('div', { class:'sub', style:'font-size:11px;margin-top:6px;color:var(--or);' }, storia) : '');
+  const ok = el('button', { class:'btnp' }, 'Salva modifica');
+  ok.onclick = async () => {
+    const q = Number(String(inQta.value).trim().replace(/\./g, '').replace(',', '.'));
+    const errore = !Number.isFinite(q) || q === 0 ? 'La quantità non può essere zero'
+      : (!inMotivo.value.trim() ? 'Scrivi il motivo' : '');
+    if (errore) { msg.textContent = errore; msg.style.color = 'var(--red)'; return; }
+    ok.disabled = true; ok.textContent = 'Salvataggio…';
+    try {
+      const { error } = await sb.rpc('mov_modifica_rettifica', { p_id: m.id, p_qta: Math.round(q * 1000) / 1000,
+        p_motivo: inMotivo.value.trim(), p_data: inData.value || null });
+      if (error) {
+        if (/could not find the function|PGRST202/i.test(error.message || '') || error.code === 'PGRST202')
+          throw new Error('la funzione mov_modifica_rettifica non c’è ancora a database (va eseguito lo SQL)');
+        throw new Error(error.message);
+      }
+      v.chiudi();
+      toast('Rettifica modificata: ' + m.codice + ' ' + (q > 0 ? '+' : '') + nf(q), 'ok');
+      await caricaMovimenti();
+      if (typeof poi === 'function') poi(m.codice);
+    } catch (e) {
+      ok.disabled = false; ok.textContent = 'Salva modifica';
+      toast('Rettifica non modificata: ' + (e.message || e), 'err', 9000);
+    }
+  };
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+  inQta.focus();
+}
+
 function renderMovimenti(root) {
   root.innerHTML = '';
   const nf = (n) => (n == null || n === '' || !Number.isFinite(Number(n)))
@@ -8017,7 +8069,13 @@ function renderMovimenti(root) {
       cella: m => el('span', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, m.data ? fmtIT(m.data) : '—') },
     { k:'tipo', t:'Tipo', ord: m => String(m.tipo || ''),
       cella: m => { const e = MOV_TIPO_ETI[m.tipo] || { txt: m.tipo || '—', cls:'bgry' };
-        return el('span', { class:'badge ' + e.cls }, e.txt); } },
+        const b = el('span', { class:'badge ' + e.cls }, e.txt);
+        // ✎ solo sulle rettifiche fatte a mano, solo admin (17 nov).
+        return (eAdminOra() && eRettificaManuale(m))
+          ? el('span', { style:'display:inline-flex;gap:4px;align-items:center;white-space:nowrap;' }, b,
+              el('button', { type:'button', class:'btnsm', style:'padding:0 5px;', title:'Modifica questa rettifica',
+                onclick: () => apriModificaRettifica(m, dopoRettifica) }, '✎'))
+          : b; } },
     { k:'codice', t:'Codice', ord: m => String(m.codice || ''),
       cella: m => el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);',
         title:'Mostra solo i movimenti di questo codice, col totale',
