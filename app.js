@@ -3948,6 +3948,17 @@ async function caricaInviiTerzista() {
       sb.from('invii_terzista').select('*').order('creato_il', { ascending: false }).order('id'));
     state.inviiTerzista = error ? null : (data || []);
   } catch (e) { state.inviiTerzista = null; }
+  await caricaRientriTerzista();
+}
+// RIENTRI DAL TERZISTA (17 nov): `rientri_terzista`. null = tabella assente
+// (strumenti/migrazione-rientri-terzista.sql non eseguita): allora il passo
+// «Rientro (DDT)» resta grigio "non ancora registrabile", come prima.
+async function caricaRientriTerzista() {
+  try {
+    const { data, error } = await fetchTutte(() =>
+      sb.from('rientri_terzista').select('*').order('data').order('creato_il'));
+    state.rientriTerzista = error ? null : (data || []);
+  } catch (e) { state.rientriTerzista = null; }
 }
 
 // Il nome di un terzista (o di qualunque azienda) dal suo id.
@@ -5588,6 +5599,11 @@ function passiFase(o, f, poi) {
       + giorno(ultimaInv.inviato_il) + (inviate.length > 1 ? ' · ' + inviate.length + ' volte' : '') });
   } else passi.push({ nome: nomeUscita, stato:'poi', dett:'' });
 
+  // I pezzi tornati dal terzista (`rientri_terzista`), per il passo 3 e 4.
+  const totPz = Number(o.quantita) || 0;
+  const rientriQui = rep ? [] : rientriDiFase(o, f.id);
+  const rientrati = rientriQui.reduce((a, r) => a + (Number(r.pezzi) || 0), 0);
+
   // 3. LA LAVORAZIONE
   if (rep) {
     const fatti = quantitaConsegnata(o.id);
@@ -5595,6 +5611,8 @@ function passiFase(o, f, poi) {
     const partita = fatti > 0 || (state.sessioni || []).some(s => s.operazione_id === o.id);
     passi.push({ nome:'Produzione', stato: (tot > 0 && fatti >= tot) ? 'fatto' : (partita ? 'ora' : 'poi'),
       dett: nfIT(fatti) + ' di ' + nfIT(tot) + ' pz' });
+  } else if (primaInv && totPz > 0 && rientrati >= totPz) {
+    passi.push({ nome:'Dal terzista', stato:'fatto', dett:'lavorazione finita' });
   } else if (primaInv) {
     const giorni = Math.max(0, Math.round((Date.now() - new Date(primaInv.inviato_il).getTime()) / 864e5));
     passi.push({ nome:'Dal terzista', stato:'ora',
@@ -5612,11 +5630,88 @@ function passiFase(o, f, poi) {
     passi.push({ nome:'Avanzi', stato: !viva ? 'fatto' : 'poi',
       dett: !viva ? 'niente da far rientrare' : (f.fuori.length ? f.fuori.length + ' materiali in reparto' : ''),
       azione: (viva && f.fuori.length) ? btn('↩ Rientro in sede', rientro, 'Fa tornare in sede gli avanzi di questa commessa') : '' });
-  } else {
+  } else if (!Array.isArray(state.rientriTerzista)) {
     passi.push({ nome:'Rientro (DDT)', stato:'poi', dett:'non ancora registrabile',
       azione: (f.fuori.length && admin) ? btn('↩ Avanzi in sede', rientro, 'Fa tornare in sede il materiale di questa commessa ancora presso il terzista') : '' });
+  } else {
+    // RIENTRO DAL TERZISTA (17 nov): il semilavorato torna col suo DDT.
+    const registra = () => apriRientroTerzista(o, f.id, poi);
+    const ultimo = rientriQui[rientriQui.length - 1];
+    const completo = totPz > 0 && rientrati >= totPz;
+    const avanzi = (f.fuori.length && admin)
+      ? btn('↩ Avanzi in sede', rientro, 'Fa tornare in sede il materiale di questa commessa ancora presso il terzista') : '';
+    const azione = el('span', { style:'display:flex;gap:4px;flex-wrap:wrap;' },
+      (!completo && primaInv) ? btn('↩ Registra rientro', registra, 'Il semilavorato è tornato: data, DDT del terzista, pezzi') : '',
+      completo ? avanzi : '');
+    passi.push({ nome:'Rientro (DDT)', stato: completo ? 'fatto' : (primaInv ? 'ora' : 'poi'),
+      dett: rientrati > 0
+        ? nfIT(rientrati) + ' di ' + nfIT(totPz) + ' pz' + (ultimo ? ' · ultimo il ' + giorno(ultimo.data) : '')
+        : (primaInv ? 'da registrare' : ''),
+      azione });
   }
   return passi;
+}
+
+// ── RIENTRO DAL TERZISTA (17 nov) ────────────────────────────────────
+// Registra cosa e' tornato: data, numero del DDT del terzista, pezzi. Non
+// muove la giacenza (il materiale lo scarica il lotto; gli avanzi tornano
+// con «↩ Avanzi in sede»). Vedi strumenti/migrazione-rientri-terzista.sql.
+function rientriDiFase(o, terzistaId) {
+  return (state.rientriTerzista || []).filter(r => r.operazione_id === o.id && r.terzista_id === terzistaId);
+}
+function apriRientroTerzista(o, terzistaId, poi) {
+  const gia = rientriDiFase(o, terzistaId).reduce((a, r) => a + (Number(r.pezzi) || 0), 0);
+  const tot = Number(o.quantita) || 0;
+  const v = veloTerzista('Rientro da ' + nomeAziendaDi(terzistaId) + ' · ' + etiOpTerzista(o), 560);
+  const campo = (et, inp) => el('div', { class:'field' }, el('label', {}, et), inp);
+  const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
+  const inDdt = el('input', { type:'text', placeholder:'Numero sul DDT del terzista' });
+  const resto = Math.max(0, tot - gia);
+  const inPz = el('input', { type:'text', inputmode:'decimal', value: resto > 0 ? String(resto) : '' });
+  const inNota = el('input', { type:'text', placeholder:'Nota (facoltativa)' });
+  const msg = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Il semilavorato è tornato. Ordinati ' + nfIT(tot) + ' pz' + (gia > 0 ? ', già rientrati ' + nfIT(gia) : '')
+      + '. La giacenza non si muove: il materiale lo scarica il lotto, gli avanzi tornano con «↩ Avanzi in sede».'),
+    el('div', { class:'frow' }, campo('Data', inData), campo('DDT del terzista', inDdt), campo('Pezzi rientrati', inPz)),
+    campo('Nota', inNota));
+  const ok = el('button', { class:'btnp' }, 'Registra');
+  ok.onclick = async () => {
+    const pz = Number(String(inPz.value).replace(',', '.'));
+    if (!(pz > 0)) { msg.textContent = 'Scrivi quanti pezzi sono rientrati'; msg.style.color = 'var(--red)'; return; }
+    if (!inData.value) { msg.textContent = 'Manca la data'; msg.style.color = 'var(--red)'; return; }
+    ok.disabled = true; ok.textContent = 'Registrazione…';
+    try {
+      const { data, error } = await sb.from('rientri_terzista').insert({ operazione_id: o.id, terzista_id: terzistaId,
+        data: inData.value, ddt_numero: inDdt.value.trim() || null, pezzi: pz, nota: inNota.value.trim() || null }).select();
+      if (error) throw new Error(error.message);
+      if (!data || !data.length) throw new Error('il database non l’ha registrato (non sei admin?)');
+      (state.rientriTerzista = state.rientriTerzista || []).push(data[0]);
+      v.chiudi();
+      toast('Rientro da ' + nomeAziendaDi(terzistaId) + ' registrato: ' + nfIT(pz) + ' pz', 'ok');
+      if (typeof poi === 'function') poi();
+    } catch (e) {
+      ok.disabled = false; ok.textContent = 'Registra';
+      toast('Rientro non registrato: ' + (e.message || e), 'err', 9000);
+    }
+  };
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+}
+async function eliminaRientroTerzista(r, poi) {
+  const sc = await chiediConferma({ titolo:'Eliminare il rientro?',
+    testo:'Il rientro di ' + nfIT(r.pezzi) + ' pz del ' + fmtIT(String(r.data || '').slice(0, 10))
+      + (r.ddt_numero ? ' (DDT ' + r.ddt_numero + ')' : '') + ' sparisce. La giacenza non cambia: il rientro non l’aveva mossa.',
+    conferma:'Elimina', annulla:'Tienilo', pericolo:true });
+  if (sc !== 'conferma') return;
+  try {
+    const { data, error } = await sb.from('rientri_terzista').delete().eq('id', r.id).select();
+    if (error) throw new Error(error.message);
+    if (!data || !data.length) throw new Error('il database non l’ha eliminato (non sei admin?)');
+    state.rientriTerzista = (state.rientriTerzista || []).filter(z => z.id !== r.id);
+    toast('Rientro eliminato', 'ok');
+    if (typeof poi === 'function') poi();
+  } catch (e) { toast('Non eliminato: ' + (e.message || e), 'err', 9000); }
 }
 
 // Lo stato della fase per la tappa in alto: fatto / ora / avviso / poi.
@@ -5697,7 +5792,8 @@ function sezioneCicloProduttivo(o, art, poi) {
     // nascosti"): ogni lista di preparazione e il suo DDT, in ordine di data,
     // con la stampa a un clic. Le annullate restano nel dettaglio chiuso.
     const docVive = f.richieste.filter(x => x.stato !== 'annullato');
-    if (docVive.length) {
+    const docRientri = rep ? [] : rientriDiFase(o, f.id);
+    if (docVive.length || docRientri.length) {
       const docs = el('div', { style:'margin-top:10px;' },
         el('div', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px;' }, 'Documenti'));
       const rigaDoc = (icona, testo, dett, ...bottoni) => el('div', {
@@ -5723,6 +5819,11 @@ function sezioneCicloProduttivo(o, art, poi) {
             bt('🖨 DDT', () => apriDdtTerzista(x), 'Apri e stampa il DDT fac simile')));
         }
       });
+      // I DDT DI RIENTRO del terzista: il documento e' suo, qui c'e' la traccia.
+      docRientri.forEach(r => docs.append(rigaDoc('📥',
+        'DDT di rientro' + (r.ddt_numero ? ' n. ' + r.ddt_numero : '') + ' del ' + fmtIT(String(r.data || '').slice(0, 10)),
+        nfIT(r.pezzi) + ' pz' + (r.nota ? ' · ' + r.nota : ''),
+        eAdminOra() ? bt('🗑', () => eliminaRientroTerzista(r, poi), 'Elimina questo rientro (registrato per errore)') : null)));
       card.append(docs);
     }
     // Il dettaglio, chiuso: materiali della fase e richieste annullate.
