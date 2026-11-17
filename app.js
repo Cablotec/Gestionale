@@ -7831,13 +7831,144 @@ async function riuEsportaExcel(rSel) {
     : 'Azioni riunioni al ' + oggi.split('-').reverse().join('-') + '.xlsx');
 }
 
+// ── RETTIFICA MANUALE (17 nov, Nico) ─────────────────────────────────
+// Un movimento non si corregge: se ne scrive un altro, tipo 'rettifica',
+// col motivo. Due modi: «Ho contato» (scrivi quanti ce ne sono, la
+// differenza la calcola lui) o «Aggiungi / togli» (±). Scrive solo
+// `mov_rettifica` (strumenti/migrazione-rettifiche-manuali.sql), admin.
+function apriRettificaMagazzino(codiceIniziale, poi) {
+  const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  const num = (v) => { const t = String(v == null ? '' : v).trim().replace(/\./g, '').replace(',', '.');
+    return t === '' ? null : Number(t); };
+  const v = veloTerzista('± Rettifica di magazzino', 620);
+  const campo = (et, inp, w) => el('div', { class:'field', style: w ? 'flex:' + w + ';' : '' }, el('label', {}, et), inp);
+  const inCod = el('input', { type:'text', class:'mono', value: codiceIniziale || '', placeholder:'Codice' });
+  const descr = el('div', { class:'sub', style:'font-size:12px;margin:-4px 0 10px;min-height:16px;' });
+  const selPosto = el('select');
+  const selOp = el('select');
+  const boxOp = campo('Commessa', selOp);
+  const saldoTxt = el('div', { style:'font-size:13px;margin:4px 0 10px;' });
+  const modo = { v: 'contato' };
+  const bContato = el('button', { type:'button', class:'btnsm' }, 'Ho contato');
+  const bDelta = el('button', { type:'button', class:'btnsm' }, 'Aggiungi / togli');
+  const inQta = el('input', { type:'text', inputmode:'decimal' });
+  const lblQta = el('label', {});
+  const anteprima = el('div', { style:'font-size:13px;font-weight:600;margin:6px 0 10px;min-height:18px;' });
+  const inMotivo = el('input', { type:'text', placeholder:'Es. conta di inventario, DDT letto male, pezzo rotto…' });
+  const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
+  const msg = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
+
+  // I movimenti CONTATI di questo codice (i fuori giacenza no: nessun conto li somma).
+  const movCod = () => {
+    const c = inCod.value.trim().toUpperCase();
+    return c ? (state.movimenti || []).filter(m => m.codice === c && !m.fuori_giacenza) : [];
+  };
+  const saldo = () => movCod().filter(m => (m.presso_id || '') === selPosto.value
+      && (!selPosto.value || (m.operazione_id || '') === selOp.value))
+    .reduce((a, m) => a + (Number(m.qta) || 0), 0);
+  const delta = () => {
+    const q = num(inQta.value);
+    if (q == null || !Number.isFinite(q)) return null;
+    return modo.v === 'contato' ? q - saldo() : q;
+  };
+  const aggiorna = () => {
+    const d = delta(), s0 = saldo();
+    saldoTxt.textContent = 'Oggi il gestionale dice: ' + nf(s0) + ' ' + (selPosto.value ? dovePosto(selPosto.value) : 'in sede');
+    bContato.style.fontWeight = modo.v === 'contato' ? '700' : '400';
+    bDelta.style.fontWeight = modo.v === 'delta' ? '700' : '400';
+    lblQta.textContent = modo.v === 'contato' ? 'Quanti ce ne sono davvero' : 'Quantità da aggiungere (−3 per togliere)';
+    if (d == null) { anteprima.textContent = ''; return; }
+    if (Math.abs(d) < 1e-9) { anteprima.textContent = 'Nessuna differenza: niente da rettificare'; anteprima.style.color = 'var(--mut)'; return; }
+    anteprima.textContent = 'Scrive una rettifica di ' + (d > 0 ? '+' : '') + nf(d) + ' · da ' + nf(s0) + ' a ' + nf(s0 + d);
+    anteprima.style.color = d < 0 ? 'var(--red)' : 'var(--grn)';
+  };
+  const riempiOp = () => {
+    selOp.innerHTML = '';
+    if (!selPosto.value) { boxOp.style.display = 'none'; return; }
+    const perOp = new Map();
+    movCod().filter(m => m.presso_id === selPosto.value)
+      .forEach(m => perOp.set(m.operazione_id || '', (perOp.get(m.operazione_id || '') || 0) + (Number(m.qta) || 0)));
+    [...perOp].forEach(([id, q]) => {
+      const o = (state.operazioni || []).find(x => x.id === id);
+      selOp.append(el('option', { value: id }, (o ? etiOpTerzista(o) : (id ? 'commessa ' + id.slice(0, 8) : 'nessuna commessa')) + ' · ' + nf(q)));
+    });
+    if (!perOp.size) selOp.append(el('option', { value:'' }, 'nessuna commessa'));
+    boxOp.style.display = '';
+  };
+  const riempiPosti = () => {
+    const prima = selPosto.value;
+    selPosto.innerHTML = '';
+    selPosto.append(el('option', { value:'' }, 'Sede'));
+    const posti = [...new Set(movCod().map(m => m.presso_id).filter(Boolean))];
+    posti.forEach(id => selPosto.append(el('option', { value: id }, eReparto(id) ? 'Reparto' : nomeAziendaDi(id))));
+    selPosto.value = posti.includes(prima) ? prima : '';
+    const ult = movCod().slice(-1)[0];
+    descr.textContent = inCod.value.trim()
+      ? (ult ? (ult.descrizione || '') : 'Nessun movimento per questo codice: la rettifica sarà il primo.') : '';
+    riempiOp(); aggiorna();
+  };
+  inCod.addEventListener('input', riempiPosti);
+  selPosto.addEventListener('change', () => { riempiOp(); aggiorna(); });
+  selOp.addEventListener('change', aggiorna);
+  inQta.addEventListener('input', aggiorna);
+  bContato.onclick = () => { modo.v = 'contato'; aggiorna(); inQta.focus(); };
+  bDelta.onclick = () => { modo.v = 'delta'; aggiorna(); inQta.focus(); };
+
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Un movimento non si modifica: la rettifica ne scrive uno nuovo, col motivo, e resta nello storico.'),
+    el('div', { class:'frow' }, campo('Codice', inCod, 2), campo('Dove', selPosto, 1)),
+    descr, boxOp, saldoTxt,
+    el('div', { style:'display:flex;gap:6px;margin-bottom:8px;' }, bContato, bDelta),
+    el('div', { class:'frow' }, el('div', { class:'field', style:'flex:2;' }, lblQta, inQta), campo('Data', inData, 1)),
+    anteprima,
+    campo('Motivo (obbligatorio)', inMotivo));
+  const ok = el('button', { class:'btnp' }, 'Registra rettifica');
+  ok.onclick = async () => {
+    const cod = inCod.value.trim().toUpperCase();
+    const d = delta();
+    const errore = !cod ? 'Manca il codice'
+      : (d == null ? 'Scrivi la quantità'
+      : (Math.abs(d) < 1e-9 ? 'Nessuna differenza da rettificare'
+      : (!inMotivo.value.trim() ? 'Scrivi il motivo' : '')));
+    if (errore) { msg.textContent = errore; msg.style.color = 'var(--red)'; return; }
+    ok.disabled = true; ok.textContent = 'Registrazione…';
+    try {
+      const { error } = await sb.rpc('mov_rettifica', { p_codice: cod, p_qta: Math.round(d * 1000) / 1000,
+        p_motivo: inMotivo.value.trim(), p_presso: selPosto.value || null,
+        p_operazione: (selPosto.value && selOp.value) ? selOp.value : null, p_data: inData.value || null });
+      if (error) {
+        if (/could not find the function|PGRST202/i.test(error.message || '') || error.code === 'PGRST202')
+          throw new Error('la funzione mov_rettifica non c’è ancora a database (va eseguito lo SQL)');
+        throw new Error(error.message);
+      }
+      v.chiudi();
+      toast('Rettifica registrata: ' + cod + ' ' + (d > 0 ? '+' : '') + nf(d), 'ok');
+      await caricaMovimenti();
+      if (typeof poi === 'function') poi(cod);
+    } catch (e) {
+      ok.disabled = false; ok.textContent = 'Registra rettifica';
+      toast('Rettifica non registrata: ' + (e.message || e), 'err', 9000);
+    }
+  };
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+  riempiPosti();
+  (codiceIniziale ? inQta : inCod).focus();
+}
+
 function renderMovimenti(root) {
   root.innerHTML = '';
   const nf = (n) => (n == null || n === '' || !Number.isFinite(Number(n)))
     ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   const ricarica = el('button', { class:'btnsm', title:'Rileggi i movimenti dal database',
     onclick: async () => { ricarica.disabled = true; await caricaMovimenti(); renderMovimenti(root); } }, '⟳ Aggiorna');
-  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Movimenti'), ricarica));
+  // ± RETTIFICA (17 nov): solo admin; la funzione a database lo ricontrolla.
+  const dopoRettifica = (cod) => { if (cod) { movCerca = cod; movQuante = 400; } renderMovimenti(root); };
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Movimenti'), ricarica,
+    (eAdminOra() && Array.isArray(state.movimenti)) ? el('button', { class:'btnsm',
+      title:'Aggiusta la giacenza di un codice: scrive un movimento di rettifica col motivo',
+      onclick: () => apriRettificaMagazzino(movCerca && /^\S+$/.test(movCerca.trim()) ? movCerca.trim().toUpperCase() : '', dopoRettifica) },
+      '± Rettifica') : ''));
 
   // DA PREPARARE PER I TERZISTI (5 nov): le richieste aperte di tutte le
   // commesse, in cima. E' la lista di lavoro del magazzino: si stampa da qui.
@@ -7873,8 +8004,7 @@ function renderMovimenti(root) {
     tutti.length
       ? tutti.length.toLocaleString('it-IT') + ' movimenti'
         + (ultimo ? ' · l\'ultimo del ' + fmtIT(ultimo) : '')
-        + '. Oggi sono i carichi letti in automatico dai DDT scansionati; un errore non si '
-        + 'corregge sulla riga, si registra una rettifica.'
+        + '. Un errore non si corregge sulla riga: si registra una rettifica (± Rettifica, admin).'
       : 'Nessun movimento ancora: compaiono qui quando l\'automazione legge il primo DDT.'));
   if (!tutti.length) return;
 
@@ -8025,7 +8155,11 @@ function renderMovimenti(root) {
         fuori.length
           ? el('span', { class:'sub' }, ' · in sede ' + nf(perPosto.get('') || 0) + ' · '
               + fuori.map(([k, q]) => nf(q) + ' ' + dovePosto(k)).join(' · '))
-          : ''));
+          : '',
+        eAdminOra() ? el('button', { type:'button', class:'btnsm', style:'margin-left:10px;',
+          title:'Aggiusta la giacenza di questo codice',
+          onclick: () => apriRettificaMagazzino([...codici][0], (cod) => { movCerca = cod; movQuante = 400; renderMovimenti(root); }) },
+          '± Rettifica') : ''));
     }
 
     const col = colonne.find(c => c.k === movSortKey) || colonne[0];
