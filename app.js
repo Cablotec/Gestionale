@@ -8465,7 +8465,7 @@ function openArticoloModal(a, opts) {
     return out.length ? out : null;
   }
   function errorePrezziFornitori() {
-    if (fasiEst.some(f => !f.fornitore && Number(f.prezzo_pz) > 0)) return 'Terzisti e reparto: c’è un prezzo senza fornitore.';
+    if (fasiEst.some(f => !f.fornitore && Number(f.prezzo_pz) > 0)) return 'Fasi: c’è un prezzo senza fornitore.';
     return null;
   }
 
@@ -8480,15 +8480,27 @@ function openArticoloModal(a, opts) {
   // richiesta al magazzino. Salvata in `articoli.fasi_esterne`:
   //   [{ fornitore: <azienda_id>, righe: [{ codice, qta }] }]
   // Il codice si SCRIVE (niente tendina, Nico): deve essere nella distinta.
+  // SEQUENZA (17 nov, Nico: "le fasi come livelli da aggiungere in
+  // sequenza"): l'ordine dell'array E' l'ordine delle fasi. Il REPARTO ci sta
+  // come segnaposto `{ reparto: true }` (niente fornitore, niente righe: la
+  // sua quota e' il resto, si calcola). Chi legge `fasi_esterne` per i
+  // fornitori lo salta da se' (filtra `f.fornitore`).
   const fasiEst = Array.isArray(a.fasi_esterne)
-    ? a.fasi_esterne.filter(f => f && f.fornitore)
-        .map(f => ({ fornitore: f.fornitore, prezzo_pz: prezziIniziali.get(f.fornitore) ?? null,
-          righe: (f.righe || []).map(r => ({ ...r })) })) : [];
+    ? a.fasi_esterne.filter(f => f && (f.fornitore || f.reparto))
+        .map(f => f.reparto ? { reparto: true, righe: [] }
+          : ({ fornitore: f.fornitore, prezzo_pz: prezziIniziali.get(f.fornitore) ?? null,
+            righe: (f.righe || []).map(r => ({ ...r })) })) : [];
   // Un fornitore col solo prezzo (niente materiali da mandargli, es. Angela)
   // ha il suo blocco anche lui.
   prezziIniziali.forEach((pz, id) => {
     if (!fasiEst.some(f => f.fornitore === id)) fasiEst.push({ fornitore: id, prezzo_pz: pz, righe: [] });
   });
+  // Il reparto c'e' sempre (se esiste l'anagrafica): senza posto salvato, in fondo.
+  if (state.reparto && !fasiEst.some(f => f.reparto)) fasiEst.push({ reparto: true, righe: [] });
+  if (!state.reparto) for (let i = fasiEst.length - 1; i >= 0; i--) if (fasiEst[i].reparto) fasiEst.splice(i, 1);
+  // Le fasi con i materiali APERTI (il resto chiuso: Nico, "per non creare
+  // una schermata troppo delirante"). Vive fra un ridisegno e l'altro.
+  const fasiAperte = new Set();
   const fasiEstWrap = el('div', {});
   const segnalaModifica = () => fasiEstWrap.dispatchEvent(new Event('change', { bubbles: true }));
   // La distinta di QUESTO momento (anche non salvata), esplosa per 1 pezzo:
@@ -8528,61 +8540,110 @@ function openArticoloModal(a, opts) {
     const fornitori = (state.aziende || []).filter(z => z.is_fornitore && z.attivo !== false)
       .sort((x, y) => String(x.nome || '').localeCompare(String(y.nome || ''), 'it'));
     fasiEstWrap.append(el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
-      'Chi lavora questo prodotto fuori: per ogni fornitore '
+      'Le fasi del prodotto, in ordine. Per ogni fornitore '
       + (prezziFornAttivo ? 'il prezzo concordato a pezzo (il conto della commessa lo moltiplica per i pezzi) e ' : '')
-      + 'i materiali da mandargli (MAC compresi), quanti per pezzo. Quello che non va fuori resta in casa. '
-      + 'Le commesse nuove ereditano i materiali; quelle già nate con «⟳ Rigenera dalla distinta».'));
+      + 'i materiali da mandargli (MAC compresi), quanti per pezzo. Il reparto prende quello che resta in casa: '
+      + 'non si scrive, si calcola. Le commesse nuove ereditano i materiali; quelle già nate con «⟳ Rigenera dalla distinta».'));
     if (!perPezzo.size && fasiEst.some(f => f.righe.length)) {
       fasiEstWrap.append(el('div', { class:'sub' }, 'Scrivi prima la distinta (linguetta Materiali): i codici devono essere lì.'));
     }
     const COL = 'display:grid;grid-template-columns:140px minmax(120px,1.2fr) 90px 40px 130px minmax(160px,1.4fr) 32px;gap:8px;align-items:center;';
+    const COLR = 'display:grid;grid-template-columns:140px minmax(160px,1.6fr) 90px 40px 130px;gap:8px;align-items:center;';
+    const et = (t, dx) => el('span', { class:'sub',
+      style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+    // Quello che resta in casa, per codice: la distinta meno tutti i terzisti.
+    const inCasa = codici.map(c => {
+      const x = riparto.get(c);
+      return { codice: c, q: +Math.max(0, Number(perPezzo.get(c)) - (x ? x.fuori : 0)).toFixed(6) };
+    }).filter(r => r.q > 0);
+    const sposta = (fi, d) => {
+      const j = fi + d;
+      if (j < 0 || j >= fasiEst.length) return;
+      [fasiEst[fi], fasiEst[j]] = [fasiEst[j], fasiEst[fi]];
+      renderFasiEsterne(); segnalaModifica();
+    };
     fasiEst.forEach((f, fi) => {
-      const box = el('div', { style:'border:1px solid var(--brd);border-radius:6px;padding:10px 12px;margin-bottom:12px;' });
-      const usati = new Set(fasiEst.filter((_, i) => i !== fi).map(x => x.fornitore));
-      const selFor = el('select', { style:'width:auto;min-width:240px;max-width:360px;' },
-        el('option', { value:'' }, '— scegli il fornitore —'),
-        ...fornitori.filter(z => !usati.has(z.id)).map(z => el('option', { value: z.id }, z.nome)),
-        ...(f.fornitore && !fornitori.some(z => z.id === f.fornitore)
-          ? [el('option', { value: f.fornitore }, nomeAziendaDi(f.fornitore))] : []));
-      selFor.value = f.fornitore || '';
-      selFor.disabled = readonly;
-      selFor.onchange = () => { f.fornitore = selFor.value || null; renderFasiEsterne(); aggiornaEtichette(); };
-      const testa = el('div', { style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;' },
-        el('span', { style:'font-weight:700;color:var(--or);' }, 'Fornitore'), selFor);
-      if (prezziFornAttivo) {
-        const inP = el('input', { type:'number', min:'0', step:'any', value: f.prezzo_pz ?? '', placeholder:'—',
-          title:'Prezzo concordato con questo fornitore, a pezzo', style:'width:100px;text-align:right;' });
-        inP.disabled = readonly;
-        inP.oninput = () => { f.prezzo_pz = inP.value === '' ? null : Number(inP.value); };
-        testa.append(inP, el('span', { class:'sub', style:'font-size:11px;' }, '€/pz'));
-      }
-      testa.append(el('span', { class:'sub', style:'font-size:11px;' }, f.righe.length
-        ? f.righe.length + (f.righe.length === 1 ? ' materiale da mandare' : ' materiali da mandare')
-        : 'nessun materiale da mandare'));
+      const rep = !!f.reparto;
+      // Un blocco con un errore si apre da solo: l'errore deve vedersi.
+      const conErrore = !rep && f.righe.some(r => {
+        const c = String(r.codice || '').trim();
+        return c && (!perPezzo.has(c) || (riparto.get(c) || {}).eccede);
+      });
+      const aperto = fasiAperte.has(f) || conErrore;
+      const box = el('div', { style:'border:1px solid ' + (rep ? 'var(--grn)' : 'var(--brd)') + ';border-radius:6px;padding:10px 12px;margin-bottom:10px;' });
+      const testa = el('div', { style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' });
+      // ▲▼: l'ordine e' la sequenza delle fasi.
       if (!readonly) {
-        testa.append(el('span', { style:'margin-left:auto;display:flex;gap:6px;' },
-          el('button', { type:'button', class:'btnsm', title:'Aggiunge tutti i materiali della distinta con la quantità intera: poi togli o abbassi quello che resta in casa',
-            onclick: () => {
-              const gia = new Set(f.righe.map(r => String(r.codice || '').trim()));
-              codici.forEach(c => { if (!gia.has(c)) f.righe.push({ codice: c, qta: +Number(perPezzo.get(c)).toFixed(6) }); });
-              renderFasiEsterne(); segnalaModifica();
-            } }, '+ tutta la distinta'),
-          el('button', { type:'button', class:'btnsm', onclick: () => {
-            f.righe.push({ codice: '', qta: null }); renderFasiEsterne(); segnalaModifica();
-            const ult = [...fasiEstWrap.querySelectorAll('[data-fe-cod="' + fi + '"]')].pop();
-            if (ult) ult.focus();
-          } }, '+ riga'),
-          el('button', { type:'button', class:'btnsm', title:'Togli questo fornitore',
-            onclick: () => { fasiEst.splice(fi, 1); renderFasiEsterne(); aggiornaEtichette(); segnalaModifica(); } }, '✕ fornitore')));
+        testa.append(el('span', { style:'display:flex;flex-direction:column;gap:1px;' },
+          el('button', { type:'button', class:'btnsm', style:'padding:0 5px;line-height:1.1;font-size:9px;', title:'Prima',
+            disabled: fi === 0, onclick: () => sposta(fi, -1) }, '▲'),
+          el('button', { type:'button', class:'btnsm', style:'padding:0 5px;line-height:1.1;font-size:9px;', title:'Dopo',
+            disabled: fi === fasiEst.length - 1, onclick: () => sposta(fi, 1) }, '▼')));
+      }
+      testa.append(el('span', { class:'mono', style:'font-weight:700;color:var(--mut);min-width:20px;' }, (fi + 1) + '.'));
+      const n = rep ? inCasa.length : f.righe.length;
+      const mostra = el('button', { type:'button', class:'btnsm', disabled: !n && rep,
+        title: aperto ? 'Nasconde i materiali di questa fase' : 'Mostra i materiali di questa fase',
+        onclick: () => { if (fasiAperte.has(f)) fasiAperte.delete(f); else fasiAperte.add(f); renderFasiEsterne(); } },
+        (aperto ? '▾ ' : '▸ ') + (rep
+          ? (n ? n + (n === 1 ? ' materiale in casa' : ' materiali in casa') : 'niente in casa')
+          : (n ? n + (n === 1 ? ' materiale da mandare' : ' materiali da mandare') : 'nessun materiale da mandare')));
+      if (rep) {
+        testa.append(el('span', { style:'font-weight:700;color:var(--grn);' }, 'Reparto'),
+          el('span', { class:'sub', style:'font-size:11px;' }, '(in casa, calcolato)'), mostra);
+      } else {
+        const usati = new Set(fasiEst.filter((_, i) => i !== fi).map(x => x.fornitore).filter(Boolean));
+        const selFor = el('select', { style:'width:auto;min-width:220px;max-width:340px;' },
+          el('option', { value:'' }, '— scegli il fornitore —'),
+          ...fornitori.filter(z => !usati.has(z.id)).map(z => el('option', { value: z.id }, z.nome)),
+          ...(f.fornitore && !fornitori.some(z => z.id === f.fornitore)
+            ? [el('option', { value: f.fornitore }, nomeAziendaDi(f.fornitore))] : []));
+        selFor.value = f.fornitore || '';
+        selFor.disabled = readonly;
+        selFor.onchange = () => { f.fornitore = selFor.value || null; renderFasiEsterne(); aggiornaEtichette(); };
+        testa.append(selFor);
+        if (prezziFornAttivo) {
+          const inP = el('input', { type:'number', min:'0', step:'any', value: f.prezzo_pz ?? '', placeholder:'—',
+            title:'Prezzo concordato con questo fornitore, a pezzo', style:'width:90px;text-align:right;' });
+          inP.disabled = readonly;
+          inP.oninput = () => { f.prezzo_pz = inP.value === '' ? null : Number(inP.value); };
+          testa.append(inP, el('span', { class:'sub', style:'font-size:11px;' }, '€/pz'));
+        }
+        testa.append(mostra);
+        if (!readonly) {
+          testa.append(el('span', { style:'margin-left:auto;display:flex;gap:6px;' },
+            el('button', { type:'button', class:'btnsm', title:'Aggiunge tutti i materiali della distinta con la quantità intera: poi togli o abbassi quello che resta in casa',
+              onclick: () => {
+                const gia = new Set(f.righe.map(r => String(r.codice || '').trim()));
+                codici.forEach(c => { if (!gia.has(c)) f.righe.push({ codice: c, qta: +Number(perPezzo.get(c)).toFixed(6) }); });
+                fasiAperte.add(f); renderFasiEsterne(); segnalaModifica();
+              } }, '+ tutta la distinta'),
+            el('button', { type:'button', class:'btnsm', onclick: () => {
+              f.righe.push({ codice: '', qta: null }); fasiAperte.add(f); renderFasiEsterne(); segnalaModifica();
+              const ult = [...fasiEstWrap.querySelectorAll('[data-fe-cod="' + fi + '"]')].pop();
+              if (ult) ult.focus();
+            } }, '+ riga'),
+            el('button', { type:'button', class:'btnsm', title:'Togli questo fornitore',
+              onclick: () => { fasiEst.splice(fi, 1); renderFasiEsterne(); aggiornaEtichette(); segnalaModifica(); } }, '✕ fornitore')));
+        }
       }
       box.append(testa);
-      if (f.righe.length) {
-        const et = (t, dx) => el('span', { class:'sub',
-          style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
-        box.append(el('div', { style: COL + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
+      if (aperto && rep && inCasa.length) {
+        box.append(el('div', { style: COLR + 'padding:6px 0 3px;border-bottom:1px solid var(--brd);margin-top:6px;' },
+          et('Codice'), et('Descrizione'), et('In casa per pezzo', 1), et('UM'), et('In distinta')));
+        inCasa.forEach(r => box.append(el('div', { style: COLR + 'padding:3px 0;' },
+          el('span', { class:'mono', style:'font-size:11px;' }, r.codice),
+          el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+            title: descr.get(r.codice) || '' }, descr.get(r.codice) || ''),
+          el('span', { class:'mono', style:'font-size:11px;text-align:right;font-weight:700;' }, nfIT(r.q)),
+          el('span', { class:'sub', style:'font-size:11px;' }, um.get(r.codice) || ''),
+          el('span', { class:'sub', style:'font-size:11px;' }, nfIT(perPezzo.get(r.codice))))));
+      }
+      if (aperto && !rep && f.righe.length) {
+        box.append(el('div', { style: COL + 'padding:6px 0 3px;border-bottom:1px solid var(--brd);margin-top:6px;' },
           et('Codice'), et('Descrizione'), et('Fuori per pezzo', 1), et('UM'), et('In distinta · in casa'), et('Nota per il magazzino'), el('span')));
       }
-      f.righe.forEach((r, ri) => {
+      if (aperto && !rep) f.righe.forEach((r, ri) => {
         const cod = String(r.codice || '').trim();
         const inCod = el('input', { type:'text', class:'mono', value: cod, placeholder:'codice',
           'data-fe-cod': String(fi), spellcheck:'false', autocomplete:'off', style:'font-size:11px;min-width:0;' });
@@ -8628,33 +8689,42 @@ function openArticoloModal(a, opts) {
     });
     if (!readonly) {
       fasiEstWrap.append(el('button', { type:'button', class:'btnsm',
-        onclick: () => { fasiEst.push({ fornitore: null, prezzo_pz: null, righe: [] }); renderFasiEsterne(); aggiornaEtichette(); segnalaModifica(); } },
-        '+ Fornitore'));
+        onclick: () => {
+          // La fase nuova va prima del reparto se il reparto e' l'ultima.
+          const nuova = { fornitore: null, prezzo_pz: null, righe: [] };
+          const ult = fasiEst[fasiEst.length - 1];
+          if (ult && ult.reparto) fasiEst.splice(fasiEst.length - 1, 0, nuova); else fasiEst.push(nuova);
+          fasiAperte.add(nuova);
+          renderFasiEsterne(); aggiornaEtichette(); segnalaModifica();
+        } },
+        '+ Fase fornitore'));
     }
   }
   // Cosa NON si puo' salvare: materiali senza fornitore, un codice che non e'
   // in distinta, o che va fuori piu' di quanto ne chiede. Ritorna la frase, o null.
   function erroreFasiEsterne() {
     const conRighe = fasiEst.filter(f => f.righe.some(r => String(r.codice || '').trim() && Number(r.qta) > 0));
-    if (conRighe.some(f => !f.fornitore)) return 'Terzisti e reparto: scegli il fornitore di ogni blocco.';
+    if (conRighe.some(f => !f.fornitore)) return 'Fasi: scegli il fornitore di ogni blocco.';
     const { perPezzo } = perPezzoOra();
     const fuoriDistinta = [...new Set(conRighe.flatMap(f => f.righe.map(r => String(r.codice || '').trim())
       .filter(c => c && !perPezzo.has(c))))];
-    if (fuoriDistinta.length) return 'Terzisti e reparto: ' + fuoriDistinta.slice(0, 3).join(', ') + (fuoriDistinta.length > 3 ? '…' : '')
+    if (fuoriDistinta.length) return 'Fasi: ' + fuoriDistinta.slice(0, 3).join(', ') + (fuoriDistinta.length > 3 ? '…' : '')
       + ' non è nella distinta.';
     const troppo = [...ripartoFasiEsterne(perPezzo, fasiEst)].filter(([, x]) => x.eccede).map(([c]) => c);
-    if (troppo.length) return 'Terzisti e reparto: ' + troppo.slice(0, 3).join(', ') + (troppo.length > 3 ? '…' : '')
+    if (troppo.length) return 'Fasi: ' + troppo.slice(0, 3).join(', ') + (troppo.length > 3 ? '…' : '')
       + ' va fuori più di quanto chiede la distinta.';
     return null;
   }
   // Quello che si salva: solo righe con codice e quantita'; null se non c'e' niente.
+  // Il reparto si salva come segnaposto `{ reparto: true }` nel suo posto
+  // della sequenza, solo se c'e' almeno un fornitore (da solo non dice niente).
   function fasiEsterneDaSalvare() {
-    const out = fasiEst.filter(f => f.fornitore).map(f => ({ fornitore: f.fornitore,
+    const out = fasiEst.map(f => f.reparto ? { reparto: true } : (!f.fornitore ? null : { fornitore: f.fornitore,
       righe: f.righe.filter(r => String(r.codice || '').trim() && Number(r.qta) > 0)
         .map(r => ({ codice: String(r.codice).trim(), qta: Number(r.qta),
           ...(String(r.nota || '').trim() ? { nota: String(r.nota).trim() } : {}) })) }))
-      .filter(f => f.righe.length);
-    return out.length ? out : null;
+      .filter(f => f && (f.reparto || f.righe.length));
+    return out.some(f => f.fornitore) ? out : null;
   }
 
   // Corpo a SEZIONI (stile scheda azienda): anagrafica → tempi → listino
@@ -8705,7 +8775,9 @@ function openArticoloModal(a, opts) {
     const nMat = distinta.length;
     linguette.materiali.textContent = 'Materiali' + (nMat ? ' · ' + nMat : '');
     linguette.lavoro.textContent = 'Lavorazioni e tempo' + (fasi.length ? ' · ' + fasi.length : '');
-    linguette.fasi.textContent = 'Fasi' + (fasiEst.length ? ' · ' + fasiEst.length : '');
+    // Il reparto conta come fase solo accanto a un fornitore (c'e' sempre).
+    const nFasi = fasiEst.some(f => !f.reparto) ? fasiEst.length : 0;
+    linguette.fasi.textContent = 'Fasi' + (nFasi ? ' · ' + nFasi : '');
     linguette.prezzi.textContent = 'Prezzi cliente' + (listinoRighe.length ? ' · ' + listinoRighe.length : '');
   }
   aggiornaEtichette();

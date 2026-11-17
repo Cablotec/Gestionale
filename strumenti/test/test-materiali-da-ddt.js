@@ -191,6 +191,9 @@ sez('Fasi esterne del prodotto: una parte va fuori, il resto in casa (5 nov)');
   t('quantita zero scartata', !q.has('VUOTO'));
   t('blocco senza fornitore scartato', !q.has('CL-9'));
   t('nessuna sezione = nessuna quota', M.quoteFasiEsterne(null).size === 0);
+  // SEQUENZA (17 nov): il segnaposto del reparto non e' un fornitore.
+  const conRep = M.quoteFasiEsterne([{ reparto: true }, ...fasi]);
+  t('segnaposto reparto ignorato dalle quote', conRep.get('CL-1').size === 2 && conRep.get('CL-1').get('FILI') === 30);
   const perPezzo = new Map([['CL-1', 100], ['MAC-1', 0.8]]);
   const r = M.ripartoFasiEsterne(perPezzo, fasi);
   t('100 in distinta, 50 fuori (30 + 20), 50 in casa',
