@@ -5411,6 +5411,7 @@ function apriDdtTerzista(x) {
   const inCaus = el('input', { type:'text', value: salvata.causale || 'Conto lavorazione' });
   const inAsp = el('input', { type:'text', value: salvata.aspetto || 'Sfuso' });
   const inColli = el('input', { type:'text', inputmode:'numeric', value: salvata.colli || '' });
+  const inPesoN = el('input', { type:'text', inputmode:'decimal', value: salvata.pesoNetto || '' });
   const inPeso = el('input', { type:'text', inputmode:'decimal', value: salvata.peso || '' });
   const inPorto = el('input', { type:'text', value: salvata.porto || 'Franco' });
   const selCura = el('select', {}, ...['Mittente', 'Destinatario', 'Vettore'].map(t => el('option', { value: t }, t)));
@@ -5429,13 +5430,13 @@ function apriDdtTerzista(x) {
       + righe.length + (righe.length === 1 ? ' riga' : ' righe') + ', con le quantità confermate alla spedizione.'),
     campo('Mittente (intestazione)', inMitt),
     el('div', { class:'frow' }, campo('Causale del trasporto', inCaus), campo('Aspetto dei beni', inAsp)),
-    el('div', { class:'frow' }, campo('N. colli', inColli), campo('Peso kg', inPeso), campo('Porto', inPorto)),
+    el('div', { class:'frow' }, campo('N. colli', inColli), campo('Peso netto kg', inPesoN), campo('Peso lordo kg', inPeso), campo('Resa (porto)', inPorto)),
     el('div', { class:'frow' }, campo('Trasporto a cura del', selCura), campo('Vettore', inVett), campo('Inizio trasporto', inInizio)),
     campo('Annotazioni', inAnn));
   const ok = el('button', { class:'btnp' }, '🖨 Stampa DDT');
   ok.onclick = async () => {
     const t = { causale: inCaus.value.trim(), aspetto: inAsp.value.trim(), colli: inColli.value.trim(),
-      peso: inPeso.value.trim(), porto: inPorto.value.trim(), cura: selCura.value, vettore: inVett.value.trim(),
+      pesoNetto: inPesoN.value.trim(), peso: inPeso.value.trim(), porto: inPorto.value.trim(), cura: selCura.value, vettore: inVett.value.trim(),
       inizio: inInizio.value, annotazioni: inAnn.value.trim() };
     try { localStorage.setItem(chiaveLoc, JSON.stringify(t)); } catch (e) { /* solo comodita' */ }
     const mitt = inMitt.value.trim();
@@ -5460,43 +5461,91 @@ function stampaDdtTerzista(x, num, mittente, t) {
   const dest = [az.nome || nomeAziendaDi(x.terzista_id), az.via,
     [az.cap, az.citta, az.provincia ? '(' + az.provincia + ')' : ''].filter(Boolean).join(' '),
     az.p_iva ? 'P.IVA ' + az.p_iva : ''].filter(Boolean);
+  // Impaginato sul modello del DDT di Alnus (18 nov, Nico: "un DDT da usare
+  // come esempio"): testata a riquadri, destinatario a destra, righe raggruppate
+  // per commessa con i riferimenti sopra, piede con colli/pesi/vettore/firme.
   const comm = commesseDiRichiesta(x);
-  const arts = [...new Set(comm.map(c => { const a = (state.articoli || []).find(z => z.id === c.articolo_id); return a ? a.codice : ''; }).filter(Boolean))];
-  const rifs = [...new Set(comm.map(c => c.riferimento_cliente).filter(Boolean))];
-  const righe = righeDdtTerzista(x);
+  const nomeArt = (c) => { const a = (state.articoli || []).find(z => z.id === c.articolo_id); return a ? a.codice : ''; };
+  // Righe per commessa (e dentro, per codice): con piu' commesse il terzista
+  // vede per quale ordine e' ogni materiale, come «Rif.Ns.Ordine» di Alnus.
+  const perOp = new Map();
+  (x.righe || []).forEach(r => {
+    const q = Number(r.qta_inviata != null ? r.qta_inviata : r.qta) || 0;
+    if (!(q > 0)) return;
+    const opId = opDiRigaTerzista(x, r) || '';
+    if (!perOp.has(opId)) perOp.set(opId, new Map());
+    const m = perOp.get(opId), c = String(r.codice || '').trim();
+    if (!m.has(c)) m.set(c, { codice: c, descrizione: r.descrizione || '', um: r.um || '', qta: 0 });
+    m.get(c).qta = +(m.get(c).qta + q).toFixed(4);
+  });
+  const ordineOp = comm.map(c => c.id).filter(id => perOp.has(id)).concat([...perOp.keys()].filter(id => !comm.some(c => c.id === id)));
   const inizio = t.inizio ? new Date(t.inizio) : null;
   const inizioTxt = inizio && !isNaN(inizio) ? inizio.toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
-  const cella = (et, val) => '<div class="c"><b>' + esc(et) + '</b>' + (esc(val) || '&nbsp;') + '</div>';
+  const nn = (v) => esc(v) || '&nbsp;';
+  const mitt = String(mittente || 'Cablotec').split('\n').map(s => s.trim()).filter(Boolean);
+  const corpo = ordineOp.map(opId => {
+    const o = comm.find(c => c.id === opId) || (state.operazioni || []).find(z => z.id === opId);
+    const pz = (x.righe || []).find(r => opDiRigaTerzista(x, r) === opId && r.pz != null);
+    const testa = o ? '<tr class="rif"><td></td><td>'
+      + '<div class="rb">Rif. Ns. Commessa ' + esc(etiOpTerzista(o)) + '</div>'
+      + (nomeArt(o) ? '<div class="rb">Prodotto ' + esc(nomeArt(o)) + (pz || o.quantita ? ' · ' + esc(nfIT(pz ? pz.pz : o.quantita)) + ' pz' : '') + '</div>' : '')
+      + (o.riferimento_cliente ? '<div class="rs">Rif. Cliente: ' + esc(o.riferimento_cliente) + '</div>' : '')
+      + '</td><td></td><td></td></tr>' : '';
+    const righe = [...perOp.get(opId).values()].sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true }));
+    return testa + righe.map(r => '<tr><td class="cod">' + esc(r.codice) + '</td><td>' + esc(r.descrizione)
+      + '</td><td class="um">' + esc(r.um) + '</td><td class="n">' + esc(nfIT(r.qta)) + '</td></tr>').join('');
+  }).join('');
   const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>DDT fac simile ' + esc(num) + '</title><style>'
-    + 'body{font-family:Arial,sans-serif;font-size:11px;margin:18px;color:#000;background:#fff;position:relative;}'
-    + '.wm{position:fixed;top:40%;left:0;right:0;text-align:center;font-size:110px;font-weight:700;color:rgba(200,0,0,.12);transform:rotate(-30deg);pointer-events:none;z-index:0;}'
-    + '.fs{border:2px solid #b00;color:#b00;font-weight:700;text-align:center;padding:4px;margin-bottom:10px;letter-spacing:.1em;}'
-    + '.top{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}.box{border:1px solid #000;padding:6px 8px;min-height:70px;white-space:pre-line;}'
-    + '.box b{display:block;font-size:9px;text-transform:uppercase;color:#444;margin-bottom:3px;}h1{font-size:15px;margin:0 0 2px;}'
-    + '.g{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #000;border-bottom:none;}.c{border-right:1px solid #000;border-bottom:1px solid #000;padding:4px 6px;}'
-    + '.c:nth-child(4n){border-right:none;}.c b{display:block;font-size:9px;text-transform:uppercase;color:#444;}'
-    + 'table{width:100%;border-collapse:collapse;margin-top:10px;}th,td{border:1px solid #000;padding:4px 6px;text-align:left;vertical-align:top;}'
-    + 'th{background:#eee;font-size:9px;text-transform:uppercase;}.n{text-align:right;}.m{font-family:monospace;}tr{page-break-inside:avoid;}thead{display:table-header-group;}'
-    + '.ann{border:1px solid #000;padding:6px 8px;margin-top:10px;min-height:30px;white-space:pre-line;}.ann b{display:block;font-size:9px;text-transform:uppercase;color:#444;}'
-    + '.f{margin-top:30px;display:flex;gap:40px;}.f div{border-top:1px solid #000;padding-top:4px;flex:1;font-size:10px;}'
+    + 'body{font-family:Arial,Helvetica,sans-serif;font-size:10px;margin:18px;color:#000;background:#fff;}'
+    + '.wm{position:fixed;top:42%;left:0;right:0;text-align:center;font-size:110px;font-weight:700;color:rgba(200,0,0,.12);transform:rotate(-30deg);pointer-events:none;}'
+    + '.fs{border:2px solid #b00;color:#b00;font-weight:700;text-align:center;padding:3px;margin-bottom:8px;letter-spacing:.1em;font-size:10px;}'
+    + '.mt h1{font-size:20px;margin:0 0 4px;border-bottom:1px solid #000;padding-bottom:3px;}.mt div{font-size:10px;font-weight:700;line-height:1.35;}'
+    + '.mid{display:grid;grid-template-columns:47% 1fr;gap:4%;margin-top:16px;align-items:start;}'
+    + '.doc{border:3px double #555;padding:4px 6px;}.doc .t{font-size:15px;font-weight:700;}.doc .t2{font-size:13px;font-weight:700;}.doc .t2 span{font-size:9px;font-weight:400;margin-left:20px;}'
+    + '.doc table{width:100%;border-collapse:collapse;margin-top:4px;}.doc th,.doc td{border:1px solid #000;text-align:center;padding:3px;}.doc td{font-size:13px;font-weight:700;}.doc th{font-size:10px;}'
+    + '.kv{display:grid;grid-template-columns:auto 1fr;gap:1px 10px;margin-top:8px;font-size:9px;}.kv b{font-weight:700;}'
+    + '.dst{background:#f6b8a5;border:1px solid #000;}.dst .h{padding:2px 6px;border-bottom:1px solid #000;font-size:10px;}.dst .v{padding:5px 6px 8px;font-weight:700;font-size:10px;line-height:1.3;white-space:pre-line;min-height:52px;}'
+    + '.dst .v+.h{border-top:1px solid #000;}'
+    + 'table.r{width:100%;border-collapse:collapse;margin-top:14px;border:1px solid #000;}'
+    + 'table.r th{background:#f6b8a5;font-style:italic;font-size:9px;padding:3px;border:1px solid #000;}'
+    + 'table.r td{border-left:1px solid #000;border-right:1px solid #000;padding:2px 6px;vertical-align:top;font-size:11px;}'
+    + 'table.r td.cod{font-weight:700;font-size:10px;white-space:nowrap;}table.r td.um{text-align:center;}.n{text-align:right;}'
+    + 'tr.rif td{padding-top:10px;}.rb{font-weight:700;font-size:11px;margin-bottom:2px;}.rs{font-size:9px;}'
+    + 'tr{page-break-inside:avoid;}thead{display:table-header-group;}tr.fill td{height:120px;}'
+    + 'table.p{width:100%;border-collapse:collapse;}table.p td{border:1px solid #000;vertical-align:top;padding:2px 5px;font-size:9px;height:34px;}'
+    + 'table.p .v{display:block;font-weight:700;font-size:10px;margin-top:3px;}.ce{text-align:center;}'
     + '@page{size:A4 portrait;margin:10mm;}@media print{body{margin:0;}}'
     + '</style></head><body><div class="wm">FAC SIMILE</div>'
     + '<div class="fs">FAC SIMILE — documento di prova, non valido come documento di trasporto</div>'
-    + '<div class="top"><div class="box"><b>Mittente</b>' + (esc(mittente) || 'Cablotec') + '</div>'
-    + '<div class="box"><b>Destinatario e luogo di destinazione</b>' + dest.map(esc).join('\n') + '</div></div>'
-    + '<h1>Documento di trasporto ' + esc(num) + ' del ' + esc(fmtIT(String(x.inviato_il).slice(0, 10))) + '</h1>'
-    + '<div class="g" style="margin-top:6px;">'
-    + cella('Causale del trasporto', t.causale) + cella('Aspetto dei beni', t.aspetto) + cella('N. colli', t.colli) + cella('Peso kg', t.peso)
-    + cella('Porto', t.porto) + cella('Trasporto a cura del', t.cura) + cella('Vettore', t.vettore) + cella('Inizio trasporto', inizioTxt)
+    + '<div class="mt"><h1>' + esc(mitt[0] || '') + '</h1>' + mitt.slice(1).map(s => '<div>' + esc(s) + '</div>').join('') + '</div>'
+    + '<div class="mid"><div>'
+    + '<div class="doc"><div class="t">DOCUMENTO DI TRASPORTO (D.D.T.)</div><div class="t2">Delivery Note<span>(D.P.R. 14-08-1996 N. 472)</span></div>'
+    + '<table><tr><th>Numero</th><th>Data</th><th>Pag.</th></tr><tr><td>' + esc(num) + '</td><td>' + esc(fmtIT(String(x.inviato_il).slice(0, 10))) + '</td><td>1 / 1</td></tr></table></div>'
+    + '<div class="kv">'
+    + '<span>Part.IVA - VAT N°</span><b>' + nn(az.p_iva) + '</b>'
+    + '<span>Caus.Trasp. - Reason for Shipment</span><b>' + nn(t.causale) + '</b>'
+    + '<span>Resa - Carriage</span><b>' + nn(t.porto) + '</b>'
+    + '<span>Operatore - Our Ref.</span><b>' + nn(state.profile && (state.profile.nome || '').toUpperCase()) + '</b>'
+    + '</div></div>'
+    + '<div class="dst"><div class="h">Spett.le Ditta - To Company</div><div class="v">' + dest.map(esc).join('\n') + '</div>'
+    + '<div class="h">Luogo di Destinazione - Goods Destination</div><div class="v">' + dest.filter(s => !/^P\.IVA /.test(s)).map(esc).join('\n') + '</div></div>'
     + '</div>'
-    + '<table><thead><tr><th>#</th><th>Codice</th><th>Descrizione</th><th>UM</th><th class="n">Quantità</th></tr></thead><tbody>'
-    + righe.map((r, i) => '<tr><td>' + (i + 1) + '</td><td class="m">' + esc(r.codice) + '</td><td>' + esc(r.descrizione)
-      + '</td><td>' + esc(r.um) + '</td><td class="n">' + esc(nfIT(r.qta)) + '</td></tr>').join('')
-    + '</tbody></table>'
-    + '<div class="ann"><b>Annotazioni</b>'
-    + esc(['Rif. commessa: ' + comm.map(etiOpTerzista).join(', '), arts.length ? 'Prodotto: ' + arts.join(', ') : '',
-      rifs.length ? 'Rif. cliente: ' + rifs.join(', ') : '', t.annotazioni].filter(Boolean).join('\n')) + '</div>'
-    + '<div class="f"><div>Firma conducente</div><div>Firma vettore</div><div>Firma destinatario</div></div>'
+    + '<table class="r"><thead><tr><th style="width:20%">COD.ARTICOLO<br>Item Code</th><th>DESCRIZIONE<br>Description</th>'
+    + '<th style="width:6%">U.M.</th><th style="width:13%">QUANTITA\'<br>Quantity</th></tr></thead><tbody>'
+    + corpo + '<tr class="fill"><td></td><td></td><td></td><td></td></tr></tbody></table>'
+    + '<table class="p">'
+    + '<tr><td colspan="2">Aspetto Esteriore dei Beni - Description of Goods<span class="v">' + nn(t.aspetto) + '</span></td>'
+    + '<td class="ce">N.Colli - No. Packages<span class="v">' + nn(t.colli) + '</span></td>'
+    + '<td class="ce">Peso Netto - Net Weight<span class="v">' + (t.pesoNetto ? esc(t.pesoNetto) + ' kg' : '&nbsp;') + '</span></td>'
+    + '<td class="ce">Peso Lordo - Gross Weight<span class="v">' + (t.peso ? esc(t.peso) + ' kg' : '&nbsp;') + '</span></td></tr>'
+    + '<tr><td colspan="2" rowspan="2">Vettore - Carrier<span class="v">' + nn(t.vettore) + '</span></td>'
+    + '<td class="ce">Data/Ora Trasporto - Date/Time Shipment<span class="v">' + nn(inizioTxt) + '</span></td>'
+    + '<td colspan="2" class="ce">Firma Vettore - Carrier Signature</td></tr>'
+    + '<tr><td class="ce">Trasporto a Cura del - Shipment by<span class="v">' + nn(t.cura) + '</span></td>'
+    + '<td colspan="2" class="ce">Firma Conducente - Driver Signature</td></tr>'
+    + '<tr><td colspan="3" style="height:44px;">Annotazioni / Variazioni - Notes<span class="v" style="font-weight:400;white-space:pre-line;">' + nn(t.annotazioni) + '</span></td>'
+    + '<td colspan="2" class="ce">Firma Destinatario - Addressee Signature</td></tr>'
+    + '</table>'
     + '<script>window.onload=function(){window.print();}<\/script></body></html>';
   const w = window.open('', '_blank');
   if (!w) return toast('Il browser ha bloccato la finestra di stampa: consentila per questo sito.', 'err', 9000);
