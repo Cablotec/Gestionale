@@ -5466,6 +5466,14 @@ const LOGO_CABLOTEC_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="150 
 // schede, dati del trasporto in una striscia, righe raggruppate per commessa,
 // piede (trasporto, annotazioni, firme) spinto in fondo alla pagina.
 function stampaDdtTerzista(x, num, mittente, t) {
+  // TESTATA E PIEDE SU OGNI PAGINA (18 nov, Nico). Le pagine le fa la stampa
+  // stessa, all'apertura: un foglio = testata + righe + piede, alto quanto
+  // l'A4 meno i margini; le righe si versano una alla volta e quando non ci
+  // stanno piu' si apre un foglio nuovo (la commessa in corso si ripete con
+  // «segue»). Provato e scartato: testata `position:fixed` + distanziatori in
+  // thead/tfoot — Chrome non ripete un'intestazione alta un terzo di pagina e
+  // le righe finivano sotto la testata. Il conteggio vale per la carta perche'
+  // anche a schermo il foglio e' largo 186 mm e alto 272 mm.
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
   const az = (state.aziende || []).find(a => a.id === x.terzista_id) || {};
   const nomeDest = az.nome || nomeAziendaDi(x.terzista_id);
@@ -5490,7 +5498,7 @@ function stampaDdtTerzista(x, num, mittente, t) {
     const o = comm.find(c => c.id === opId) || (state.operazioni || []).find(z => z.id === opId);
     const rPz = (x.righe || []).find(r => opDiRigaTerzista(x, r) === opId && r.pz != null);
     const pz = rPz ? rPz.pz : (o && o.quantita);
-    const testa = o ? '<tr class="g"><td colspan="4"><b>Commessa ' + esc(etiOpTerzista(o)) + '</b>'
+    const testa = o ? '<tr class="g"><td colspan="4"><b>Commessa ' + esc(etiOpTerzista(o)) + '</b><em> (segue)</em>'
       + (nomeArt(o) ? '<span>Prodotto <b>' + esc(nomeArt(o)) + '</b>' + (pz ? ' · ' + esc(nfIT(pz)) + ' pz' : '') + '</span>' : '')
       + (o.riferimento_cliente ? '<span>Rif. cliente ' + esc(o.riferimento_cliente) + '</span>' : '')
       + '</td></tr>' : '';
@@ -5502,92 +5510,106 @@ function stampaDdtTerzista(x, num, mittente, t) {
   const inizio = t.inizio ? new Date(t.inizio) : null;
   const inizioTxt = inizio && !isNaN(inizio) ? inizio.toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
   const mitt = String(mittente || 'Cablotec S.R.L.').split('\n').map(s => s.trim()).filter(Boolean);
-  const lab = (it, en) => '<div class="lab">' + esc(it) + (en ? '<i>' + esc(en) + '</i>' : '') + '</div>';
+  const lab = (s) => '<div class="lab">' + esc(s) + '</div>';
   const val = (v) => '<div class="v">' + (esc(v) || '&nbsp;') + '</div>';
-  const cella = (it, en, v, cls) => '<div' + (cls ? ' class="' + cls + '"' : '') + '>' + lab(it, en) + val(v) + '</div>';
+  const cella = (l, v, cls) => '<div' + (cls ? ' class="' + cls + '"' : '') + '>' + lab(l) + val(v) + '</div>';
   const kg = (v) => v ? v + ' kg' : '';
   const operatore = state.profile && state.profile.nome ? state.profile.nome : '';
+  const dataDdt = fmtIT(String(x.inviato_il).slice(0, 10));
+  // Logo come immagine: un SVG in linea con un <g transform> ripetuto su
+  // piu' fogli perdeva la scritta CABLO TEC dal secondo in poi.
+  const logo = '<img class="logo" alt="Cablotec" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(LOGO_CABLOTEC_SVG) + '">';
+  const foglio = '<div class="pg"><div class="wm">FAC SIMILE</div>'
+    // testata
+    + '<div class="top"><div class="hd"><div class="br">' + logo + '<div class="mi"><div class="rs">' + esc(mitt[0]) + '</div>'
+    + mitt.slice(1).map(s => '<div>' + esc(s) + '</div>').join('') + '</div></div>'
+    + '<div class="nb"><div class="k">Documento di trasporto</div><div class="kk">D.P.R. 472/1996</div>'
+    + '<div class="n">' + esc(num) + '</div><div class="d">del ' + esc(dataDdt) + '</div><div class="pn"></div></div></div>'
+    + '<div class="rule"></div>'
+    + '<div class="fs">FAC SIMILE — DOCUMENTO DI PROVA, NON VALIDO COME DOCUMENTO DI TRASPORTO</div>'
+    + '<div class="ad"><div class="card">' + lab('Destinatario') + '<div class="nm">' + esc(nomeDest) + '</div>'
+    + '<div class="ln">' + indDest.map(esc).join('<br>') + '</div>' + (az.p_iva ? '<div class="pi">P.IVA ' + esc(az.p_iva) + '</div>' : '') + '</div>'
+    + '<div class="card">' + lab('Luogo di destinazione') + '<div class="nm">' + esc(nomeDest) + '</div>'
+    + '<div class="ln">' + indDest.map(esc).join('<br>') + '</div></div></div>'
+    + '<div class="inf">' + cella('Causale', t.causale) + cella('Resa', t.porto)
+    + cella('Trasporto a cura del', t.cura) + cella('Operatore', operatore) + '</div></div>'
+    // righe
+    + '<div class="mid"><table class="r"><thead><tr><th style="width:24%">Codice</th><th>Descrizione</th>'
+    + '<th class="q" style="width:14%">Quantità</th><th style="width:8%">U.M.</th></tr></thead><tbody></tbody></table></div>'
+    // piede
+    + '<div class="bot"><div class="tr">'
+    + cella('Aspetto dei beni', t.aspetto) + cella('N. colli', t.colli)
+    + cella('Peso netto', kg(t.pesoNetto)) + cella('Peso lordo', kg(t.peso))
+    + cella('Vettore', t.vettore, 's2') + cella('Inizio trasporto', inizioTxt, 's2')
+    + '</div>'
+    + '<div class="an">' + lab('Annotazioni') + val(t.annotazioni) + '</div>'
+    + '<div class="fi"><div>' + lab('Firma conducente') + '</div><div>' + lab('Firma vettore') + '</div>'
+    + '<div>' + lab('Firma destinatario') + '</div></div>'
+    + '<div class="cr"><span>' + esc(mitt[0]) + ' · DDT ' + esc(num) + ' del ' + esc(dataDdt) + ' · ' + nRighe + (nRighe === 1 ? ' riga' : ' righe') + '</span><span>Fac simile generato dal gestionale</span></div>'
+    + '</div></div>';
+  // Impagina: versa le righe nei fogli. Una testata di commessa non resta da
+  // sola in fondo a un foglio; una commessa che continua si ripete con «segue».
+  const impagina = 'function(){'
+    + 'var righe=[].slice.call(document.querySelectorAll("#righe tr"));document.getElementById("righe").remove();'
+    + 'var pg=document.querySelector(".pg"),modello=pg.cloneNode(true),tb=pg.querySelector("tbody"),mid=pg.querySelector(".mid"),gruppo=null;'
+    + 'var pieno=function(){return mid.scrollHeight>mid.clientHeight+1;};'
+    + 'righe.forEach(function(tr){tb.appendChild(tr);if(!pieno()){if(tr.className==="g")gruppo=tr;return;}'
+    + 'tb.removeChild(tr);var porta=[];var ult=tb.lastElementChild;if(ult&&ult.className==="g"&&ult!==tb.firstElementChild){porta.push(ult);tb.removeChild(ult);}'
+    + 'pg=modello.cloneNode(true);document.body.appendChild(pg);tb=pg.querySelector("tbody");mid=pg.querySelector(".mid");'
+    + 'if(!porta.length&&tr.className!=="g"&&gruppo){var s=gruppo.cloneNode(true);s.classList.add("segue");tb.appendChild(s);}'
+    + 'porta.forEach(function(p){tb.appendChild(p);});tb.appendChild(tr);if(tr.className==="g")gruppo=tr;});'
+    + 'var fogli=document.querySelectorAll(".pg");for(var i=0;i<fogli.length;i++)fogli[i].querySelector(".pn").textContent="Pagina "+(i+1)+" di "+fogli.length;'
+    + '}';
   const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>DDT fac simile ' + esc(num) + '</title><style>'
     + ':root{--o:#ff6e36;--d:#28282d;--t:#fff4ee;--b:#e4ddd9;--g:#7a716d;}'
     + '*{box-sizing:border-box;}'
     + 'body{margin:0;font:9pt/1.35 "Segoe UI",Arial,Helvetica,sans-serif;color:var(--d);background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
-    + '.pg{min-height:273mm;display:flex;flex-direction:column;position:relative;}'
-    + '@media screen{body{background:#e6e3e1;}.pg{width:210mm;min-height:297mm;margin:8mm auto;padding:12mm;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.18);}}'
-    + '.wm{position:fixed;top:45%;left:0;right:0;text-align:center;font-size:96pt;font-weight:800;white-space:nowrap;color:rgba(200,0,0,.08);transform:rotate(-32deg);pointer-events:none;letter-spacing:.05em;}'
+    + '.pg{position:relative;width:186mm;height:272mm;display:flex;flex-direction:column;overflow:hidden;break-after:page;page-break-after:always;}'
+    + '.pg:last-of-type{break-after:auto;page-break-after:auto;}'
+    + '.wm{position:absolute;top:45%;left:-20mm;right:-20mm;text-align:center;font-size:96pt;font-weight:800;white-space:nowrap;color:rgba(200,0,0,.08);transform:rotate(-32deg);pointer-events:none;letter-spacing:.05em;}'
     // testata
-    + '.hd{display:flex;justify-content:space-between;align-items:stretch;gap:8mm;}'
-    + '.br{display:flex;align-items:center;gap:5mm;}.br svg{height:21mm;width:auto;flex:none;}'
-    + '.mi .rs{font-size:13pt;font-weight:800;letter-spacing:.01em;margin-bottom:1mm;}.mi div{font-size:7.8pt;color:#4a4542;}'
-    + '.nb{background:var(--d);color:#fff;border-radius:2.5mm;padding:3.5mm 5mm;min-width:60mm;display:flex;flex-direction:column;justify-content:center;text-align:right;}'
+    + '.top{flex:none;}'
+    + '.hd{display:flex;justify-content:space-between;align-items:stretch;gap:6mm;}'
+    + '.br{display:flex;align-items:center;gap:5mm;}.logo{height:21mm;width:auto;flex:none;}'
+    + '.mi .rs{font-size:13pt;font-weight:800;letter-spacing:.01em;margin-bottom:1mm;}.mi div{font-size:7.6pt;color:#4a4542;line-height:1.4;}'
+    + '.nb{background:var(--d);color:#fff;border-radius:2.5mm;padding:3mm 5mm;min-width:52mm;display:flex;flex-direction:column;justify-content:center;text-align:right;flex:none;}'
     + '.nb .k{font-size:8pt;font-weight:800;text-transform:uppercase;letter-spacing:.14em;color:var(--o);}'
     + '.nb .kk{font-size:6.8pt;color:#b9b3b0;margin-top:.5mm;}'
-    + '.nb .n{font-size:21pt;font-weight:800;line-height:1;margin-top:2.5mm;letter-spacing:.01em;}'
-    + '.nb .d{font-size:9.5pt;margin-top:1mm;color:#e9e4e1;}'
+    + '.nb .n{font-size:21pt;font-weight:800;line-height:1;margin-top:2mm;letter-spacing:.01em;}'
+    + '.nb .d{font-size:9.5pt;margin-top:1mm;color:#e9e4e1;}.nb .pn{font-size:7pt;margin-top:1mm;color:#b9b3b0;}'
     + '.rule{height:2px;background:linear-gradient(90deg,var(--o),var(--o) 40%,var(--d) 40%);margin:4mm 0 3mm;}'
     + '.fs{border:1.5px dashed #c62828;color:#c62828;text-align:center;font-weight:800;font-size:7.5pt;letter-spacing:.16em;padding:1.3mm;border-radius:1.5mm;}'
-    // etichette e valori
     + '.lab{font-size:6.6pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--g);}'
-    + '.lab i{font-style:normal;font-weight:400;text-transform:none;letter-spacing:0;color:#aaa29e;margin-left:1.5mm;}'
     + '.v{font-weight:700;font-size:9.2pt;margin-top:.6mm;min-height:4mm;}'
-    // destinatario
-    + '.ad{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:4mm;}'
-    + '.card{background:var(--t);border:1px solid #f1d9cc;border-left:3px solid var(--o);border-radius:0 2mm 2mm 0;padding:3mm 4mm;min-height:26mm;}'
-    + '.card .nm{font-size:11pt;font-weight:800;margin-top:1.5mm;}.card .ln{margin-top:.5mm;}.card .pi{margin-top:1.5mm;font-size:8pt;color:#4a4542;}'
-    // striscia dati
-    + '.inf{display:grid;grid-template-columns:repeat(4,1fr);margin-top:4mm;border:1px solid var(--b);border-radius:2mm;}'
+    + '.ad{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:3.5mm;}'
+    + '.card{background:var(--t);border:1px solid #f1d9cc;border-left:3px solid var(--o);border-radius:0 2mm 2mm 0;padding:2.5mm 4mm;}'
+    + '.card .nm{font-size:11pt;font-weight:800;margin-top:1mm;}.card .ln{margin-top:.5mm;}.card .pi{margin-top:1mm;font-size:8pt;color:#4a4542;}'
+    + '.inf{display:grid;grid-template-columns:repeat(4,1fr);margin-top:3.5mm;border:1px solid var(--b);border-radius:2mm;}'
     + '.inf>div{padding:2mm 3mm;border-left:1px solid var(--b);}.inf>div:first-child{border-left:none;}'
     // righe
-    + 'table.r{width:100%;border-collapse:collapse;margin-top:5mm;}'
+    + '.mid{flex:1;min-height:0;overflow:hidden;padding-top:4mm;}'
+    + 'table.r{width:100%;border-collapse:collapse;}'
     + 'table.r th{background:var(--d);color:#fff;font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:2mm 3mm;}'
-    + 'table.r th i{display:block;font-style:normal;font-weight:400;text-transform:none;letter-spacing:0;color:#a9a3a0;font-size:6.5pt;}'
-    + 'table.r th:first-child{border-radius:1.5mm 0 0 0;}table.r th:last-child{border-radius:0 1.5mm 0 0;}'
     + 'table.r td{padding:1.7mm 3mm;border-bottom:1px solid #eeeae8;vertical-align:top;}'
     + 'td.c{font-family:Consolas,"Courier New",monospace;font-weight:700;font-size:8.6pt;white-space:nowrap;}'
     + 'td.q,th.q{text-align:right;}td.q{font-weight:800;white-space:nowrap;font-size:9.5pt;}td.u{color:var(--g);width:10mm;}'
     + 'tr.g td{background:var(--t);border-bottom:1px solid #f1d9cc;box-shadow:inset 3px 0 0 var(--o);padding:2mm 3mm;font-size:8.4pt;}'
-    + 'tr.g span{margin-left:5mm;color:#4a4542;}'
-    + 'tr{page-break-inside:avoid;}thead{display:table-header-group;}'
-    + '.tot{display:flex;justify-content:flex-end;margin-top:1.5mm;font-size:7.5pt;color:var(--g);}'
-    + '.sp{flex:1;min-height:6mm;}'
+    + 'tr.g span{margin-left:5mm;color:#4a4542;}tr.g em{display:none;font-style:normal;color:var(--g);}tr.g.segue em{display:inline;}'
     // piede
-    + '.ft{page-break-inside:avoid;}'
+    + '.bot{flex:none;padding-top:4mm;}'
     + '.tr{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--b);border-radius:2mm;}'
     + '.tr>div{padding:2mm 3mm;border-left:1px solid var(--b);border-top:1px solid var(--b);}'
-    + '.tr>div:nth-child(-n+4){border-top:none;}.tr>div:nth-child(4n+1),.tr>.s2:nth-child(5){border-left:none;}.s2{grid-column:span 2;}'
-    + '.an{margin-top:3mm;border:1px solid var(--b);border-radius:2mm;padding:2mm 3mm;min-height:15mm;}.an .v{font-weight:400;white-space:pre-line;}'
-    + '.fi{display:grid;grid-template-columns:repeat(3,1fr);gap:6mm;margin-top:5mm;}'
-    + '.fi>div{border-top:1px solid var(--d);padding-top:1.2mm;margin-top:13mm;}'
-    + '.cr{margin-top:4mm;display:flex;justify-content:space-between;font-size:6.6pt;color:#aaa29e;}'
+    + '.tr>div:nth-child(-n+4){border-top:none;}.tr>div:nth-child(4n+1){border-left:none;}.s2{grid-column:span 2;}'
+    + '.an{margin-top:3mm;border:1px solid var(--b);border-radius:2mm;padding:2mm 3mm;min-height:13mm;}.an .v{font-weight:400;white-space:pre-line;}'
+    + '.fi{display:grid;grid-template-columns:repeat(3,1fr);gap:6mm;}'
+    + '.fi>div{border-top:1px solid var(--d);padding-top:1.2mm;margin-top:12mm;}'
+    + '.cr{margin-top:3mm;display:flex;justify-content:space-between;font-size:6.6pt;color:#aaa29e;}'
+    + '@media screen{html{background:#e6e3e1;}.pg{box-sizing:content-box;margin:8mm auto;padding:12mm;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.18);}}'
     + '@page{size:A4 portrait;margin:12mm;}'
-    + '</style></head><body><div class="pg"><div class="wm">FAC SIMILE</div>'
-    + '<div class="hd"><div class="br">' + LOGO_CABLOTEC_SVG + '<div class="mi"><div class="rs">' + esc(mitt[0]) + '</div>'
-    + mitt.slice(1).map(s => '<div>' + esc(s) + '</div>').join('') + '</div></div>'
-    + '<div class="nb"><div class="k">Documento di trasporto</div><div class="kk">Delivery note · D.P.R. 472/1996</div>'
-    + '<div class="n">' + esc(num) + '</div><div class="d">del ' + esc(fmtIT(String(x.inviato_il).slice(0, 10))) + '</div></div></div>'
-    + '<div class="rule"></div>'
-    + '<div class="fs">FAC SIMILE — DOCUMENTO DI PROVA, NON VALIDO COME DOCUMENTO DI TRASPORTO</div>'
-    + '<div class="ad"><div class="card">' + lab('Destinatario', 'To company') + '<div class="nm">' + esc(nomeDest) + '</div>'
-    + '<div class="ln">' + indDest.map(esc).join('<br>') + '</div>' + (az.p_iva ? '<div class="pi">P.IVA ' + esc(az.p_iva) + '</div>' : '') + '</div>'
-    + '<div class="card">' + lab('Luogo di destinazione', 'Goods destination') + '<div class="nm">' + esc(nomeDest) + '</div>'
-    + '<div class="ln">' + indDest.map(esc).join('<br>') + '</div></div></div>'
-    + '<div class="inf">' + cella('Causale', 'Reason', t.causale) + cella('Resa', 'Carriage', t.porto)
-    + cella('A cura del', 'Shipment by', t.cura) + cella('Operatore', 'Our ref.', operatore) + '</div>'
-    + '<table class="r"><thead><tr><th style="width:24%">Codice<i>Item code</i></th><th>Descrizione<i>Description</i></th>'
-    + '<th class="q" style="width:14%">Quantità<i>Quantity</i></th><th style="width:8%">U.M.<i>Unit</i></th></tr></thead>'
-    + '<tbody>' + corpo + '</tbody></table>'
-    + '<div class="tot">' + nRighe + (nRighe === 1 ? ' riga' : ' righe') + '</div>'
-    + '<div class="sp"></div>'
-    + '<div class="ft"><div class="tr">'
-    + cella('Aspetto dei beni', 'Goods', t.aspetto) + cella('N. colli', 'Packages', t.colli)
-    + cella('Peso netto', 'Net weight', kg(t.pesoNetto)) + cella('Peso lordo', 'Gross weight', kg(t.peso))
-    + cella('Vettore', 'Carrier', t.vettore, 's2') + cella('Inizio trasporto', 'Date/time shipment', inizioTxt, 's2')
-    + '</div>'
-    + '<div class="an">' + lab('Annotazioni', 'Notes') + val(t.annotazioni) + '</div>'
-    + '<div class="fi"><div>' + lab('Firma conducente', 'Driver') + '</div><div>' + lab('Firma vettore', 'Carrier') + '</div>'
-    + '<div>' + lab('Firma destinatario', 'Addressee') + '</div></div>'
-    + '<div class="cr"><span>' + esc(mitt[0]) + ' · DDT ' + esc(num) + '</span><span>Fac simile generato dal gestionale</span></div>'
-    + '</div></div>'
-    + '<script>window.onload=function(){window.print();}<\/script></body></html>';
+    + '</style></head><body>' + foglio
+    + '<table id="righe" style="display:none"><tbody>' + corpo
+    + '</tbody></table>'
+    + '<script>window.onload=function(){(' + impagina + ')();window.print();};<\/script></body></html>';
   const w = window.open('', '_blank');
   if (!w) return toast('Il browser ha bloccato la finestra di stampa: consentila per questo sito.', 'err', 9000);
   w.document.open(); w.document.write(html); w.document.close();
