@@ -2809,6 +2809,54 @@ function renderOperatori(root) {
   }
 
   root.append(box);
+  root.append(sezioneChiVedeRiunioni());
+}
+
+// CHI VEDE RIUNIONI (18 nov, Nico: "mi metti la query in impostazioni, cosi'
+// vedo io chi vede questa cosa e chi no"). Sola lettura: l'elenco si cambia
+// SOLO da SQL (nessuna policy di scrittura su `riunioni_membri`, di proposito).
+// La legge chi e' membro (policy `riunioni_membri_leggi`): Nico lo e'.
+function sezioneChiVedeRiunioni() {
+  const box = el('div', { style:'margin-top:14px;padding:14px 16px;background:var(--sur);border:1px solid var(--brd);border-radius:6px;' },
+    el('div', { class:'kl', style:'margin-bottom:6px;' }, 'Chi vede Riunioni'),
+    el('div', { class:'sub', style:'margin-bottom:10px;line-height:1.6;' },
+      'Non dipende dal ruolo: la vede solo chi è in questo elenco, anche se è user. '
+      + 'L\'elenco si cambia da SQL nel pannello Supabase (chiedi a Claude).'));
+  const corpo = el('div', { class:'sub' }, 'Lettura…');
+  box.append(corpo);
+  (async () => {
+    let ids;
+    try {
+      const { data, error } = await sb.from('riunioni_membri').select('profilo_id');
+      if (error) throw error;
+      ids = new Set((data || []).map(r => r.profilo_id));
+    } catch (e) {
+      corpo.textContent = 'Elenco non leggibile: ' + (e.message || e);
+      corpo.style.color = 'var(--red)';
+      return;
+    }
+    // Una riga per account (il nome dalla scheda utente collegata), membri prima.
+    const nomeDi = (p) => ((state.utenti || []).find(u => u.account_id === p.id) || {}).nome || p.nome || p.email || '?';
+    const righe = Object.values(state.profiliById || {}).filter(p => !isKioskRecord(p))
+      .map(p => ({ p, nome: nomeDi(p), vede: ids.has(p.id) }))
+      .sort((a, b) => (b.vede - a.vede) || a.nome.localeCompare(b.nome, 'it'));
+    corpo.innerHTML = '';
+    corpo.style.color = '';
+    corpo.append(el('div', { style:'margin-bottom:8px;' },
+      ids.size + (ids.size === 1 ? ' persona la vede' : ' persone la vedono') + ' · '
+      + (righe.length - righe.filter(r => r.vede).length) + ' no'));
+    const tab = el('table', { class:'rt' }, el('thead', {}, el('tr', {},
+      el('th', {}, 'Nome'), el('th', {}, 'Ruolo'), el('th', {}, 'Vede Riunioni'))));
+    const tb = el('tbody');
+    righe.forEach(({ p, nome, vede }) => tb.append(el('tr', {},
+      el('td', {}, nome),
+      el('td', {}, p.super_admin === true && p.ruolo === 'admin' ? el('span', { class:'badge byel' }, '★★ super admin')
+        : p.ruolo === 'admin' ? el('span', { class:'badge bvio' }, '★ admin') : el('span', { class:'badge bok' }, '✓ user')),
+      el('td', {}, vede ? el('span', { class:'badge bok' }, '✓ sì') : el('span', { class:'badge bgry' }, '— no')))));
+    tab.append(tb);
+    corpo.append(tab);
+  })();
+  return box;
 }
 
 // ─── Modal: crea account login per un utente ───
