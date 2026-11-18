@@ -4082,6 +4082,7 @@ async function caricaInviiTerzista() {
     state.inviiTerzista = error ? null : (data || []);
   } catch (e) { state.inviiTerzista = null; }
   await caricaRientriTerzista();
+  await caricaOrdiniFornitore();
 }
 // RIENTRI DAL TERZISTA (17 nov): `rientri_terzista`. null = tabella assente
 // (strumenti/migrazione-rientri-terzista.sql non eseguita): allora il passo
@@ -5456,24 +5457,134 @@ const INTESTAZIONE_CABLOTEC = [
 // document.write, dove un indirizzo relativo non e' detto che si risolva.
 const LOGO_CABLOTEC_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="150 100 2440 2060"><g transform="translate(23.4)"><path fill="#000000" d="m 1759.3,1775.5 c -66.1,0 -127.4,35.3 -160.5,92.6 -33.0,57.2 -33.0,128.0 0,185.3 33.0,57.2 94.3,92.6 160.5,92.6 h 185.5 l 55.0,-95 H 1759.3 c -32.3,0 -62.0,-17.1 -78.2,-45.1 -16.1,-28.0 -16.1,-62.3 0,-90.3 16.1,-28.0 45.9,-45.1 78.2,-45.1 h 345.3 l 55.0,-95 z"/><path fill="#000000" d="m 1118.7,1775.5 v 1.0 93.9 43.5 95 138.5 h 95 258.9 l 54.8,-95 H 1213.7 v -43.5 h 258.9 l 54.8,-95 H 1213.7 v -43.5 h 258.9 l 54.8,-95 z"/><path fill="#000000" d="m 676.8,1775.5 -54.8,95 h 178.4 v 276.6 h 95.0 v -276.6 h 123.6 l 54.8,-95 z"/><path fill="#ff6e36" d="m 2233.0,1364.7 c -66.1,0 -127.4,35.3 -160.5,92.6 -33.0,57.2 -33.0,128.0 0,185.3 33.0,57.2 94.3,92.6 160.5,92.6 h 164.7 c 66.1,0 127.4,-35.3 160.5,-92.6 33.0,-57.2 33.0,-128.0 0,-185.3 -33.0,-57.2 -94.3,-92.6 -160.5,-92.6 z m 0,95 h 164.7 c 32.3,0 62.0,17.1 78.2,45.1 16.1,28.0 16.1,62.3 0,90.3 -16.1,28.0 -45.9,45.1 -78.2,45.1 h -164.7 c -32.3,0 -62.0,-17.1 -78.2,-45.1 -16.1,-28.0 -16.1,-62.3 0,-90.3 16.1,-28.0 45.9,-45.1 78.2,-45.1 z"/><path fill="#ff6e36" d="m 1628.6,1364.7 v 372.0 h 95 258.9 l 54.8,-95 H 1723.6 V 1364.7 Z"/><path fill="#ff6e36" d="m 908.1,1364.7 v 0.3 l 54.6,94.6 H 1465.9 c 7.6,0 14.6,3.9 18.4,10.6 3.8,6.6 3.8,14.6 0,21.3 -3.8,6.6 -10.7,10.6 -18.4,10.6 h -345.0 v 232.5 h 345.0 c 41.4,0 79.9,-22.2 100.7,-58.1 20.7,-35.9 20.7,-80.3 0,-116.3 -2.1,-3.7 -4.5,-7.2 -7.0,-10.6 2.5,-3.4 4.8,-6.9 7.0,-10.6 20.7,-35.9 20.7,-80.3 0,-116.3 -20.7,-35.9 -59.2,-58.1 -100.7,-58.1 z m 307.7,232.6 h 250.0 c 7.6,0 14.6,3.9 18.4,10.6 3.8,6.6 3.8,14.6 0,21.3 -3.8,6.6 -10.7,10.6 -18.4,10.6 h -250.0 z"/><path fill="#ff6e36" d="m 786.0,1364.7 c -16.9,8e-4 -32.6,9.0 -41.1,23.7 l -292.9,507.4 h 109.6 l 248.3,-430.1 100.9,174.8 H 754.4 l -54.8,95 H 1075.4 L 875.0,1388.5 c -8.4,-14.6 -24.1,-23.7 -41.1,-23.7 z"/><path fill="#ff6e36" d="m 313.5,1364.7 c -66.1,0 -127.4,35.3 -160.5,92.6 -33.0,57.2 -33.0,128.0 0,185.3 33.0,57.2 94.3,92.6 160.5,92.6 H 499.1 l 55.0,-95 H 313.5 c -32.3,0 -62.0,-17.1 -78.2,-45.1 -16.1,-28.0 -16.1,-62.3 0,-90.3 16.1,-28.0 45.9,-45.1 78.2,-45.1 H 658.9 l 55.0,-95 z"/></g><path fill="#ff6e36" d="m 1375.0,108.3 a 571.1,571.1 0 0 0 -250.9,59.0 v 363.7 a 112.0,112.0 0 0 1 75.1,105.7 A 112.0,112.0 0 0 1 1087.2,748.9 112.0,112.0 0 0 1 975.1,636.8 112.0,112.0 0 0 1 1049.3,531.7 V 211.5 A 571.1,571.1 0 0 0 803.8,679.4 571.1,571.1 0 0 0 868.7,941.0 h 473.5 c 9.9,-10.2 23.6,-15.9 37.9,-16.0 29.4,-7.9e-4 53.3,23.9 53.3,53.3 -3e-4,29.4 -23.9,53.3 -53.3,53.3 -14.2,-0.0 -27.9,-5.8 -37.9,-16.0 H 915.1 a 571.1,571.1 0 0 0 459.8,234.8 571.1,571.1 0 0 0 79.9,-5.7 V 547.4 c -25.4,-13.3 -42.6,-40.1 -42.6,-70.8 0,-44.1 35.8,-80 80,-80 44.1,0 80.0,35.8 80.0,80 0,30.6 -17.3,57.4 -42.7,70.8 v 681.6 a 571.1,571.1 0 0 0 106.8,-42.0 V 857.0 c -25.4,-13.3 -42.6,-40.1 -42.6,-70.8 0,-44.1 35.8,-80 80,-80 44.1,0 80.0,35.9 80.0,80 0,30.6 -17.3,57.4 -42.7,70.8 V 1141.0 A 571.1,571.1 0 0 0 1946.1,679.4 571.1,571.1 0 0 0 1782.2,279.0 H 1279.3 c -9.9,10.1 -23.5,15.8 -37.7,15.9 -29.4,-8.3e-4 -53.2,-23.8 -53.2,-53.2 -3e-4,-29.4 23.8,-53.2 53.2,-53.2 14.2,0.0 27.9,5.7 37.9,15.9 h 412.5 a 571.1,571.1 0 0 0 -317.0,-96.0 z"/></svg>';
 
-// Restyling A4 verticale (18 nov, Nico: "fare un restyling completo, sentiti
-// libero di ispirarti"). Contenuto del DDT di Alnus, impaginazione nostra:
-// testata con logo e numero in evidenza, destinatario e destinazione in due
-// schede, dati del trasporto in una striscia, righe raggruppate per commessa,
-// piede (trasporto, annotazioni, firme) spinto in fondo alla pagina.
-function stampaDdtTerzista(x, num, mittente, t) {
-  // TESTATA E PIEDE SU OGNI PAGINA (18 nov, Nico). Le pagine le fa la stampa
-  // stessa, all'apertura: un foglio = testata + righe + piede, alto quanto
-  // l'A4 meno i margini; le righe si versano una alla volta e quando non ci
-  // stanno piu' si apre un foglio nuovo (la commessa in corso si ripete con
-  // «segue»). Provato e scartato: testata `position:fixed` + distanziatori in
-  // thead/tfoot — Chrome non ripete un'intestazione alta un terzo di pagina e
-  // le righe finivano sotto la testata. Il conteggio vale per la carta perche'
-  // anche a schermo il foglio e' largo 186 mm e alto 272 mm.
+// ── CARTA INTESTATA CABLOTEC (18 nov) ────────────────────────────────
+// UNA stampa per tutti i documenti (DDT, ordini fornitore, domani fatture):
+// testata col logo e INTESTAZIONE_CABLOTEC, blocco scuro col numero, schede,
+// striscia di dati, tabella delle righe, piede; testata e piede su OGNI foglio.
+// Ogni documento dice solo COSA ci va dentro (opts), non come si impagina.
+// IMPAGINAZIONE: la fa la stampa stessa all'apertura. Un foglio e' alto
+// quanto l'A4 meno i margini (186x272 mm anche a schermo, cosi' la misura
+// vale per la carta); le righe si versano una alla volta e quando non ci
+// stanno piu' si apre un foglio nuovo. Una riga di gruppo (classe `g`) non
+// resta sola in fondo; il gruppo che continua si ripete con «(segue)».
+// ⚠ Scartato `position:fixed` + distanziatori in thead/tfoot: Chrome non
+// ripete un thead alto un terzo di pagina e le righe finivano sotto la
+// testata. ⚠ Logo come <img>: l'SVG in linea col <g transform> ripetuto su
+// piu' fogli perdeva la scritta CABLO TEC dal secondo in poi.
+// opts: { titolo, sottotitolo, numero, data, schede:[{ lab, nome, righe[] , nota }],
+//   striscia:[[etichetta, valore]], colonne:[{ t, w, cls }], righe: html dei <tr>,
+//   piede: html, conta: testo in fondo (es. "3 righe"), titoloFinestra }
+// finestra: una finestra gia' aperta (serve quando si stampa DOPO un await:
+// il browser blocca window.open fuori dal clic). Ritorna false se bloccata.
+function stampaCartaCablotec(opts, finestra) {
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+  const mitt = INTESTAZIONE_CABLOTEC;
+  const lab = (s) => '<div class="lab">' + esc(s) + '</div>';
+  const logo = '<img class="logo" alt="Cablotec" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(LOGO_CABLOTEC_SVG) + '">';
+  const foglio = '<div class="pg"><div class="wm">FAC SIMILE</div>'
+    + '<div class="top"><div class="hd"><div class="br">' + logo + '<div class="mi"><div class="rs">' + esc(mitt[0]) + '</div>'
+    + mitt.slice(1).map(s => '<div>' + esc(s) + '</div>').join('') + '</div></div>'
+    + '<div class="nb"><div class="k">' + esc(opts.titolo) + '</div>' + (opts.sottotitolo ? '<div class="kk">' + esc(opts.sottotitolo) + '</div>' : '')
+    + '<div class="n">' + esc(opts.numero) + '</div><div class="d">del ' + esc(opts.data) + '</div><div class="pn"></div></div></div>'
+    + '<div class="rule"></div>'
+    + '<div class="fs">FAC SIMILE — DOCUMENTO DI PROVA, NON VALIDO</div>'
+    + '<div class="ad">' + (opts.schede || []).map(s => '<div class="card">' + lab(s.lab) + '<div class="nm">' + esc(s.nome) + '</div>'
+      + '<div class="ln">' + (s.righe || []).filter(Boolean).map(esc).join('<br>') + '</div>'
+      + (s.nota ? '<div class="pi">' + esc(s.nota) + '</div>' : '') + '</div>').join('') + '</div>'
+    + ((opts.striscia || []).length ? '<div class="inf" style="grid-template-columns:repeat(' + opts.striscia.length + ',1fr)">'
+      + opts.striscia.map(([l, v]) => '<div>' + lab(l) + '<div class="v">' + (esc(v) || '&nbsp;') + '</div></div>').join('') + '</div>' : '')
+    + '</div>'
+    + '<div class="mid"><table class="r"><thead><tr>' + opts.colonne.map(c => '<th' + (c.cls ? ' class="' + c.cls + '"' : '')
+      + (c.w ? ' style="width:' + c.w + '"' : '') + '>' + esc(c.t) + '</th>').join('') + '</tr></thead><tbody></tbody></table></div>'
+    + '<div class="bot">' + (opts.piede || '')
+    + '<div class="cr"><span>' + esc(mitt[0]) + ' · ' + esc(opts.titolo) + ' ' + esc(opts.numero) + ' del ' + esc(opts.data)
+    + (opts.conta ? ' · ' + esc(opts.conta) : '') + '</span><span>Fac simile generato dal gestionale</span></div>'
+    + '</div></div>';
+  const impagina = 'function(){'
+    + 'var righe=[].slice.call(document.querySelectorAll("#righe tr"));document.getElementById("righe").remove();'
+    + 'var pg=document.querySelector(".pg"),modello=pg.cloneNode(true),tb=pg.querySelector("tbody"),mid=pg.querySelector(".mid"),gruppo=null;'
+    + 'var pieno=function(){return mid.scrollHeight>mid.clientHeight+1;};'
+    + 'righe.forEach(function(tr){tb.appendChild(tr);if(!pieno()){if(tr.className==="g")gruppo=tr;return;}'
+    + 'tb.removeChild(tr);var porta=[];var ult=tb.lastElementChild;if(ult&&ult.className==="g"&&ult!==tb.firstElementChild){porta.push(ult);tb.removeChild(ult);}'
+    + 'pg=modello.cloneNode(true);document.body.appendChild(pg);tb=pg.querySelector("tbody");mid=pg.querySelector(".mid");'
+    + 'if(!porta.length&&tr.className!=="g"&&gruppo){var s=gruppo.cloneNode(true);s.classList.add("segue");tb.appendChild(s);}'
+    + 'porta.forEach(function(p){tb.appendChild(p);});tb.appendChild(tr);if(tr.className==="g")gruppo=tr;});'
+    + 'var fogli=document.querySelectorAll(".pg");for(var i=0;i<fogli.length;i++)fogli[i].querySelector(".pn").textContent="Pagina "+(i+1)+" di "+fogli.length;'
+    + '}';
+  const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>' + esc(opts.titoloFinestra || opts.titolo) + '</title><style>'
+    + ':root{--o:#ff6e36;--d:#28282d;--t:#fff4ee;--b:#e4ddd9;--g:#7a716d;}'
+    + '*{box-sizing:border-box;}'
+    + 'body{margin:0;font:9pt/1.35 "Segoe UI",Arial,Helvetica,sans-serif;color:var(--d);background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+    + '.pg{position:relative;width:186mm;height:272mm;display:flex;flex-direction:column;overflow:hidden;break-after:page;page-break-after:always;}'
+    + '.pg:last-of-type{break-after:auto;page-break-after:auto;}'
+    + '.wm{position:absolute;top:45%;left:-20mm;right:-20mm;text-align:center;font-size:96pt;font-weight:800;white-space:nowrap;color:rgba(200,0,0,.08);transform:rotate(-32deg);pointer-events:none;letter-spacing:.05em;}'
+    + '.top{flex:none;}'
+    + '.hd{display:flex;justify-content:space-between;align-items:stretch;gap:6mm;}'
+    + '.br{display:flex;align-items:center;gap:5mm;}.logo{height:21mm;width:auto;flex:none;}'
+    + '.mi .rs{font-size:13pt;font-weight:800;letter-spacing:.01em;margin-bottom:1mm;}.mi div{font-size:7.6pt;color:#4a4542;line-height:1.4;}'
+    + '.nb{background:var(--d);color:#fff;border-radius:2.5mm;padding:3mm 5mm;min-width:52mm;display:flex;flex-direction:column;justify-content:center;text-align:right;flex:none;}'
+    + '.nb .k{font-size:8pt;font-weight:800;text-transform:uppercase;letter-spacing:.14em;color:var(--o);}'
+    + '.nb .kk{font-size:6.8pt;color:#b9b3b0;margin-top:.5mm;}'
+    + '.nb .n{font-size:21pt;font-weight:800;line-height:1;margin-top:2mm;letter-spacing:.01em;}'
+    + '.nb .d{font-size:9.5pt;margin-top:1mm;color:#e9e4e1;}.nb .pn{font-size:7pt;margin-top:1mm;color:#b9b3b0;}'
+    + '.rule{height:2px;background:linear-gradient(90deg,var(--o),var(--o) 40%,var(--d) 40%);margin:4mm 0 3mm;}'
+    + '.fs{border:1.5px dashed #c62828;color:#c62828;text-align:center;font-weight:800;font-size:7.5pt;letter-spacing:.16em;padding:1.3mm;border-radius:1.5mm;}'
+    + '.lab{font-size:6.6pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--g);}'
+    + '.v{font-weight:700;font-size:9.2pt;margin-top:.6mm;min-height:4mm;}'
+    + '.ad{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:3.5mm;}'
+    + '.card{background:var(--t);border:1px solid #f1d9cc;border-left:3px solid var(--o);border-radius:0 2mm 2mm 0;padding:2.5mm 4mm;}'
+    + '.card .nm{font-size:11pt;font-weight:800;margin-top:1mm;}.card .ln{margin-top:.5mm;}.card .pi{margin-top:1mm;font-size:8pt;color:#4a4542;}'
+    + '.inf{display:grid;margin-top:3.5mm;border:1px solid var(--b);border-radius:2mm;}'
+    + '.inf>div{padding:2mm 3mm;border-left:1px solid var(--b);}.inf>div:first-child{border-left:none;}'
+    + '.mid{flex:1;min-height:0;overflow:hidden;padding-top:4mm;}'
+    + 'table.r{width:100%;border-collapse:collapse;}'
+    + 'table.r th{background:var(--d);color:#fff;font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:2mm 3mm;}'
+    + 'table.r td{padding:1.7mm 3mm;border-bottom:1px solid #eeeae8;vertical-align:top;}'
+    + 'td.c{font-family:Consolas,"Courier New",monospace;font-weight:700;font-size:8.6pt;white-space:nowrap;}'
+    + 'td.q,table.r th.q{text-align:right;}td.q{font-weight:800;white-space:nowrap;font-size:9.5pt;}td.u{color:var(--g);width:10mm;}'
+    + 'td.e{text-align:right;white-space:nowrap;}td .s{display:block;font-family:inherit;font:400 7.6pt/1.3 "Segoe UI",Arial,sans-serif;color:var(--g);margin-top:.4mm;}'
+    + 'tr.g td{background:var(--t);border-bottom:1px solid #f1d9cc;box-shadow:inset 3px 0 0 var(--o);padding:2mm 3mm;font-size:8.4pt;}'
+    + 'tr.g span{margin-left:5mm;color:#4a4542;}tr.g em{display:none;font-style:normal;color:var(--g);}tr.g.segue em{display:inline;}'
+    + '.bot{flex:none;padding-top:4mm;}'
+    + '.tr{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--b);border-radius:2mm;}'
+    + '.tr>div{padding:2mm 3mm;border-left:1px solid var(--b);border-top:1px solid var(--b);}'
+    + '.tr>div:nth-child(-n+4){border-top:none;}.tr>div:nth-child(4n+1){border-left:none;}.s2{grid-column:span 2;}.s4{grid-column:span 4;border-left:none!important;}'
+    + '.tot{display:flex;justify-content:flex-end;align-items:baseline;gap:5mm;padding:2.5mm 3mm;background:var(--d);color:#fff;border-radius:2mm;margin-bottom:3mm;}'
+    + '.tot .lab{color:#b9b3b0;}.tot b{font-size:13pt;}'
+    + '.an{margin-top:3mm;border:1px solid var(--b);border-radius:2mm;padding:2mm 3mm;min-height:13mm;}.an .v{font-weight:400;white-space:pre-line;}'
+    + '.fi{display:grid;grid-template-columns:repeat(3,1fr);gap:6mm;}.fi.f2{grid-template-columns:1fr 1fr;}'
+    + '.fi>div{border-top:1px solid var(--d);padding-top:1.2mm;margin-top:12mm;}'
+    + '.cr{margin-top:3mm;display:flex;justify-content:space-between;font-size:6.6pt;color:#aaa29e;}'
+    + '@media screen{html{background:#e6e3e1;}.pg{box-sizing:content-box;margin:8mm auto;padding:12mm;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.18);}}'
+    + '@page{size:A4 portrait;margin:12mm;}'
+    + '</style></head><body>' + foglio
+    + '<table id="righe" style="display:none"><tbody>' + (opts.righe || '') + '</tbody></table>'
+    + '<script>window.onload=function(){(' + impagina + ')();window.print();};<\/script></body></html>';
+  const w = finestra || window.open('', '_blank');
+  if (!w) { toast('Il browser ha bloccato la finestra di stampa: consentila per questo sito.', 'err', 9000); return false; }
+  w.document.open(); w.document.write(html); w.document.close();
+  return true;
+}
+// Pezzi della carta riusati dai documenti (piede, celle, euro).
+// Euro con il punto delle migliaia SEMPRE: in italiano il browser non lo
+// mette sotto le 5 cifre ("1240,00"), su un ordine si legge male.
+function cartaEuro(n) {
+  if (n == null || isNaN(Number(n))) return '';
+  const [i, d] = Math.abs(Number(n)).toFixed(2).split('.');
+  return (Number(n) < 0 ? '−' : '') + '€ ' + i.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + d;
+}
+function cartaEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c])); }
+function cartaCella(l, v, cls) {
+  return '<div' + (cls ? ' class="' + cls + '"' : '') + '><div class="lab">' + cartaEsc(l) + '</div><div class="v">' + (cartaEsc(v) || '&nbsp;') + '</div></div>';
+}
+function cartaIndirizzo(az) {
+  return [az.via, [az.cap, az.citta, az.provincia ? '(' + az.provincia + ')' : ''].filter(Boolean).join(' ')].filter(Boolean);
+}
+
+function stampaDdtTerzista(x, num, mittente, t) {
+  const esc = cartaEsc;
   const az = (state.aziende || []).find(a => a.id === x.terzista_id) || {};
   const nomeDest = az.nome || nomeAziendaDi(x.terzista_id);
-  const indDest = [az.via, [az.cap, az.citta, az.provincia ? '(' + az.provincia + ')' : ''].filter(Boolean).join(' ')].filter(Boolean);
   const comm = commesseDiRichiesta(x);
   const nomeArt = (c) => { const a = (state.articoli || []).find(z => z.id === c.articolo_id); return a ? a.codice : ''; };
   // Righe per commessa (e dentro, per codice): con piu' commesse il terzista
@@ -5505,110 +5616,196 @@ function stampaDdtTerzista(x, num, mittente, t) {
   }).join('');
   const inizio = t.inizio ? new Date(t.inizio) : null;
   const inizioTxt = inizio && !isNaN(inizio) ? inizio.toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
-  const mitt = String(mittente || 'Cablotec S.R.L.').split('\n').map(s => s.trim()).filter(Boolean);
-  const lab = (s) => '<div class="lab">' + esc(s) + '</div>';
-  const val = (v) => '<div class="v">' + (esc(v) || '&nbsp;') + '</div>';
-  const cella = (l, v, cls) => '<div' + (cls ? ' class="' + cls + '"' : '') + '>' + lab(l) + val(v) + '</div>';
   const kg = (v) => v ? v + ' kg' : '';
-  const operatore = state.profile && state.profile.nome ? state.profile.nome : '';
-  const dataDdt = fmtIT(String(x.inviato_il).slice(0, 10));
-  // Logo come immagine: un SVG in linea con un <g transform> ripetuto su
-  // piu' fogli perdeva la scritta CABLO TEC dal secondo in poi.
-  const logo = '<img class="logo" alt="Cablotec" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(LOGO_CABLOTEC_SVG) + '">';
-  const foglio = '<div class="pg"><div class="wm">FAC SIMILE</div>'
-    // testata
-    + '<div class="top"><div class="hd"><div class="br">' + logo + '<div class="mi"><div class="rs">' + esc(mitt[0]) + '</div>'
-    + mitt.slice(1).map(s => '<div>' + esc(s) + '</div>').join('') + '</div></div>'
-    + '<div class="nb"><div class="k">Documento di trasporto</div><div class="kk">D.P.R. 472/1996</div>'
-    + '<div class="n">' + esc(num) + '</div><div class="d">del ' + esc(dataDdt) + '</div><div class="pn"></div></div></div>'
-    + '<div class="rule"></div>'
-    + '<div class="fs">FAC SIMILE — DOCUMENTO DI PROVA, NON VALIDO COME DOCUMENTO DI TRASPORTO</div>'
-    + '<div class="ad"><div class="card">' + lab('Destinatario') + '<div class="nm">' + esc(nomeDest) + '</div>'
-    + '<div class="ln">' + indDest.map(esc).join('<br>') + '</div>' + (az.p_iva ? '<div class="pi">P.IVA ' + esc(az.p_iva) + '</div>' : '') + '</div>'
-    + '<div class="card">' + lab('Luogo di destinazione') + '<div class="nm">' + esc(nomeDest) + '</div>'
-    + '<div class="ln">' + indDest.map(esc).join('<br>') + '</div></div></div>'
-    + '<div class="inf">' + cella('Causale', t.causale) + cella('Resa', t.porto)
-    + cella('Trasporto a cura del', t.cura) + cella('Operatore', operatore) + '</div></div>'
-    // righe
-    + '<div class="mid"><table class="r"><thead><tr><th style="width:24%">Codice</th><th>Descrizione</th>'
-    + '<th class="q" style="width:14%">Quantità</th><th style="width:8%">U.M.</th></tr></thead><tbody></tbody></table></div>'
-    // piede
-    + '<div class="bot"><div class="tr">'
-    + cella('Aspetto dei beni', t.aspetto) + cella('N. colli', t.colli)
-    + cella('Peso netto', kg(t.pesoNetto)) + cella('Peso lordo', kg(t.peso))
-    + cella('Vettore', t.vettore, 's2') + cella('Inizio trasporto', inizioTxt, 's2')
-    + '</div>'
-    + '<div class="an">' + lab('Annotazioni') + val(t.annotazioni) + '</div>'
-    + '<div class="fi"><div>' + lab('Firma conducente') + '</div><div>' + lab('Firma vettore') + '</div>'
-    + '<div>' + lab('Firma destinatario') + '</div></div>'
-    + '<div class="cr"><span>' + esc(mitt[0]) + ' · DDT ' + esc(num) + ' del ' + esc(dataDdt) + ' · ' + nRighe + (nRighe === 1 ? ' riga' : ' righe') + '</span><span>Fac simile generato dal gestionale</span></div>'
-    + '</div></div>';
-  // Impagina: versa le righe nei fogli. Una testata di commessa non resta da
-  // sola in fondo a un foglio; una commessa che continua si ripete con «segue».
-  const impagina = 'function(){'
-    + 'var righe=[].slice.call(document.querySelectorAll("#righe tr"));document.getElementById("righe").remove();'
-    + 'var pg=document.querySelector(".pg"),modello=pg.cloneNode(true),tb=pg.querySelector("tbody"),mid=pg.querySelector(".mid"),gruppo=null;'
-    + 'var pieno=function(){return mid.scrollHeight>mid.clientHeight+1;};'
-    + 'righe.forEach(function(tr){tb.appendChild(tr);if(!pieno()){if(tr.className==="g")gruppo=tr;return;}'
-    + 'tb.removeChild(tr);var porta=[];var ult=tb.lastElementChild;if(ult&&ult.className==="g"&&ult!==tb.firstElementChild){porta.push(ult);tb.removeChild(ult);}'
-    + 'pg=modello.cloneNode(true);document.body.appendChild(pg);tb=pg.querySelector("tbody");mid=pg.querySelector(".mid");'
-    + 'if(!porta.length&&tr.className!=="g"&&gruppo){var s=gruppo.cloneNode(true);s.classList.add("segue");tb.appendChild(s);}'
-    + 'porta.forEach(function(p){tb.appendChild(p);});tb.appendChild(tr);if(tr.className==="g")gruppo=tr;});'
-    + 'var fogli=document.querySelectorAll(".pg");for(var i=0;i<fogli.length;i++)fogli[i].querySelector(".pn").textContent="Pagina "+(i+1)+" di "+fogli.length;'
-    + '}';
-  const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>DDT fac simile ' + esc(num) + '</title><style>'
-    + ':root{--o:#ff6e36;--d:#28282d;--t:#fff4ee;--b:#e4ddd9;--g:#7a716d;}'
-    + '*{box-sizing:border-box;}'
-    + 'body{margin:0;font:9pt/1.35 "Segoe UI",Arial,Helvetica,sans-serif;color:var(--d);background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
-    + '.pg{position:relative;width:186mm;height:272mm;display:flex;flex-direction:column;overflow:hidden;break-after:page;page-break-after:always;}'
-    + '.pg:last-of-type{break-after:auto;page-break-after:auto;}'
-    + '.wm{position:absolute;top:45%;left:-20mm;right:-20mm;text-align:center;font-size:96pt;font-weight:800;white-space:nowrap;color:rgba(200,0,0,.08);transform:rotate(-32deg);pointer-events:none;letter-spacing:.05em;}'
-    // testata
-    + '.top{flex:none;}'
-    + '.hd{display:flex;justify-content:space-between;align-items:stretch;gap:6mm;}'
-    + '.br{display:flex;align-items:center;gap:5mm;}.logo{height:21mm;width:auto;flex:none;}'
-    + '.mi .rs{font-size:13pt;font-weight:800;letter-spacing:.01em;margin-bottom:1mm;}.mi div{font-size:7.6pt;color:#4a4542;line-height:1.4;}'
-    + '.nb{background:var(--d);color:#fff;border-radius:2.5mm;padding:3mm 5mm;min-width:52mm;display:flex;flex-direction:column;justify-content:center;text-align:right;flex:none;}'
-    + '.nb .k{font-size:8pt;font-weight:800;text-transform:uppercase;letter-spacing:.14em;color:var(--o);}'
-    + '.nb .kk{font-size:6.8pt;color:#b9b3b0;margin-top:.5mm;}'
-    + '.nb .n{font-size:21pt;font-weight:800;line-height:1;margin-top:2mm;letter-spacing:.01em;}'
-    + '.nb .d{font-size:9.5pt;margin-top:1mm;color:#e9e4e1;}.nb .pn{font-size:7pt;margin-top:1mm;color:#b9b3b0;}'
-    + '.rule{height:2px;background:linear-gradient(90deg,var(--o),var(--o) 40%,var(--d) 40%);margin:4mm 0 3mm;}'
-    + '.fs{border:1.5px dashed #c62828;color:#c62828;text-align:center;font-weight:800;font-size:7.5pt;letter-spacing:.16em;padding:1.3mm;border-radius:1.5mm;}'
-    + '.lab{font-size:6.6pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--g);}'
-    + '.v{font-weight:700;font-size:9.2pt;margin-top:.6mm;min-height:4mm;}'
-    + '.ad{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:3.5mm;}'
-    + '.card{background:var(--t);border:1px solid #f1d9cc;border-left:3px solid var(--o);border-radius:0 2mm 2mm 0;padding:2.5mm 4mm;}'
-    + '.card .nm{font-size:11pt;font-weight:800;margin-top:1mm;}.card .ln{margin-top:.5mm;}.card .pi{margin-top:1mm;font-size:8pt;color:#4a4542;}'
-    + '.inf{display:grid;grid-template-columns:repeat(4,1fr);margin-top:3.5mm;border:1px solid var(--b);border-radius:2mm;}'
-    + '.inf>div{padding:2mm 3mm;border-left:1px solid var(--b);}.inf>div:first-child{border-left:none;}'
-    // righe
-    + '.mid{flex:1;min-height:0;overflow:hidden;padding-top:4mm;}'
-    + 'table.r{width:100%;border-collapse:collapse;}'
-    + 'table.r th{background:var(--d);color:#fff;font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:2mm 3mm;}'
-    + 'table.r td{padding:1.7mm 3mm;border-bottom:1px solid #eeeae8;vertical-align:top;}'
-    + 'td.c{font-family:Consolas,"Courier New",monospace;font-weight:700;font-size:8.6pt;white-space:nowrap;}'
-    + 'td.q,th.q{text-align:right;}td.q{font-weight:800;white-space:nowrap;font-size:9.5pt;}td.u{color:var(--g);width:10mm;}'
-    + 'tr.g td{background:var(--t);border-bottom:1px solid #f1d9cc;box-shadow:inset 3px 0 0 var(--o);padding:2mm 3mm;font-size:8.4pt;}'
-    + 'tr.g span{margin-left:5mm;color:#4a4542;}tr.g em{display:none;font-style:normal;color:var(--g);}tr.g.segue em{display:inline;}'
-    // piede
-    + '.bot{flex:none;padding-top:4mm;}'
-    + '.tr{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--b);border-radius:2mm;}'
-    + '.tr>div{padding:2mm 3mm;border-left:1px solid var(--b);border-top:1px solid var(--b);}'
-    + '.tr>div:nth-child(-n+4){border-top:none;}.tr>div:nth-child(4n+1){border-left:none;}.s2{grid-column:span 2;}'
-    + '.an{margin-top:3mm;border:1px solid var(--b);border-radius:2mm;padding:2mm 3mm;min-height:13mm;}.an .v{font-weight:400;white-space:pre-line;}'
-    + '.fi{display:grid;grid-template-columns:repeat(3,1fr);gap:6mm;}'
-    + '.fi>div{border-top:1px solid var(--d);padding-top:1.2mm;margin-top:12mm;}'
-    + '.cr{margin-top:3mm;display:flex;justify-content:space-between;font-size:6.6pt;color:#aaa29e;}'
-    + '@media screen{html{background:#e6e3e1;}.pg{box-sizing:content-box;margin:8mm auto;padding:12mm;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.18);}}'
-    + '@page{size:A4 portrait;margin:12mm;}'
-    + '</style></head><body>' + foglio
-    + '<table id="righe" style="display:none"><tbody>' + corpo
-    + '</tbody></table>'
-    + '<script>window.onload=function(){(' + impagina + ')();window.print();};<\/script></body></html>';
-  const w = window.open('', '_blank');
-  if (!w) return toast('Il browser ha bloccato la finestra di stampa: consentila per questo sito.', 'err', 9000);
-  w.document.open(); w.document.write(html); w.document.close();
+  const ind = cartaIndirizzo(az);
+  return stampaCartaCablotec({
+    titolo: 'Documento di trasporto', sottotitolo: 'D.P.R. 472/1996', titoloFinestra: 'DDT fac simile ' + num,
+    numero: num, data: fmtIT(String(x.inviato_il).slice(0, 10)),
+    schede: [{ lab: 'Destinatario', nome: nomeDest, righe: ind, nota: az.p_iva ? 'P.IVA ' + az.p_iva : '' },
+      { lab: 'Luogo di destinazione', nome: nomeDest, righe: ind }],
+    striscia: [['Causale', t.causale], ['Resa', t.porto], ['Trasporto a cura del', t.cura],
+      ['Operatore', state.profile && state.profile.nome ? state.profile.nome : '']],
+    colonne: [{ t: 'Codice', w: '24%' }, { t: 'Descrizione' }, { t: 'Quantità', w: '14%', cls: 'q' }, { t: 'U.M.', w: '8%' }],
+    righe: corpo,
+    piede: '<div class="tr">' + cartaCella('Aspetto dei beni', t.aspetto) + cartaCella('N. colli', t.colli)
+      + cartaCella('Peso netto', kg(t.pesoNetto)) + cartaCella('Peso lordo', kg(t.peso))
+      + cartaCella('Vettore', t.vettore, 's2') + cartaCella('Inizio trasporto', inizioTxt, 's2') + '</div>'
+      + '<div class="an">' + cartaCella('Annotazioni', t.annotazioni) + '</div>'
+      + '<div class="fi"><div><div class="lab">Firma conducente</div></div><div><div class="lab">Firma vettore</div></div>'
+      + '<div><div class="lab">Firma destinatario</div></div></div>',
+    conta: nRighe + (nRighe === 1 ? ' riga' : ' righe'),
+  });
+}
+
+// ── ORDINE AL TERZISTA, FAC SIMILE (18 nov, Nico) ─────────────────────
+// Nasce dal terzista sulla commessa: nei Documenti della sua fase c'e'
+// «＋ Crea OF». La finestra propone GIA' SPUNTATE tutte le commesse aperte di
+// quel terzista non ancora in un ordine; si tolgono quelle da non ordinare
+// adesso (restano libere per il prossimo). Un ordine, piu' commesse, numero
+// progressivo dell'anno assegnato dal database (`crea_ordine_fornitore`) e
+// righe FOTOGRAFATE alla creazione: la ristampa esce identica. Non si
+// cancella: si annulla, e le sue commesse tornano libere.
+// Prezzo di una commessa: «€ ordine» scritto sulla commessa (totale, vince)
+// > €/pz della scheda prodotto > «da definire».
+// `state.ordiniFornitore` null = tabella assente (migrazione non eseguita).
+async function caricaOrdiniFornitore() {
+  try {
+    const { data, error } = await fetchTutte(() =>
+      sb.from('ordini_fornitore').select('*').order('anno').order('numero'));
+    state.ordiniFornitore = error ? null : (data || []);
+  } catch (e) { state.ordiniFornitore = null; }
+}
+function numeroOrdineFornitore(of) { return of ? 'OFS ' + of.numero + '/' + of.anno : ''; }
+// L'ordine EMESSO a questo terzista che contiene la commessa, o null.
+function ordineTerzistaDi(opId, terzistaId) {
+  return (state.ordiniFornitore || []).find(of => of.stato === 'emesso' && of.tipo === 'terzista'
+    && of.fornitore_id === terzistaId && (of.righe || []).some(r => r.operazione_id === opId)) || null;
+}
+// Le commesse ordinabili a un terzista: lui e' sulla commessa, la commessa e'
+// aperta o sospesa, e non e' gia' in un ordine emesso a lui.
+function commesseOrdinabiliTerzista(terzistaId) {
+  const conLui = new Set((state.opFornitori || []).filter(r => r.azienda_id === terzistaId).map(r => r.operazione_id));
+  return (state.operazioni || []).filter(o => conLui.has(o.id) && (o.stato === 'aperta' || o.stato === 'sospesa')
+    && !ordineTerzistaDi(o.id, terzistaId)).sort((a, b) => ordineDiServizio(a, b));
+}
+// La riga d'ordine di una commessa, come la si fotografa.
+function rigaOrdineTerzista(o, terzistaId) {
+  const art = (state.articoli || []).find(a => a.id === o.articolo_id) || {};
+  const pezzi = Number(o.quantita) || 0;
+  const imp = Math.max(0, ...(state.opFornitori || [])
+    .filter(r => r.operazione_id === o.id && r.azienda_id === terzistaId).map(r => Number(r.importo) || 0));
+  const pp = prezzoFornitoreProdotto(o, terzistaId);
+  let prezzo_pz = null, totale = null, fonte = null;
+  if (imp > 0) { totale = imp; prezzo_pz = pezzi > 0 ? Math.round(imp / pezzi * 10000) / 10000 : null; fonte = 'commessa'; }
+  else if (pp) { prezzo_pz = pp.prezzoPz; totale = pp.costo; fonte = 'prodotto'; }
+  return { operazione_id: o.id, etichetta: etiOpTerzista(o), articolo: art.codice || '', descrizione: art.descrizione || '',
+    pezzi, prezzo_pz, totale, fonte, rif_cliente: o.riferimento_cliente || null, scadenza: o.scadenza || null };
+}
+
+function apriOrdineTerzista(o, terzistaId, poi) {
+  if (state.ordiniFornitore == null) return toast('Gli ordini fornitore non sono attivi: manca la tabella (migrazione-ordini-fornitore.sql).', 'err', 9000);
+  const gia = ordineTerzistaDi(o.id, terzistaId);
+  if (gia) return stampaOrdineFornitore(gia);
+  const nome = nomeAziendaDi(terzistaId);
+  const v = veloTerzista('Ordine al terzista · ' + nome, 820);
+  const lista = commesseOrdinabiliTerzista(terzistaId);
+  if (!lista.some(c => c.id === o.id)) lista.unshift(o);
+  const scelte = new Map(lista.map(c => [c.id, true]));
+  const righe = new Map(lista.map(c => [c.id, rigaOrdineTerzista(c, terzistaId)]));
+  const euro = (n) => n == null ? '—' : cartaEuro(n);
+  const tabella = el('div');
+  const totEl = el('span', { style:'font-weight:700;' });
+  const C = 'display:grid;grid-template-columns:24px minmax(150px,1fr) minmax(150px,1.4fr) 60px 80px 90px;gap:8px;align-items:baseline;';
+  const et = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const ridisegnaTot = () => {
+    const sel = lista.filter(c => scelte.get(c.id)).map(c => righe.get(c.id));
+    const daDef = sel.filter(r => r.totale == null).length;
+    totEl.textContent = sel.length + (sel.length === 1 ? ' commessa' : ' commesse') + ' · totale ' + euro(sel.reduce((s, r) => s + (r.totale || 0), 0))
+      + (daDef ? ' · ' + daDef + ' senza prezzo' : '');
+  };
+  tabella.append(el('div', { style: C + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
+    el('span'), et('Commessa'), et('Prodotto'), et('Pz', 1), et('€/pz', 1), et('Totale', 1)));
+  lista.forEach(c => {
+    const r = righe.get(c.id);
+    const cb = el('input', { type:'checkbox' });
+    cb.checked = true;
+    cb.onchange = () => { scelte.set(c.id, cb.checked); ridisegnaTot(); };
+    tabella.append(el('label', { style: C + 'padding:4px 0;border-bottom:1px solid var(--brd);font-size:12px;cursor:pointer;' },
+      cb,
+      el('span', {}, el('span', { class:'mono', style:'font-weight:700;' }, r.etichetta),
+        el('div', { class:'sub', style:'font-size:11px;' }, (c.id === o.id ? 'questa commessa' : '')
+          + (r.scadenza ? (c.id === o.id ? ' · ' : '') + 'scade ' + fmtIT(String(r.scadenza).slice(0, 10)) : ''))),
+      el('span', { style:'min-width:0;' }, el('span', { class:'mono' }, r.articolo || '—'),
+        el('div', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: r.descrizione }, r.descrizione)),
+      el('span', { class:'mono', style:'text-align:right;' }, nfIT(r.pezzi)),
+      el('span', { class:'mono', style:'text-align:right;' + (r.prezzo_pz == null ? 'color:var(--or);' : '') }, r.prezzo_pz == null ? 'da definire' : euro(r.prezzo_pz)),
+      el('span', { class:'mono', style:'text-align:right;font-weight:700;' }, euro(r.totale))));
+  });
+  const inCons = el('input', { type:'date' });
+  const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Ordine di prova: esce con la scritta FAC SIMILE. Sono già spuntate tutte le commesse aperte di ' + nome
+      + ' non ancora ordinate: togli quelle da non ordinare adesso, restano libere per il prossimo ordine. '
+      + 'Prezzo dal «€ ordine» della commessa o dalla scheda prodotto.'),
+    tabella,
+    el('div', { style:'display:flex;justify-content:flex-end;margin:8px 0 12px;font-size:12px;' }, totEl),
+    el('div', { class:'frow' }, campo('Consegna richiesta', inCons)));
+  ridisegnaTot();
+  const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
+  const ok = el('button', { class:'btnp' }, '🖨 Crea e stampa OF');
+  ok.onclick = async () => {
+    const sel = lista.filter(c => scelte.get(c.id)).map(c => righe.get(c.id));
+    if (!sel.length) { msg.textContent = 'Spunta almeno una commessa'; msg.style.color = 'var(--red)'; return; }
+    // La finestra di stampa si apre ADESSO, dentro il clic: dopo l'await il browser la bloccherebbe.
+    const w = window.open('', '_blank');
+    if (w) w.document.write('<p style="font-family:sans-serif">Creazione dell’ordine…</p>');
+    ok.disabled = true; ok.textContent = 'Creazione…';
+    try {
+      const { data, error } = await sb.rpc('crea_ordine_fornitore', { p_tipo: 'terzista', p_fornitore: terzistaId,
+        p_data: toLocalISO(new Date()), p_consegna: inCons.value || null, p_note: null, p_righe: sel });
+      if (error) throw new Error(error.message);
+      const of = Array.isArray(data) ? data[0] : data;
+      if (!of || !of.id) throw new Error('il database non ha restituito l’ordine');
+      (state.ordiniFornitore = state.ordiniFornitore || []).push(of);
+      v.chiudi();
+      toast('Ordine ' + numeroOrdineFornitore(of) + ' a ' + nome + ' creato', 'ok');
+      stampaOrdineFornitore(of, w);
+      if (typeof poi === 'function') poi();
+    } catch (e) {
+      if (w) w.close();
+      ok.disabled = false; ok.textContent = '🖨 Crea e stampa OF';
+      toast('Ordine non creato: ' + (e.message || e), 'err', 9000);
+    }
+  };
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+}
+
+async function annullaOrdineFornitore(of, poi) {
+  const sc = await chiediConferma({ titolo:'Annullare l’ordine ' + numeroOrdineFornitore(of) + '?',
+    testo:'L’ordine resta in archivio come annullato e il suo numero non si riusa. Le sue commesse ('
+      + (of.righe || []).map(r => r.etichetta).join(', ') + ') tornano libere per un ordine nuovo.',
+    conferma:'Annulla l’ordine', annulla:'Tienilo', pericolo:true });
+  if (sc !== 'conferma') return;
+  try {
+    const { data, error } = await sb.rpc('annulla_ordine_fornitore', { p_id: of.id });
+    if (error) throw new Error(error.message);
+    const nuovo = Array.isArray(data) ? data[0] : data;
+    state.ordiniFornitore = (state.ordiniFornitore || []).map(z => z.id === of.id ? (nuovo || { ...z, stato:'annullato' }) : z);
+    toast('Ordine ' + numeroOrdineFornitore(of) + ' annullato', 'ok');
+    if (typeof poi === 'function') poi();
+  } catch (e) { toast('Non annullato: ' + (e.message || e), 'err', 9000); }
+}
+
+function stampaOrdineFornitore(of, finestra) {
+  const esc = cartaEsc;
+  const az = (state.aziende || []).find(a => a.id === of.fornitore_id) || {};
+  const euro = cartaEuro;
+  const righe = of.righe || [];
+  const totale = righe.reduce((s, r) => s + (Number(r.totale) || 0), 0);
+  const daDef = righe.some(r => r.totale == null);
+  const corpo = righe.map(r => '<tr><td class="c">' + esc(r.etichetta)
+    + (r.rif_cliente ? '<span class="s">Rif. cliente ' + esc(r.rif_cliente) + '</span>' : '') + '</td>'
+    + '<td><b>' + esc(r.articolo) + '</b><span class="s">' + esc(r.descrizione) + '</span></td>'
+    + '<td class="q">' + esc(nfIT(r.pezzi)) + '</td>'
+    + '<td class="e">' + (r.prezzo_pz == null ? 'da definire' : esc(euro(r.prezzo_pz))) + '</td>'
+    + '<td class="e"><b>' + esc(euro(r.totale)) + '</b></td></tr>').join('');
+  return stampaCartaCablotec({
+    titolo: 'Ordine fornitore', sottotitolo: 'Conto lavorazione', titoloFinestra: 'OF fac simile ' + numeroOrdineFornitore(of),
+    numero: numeroOrdineFornitore(of), data: fmtIT(String(of.data).slice(0, 10)),
+    schede: [{ lab: 'Fornitore', nome: az.nome || nomeAziendaDi(of.fornitore_id), righe: cartaIndirizzo(az), nota: az.p_iva ? 'P.IVA ' + az.p_iva : '' },
+      { lab: 'Consegna a', nome: INTESTAZIONE_CABLOTEC[0], righe: [INTESTAZIONE_CABLOTEC[1]] }],
+    striscia: [['Consegna richiesta', of.consegna ? fmtIT(String(of.consegna).slice(0, 10)) : 'da concordare'],
+      ['Lavorazione', 'Conto terzi'], ['Commesse', String(righe.length)],
+      ['Operatore', state.profile && state.profile.nome ? state.profile.nome : '']],
+    colonne: [{ t: 'Commessa', w: '25%' }, { t: 'Prodotto' }, { t: 'Pezzi', w: '9%', cls: 'q' },
+      { t: '€/pz', w: '12%', cls: 'q' }, { t: 'Totale', w: '14%', cls: 'q' }],
+    righe: corpo,
+    piede: '<div class="tot"><span class="lab">Totale ordine' + (daDef ? ' (righe senza prezzo escluse)' : '') + '</span><b>' + esc(euro(totale)) + '</b></div>'
+      + '<div class="an">' + cartaCella('Note', of.note || 'Il materiale in conto lavorazione viene consegnato da noi con DDT. Prezzi IVA esclusa.') + '</div>'
+      + '<div class="fi f2"><div><div class="lab">Cablotec S.R.L. · firma</div></div><div><div class="lab">Fornitore · timbro e firma per accettazione</div></div></div>',
+    conta: righe.length + (righe.length === 1 ? ' commessa' : ' commesse'),
+  }, finestra);
 }
 
 // ── 3. LA CONFERMA (quantita' reali -> movimenti) ───────────────────
@@ -6109,7 +6306,11 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
     // con la stampa a un clic. Le annullate restano nel dettaglio chiuso.
     const docVive = f.richieste.filter(x => x.stato !== 'annullato');
     const docRientri = rep ? [] : rientriDiFase(o, f.id);
-    if (docVive.length || docRientri.length) {
+    // L'ORDINE AL TERZISTA (18 nov): nasce dal terzista sulla commessa, quindi
+    // la riga c'e' sempre per i terzisti (se la tabella esiste), anche prima
+    // di qualunque richiesta di materiale.
+    const conOrdine = !rep && o.id && state.ordiniFornitore != null;
+    if (docVive.length || docRientri.length || conOrdine) {
       const docs = el('div', { style:'margin-top:10px;' },
         el('div', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px;' }, 'Documenti'));
       const rigaDoc = (icona, testo, dett, ...bottoni) => el('div', {
@@ -6119,6 +6320,23 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
         el('span', { style:'display:flex;gap:6px;margin-left:auto;' }, ...bottoni.filter(Boolean)));
       const bt = (txt, fn, titolo) => el('button', { type:'button', class:'btnsm', style:'font-size:11px;padding:2px 8px;',
         title: titolo || '', onclick: fn }, txt);
+      if (conOrdine) {
+        const of = ordineTerzistaDi(o.id, f.id);
+        if (of) {
+          const altre = (of.righe || []).filter(r => r.operazione_id !== o.id).map(r => r.etichetta);
+          const tot = (of.righe || []).reduce((s, r) => s + (Number(r.totale) || 0), 0);
+          docs.append(rigaDoc('📑', 'Ordine ' + numeroOrdineFornitore(of) + ' del ' + fmtIT(String(of.data || '').slice(0, 10)),
+            (tot ? cartaEuro(tot) + ' · ' : '')
+              + (of.consegna ? 'consegna ' + fmtIT(String(of.consegna).slice(0, 10)) + ' · ' : '')
+              + (altre.length ? 'insieme a ' + altre.join(', ') + ' · ' : '') + 'fac simile',
+            bt('🖨 OF', () => stampaOrdineFornitore(of), 'Ristampa l’ordine fac simile'),
+            eAdminOra() ? bt('✕', () => annullaOrdineFornitore(of, poi), 'Annulla l’ordine: le sue commesse tornano libere') : null));
+        } else {
+          docs.append(rigaDoc('📑', 'Ordine al terzista', 'non ancora emesso',
+            eAdminOra() ? bt('＋ Crea OF', () => apriOrdineTerzista(o, f.id, poi), 'Ordine fac simile a ' + nomeAziendaDi(f.id)
+              + ', con le sue altre commesse aperte') : null));
+        }
+      }
       docVive.forEach(x => {
         const pc = righePerCodiceTerzista(x);
         const nM = pc.filter(r => r.qta > 0).length, nMan = pc.filter(r => r.mancante > 0).length;
