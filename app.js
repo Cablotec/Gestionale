@@ -14141,14 +14141,12 @@ function openOperazioneModal(o, opts) {
     // se c'e' il reparto il suo bottone sta nella sua scheda, non in testa.
     const { ciclo, seq: seqCiclo } = cicloDellaScheda(art);
     const cicloHaReparto = !!(ciclo && repartoId() && seqCiclo.some(f => eReparto(f.id)));
-    // RICHIESTA PER TERZISTA (5 nov): la lista da far preparare al magazzino
-    // per una fase esterna. Si conferma la spedizione dopo, dalla richiesta.
+    // ⚠ «↗ Richiesta per terzista» in testa TOLTO (18 nov, Nico: "togli, se
+    // ci fosse necessita' di mandare materiali al di fuori dell'ordinario lo
+    // facciamo in altra maniera"). La richiesta parte dal passo «Lista» della
+    // sua fase nel ciclo (o dai mancanti arrivati); da Movimenti resta
+    // «+ Nuova richiesta». Non rimetterlo, ne' un «Altra richiesta» sul passo.
     if (!isNew && isAdmin && richiesteTerzistaPossibili()) {
-      intestazione.append(el('button', { type:'button', class:'btnsm',
-        style: art ? '' : 'margin-left:auto;',
-        title:'Prepara la lista dei materiali di una fase esterna da mandare al terzista. '
-          + 'La giacenza si muove solo quando confermi la spedizione.',
-        onclick: () => apriRichiestaTerzista(o, renderMancanti) }, '↗ Richiesta per terzista'));
       // REPARTO (16 nov): la stessa richiesta, per la quota che resta in casa.
       if (repartoId() && o.materiali_da_ddt && !cicloHaReparto) {
         intestazione.append(el('button', { type:'button', class:'btnsm',
