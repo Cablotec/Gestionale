@@ -1792,8 +1792,22 @@ function renderTab(name) {
   // lasciando a schermo solo la sua. Rimappare qui e' una riga; inseguire
   // diciotto chiamate e' il modo di dimenticarne una.
   if (name === 'mezzi' || name === 'chiusure' || name === 'tipi_assenza') name = 'imp_calendari';
-  state.currentTab = name;
   const root = $('#tab-content');
+  // ⚠ LA CASELLA DI RICERCA NON SI TOGLIE DI MANO (18 nov, dai reparti: "alcuni
+  // caratteri si perdono"). Ridisegnare la scheda ricrea anche la casella: se
+  // ci stavi scrivendo — per l'aggiornamento in tempo reale di qualcun altro o
+  // per la tua stessa ricerca — perdevi il fuoco e il cursore saltava in fondo.
+  // Si ricorda quale casella (per id, o per posizione fra le .search) e dove
+  // stava il cursore, e si rimette tutto com'era dopo il disegno.
+  const ricercaAttiva = (() => {
+    const a = document.activeElement;
+    if (!a || a.tagName !== 'INPUT' || !a.classList.contains('search') || !root.contains(a)) return null;
+    if (state.currentTab !== name) return null;
+    let s0 = null, s1 = null;
+    try { s0 = a.selectionStart; s1 = a.selectionEnd; } catch (e) {}
+    return { id: a.id || null, pos: [...root.querySelectorAll('input.search')].indexOf(a), s0, s1 };
+  })();
+  state.currentTab = name;
   if (!state.loaded) { root.innerHTML = '<div class="empty">Caricamento…</div>'; return; }
   try {
     if (name === 'generale')          renderGenerale(root);
@@ -1836,18 +1850,28 @@ function renderTab(name) {
       el('button', { class:'btnp', onclick:()=>renderTab(name) }, 'Riprova'),
     ));
   }
-  // Ripristina il focus su un campo di ricerca se richiesto
-  // (i campi che ri-renderizzano la tab a ogni carattere perderebbero il focus)
-  if (state._focusSearch) {
-    const campo = document.getElementById(state._focusSearch);
-    state._focusSearch = null;
-    if (campo) {
+  // La casella che si stava usando torna a fuoco, col cursore dov'era.
+  if (ricercaAttiva) {
+    const campo = (ricercaAttiva.id && document.getElementById(ricercaAttiva.id))
+      || root.querySelectorAll('input.search')[ricercaAttiva.pos];
+    if (campo && campo !== document.activeElement) {
       campo.focus();
-      // Riporta il cursore alla fine del testo
-      const v = campo.value;
-      try { campo.setSelectionRange(v.length, v.length); } catch (e) {}
+      const n = (campo.value || '').length;
+      const a = ricercaAttiva.s0 == null ? n : Math.min(ricercaAttiva.s0, n);
+      const b = ricercaAttiva.s1 == null ? n : Math.min(ricercaAttiva.s1, n);
+      try { campo.setSelectionRange(a, b); } catch (e) {}
     }
   }
+}
+
+// Le ricerche che ridisegnano TUTTA la scheda (Ordini cliente, Storico,
+// Prodotti, Aziende, Attivita' extra) aspettano 200 ms dopo l'ultimo tasto:
+// prima ridisegnavano a ogni lettera, e su un PC lento la scrittura andava a
+// scatti. Lo stato si aggiorna subito, il disegno una volta sola.
+let _ricercaTimer = null;
+function ridisegnaDopoRicerca(tab) {
+  clearTimeout(_ricercaTimer);
+  _ricercaTimer = setTimeout(() => { if (state.currentTab === tab) renderTab(tab); }, 200);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3240,7 +3264,7 @@ function renderAziende(root) {
       type:'text', class:'search', id:'cli-search',
       placeholder:'Cerca per nome, indirizzo, città, P.IVA…',
       value: state.azSearch || '',
-      oninput: (e) => { state.azSearch = e.target.value; state._focusSearch = 'cli-search'; renderTab('aziende'); }
+      oninput: (e) => { state.azSearch = e.target.value; ridisegnaDopoRicerca('aziende'); }
     }),
   );
   if (isAdmin) {
@@ -3912,7 +3936,7 @@ function renderArticoli(root) {
       type:'text', class:'search', id:'art-search',
       placeholder:'Cerca per codice, descrizione, categoria…',
       value: state.artSearch || '',
-      oninput: (e) => { state.artSearch = e.target.value; state._focusSearch = 'art-search'; renderTab('articoli'); }
+      oninput: (e) => { state.artSearch = e.target.value; ridisegnaDopoRicerca('articoli'); }
     }),
   );
   if (isAdmin) {
@@ -12371,8 +12395,7 @@ function renderPianificazione(root) {
     value: state.opSearch || '',
     oninput: (e) => {
       state.opSearch = e.target.value;
-      state._focusSearch = 'pian-search';
-      renderTab('pianificazione');
+      ridisegnaDopoRicerca('pianificazione');
     }
   });
   // Pulsante filtro clienti (popup multi-checkbox in stile Excel)
@@ -16896,7 +16919,7 @@ function renderStorico(root) {
       type:'text', class:'search', id:'sto-search',
       placeholder:'Cerca DDT, ordine, OP, rif. cliente, pos, cliente, codice, descrizione…',
       value: state.stoSearch || '',
-      oninput: (e) => { state.stoSearch = e.target.value; state._focusSearch = 'sto-search'; renderTab('storico'); }
+      oninput: (e) => { state.stoSearch = e.target.value; ridisegnaDopoRicerca('storico'); }
     }),
     el('button', { class:'btng', onclick:storicoExportExcel }, '⬇ Esporta'),
   );
@@ -24497,7 +24520,7 @@ function renderTimbriExtra(root) {
       type:'text', class:'search', id:'tx-search', style:'max-width:300px;',
       placeholder:'Cerca nella nota, nell\'attività, nel nome…',
       value: state.txSearch || '',
-      oninput: (e) => { state.txSearch = e.target.value; state._focusSearch = 'tx-search'; renderTab('timbri_extra'); },
+      oninput: (e) => { state.txSearch = e.target.value; ridisegnaDopoRicerca('timbri_extra'); },
     }),
     selAtt, selUte, selMese,
     el('button', {
