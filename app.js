@@ -5455,19 +5455,25 @@ function apriDdtTerzista(x) {
   v.piede.append(el('button', { class:'btng', onclick: v.chiudi }, 'Chiudi'), ok);
 }
 
+// Logo Cablotec per la stampa del DDT (solo tracciati, dal vettoriale ufficiale).
+// Dentro il codice e non come file: la stampa e' una finestra scritta con
+// document.write, dove un indirizzo relativo non e' detto che si risolva.
+const LOGO_CABLOTEC_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="150 100 2440 2060"><g transform="translate(23.4)"><path fill="#000000" d="m 1759.3,1775.5 c -66.1,0 -127.4,35.3 -160.5,92.6 -33.0,57.2 -33.0,128.0 0,185.3 33.0,57.2 94.3,92.6 160.5,92.6 h 185.5 l 55.0,-95 H 1759.3 c -32.3,0 -62.0,-17.1 -78.2,-45.1 -16.1,-28.0 -16.1,-62.3 0,-90.3 16.1,-28.0 45.9,-45.1 78.2,-45.1 h 345.3 l 55.0,-95 z"/><path fill="#000000" d="m 1118.7,1775.5 v 1.0 93.9 43.5 95 138.5 h 95 258.9 l 54.8,-95 H 1213.7 v -43.5 h 258.9 l 54.8,-95 H 1213.7 v -43.5 h 258.9 l 54.8,-95 z"/><path fill="#000000" d="m 676.8,1775.5 -54.8,95 h 178.4 v 276.6 h 95.0 v -276.6 h 123.6 l 54.8,-95 z"/><path fill="#ff6e36" d="m 2233.0,1364.7 c -66.1,0 -127.4,35.3 -160.5,92.6 -33.0,57.2 -33.0,128.0 0,185.3 33.0,57.2 94.3,92.6 160.5,92.6 h 164.7 c 66.1,0 127.4,-35.3 160.5,-92.6 33.0,-57.2 33.0,-128.0 0,-185.3 -33.0,-57.2 -94.3,-92.6 -160.5,-92.6 z m 0,95 h 164.7 c 32.3,0 62.0,17.1 78.2,45.1 16.1,28.0 16.1,62.3 0,90.3 -16.1,28.0 -45.9,45.1 -78.2,45.1 h -164.7 c -32.3,0 -62.0,-17.1 -78.2,-45.1 -16.1,-28.0 -16.1,-62.3 0,-90.3 16.1,-28.0 45.9,-45.1 78.2,-45.1 z"/><path fill="#ff6e36" d="m 1628.6,1364.7 v 372.0 h 95 258.9 l 54.8,-95 H 1723.6 V 1364.7 Z"/><path fill="#ff6e36" d="m 908.1,1364.7 v 0.3 l 54.6,94.6 H 1465.9 c 7.6,0 14.6,3.9 18.4,10.6 3.8,6.6 3.8,14.6 0,21.3 -3.8,6.6 -10.7,10.6 -18.4,10.6 h -345.0 v 232.5 h 345.0 c 41.4,0 79.9,-22.2 100.7,-58.1 20.7,-35.9 20.7,-80.3 0,-116.3 -2.1,-3.7 -4.5,-7.2 -7.0,-10.6 2.5,-3.4 4.8,-6.9 7.0,-10.6 20.7,-35.9 20.7,-80.3 0,-116.3 -20.7,-35.9 -59.2,-58.1 -100.7,-58.1 z m 307.7,232.6 h 250.0 c 7.6,0 14.6,3.9 18.4,10.6 3.8,6.6 3.8,14.6 0,21.3 -3.8,6.6 -10.7,10.6 -18.4,10.6 h -250.0 z"/><path fill="#ff6e36" d="m 786.0,1364.7 c -16.9,8e-4 -32.6,9.0 -41.1,23.7 l -292.9,507.4 h 109.6 l 248.3,-430.1 100.9,174.8 H 754.4 l -54.8,95 H 1075.4 L 875.0,1388.5 c -8.4,-14.6 -24.1,-23.7 -41.1,-23.7 z"/><path fill="#ff6e36" d="m 313.5,1364.7 c -66.1,0 -127.4,35.3 -160.5,92.6 -33.0,57.2 -33.0,128.0 0,185.3 33.0,57.2 94.3,92.6 160.5,92.6 H 499.1 l 55.0,-95 H 313.5 c -32.3,0 -62.0,-17.1 -78.2,-45.1 -16.1,-28.0 -16.1,-62.3 0,-90.3 16.1,-28.0 45.9,-45.1 78.2,-45.1 H 658.9 l 55.0,-95 z"/></g><path fill="#ff6e36" d="m 1375.0,108.3 a 571.1,571.1 0 0 0 -250.9,59.0 v 363.7 a 112.0,112.0 0 0 1 75.1,105.7 A 112.0,112.0 0 0 1 1087.2,748.9 112.0,112.0 0 0 1 975.1,636.8 112.0,112.0 0 0 1 1049.3,531.7 V 211.5 A 571.1,571.1 0 0 0 803.8,679.4 571.1,571.1 0 0 0 868.7,941.0 h 473.5 c 9.9,-10.2 23.6,-15.9 37.9,-16.0 29.4,-7.9e-4 53.3,23.9 53.3,53.3 -3e-4,29.4 -23.9,53.3 -53.3,53.3 -14.2,-0.0 -27.9,-5.8 -37.9,-16.0 H 915.1 a 571.1,571.1 0 0 0 459.8,234.8 571.1,571.1 0 0 0 79.9,-5.7 V 547.4 c -25.4,-13.3 -42.6,-40.1 -42.6,-70.8 0,-44.1 35.8,-80 80,-80 44.1,0 80.0,35.8 80.0,80 0,30.6 -17.3,57.4 -42.7,70.8 v 681.6 a 571.1,571.1 0 0 0 106.8,-42.0 V 857.0 c -25.4,-13.3 -42.6,-40.1 -42.6,-70.8 0,-44.1 35.8,-80 80,-80 44.1,0 80.0,35.9 80.0,80 0,30.6 -17.3,57.4 -42.7,70.8 V 1141.0 A 571.1,571.1 0 0 0 1946.1,679.4 571.1,571.1 0 0 0 1782.2,279.0 H 1279.3 c -9.9,10.1 -23.5,15.8 -37.7,15.9 -29.4,-8.3e-4 -53.2,-23.8 -53.2,-53.2 -3e-4,-29.4 23.8,-53.2 53.2,-53.2 14.2,0.0 27.9,5.7 37.9,15.9 h 412.5 a 571.1,571.1 0 0 0 -317.0,-96.0 z"/></svg>';
+
+// Restyling A4 verticale (18 nov, Nico: "fare un restyling completo, sentiti
+// libero di ispirarti"). Contenuto del DDT di Alnus, impaginazione nostra:
+// testata con logo e numero in evidenza, destinatario e destinazione in due
+// schede, dati del trasporto in una striscia, righe raggruppate per commessa,
+// piede (trasporto, annotazioni, firme) spinto in fondo alla pagina.
 function stampaDdtTerzista(x, num, mittente, t) {
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
   const az = (state.aziende || []).find(a => a.id === x.terzista_id) || {};
-  const dest = [az.nome || nomeAziendaDi(x.terzista_id), az.via,
-    [az.cap, az.citta, az.provincia ? '(' + az.provincia + ')' : ''].filter(Boolean).join(' '),
-    az.p_iva ? 'P.IVA ' + az.p_iva : ''].filter(Boolean);
-  // Impaginato sul modello del DDT di Alnus (18 nov, Nico: "un DDT da usare
-  // come esempio"): testata a riquadri, destinatario a destra, righe raggruppate
-  // per commessa con i riferimenti sopra, piede con colli/pesi/vettore/firme.
+  const nomeDest = az.nome || nomeAziendaDi(x.terzista_id);
+  const indDest = [az.via, [az.cap, az.citta, az.provincia ? '(' + az.provincia + ')' : ''].filter(Boolean).join(' ')].filter(Boolean);
   const comm = commesseDiRichiesta(x);
   const nomeArt = (c) => { const a = (state.articoli || []).find(z => z.id === c.articolo_id); return a ? a.codice : ''; };
   // Righe per commessa (e dentro, per codice): con piu' commesse il terzista
-  // vede per quale ordine e' ogni materiale, come «Rif.Ns.Ordine» di Alnus.
+  // vede per quale ordine e' ogni materiale.
   const perOp = new Map();
   (x.righe || []).forEach(r => {
     const q = Number(r.qta_inviata != null ? r.qta_inviata : r.qta) || 0;
@@ -5479,73 +5485,108 @@ function stampaDdtTerzista(x, num, mittente, t) {
     m.get(c).qta = +(m.get(c).qta + q).toFixed(4);
   });
   const ordineOp = comm.map(c => c.id).filter(id => perOp.has(id)).concat([...perOp.keys()].filter(id => !comm.some(c => c.id === id)));
-  const inizio = t.inizio ? new Date(t.inizio) : null;
-  const inizioTxt = inizio && !isNaN(inizio) ? inizio.toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
-  const nn = (v) => esc(v) || '&nbsp;';
-  const mitt = String(mittente || 'Cablotec').split('\n').map(s => s.trim()).filter(Boolean);
+  let nRighe = 0;
   const corpo = ordineOp.map(opId => {
     const o = comm.find(c => c.id === opId) || (state.operazioni || []).find(z => z.id === opId);
-    const pz = (x.righe || []).find(r => opDiRigaTerzista(x, r) === opId && r.pz != null);
-    const testa = o ? '<tr class="rif"><td></td><td>'
-      + '<div class="rb">Rif. Ns. Commessa ' + esc(etiOpTerzista(o)) + '</div>'
-      + (nomeArt(o) ? '<div class="rb">Prodotto ' + esc(nomeArt(o)) + (pz || o.quantita ? ' · ' + esc(nfIT(pz ? pz.pz : o.quantita)) + ' pz' : '') + '</div>' : '')
-      + (o.riferimento_cliente ? '<div class="rs">Rif. Cliente: ' + esc(o.riferimento_cliente) + '</div>' : '')
-      + '</td><td></td><td></td></tr>' : '';
+    const rPz = (x.righe || []).find(r => opDiRigaTerzista(x, r) === opId && r.pz != null);
+    const pz = rPz ? rPz.pz : (o && o.quantita);
+    const testa = o ? '<tr class="g"><td colspan="4"><b>Commessa ' + esc(etiOpTerzista(o)) + '</b>'
+      + (nomeArt(o) ? '<span>Prodotto <b>' + esc(nomeArt(o)) + '</b>' + (pz ? ' · ' + esc(nfIT(pz)) + ' pz' : '') + '</span>' : '')
+      + (o.riferimento_cliente ? '<span>Rif. cliente ' + esc(o.riferimento_cliente) + '</span>' : '')
+      + '</td></tr>' : '';
     const righe = [...perOp.get(opId).values()].sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true }));
-    return testa + righe.map(r => '<tr><td class="cod">' + esc(r.codice) + '</td><td>' + esc(r.descrizione)
-      + '</td><td class="um">' + esc(r.um) + '</td><td class="n">' + esc(nfIT(r.qta)) + '</td></tr>').join('');
+    nRighe += righe.length;
+    return testa + righe.map(r => '<tr><td class="c">' + esc(r.codice) + '</td><td>' + esc(r.descrizione)
+      + '</td><td class="q">' + esc(nfIT(r.qta)) + '</td><td class="u">' + esc(r.um) + '</td></tr>').join('');
   }).join('');
+  const inizio = t.inizio ? new Date(t.inizio) : null;
+  const inizioTxt = inizio && !isNaN(inizio) ? inizio.toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+  const mitt = String(mittente || 'Cablotec S.R.L.').split('\n').map(s => s.trim()).filter(Boolean);
+  const lab = (it, en) => '<div class="lab">' + esc(it) + (en ? '<i>' + esc(en) + '</i>' : '') + '</div>';
+  const val = (v) => '<div class="v">' + (esc(v) || '&nbsp;') + '</div>';
+  const cella = (it, en, v, cls) => '<div' + (cls ? ' class="' + cls + '"' : '') + '>' + lab(it, en) + val(v) + '</div>';
+  const kg = (v) => v ? v + ' kg' : '';
+  const operatore = state.profile && state.profile.nome ? state.profile.nome : '';
   const html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>DDT fac simile ' + esc(num) + '</title><style>'
-    + 'body{font-family:Arial,Helvetica,sans-serif;font-size:10px;margin:18px;color:#000;background:#fff;}'
-    + '.wm{position:fixed;top:42%;left:0;right:0;text-align:center;font-size:110px;font-weight:700;color:rgba(200,0,0,.12);transform:rotate(-30deg);pointer-events:none;}'
-    + '.fs{border:2px solid #b00;color:#b00;font-weight:700;text-align:center;padding:3px;margin-bottom:8px;letter-spacing:.1em;font-size:10px;}'
-    + '.mt h1{font-size:20px;margin:0 0 4px;border-bottom:1px solid #000;padding-bottom:3px;}.mt div{font-size:10px;font-weight:700;line-height:1.35;}'
-    + '.mid{display:grid;grid-template-columns:47% 1fr;gap:4%;margin-top:16px;align-items:start;}'
-    + '.doc{border:3px double #555;padding:4px 6px;}.doc .t{font-size:15px;font-weight:700;}.doc .t2{font-size:13px;font-weight:700;}.doc .t2 span{font-size:9px;font-weight:400;margin-left:20px;}'
-    + '.doc table{width:100%;border-collapse:collapse;margin-top:4px;}.doc th,.doc td{border:1px solid #000;text-align:center;padding:3px;}.doc td{font-size:13px;font-weight:700;}.doc th{font-size:10px;}'
-    + '.kv{display:grid;grid-template-columns:auto 1fr;gap:1px 10px;margin-top:8px;font-size:9px;}.kv b{font-weight:700;}'
-    + '.dst{background:#f6b8a5;border:1px solid #000;}.dst .h{padding:2px 6px;border-bottom:1px solid #000;font-size:10px;}.dst .v{padding:5px 6px 8px;font-weight:700;font-size:10px;line-height:1.3;white-space:pre-line;min-height:52px;}'
-    + '.dst .v+.h{border-top:1px solid #000;}'
-    + 'table.r{width:100%;border-collapse:collapse;margin-top:14px;border:1px solid #000;}'
-    + 'table.r th{background:#f6b8a5;font-style:italic;font-size:9px;padding:3px;border:1px solid #000;}'
-    + 'table.r td{border-left:1px solid #000;border-right:1px solid #000;padding:2px 6px;vertical-align:top;font-size:11px;}'
-    + 'table.r td.cod{font-weight:700;font-size:10px;white-space:nowrap;}table.r td.um{text-align:center;}.n{text-align:right;}'
-    + 'tr.rif td{padding-top:10px;}.rb{font-weight:700;font-size:11px;margin-bottom:2px;}.rs{font-size:9px;}'
-    + 'tr{page-break-inside:avoid;}thead{display:table-header-group;}tr.fill td{height:120px;}'
-    + 'table.p{width:100%;border-collapse:collapse;}table.p td{border:1px solid #000;vertical-align:top;padding:2px 5px;font-size:9px;height:34px;}'
-    + 'table.p .v{display:block;font-weight:700;font-size:10px;margin-top:3px;}.ce{text-align:center;}'
-    + '@page{size:A4 portrait;margin:10mm;}@media print{body{margin:0;}}'
-    + '</style></head><body><div class="wm">FAC SIMILE</div>'
-    + '<div class="fs">FAC SIMILE — documento di prova, non valido come documento di trasporto</div>'
-    + '<div class="mt"><h1>' + esc(mitt[0] || '') + '</h1>' + mitt.slice(1).map(s => '<div>' + esc(s) + '</div>').join('') + '</div>'
-    + '<div class="mid"><div>'
-    + '<div class="doc"><div class="t">DOCUMENTO DI TRASPORTO (D.D.T.)</div><div class="t2">Delivery Note<span>(D.P.R. 14-08-1996 N. 472)</span></div>'
-    + '<table><tr><th>Numero</th><th>Data</th><th>Pag.</th></tr><tr><td>' + esc(num) + '</td><td>' + esc(fmtIT(String(x.inviato_il).slice(0, 10))) + '</td><td>1 / 1</td></tr></table></div>'
-    + '<div class="kv">'
-    + '<span>Part.IVA - VAT N°</span><b>' + nn(az.p_iva) + '</b>'
-    + '<span>Caus.Trasp. - Reason for Shipment</span><b>' + nn(t.causale) + '</b>'
-    + '<span>Resa - Carriage</span><b>' + nn(t.porto) + '</b>'
-    + '<span>Operatore - Our Ref.</span><b>' + nn(state.profile && (state.profile.nome || '').toUpperCase()) + '</b>'
-    + '</div></div>'
-    + '<div class="dst"><div class="h">Spett.le Ditta - To Company</div><div class="v">' + dest.map(esc).join('\n') + '</div>'
-    + '<div class="h">Luogo di Destinazione - Goods Destination</div><div class="v">' + dest.filter(s => !/^P\.IVA /.test(s)).map(esc).join('\n') + '</div></div>'
+    + ':root{--o:#ff6e36;--d:#28282d;--t:#fff4ee;--b:#e4ddd9;--g:#7a716d;}'
+    + '*{box-sizing:border-box;}'
+    + 'body{margin:0;font:9pt/1.35 "Segoe UI",Arial,Helvetica,sans-serif;color:var(--d);background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+    + '.pg{min-height:273mm;display:flex;flex-direction:column;position:relative;}'
+    + '@media screen{body{background:#e6e3e1;}.pg{width:210mm;min-height:297mm;margin:8mm auto;padding:12mm;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.18);}}'
+    + '.wm{position:fixed;top:45%;left:0;right:0;text-align:center;font-size:96pt;font-weight:800;white-space:nowrap;color:rgba(200,0,0,.08);transform:rotate(-32deg);pointer-events:none;letter-spacing:.05em;}'
+    // testata
+    + '.hd{display:flex;justify-content:space-between;align-items:stretch;gap:8mm;}'
+    + '.br{display:flex;align-items:center;gap:5mm;}.br svg{height:21mm;width:auto;flex:none;}'
+    + '.mi .rs{font-size:13pt;font-weight:800;letter-spacing:.01em;margin-bottom:1mm;}.mi div{font-size:7.8pt;color:#4a4542;}'
+    + '.nb{background:var(--d);color:#fff;border-radius:2.5mm;padding:3.5mm 5mm;min-width:60mm;display:flex;flex-direction:column;justify-content:center;text-align:right;}'
+    + '.nb .k{font-size:8pt;font-weight:800;text-transform:uppercase;letter-spacing:.14em;color:var(--o);}'
+    + '.nb .kk{font-size:6.8pt;color:#b9b3b0;margin-top:.5mm;}'
+    + '.nb .n{font-size:21pt;font-weight:800;line-height:1;margin-top:2.5mm;letter-spacing:.01em;}'
+    + '.nb .d{font-size:9.5pt;margin-top:1mm;color:#e9e4e1;}'
+    + '.rule{height:2px;background:linear-gradient(90deg,var(--o),var(--o) 40%,var(--d) 40%);margin:4mm 0 3mm;}'
+    + '.fs{border:1.5px dashed #c62828;color:#c62828;text-align:center;font-weight:800;font-size:7.5pt;letter-spacing:.16em;padding:1.3mm;border-radius:1.5mm;}'
+    // etichette e valori
+    + '.lab{font-size:6.6pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--g);}'
+    + '.lab i{font-style:normal;font-weight:400;text-transform:none;letter-spacing:0;color:#aaa29e;margin-left:1.5mm;}'
+    + '.v{font-weight:700;font-size:9.2pt;margin-top:.6mm;min-height:4mm;}'
+    // destinatario
+    + '.ad{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:4mm;}'
+    + '.card{background:var(--t);border:1px solid #f1d9cc;border-left:3px solid var(--o);border-radius:0 2mm 2mm 0;padding:3mm 4mm;min-height:26mm;}'
+    + '.card .nm{font-size:11pt;font-weight:800;margin-top:1.5mm;}.card .ln{margin-top:.5mm;}.card .pi{margin-top:1.5mm;font-size:8pt;color:#4a4542;}'
+    // striscia dati
+    + '.inf{display:grid;grid-template-columns:repeat(4,1fr);margin-top:4mm;border:1px solid var(--b);border-radius:2mm;}'
+    + '.inf>div{padding:2mm 3mm;border-left:1px solid var(--b);}.inf>div:first-child{border-left:none;}'
+    // righe
+    + 'table.r{width:100%;border-collapse:collapse;margin-top:5mm;}'
+    + 'table.r th{background:var(--d);color:#fff;font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:2mm 3mm;}'
+    + 'table.r th i{display:block;font-style:normal;font-weight:400;text-transform:none;letter-spacing:0;color:#a9a3a0;font-size:6.5pt;}'
+    + 'table.r th:first-child{border-radius:1.5mm 0 0 0;}table.r th:last-child{border-radius:0 1.5mm 0 0;}'
+    + 'table.r td{padding:1.7mm 3mm;border-bottom:1px solid #eeeae8;vertical-align:top;}'
+    + 'td.c{font-family:Consolas,"Courier New",monospace;font-weight:700;font-size:8.6pt;white-space:nowrap;}'
+    + 'td.q,th.q{text-align:right;}td.q{font-weight:800;white-space:nowrap;font-size:9.5pt;}td.u{color:var(--g);width:10mm;}'
+    + 'tr.g td{background:var(--t);border-bottom:1px solid #f1d9cc;box-shadow:inset 3px 0 0 var(--o);padding:2mm 3mm;font-size:8.4pt;}'
+    + 'tr.g span{margin-left:5mm;color:#4a4542;}'
+    + 'tr{page-break-inside:avoid;}thead{display:table-header-group;}'
+    + '.tot{display:flex;justify-content:flex-end;margin-top:1.5mm;font-size:7.5pt;color:var(--g);}'
+    + '.sp{flex:1;min-height:6mm;}'
+    // piede
+    + '.ft{page-break-inside:avoid;}'
+    + '.tr{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--b);border-radius:2mm;}'
+    + '.tr>div{padding:2mm 3mm;border-left:1px solid var(--b);border-top:1px solid var(--b);}'
+    + '.tr>div:nth-child(-n+4){border-top:none;}.tr>div:nth-child(4n+1),.tr>.s2:nth-child(5){border-left:none;}.s2{grid-column:span 2;}'
+    + '.an{margin-top:3mm;border:1px solid var(--b);border-radius:2mm;padding:2mm 3mm;min-height:15mm;}.an .v{font-weight:400;white-space:pre-line;}'
+    + '.fi{display:grid;grid-template-columns:repeat(3,1fr);gap:6mm;margin-top:5mm;}'
+    + '.fi>div{border-top:1px solid var(--d);padding-top:1.2mm;margin-top:13mm;}'
+    + '.cr{margin-top:4mm;display:flex;justify-content:space-between;font-size:6.6pt;color:#aaa29e;}'
+    + '@page{size:A4 portrait;margin:12mm;}'
+    + '</style></head><body><div class="pg"><div class="wm">FAC SIMILE</div>'
+    + '<div class="hd"><div class="br">' + LOGO_CABLOTEC_SVG + '<div class="mi"><div class="rs">' + esc(mitt[0]) + '</div>'
+    + mitt.slice(1).map(s => '<div>' + esc(s) + '</div>').join('') + '</div></div>'
+    + '<div class="nb"><div class="k">Documento di trasporto</div><div class="kk">Delivery note · D.P.R. 472/1996</div>'
+    + '<div class="n">' + esc(num) + '</div><div class="d">del ' + esc(fmtIT(String(x.inviato_il).slice(0, 10))) + '</div></div></div>'
+    + '<div class="rule"></div>'
+    + '<div class="fs">FAC SIMILE — DOCUMENTO DI PROVA, NON VALIDO COME DOCUMENTO DI TRASPORTO</div>'
+    + '<div class="ad"><div class="card">' + lab('Destinatario', 'To company') + '<div class="nm">' + esc(nomeDest) + '</div>'
+    + '<div class="ln">' + indDest.map(esc).join('<br>') + '</div>' + (az.p_iva ? '<div class="pi">P.IVA ' + esc(az.p_iva) + '</div>' : '') + '</div>'
+    + '<div class="card">' + lab('Luogo di destinazione', 'Goods destination') + '<div class="nm">' + esc(nomeDest) + '</div>'
+    + '<div class="ln">' + indDest.map(esc).join('<br>') + '</div></div></div>'
+    + '<div class="inf">' + cella('Causale', 'Reason', t.causale) + cella('Resa', 'Carriage', t.porto)
+    + cella('A cura del', 'Shipment by', t.cura) + cella('Operatore', 'Our ref.', operatore) + '</div>'
+    + '<table class="r"><thead><tr><th style="width:24%">Codice<i>Item code</i></th><th>Descrizione<i>Description</i></th>'
+    + '<th class="q" style="width:14%">Quantità<i>Quantity</i></th><th style="width:8%">U.M.<i>Unit</i></th></tr></thead>'
+    + '<tbody>' + corpo + '</tbody></table>'
+    + '<div class="tot">' + nRighe + (nRighe === 1 ? ' riga' : ' righe') + '</div>'
+    + '<div class="sp"></div>'
+    + '<div class="ft"><div class="tr">'
+    + cella('Aspetto dei beni', 'Goods', t.aspetto) + cella('N. colli', 'Packages', t.colli)
+    + cella('Peso netto', 'Net weight', kg(t.pesoNetto)) + cella('Peso lordo', 'Gross weight', kg(t.peso))
+    + cella('Vettore', 'Carrier', t.vettore, 's2') + cella('Inizio trasporto', 'Date/time shipment', inizioTxt, 's2')
     + '</div>'
-    + '<table class="r"><thead><tr><th style="width:20%">COD.ARTICOLO<br>Item Code</th><th>DESCRIZIONE<br>Description</th>'
-    + '<th style="width:6%">U.M.</th><th style="width:13%">QUANTITA\'<br>Quantity</th></tr></thead><tbody>'
-    + corpo + '<tr class="fill"><td></td><td></td><td></td><td></td></tr></tbody></table>'
-    + '<table class="p">'
-    + '<tr><td colspan="2">Aspetto Esteriore dei Beni - Description of Goods<span class="v">' + nn(t.aspetto) + '</span></td>'
-    + '<td class="ce">N.Colli - No. Packages<span class="v">' + nn(t.colli) + '</span></td>'
-    + '<td class="ce">Peso Netto - Net Weight<span class="v">' + (t.pesoNetto ? esc(t.pesoNetto) + ' kg' : '&nbsp;') + '</span></td>'
-    + '<td class="ce">Peso Lordo - Gross Weight<span class="v">' + (t.peso ? esc(t.peso) + ' kg' : '&nbsp;') + '</span></td></tr>'
-    + '<tr><td colspan="2" rowspan="2">Vettore - Carrier<span class="v">' + nn(t.vettore) + '</span></td>'
-    + '<td class="ce">Data/Ora Trasporto - Date/Time Shipment<span class="v">' + nn(inizioTxt) + '</span></td>'
-    + '<td colspan="2" class="ce">Firma Vettore - Carrier Signature</td></tr>'
-    + '<tr><td class="ce">Trasporto a Cura del - Shipment by<span class="v">' + nn(t.cura) + '</span></td>'
-    + '<td colspan="2" class="ce">Firma Conducente - Driver Signature</td></tr>'
-    + '<tr><td colspan="3" style="height:44px;">Annotazioni / Variazioni - Notes<span class="v" style="font-weight:400;white-space:pre-line;">' + nn(t.annotazioni) + '</span></td>'
-    + '<td colspan="2" class="ce">Firma Destinatario - Addressee Signature</td></tr>'
-    + '</table>'
+    + '<div class="an">' + lab('Annotazioni', 'Notes') + val(t.annotazioni) + '</div>'
+    + '<div class="fi"><div>' + lab('Firma conducente', 'Driver') + '</div><div>' + lab('Firma vettore', 'Carrier') + '</div>'
+    + '<div>' + lab('Firma destinatario', 'Addressee') + '</div></div>'
+    + '<div class="cr"><span>' + esc(mitt[0]) + ' · DDT ' + esc(num) + '</span><span>Fac simile generato dal gestionale</span></div>'
+    + '</div></div>'
     + '<script>window.onload=function(){window.print();}<\/script></body></html>';
   const w = window.open('', '_blank');
   if (!w) return toast('Il browser ha bloccato la finestra di stampa: consentila per questo sito.', 'err', 9000);
