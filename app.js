@@ -14115,11 +14115,18 @@ function openOperazioneModal(o, opts) {
       const btnRi = el('button', { type:'button', class:'btnsm',
         style:'margin-left:auto;' }, '⟳ Rigenera dalla distinta');
       btnRi.onclick = async () => {
+        // Il rigenera scrive subito: con terzisti cambiati e non salvati
+        // partirebbe da una commessa diversa da quella a database.
+        if (materialiInSospeso) return toast('Prima salva le modifiche ai terzisti, poi rigenera la lista', 'err');
         if (!confirm('Rifare la lista dalla distinta di ' + art.codice + ' per ' + ordinati + ' pz?\n\n'
-          + 'Le quantità attuali di questa commessa vengono sostituite.')) return;
+          + 'Le quantità attuali di questa commessa vengono sostituite. '
+          + 'I terzisti scelti su questa commessa restano.')) return;
         btnRi.disabled = true; btnRi.textContent = 'Calcolo…';
         try {
-          const nuove = await generaMaterialiCommessa(art.codice, ordinati);
+          // ⚠ Quantita' e codici dal prodotto, TERZISTI dalla commessa (18 nov):
+          // un terzista cambiato resta cambiato, una fase tolta resta tolta.
+          const nuove = terzistiDellaCommessa(await generaMaterialiCommessa(art.codice, ordinati),
+            righe, fornitoriSel.map(x => x.azienda_id));
           await salvaMaterialiCommessa(o, nuove);
           toast('Lista rifatta: ' + nuove.length + ' materiali', 'ok');
           renderMancanti();

@@ -233,5 +233,30 @@ sez('Movimenti fuori giacenza (MAC mandati al terzista)');
   t('il C/L resta contato', M.arriviDaDdt(a, [a], mov).get('TS-1').manca === 0);
 }
 
+sez('Rigenerare tiene i terzisti della commessa');
+{
+  const T = M.terzistiDellaCommessa;
+  const prod = [{ codice: 'A', qta_pz: 2, fasi_esterne: { BEL: 2 } }, { codice: 'B', qta_pz: 3, fasi_esterne: { BEL: 1, ANG: 1 } },
+    { codice: 'C', qta_pz: 1, fasi_esterne: null }, { codice: 'N', qta_pz: 1, fasi_esterne: { BEL: 1 } }];
+  // Nessun cambio: uguale al prodotto.
+  const r0 = T(prod, [{ codice: 'A', fasi_esterne: { BEL: 2 } }], ['BEL', 'ANG']);
+  t('senza cambi resta come il prodotto', JSON.stringify(r0.map(r => r.fasi_esterne))
+    === JSON.stringify([{ BEL: 2 }, { BEL: 1, ANG: 1 }, null, { BEL: 1 }]));
+  // BEL sostituito da TEC sulla commessa.
+  const vec = [{ codice: 'A', fasi_esterne: { TEC: 2 } }, { codice: 'B', fasi_esterne: { TEC: 1, ANG: 1 } }, { codice: 'C', fasi_esterne: null }];
+  const r1 = T(prod, vec, ['TEC', 'ANG']);
+  t('cambio: la quota di BEL va a TEC', r1[0].fasi_esterne.TEC === 2 && !('BEL' in r1[0].fasi_esterne));
+  t('cambio: l altro terzista sulla riga resta', r1[1].fasi_esterne.TEC === 1 && r1[1].fasi_esterne.ANG === 1);
+  t('cambio: un codice NUOVO del prodotto segue lo scambio', r1[3].fasi_esterne && r1[3].fasi_esterne.TEC === 1);
+  t('riga senza terzisti resta senza', r1[2].fasi_esterne === null);
+  // ANG tolto (fase tolta): la sua quota resta in casa.
+  const r2 = T(prod, [{ codice: 'B', fasi_esterne: { BEL: 1 } }], ['BEL']);
+  t('fase tolta: la quota resta in casa', JSON.stringify(r2[1].fasi_esterne) === JSON.stringify({ BEL: 1 }));
+  // Tutti tolti: null.
+  const r3 = T(prod, [], []);
+  t('nessun terzista sulla commessa: tutto in casa', r3.every(r => r.fasi_esterne === null));
+  t('quantita e codici restano quelli del prodotto', r3.map(r => r.codice + r.qta_pz).join() === 'A2,B3,C1,N1');
+}
+
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);

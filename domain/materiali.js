@@ -411,6 +411,53 @@ function ripartoFasiEsterne(perPezzo, fasiEsterne) {
   return out;
 }
 
+// RIGENERARE SENZA PERDERE LE SCELTE DELLA COMMESSA (18 nov, Nico: "tutto
+// questo rimane legato all'ordine?"). La lista rigenerata porta le quote per
+// terzista della SCHEDA PRODOTTO; la commessa puo' aver cambiato terzista
+// («⇄ Cambia») o tolto una fase («✕ Togli fase»). Si tengono quantita' e
+// codici del prodotto, e i TERZISTI della commessa:
+//   - terzista del prodotto che e' sulla commessa  -> resta
+//   - terzista del prodotto che NON c'e' piu'       -> la sua quota va a chi
+//     lo ha sostituito (sulla vecchia lista lo stesso codice era di un
+//     terzista della commessa che il prodotto non nomina), altrimenti
+//     resta in casa (fase tolta)
+// Il sostituto si cerca prima sulla riga dello stesso codice, poi fra quelli
+// visti sulle altre righe (un codice nuovo del prodotto segue lo scambio).
+// `nuove`: righe da generaMaterialiCommessa (fasi_esterne: { id: qta_pz } o null).
+// `vecchie`: la lista attuale della commessa. `fornitori`: id sulla commessa.
+// Ritorna le righe nuove con `fasi_esterne` riscritto (null se vuoto).
+function terzistiDellaCommessa(nuove, vecchie, fornitori) {
+  const sulla = new Set(fornitori || []);
+  const vecchiaDi = new Map();
+  (vecchie || []).forEach(r => { if (r && r.codice != null) vecchiaDi.set(String(r.codice), r); });
+  const feDi = (r) => (r && r.fasi_esterne && typeof r.fasi_esterne === 'object') ? r.fasi_esterne : {};
+  // Sostituti dalla riga dello stesso codice: chi sulla vecchia c'era e il prodotto non nomina.
+  const sostitutoRiga = (prodFe, vecFe) => Object.keys(vecFe)
+    .filter(id => sulla.has(id) && !(id in prodFe) && Number(vecFe[id]) > 0)[0] || null;
+  const sostGlobale = new Map();
+  (nuove || []).forEach(r => {
+    const prodFe = feDi(r);
+    const vec = vecchiaDi.get(String(r && r.codice));
+    if (!vec) return;
+    const s = sostitutoRiga(prodFe, feDi(vec));
+    if (!s) return;
+    Object.keys(prodFe).forEach(t => { if (!sulla.has(t) && !sostGlobale.has(t)) sostGlobale.set(t, s); });
+  });
+  return (nuove || []).map(r => {
+    const prodFe = feDi(r);
+    if (!Object.keys(prodFe).length) return r;
+    const vec = vecchiaDi.get(String(r.codice));
+    const sRiga = vec ? sostitutoRiga(prodFe, feDi(vec)) : null;
+    const out = {};
+    Object.entries(prodFe).forEach(([t, q]) => {
+      const dove = sulla.has(t) ? t : (sRiga || sostGlobale.get(t) || null);
+      if (!dove || !(Number(q) > 0)) return;
+      out[dove] = +((Number(out[dove]) || 0) + Number(q)).toFixed(6);
+    });
+    return Object.assign({}, r, { fasi_esterne: Object.keys(out).length ? out : null });
+  });
+}
+
 // RICHIESTA PER PIU' COMMESSE (Nico, 6 nov): una quantita' da preparare
 // per un codice si divide fra le commesse con la regola di sempre
 // (`ordineDiServizio`: priorita' dell'ordine, poi scadenza). Chi viene prima
@@ -645,5 +692,5 @@ if (typeof module !== 'undefined' && module.exports) {
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
-    ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne, assegnaPerServizio };
+    ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne, assegnaPerServizio, terzistiDellaCommessa };
 }
