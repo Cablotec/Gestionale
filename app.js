@@ -586,8 +586,8 @@ async function afterLogin() {
   $('#auth-screen').style.display = 'none';
   $('#app-screen').style.display = 'block';
   $('#user-name').innerHTML = '<b>'+(state.profile.nome || state.profile.email)+'</b>';
-  $('#role-pill').innerHTML = state.profile.ruolo === 'admin'
-    ? '<span class="badge bvio">admin</span>' : '<span class="badge bgry">user</span>';
+  $('#role-pill').innerHTML = eSuperAdmin() ? '<span class="badge bvio">super admin</span>'
+    : state.profile.ruolo === 'admin' ? '<span class="badge bvio">admin</span>' : '<span class="badge bgry">user</span>';
   $('#area-gestione').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#area-impostazioni').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#area-strumenti').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
@@ -2670,14 +2670,20 @@ function renderOperatori(root) {
     const account = u.account_id ? state.profiliById[u.account_id] : null;
     const accountCell = account
       ? el('span', { class:'badge bok', title:account.email },
-          (account.ruolo === 'admin' ? '★ admin' : '✓ user'))
+          (account.super_admin === true && account.ruolo === 'admin' ? '★★ super admin'
+            : account.ruolo === 'admin' ? '★ admin' : '✓ user'))
       : el('span', { class:'badge bgry' }, 'nessuno');
 
     const azioniCell = el('td', { class:'tc' },
       el('button', { class:'btnsm', onclick:()=>openOperatoreModal(u) }, 'Modifica'),
     );
     // Account collegato → bottoni ruolo + reset password
-    if (account) {
+    // Il profilo del super admin lo tocca solo lui: niente cambio ruolo ne'
+    // password da un altro admin (lo rifiuta anche il trigger sul database).
+    const intoccabile = !!(account && account.super_admin === true && !eSuperAdmin());
+    if (account && intoccabile) {
+      azioniCell.append(' ', el('span', { class:'sub', style:'font-size:11px;' }, 'gestito da lui'));
+    } else if (account) {
       azioniCell.append(' ', el('button', {
         class:'btnsm', onclick:()=>toggleRuolo(account),
         title:'Cambia ruolo dell\'account collegato',
@@ -4656,6 +4662,15 @@ function richiesteTerzistaPossibili() {
     && Array.isArray(state.movimenti);
 }
 function eAdminOra() { return !!(state.profile && state.profile.ruolo === 'admin'); }
+// SUPER ADMIN (18 nov, Nico: "crea solo per me il super admin, poi mano a mano
+// ti dico cosa togliere agli admin"). E' un admin con in piu' la colonna
+// `profili.super_admin`: tutto cio' che oggi chiede eAdminOra() continua a
+// valere anche per lui, senza toccare niente. Quando Nico toglie una cosa agli
+// admin, quel punto passa a eSuperAdmin() qui e a `e_super_admin()` nelle
+// policy del database (le due serrature, come sempre).
+// La colonna si assegna solo dal pannello Supabase (trigger
+// `profili_super_admin`). Finche' non esiste, nessuno e' super admin.
+function eSuperAdmin() { return !!(state.profile && state.profile.ruolo === 'admin' && state.profile.super_admin === true); }
 function nomeTipoLav(id) { return ((state.tipiLav || []).find(t => t.id === id) || {}).nome || 'lavorazione ?'; }
 function nfIT(n) { return Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 }); }
 
