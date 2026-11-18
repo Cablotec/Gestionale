@@ -1618,6 +1618,9 @@ const TAB_STRUCTURE = {
       // e Prelievi perche' e' la stessa catena: cosa serve, cosa e' entrato,
       // cosa e' uscito. Sola lettura: li scrive l'automazione DDT.
       { id: 'movimenti',      label: 'Movimenti',      adminOnly: false },
+      // ORDINI FORNITORE (18 nov, Nico): tutti gli OF fac simile, d'acquisto
+      // e ai terzisti. Admin: ci sono i prezzi d'acquisto.
+      { id: 'ordini_fornitore', label: 'Ordini fornitore', adminOnly: true },
       // Ricerca sui timbri NON legati a commessa (6 ago). L'anagrafica delle
       // attività resta in Gestione: qui si guarda cosa è stato fatto.
       { id: 'timbri_extra',   label: 'Attività extra', adminOnly: false },
@@ -1820,6 +1823,7 @@ function renderTab(name) {
     else if (name === 'pianificazione') renderPianificazione(root);
     else if (name === 'prelievi') renderPrelievi(root);
     else if (name === 'movimenti') renderMovimenti(root);
+    else if (name === 'ordini_fornitore') renderOrdiniFornitore(root);
     else if (name === 'riunioni') renderRiunioni(root);
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt_live') renderGanttLiveTab(root);
@@ -5568,9 +5572,13 @@ function stampaCartaCablotec(opts, finestra) {
 // Pezzi della carta riusati dai documenti (piede, celle, euro).
 // Euro con il punto delle migliaia SEMPRE: in italiano il browser non lo
 // mette sotto le 5 cifre ("1240,00"), su un ordine si legge male.
-function cartaEuro(n) {
+// `maxDec` per i PREZZI UNITARI: un faston costa 0,035 € e a due decimali
+// diventerebbe 0,04 (18 nov, visto sull'OF di prova). Almeno 2, al massimo maxDec.
+function cartaEuro(n, maxDec) {
   if (n == null || isNaN(Number(n))) return '';
-  const [i, d] = Math.abs(Number(n)).toFixed(2).split('.');
+  const dec = maxDec > 2 ? maxDec : 2;
+  let [i, d] = Math.abs(Number(n)).toFixed(dec).split('.');
+  if (dec > 2) d = d.replace(/0+$/, '').padEnd(2, '0');
   return (Number(n) < 0 ? '−' : '') + '€ ' + i.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + d;
 }
 function cartaEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c])); }
@@ -5718,7 +5726,7 @@ function apriOrdineTerzista(o, terzistaId, poi) {
       el('span', { style:'min-width:0;' }, el('span', { class:'mono' }, r.articolo || '—'),
         el('div', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: r.descrizione }, r.descrizione)),
       el('span', { class:'mono', style:'text-align:right;' }, nfIT(r.pezzi)),
-      el('span', { class:'mono', style:'text-align:right;' + (r.prezzo_pz == null ? 'color:var(--or);' : '') }, r.prezzo_pz == null ? 'da definire' : euro(r.prezzo_pz)),
+      el('span', { class:'mono', style:'text-align:right;' + (r.prezzo_pz == null ? 'color:var(--or);' : '') }, r.prezzo_pz == null ? 'da definire' : euro(r.prezzo_pz, 5)),
       el('span', { class:'mono', style:'text-align:right;font-weight:700;' }, euro(r.totale))));
   });
   const inCons = el('input', { type:'date' });
@@ -5777,34 +5785,313 @@ async function annullaOrdineFornitore(of, poi) {
   } catch (e) { toast('Non annullato: ' + (e.message || e), 'err', 9000); }
 }
 
+// ── OF D'ACQUISTO (18 nov, Nico: "il luogo dedicato per gli OF d'acquisto,
+// per comprare materiale come Fabbi, Comet, Agencavi") ──────────────────
+// Stessa tabella degli ordini ai terzisti (`ordini_fornitore`, tipo
+// 'acquisto'), stessa numerazione OFS n/anno, stessa carta. Scelte di Nico:
+// scheda Produzione → «Ordini fornitore» con TUTTI gli OF; righe PROPOSTE dai
+// codici «da ordinare» di Materiali che hanno quel fornitore come abituale
+// (poi si tolgono, correggono, aggiungono a mano); prezzo = ULTIMO PAGATO a
+// quel fornitore per quel codice, preso dagli OF d'acquisto gia' emessi (la
+// prima volta si scrive: il listino nasce ordinando).
+// ⚠ Fac simile: l'OF qui NON cambia lo stato dei mancanti. «In arrivo» resta
+// quello che dice Alnus finche' gli OF veri nascono la'.
+
+// Codici «da ordinare» (rossi di Materiali) raggruppati per fornitore
+// abituale con una scheda in Aziende. Quantita' = quella che il magazzino
+// dice di comprare (`qta_da_ordinare`), una volta per codice.
+function daOrdinarePerFornitore() {
+  const perCodice = new Map();
+  (state.mancanti || []).forEach(m => {
+    if (typeof mancanteCategoria !== 'function' || mancanteCategoria(m) !== 'da_ordinare') return;
+    const c = String(m.codice || '').trim();
+    const q = Number(m.qta_da_ordinare) || 0;
+    if (!c || !(q > 0)) return;
+    const v = perCodice.get(c);
+    if (!v || q > v.qta) perCodice.set(c, { codice: c, descrizione: m.descrizione || '', um: m.um || '', qta: q });
+  });
+  const per = new Map(), senza = [];
+  perCodice.forEach(r => {
+    const nome = matAbitualeDi(r.codice);
+    const az = nome ? aziendaPerNome(nome) : null;
+    if (!az) { senza.push(r); return; }
+    if (!per.has(az.id)) per.set(az.id, []);
+    per.get(az.id).push(r);
+  });
+  per.forEach(l => l.sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true })));
+  return { per, senza };
+}
+// L'ultimo prezzo pagato a un fornitore per un codice: { prezzo, data, numero } o null.
+function ultimoPrezzoAcquisto(fornitoreId, codice) {
+  const c = String(codice || '').trim().toUpperCase();
+  if (!c) return null;
+  const ofs = (state.ordiniFornitore || []).filter(of => of.tipo === 'acquisto' && of.stato === 'emesso' && of.fornitore_id === fornitoreId)
+    .sort((a, b) => String(b.data).localeCompare(String(a.data)) || (b.anno - a.anno) || (b.numero - a.numero));
+  for (const o2 of ofs) {
+    const r = (o2.righe || []).find(x => String(x.codice || '').trim().toUpperCase() === c && x.prezzo != null);
+    if (r) return { prezzo: Number(r.prezzo), data: o2.data, numero: numeroOrdineFornitore(o2) };
+  }
+  return null;
+}
+function numeroDaTesto(s) {
+  const t = String(s == null ? '' : s).trim().replace(/\s/g, '');
+  if (!t) return null;
+  const n = Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+async function apriOrdineAcquisto(poi) {
+  if (state.ordiniFornitore == null) return toast('Gli ordini fornitore non sono attivi: manca la tabella.', 'err', 9000);
+  if (!matAbituali) await caricaFornitoriAbituali();
+  const { per, senza } = daOrdinarePerFornitore();
+  const v = veloTerzista('Nuovo ordine d’acquisto', 980);
+  const euro = (n) => n == null || isNaN(n) ? '—' : cartaEuro(n);
+  // Fornitori: prima chi ha codici da ordinare (i piu' carichi in alto), poi gli altri.
+  const fornitori = (state.aziende || []).filter(a => a.attivo !== false && a.is_fornitore);
+  const conDaOrd = fornitori.filter(a => per.has(a.id)).sort((a, b) => per.get(b.id).length - per.get(a.id).length);
+  const altri = fornitori.filter(a => !per.has(a.id)).sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
+  const selForn = el('select', {}, el('option', { value:'' }, '— scegli il fornitore —'));
+  if (conDaOrd.length) selForn.append(el('optgroup', { label:'Con codici da ordinare' },
+    ...conDaOrd.map(a => el('option', { value: a.id }, a.nome + ' · ' + per.get(a.id).length + ' da ordinare'))));
+  if (altri.length) selForn.append(el('optgroup', { label:'Altri fornitori' }, ...altri.map(a => el('option', { value: a.id }, a.nome))));
+
+  let righe = [];   // { codice, descrizione, um, qta, prezzo, ultimo }
+  const corpoRighe = el('div');
+  const totEl = el('span', { style:'font-weight:700;' });
+  const C = 'display:grid;grid-template-columns:150px minmax(180px,1fr) 52px 80px 96px 96px 28px;gap:6px;align-items:center;';
+  const et = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const aggiornaTot = () => {
+    const valide = righe.filter(r => r.codice && r.qta > 0);
+    const conPrezzo = valide.filter(r => r.prezzo != null && !isNaN(r.prezzo));
+    totEl.textContent = valide.length + (valide.length === 1 ? ' riga' : ' righe') + ' · totale '
+      + cartaEuro(conPrezzo.reduce((s, r) => s + r.qta * r.prezzo, 0))
+      + (valide.length - conPrezzo.length ? ' · ' + (valide.length - conPrezzo.length) + ' senza prezzo' : '');
+  };
+  // Descrizione e UM di un codice scritto a mano: prima i mancanti, poi l'anagrafica.
+  const completa = async (r, poiDisegna) => {
+    const c = r.codice;
+    const m = (state.mancanti || []).find(x => String(x.codice || '').trim().toUpperCase() === c);
+    if (m) { if (!r.descrizione) r.descrizione = m.descrizione || ''; if (!r.um) r.um = m.um || ''; }
+    else if (!r.descrizione) {
+      try {
+        const { data } = await sb.from('materiali').select('descrizione,um').eq('codice', c).limit(1);
+        if (data && data[0]) { r.descrizione = data[0].descrizione || ''; if (!r.um) r.um = data[0].um || ''; }
+      } catch (e) { /* resta da scrivere a mano */ }
+    }
+    poiDisegna();
+  };
+  const disegna = () => {
+    corpoRighe.innerHTML = '';
+    corpoRighe.append(el('div', { style: C + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
+      et('Codice'), et('Descrizione'), et('UM'), et('Q.tà', 1), et('€/unità', 1), et('Totale', 1), el('span')));
+    if (!righe.length) corpoRighe.append(el('div', { class:'sub', style:'padding:10px 0;font-size:12px;' },
+      selForn.value ? 'Nessun codice da ordinare con questo fornitore come abituale: aggiungi le righe a mano.' : 'Scegli il fornitore.'));
+    righe.forEach((r, i) => {
+      const totRiga = el('span', { class:'mono', style:'text-align:right;font-weight:700;font-size:12px;' });
+      const segnaTot = () => { totRiga.textContent = (r.qta > 0 && r.prezzo != null && !isNaN(r.prezzo)) ? cartaEuro(r.qta * r.prezzo) : '—'; aggiornaTot(); };
+      const inCod = el('input', { type:'text', value: r.codice, class:'mono', style:'font-size:12px;', placeholder:'codice' });
+      inCod.onchange = () => {
+        r.codice = inCod.value.trim().toUpperCase(); inCod.value = r.codice;
+        r.ultimo = ultimoPrezzoAcquisto(selForn.value, r.codice);
+        if ((r.prezzo == null || isNaN(r.prezzo)) && r.ultimo) r.prezzo = r.ultimo.prezzo;
+        completa(r, disegna);
+      };
+      const inDesc = el('input', { type:'text', value: r.descrizione, style:'font-size:12px;' });
+      inDesc.oninput = () => { r.descrizione = inDesc.value; };
+      const inUm = el('input', { type:'text', value: r.um, style:'font-size:12px;' });
+      inUm.oninput = () => { r.um = inUm.value.trim(); };
+      const inQ = el('input', { type:'text', inputmode:'decimal', value: r.qta ? nfIT(r.qta) : '', class:'mono', style:'font-size:12px;text-align:right;' });
+      inQ.oninput = () => { const n = numeroDaTesto(inQ.value); r.qta = n == null || isNaN(n) ? 0 : n;
+        inQ.style.color = n != null && isNaN(n) ? 'var(--red)' : ''; segnaTot(); };
+      const inP = el('input', { type:'text', inputmode:'decimal', value: r.prezzo != null && !isNaN(r.prezzo) ? String(r.prezzo).replace('.', ',') : '',
+        class:'mono', style:'font-size:12px;text-align:right;', placeholder: 'da scrivere' });
+      inP.oninput = () => { const n = numeroDaTesto(inP.value); r.prezzo = n; inP.style.color = n != null && isNaN(n) ? 'var(--red)' : ''; segnaTot(); };
+      const via = el('button', { type:'button', class:'btnsm', style:'padding:0 6px;', title:'Togli la riga',
+        onclick: () => { righe.splice(i, 1); disegna(); } }, '✕');
+      corpoRighe.append(el('div', { style: C + 'padding:3px 0;' }, inCod, inDesc, inUm, inQ, inP, totRiga, via));
+      if (r.ultimo || r.daOrdinare) corpoRighe.append(el('div', { class:'sub', style:'font-size:10.5px;margin:-2px 0 3px 156px;' },
+        [r.daOrdinare ? 'da ordinare ' + nfIT(r.daOrdinare) : '',
+          r.ultimo ? 'ultimo prezzo ' + cartaEuro(r.ultimo.prezzo, 5) + ' (' + r.ultimo.numero + ' del ' + fmtIT(String(r.ultimo.data).slice(0, 10)) + ')' : ''].filter(Boolean).join(' · ')));
+      segnaTot();
+    });
+    aggiornaTot();
+  };
+  selForn.onchange = () => {
+    const fid = selForn.value;
+    righe = (fid && per.has(fid) ? per.get(fid) : []).map(x => {
+      const ul = ultimoPrezzoAcquisto(fid, x.codice);
+      return { codice: x.codice, descrizione: x.descrizione, um: x.um, qta: x.qta, daOrdinare: x.qta, prezzo: ul ? ul.prezzo : null, ultimo: ul };
+    });
+    disegna();
+  };
+  const piu = el('button', { type:'button', class:'btnsm', style:'margin-top:6px;',
+    onclick: () => { righe.push({ codice:'', descrizione:'', um:'', qta:0, prezzo:null, ultimo:null }); disegna();
+      const ins = corpoRighe.querySelectorAll('input.mono'); if (ins.length) ins[ins.length - 3].focus(); } }, '+ Riga');
+  const inCons = el('input', { type:'date' });
+  const inNote = el('textarea', { rows:'2', style:'width:100%;font-size:12px;', placeholder:'Facoltative: imballo, certificati, riferimenti…' });
+  const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Ordine di prova: esce con la scritta FAC SIMILE e non cambia i mancanti (l’«in arrivo» resta quello di Alnus). '
+      + 'Scegliendo il fornitore compaiono i codici «da ordinare» di Materiali che hanno lui come fornitore abituale, col prezzo dell’ultimo ordine.'
+      + (senza.length ? ' ' + senza.length + (senza.length === 1 ? ' codice da ordinare non ha' : ' codici da ordinare non hanno')
+        + ' un fornitore abituale con la scheda in Aziende: si aggiungono a mano.' : '')),
+    campo('Fornitore', selForn),
+    corpoRighe, piu,
+    el('div', { style:'display:flex;justify-content:flex-end;margin:8px 0 12px;font-size:12px;' }, totEl),
+    el('div', { class:'frow' }, campo('Consegna richiesta', inCons)),
+    campo('Note', inNote));
+  disegna();
+  const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
+  const ok = el('button', { class:'btnp' }, '🖨 Crea e stampa OF');
+  ok.onclick = async () => {
+    const fid = selForn.value;
+    const valide = righe.filter(r => r.codice);
+    const err = !fid ? 'Scegli il fornitore'
+      : !valide.length ? 'Aggiungi almeno una riga'
+      : valide.some(r => !(r.qta > 0)) ? 'Ogni riga vuole una quantità maggiore di zero'
+      : valide.some(r => r.prezzo != null && (isNaN(r.prezzo) || r.prezzo < 0)) ? 'C’è un prezzo che non è un numero'
+      : null;
+    if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
+    const payload = valide.map(r => ({ codice: r.codice, descrizione: r.descrizione || '', um: r.um || '', qta: r.qta,
+      prezzo: r.prezzo == null ? null : r.prezzo, totale: r.prezzo == null ? null : Math.round(r.qta * r.prezzo * 100) / 100 }));
+    // La finestra di stampa si apre ADESSO, dentro il clic: dopo l'await il browser la bloccherebbe.
+    const w = window.open('', '_blank');
+    if (w) w.document.write('<p style="font-family:sans-serif">Creazione dell’ordine…</p>');
+    ok.disabled = true; ok.textContent = 'Creazione…';
+    try {
+      const { data, error } = await sb.rpc('crea_ordine_fornitore', { p_tipo: 'acquisto', p_fornitore: fid,
+        p_data: toLocalISO(new Date()), p_consegna: inCons.value || null, p_note: inNote.value.trim() || null, p_righe: payload });
+      if (error) throw new Error(error.message);
+      const of = Array.isArray(data) ? data[0] : data;
+      if (!of || !of.id) throw new Error('il database non ha restituito l’ordine');
+      (state.ordiniFornitore = state.ordiniFornitore || []).push(of);
+      v.chiudi();
+      toast('Ordine ' + numeroOrdineFornitore(of) + ' a ' + nomeAziendaDi(fid) + ' creato', 'ok');
+      stampaOrdineFornitore(of, w);
+      if (typeof poi === 'function') poi();
+    } catch (e) {
+      if (w) w.close();
+      ok.disabled = false; ok.textContent = '🖨 Crea e stampa OF';
+      toast('Ordine non creato: ' + (e.message || e), 'err', 9000);
+    }
+  };
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+}
+
+// La scheda: tutti gli OF, d'acquisto e ai terzisti.
+let ofFiltroTipo = 'tutti', ofFiltroStato = 'emesso', ofCerca = '';
+function renderOrdiniFornitore(root) {
+  root.innerHTML = '';
+  const ridisegna = () => renderOrdiniFornitore(root);
+  const ricarica = el('button', { class:'btnsm', title:'Rileggi gli ordini dal database',
+    onclick: async () => { ricarica.disabled = true; await caricaOrdiniFornitore(); ridisegna(); } }, '⟳ Aggiorna');
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Ordini fornitore'), ricarica,
+    (eAdminOra() && state.ordiniFornitore != null) ? el('button', { class:'btnp', style:'margin-left:auto;',
+      title:'Ordine d’acquisto a un fornitore: propone i codici da ordinare di cui è fornitore abituale',
+      onclick: () => apriOrdineAcquisto(ridisegna) }, '＋ Nuovo OF d’acquisto') : ''));
+  if (state.ordiniFornitore == null) {
+    root.append(el('div', { class:'empty' }, 'Gli ordini fornitore non si sono potuti leggere. Premi ⟳ Aggiorna; '
+      + 'se resta così, la tabella `ordini_fornitore` non è raggiungibile.'));
+    return;
+  }
+  const selTipo = el('select', { onchange: (e) => { ofFiltroTipo = e.target.value; ridisegna(); } },
+    ...[['tutti', 'Tutti i tipi'], ['acquisto', 'D’acquisto'], ['terzista', 'Ai terzisti']].map(([v, t]) => el('option', { value: v }, t)));
+  selTipo.value = ofFiltroTipo;
+  const selStato = el('select', { onchange: (e) => { ofFiltroStato = e.target.value; ridisegna(); } },
+    ...[['emesso', 'Emessi'], ['annullato', 'Annullati'], ['tutti', 'Tutti']].map(([v, t]) => el('option', { value: v }, t)));
+  selStato.value = ofFiltroStato;
+  const cerca = el('input', { type:'text', class:'search', id:'of-cerca', value: ofCerca,
+    placeholder:'Cerca fornitore, numero, codice, commessa…',
+    oninput: (e) => { ofCerca = e.target.value; ridisegnaDopoRicerca('ordini_fornitore'); } });
+  root.append(el('div', { style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;' }, selTipo, selStato, cerca));
+
+  const q = ofCerca.trim().toLowerCase();
+  const lista = state.ordiniFornitore.filter(of =>
+    (ofFiltroTipo === 'tutti' || of.tipo === ofFiltroTipo)
+    && (ofFiltroStato === 'tutti' || of.stato === ofFiltroStato)
+    && (!q || [numeroOrdineFornitore(of), nomeAziendaDi(of.fornitore_id), ...(of.righe || []).flatMap(r => [r.codice, r.descrizione, r.etichetta, r.articolo])]
+      .some(s => String(s || '').toLowerCase().includes(q))))
+    .sort((a, b) => (b.anno - a.anno) || (b.numero - a.numero));
+  const totOf = (of) => (of.righe || []).reduce((s, r) => s + (Number(r.totale) || 0), 0);
+  root.append(el('div', { class:'sub', style:'margin:-4px 0 10px;font-size:12px;' },
+    lista.length + (lista.length === 1 ? ' ordine' : ' ordini')
+    + (lista.length ? ' · ' + cartaEuro(lista.filter(o => o.stato === 'emesso').reduce((s, o) => s + totOf(o), 0)) + ' emessi' : '')
+    + ' · fac simile: non sostituiscono gli OF di Alnus.'));
+  if (!lista.length) {
+    root.append(el('div', { class:'empty' }, state.ordiniFornitore.length ? 'Nessun ordine con questi filtri.'
+      : 'Nessun ordine ancora. Gli OF d’acquisto nascono da «＋ Nuovo OF d’acquisto»; quelli ai terzisti dal Ciclo produttivo della commessa.'));
+    return;
+  }
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {}, ...['Numero', 'Data', 'Tipo', 'Fornitore', 'Contenuto', 'Totale', 'Consegna', ''].map(t => el('th', {}, t)))));
+  const tb = el('tbody');
+  lista.forEach(of => {
+    const righe = of.righe || [];
+    const contenuto = of.tipo === 'terzista'
+      ? righe.map(r => r.etichetta).join(', ')
+      : righe.length + (righe.length === 1 ? ' riga: ' : ' righe: ') + righe.slice(0, 3).map(r => r.codice).join(', ') + (righe.length > 3 ? '…' : '');
+    const ann = of.stato === 'annullato';
+    tb.append(el('tr', { style: ann ? 'opacity:.55;' : '' },
+      el('td', {}, el('span', { class:'mono', style:'font-weight:700;white-space:nowrap;' }, numeroOrdineFornitore(of)),
+        ann ? el('span', { class:'badge bgry', style:'margin-left:6px;' }, 'annullato') : ''),
+      el('td', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, fmtIT(String(of.data || '').slice(0, 10))),
+      el('td', {}, el('span', { class:'badge ' + (of.tipo === 'terzista' ? 'bvio' : 'bblu') }, of.tipo === 'terzista' ? 'terzista' : 'acquisto')),
+      el('td', {}, nomeAziendaDi(of.fornitore_id)),
+      el('td', { style:'max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;', title: contenuto }, contenuto),
+      el('td', { class:'mono', style:'text-align:right;white-space:nowrap;' }, totOf(of) ? cartaEuro(totOf(of)) : '—'),
+      el('td', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, of.consegna ? fmtIT(String(of.consegna).slice(0, 10)) : '—'),
+      el('td', { style:'white-space:nowrap;text-align:right;' },
+        el('button', { type:'button', class:'btnsm', title:'Stampa l’ordine', onclick: () => stampaOrdineFornitore(of) }, '🖨'),
+        (eAdminOra() && !ann) ? el('button', { type:'button', class:'btnsm', style:'margin-left:4px;', title:'Annulla l’ordine',
+          onclick: () => annullaOrdineFornitore(of, ridisegna) }, '✕') : '')));
+  });
+  tbl.append(tb);
+  root.append(el('div', { style:'overflow-x:auto;' }, tbl));
+}
+
 function stampaOrdineFornitore(of, finestra) {
   const esc = cartaEsc;
   const az = (state.aziende || []).find(a => a.id === of.fornitore_id) || {};
   const euro = cartaEuro;
   const righe = of.righe || [];
+  const acq = of.tipo === 'acquisto';
   const totale = righe.reduce((s, r) => s + (Number(r.totale) || 0), 0);
   const daDef = righe.some(r => r.totale == null);
-  const corpo = righe.map(r => '<tr><td class="c">' + esc(r.etichetta)
-    + (r.rif_cliente ? '<span class="s">Rif. cliente ' + esc(r.rif_cliente) + '</span>' : '') + '</td>'
-    + '<td><b>' + esc(r.articolo) + '</b><span class="s">' + esc(r.descrizione) + '</span></td>'
-    + '<td class="q">' + esc(nfIT(r.pezzi)) + '</td>'
-    + '<td class="e">' + (r.prezzo_pz == null ? 'da definire' : esc(euro(r.prezzo_pz))) + '</td>'
-    + '<td class="e"><b>' + esc(euro(r.totale)) + '</b></td></tr>').join('');
+  const corpo = acq
+    ? righe.map(r => '<tr><td class="c">' + esc(r.codice) + '</td><td>' + esc(r.descrizione) + '</td>'
+      + '<td class="q">' + esc(nfIT(r.qta)) + '</td><td class="u">' + esc(r.um) + '</td>'
+      + '<td class="e">' + (r.prezzo == null ? 'da definire' : esc(euro(r.prezzo, 5))) + '</td>'
+      + '<td class="e"><b>' + esc(euro(r.totale)) + '</b></td></tr>').join('')
+    : righe.map(r => '<tr><td class="c">' + esc(r.etichetta)
+      + (r.rif_cliente ? '<span class="s">Rif. cliente ' + esc(r.rif_cliente) + '</span>' : '') + '</td>'
+      + '<td><b>' + esc(r.articolo) + '</b><span class="s">' + esc(r.descrizione) + '</span></td>'
+      + '<td class="q">' + esc(nfIT(r.pezzi)) + '</td>'
+      + '<td class="e">' + (r.prezzo_pz == null ? 'da definire' : esc(euro(r.prezzo_pz, 5))) + '</td>'
+      + '<td class="e"><b>' + esc(euro(r.totale)) + '</b></td></tr>').join('');
+  const operatore = state.profile && state.profile.nome ? state.profile.nome : '';
+  const consegna = of.consegna ? fmtIT(String(of.consegna).slice(0, 10)) : 'da concordare';
   return stampaCartaCablotec({
-    titolo: 'Ordine fornitore', sottotitolo: 'Conto lavorazione', titoloFinestra: 'OF fac simile ' + numeroOrdineFornitore(of),
+    titolo: 'Ordine fornitore', sottotitolo: acq ? 'Acquisto materiale' : 'Conto lavorazione',
+    titoloFinestra: 'OF fac simile ' + numeroOrdineFornitore(of),
     numero: numeroOrdineFornitore(of), data: fmtIT(String(of.data).slice(0, 10)),
     schede: [{ lab: 'Fornitore', nome: az.nome || nomeAziendaDi(of.fornitore_id), righe: cartaIndirizzo(az), nota: az.p_iva ? 'P.IVA ' + az.p_iva : '' },
       { lab: 'Consegna a', nome: INTESTAZIONE_CABLOTEC[0], righe: [INTESTAZIONE_CABLOTEC[1]] }],
-    striscia: [['Consegna richiesta', of.consegna ? fmtIT(String(of.consegna).slice(0, 10)) : 'da concordare'],
-      ['Lavorazione', 'Conto terzi'], ['Commesse', String(righe.length)],
-      ['Operatore', state.profile && state.profile.nome ? state.profile.nome : '']],
-    colonne: [{ t: 'Commessa', w: '25%' }, { t: 'Prodotto' }, { t: 'Pezzi', w: '9%', cls: 'q' },
-      { t: '€/pz', w: '12%', cls: 'q' }, { t: 'Totale', w: '14%', cls: 'q' }],
+    striscia: acq
+      ? [['Consegna richiesta', consegna], ['Righe', String(righe.length)], ['Operatore', operatore]]
+      : [['Consegna richiesta', consegna], ['Lavorazione', 'Conto terzi'], ['Commesse', String(righe.length)], ['Operatore', operatore]],
+    colonne: acq
+      ? [{ t: 'Codice', w: '22%' }, { t: 'Descrizione' }, { t: 'Q.tà', w: '9%', cls: 'q' }, { t: 'U.M.', w: '7%' },
+        { t: '€/unità', w: '12%', cls: 'q' }, { t: 'Totale', w: '13%', cls: 'q' }]
+      : [{ t: 'Commessa', w: '25%' }, { t: 'Prodotto' }, { t: 'Pezzi', w: '9%', cls: 'q' },
+        { t: '€/pz', w: '12%', cls: 'q' }, { t: 'Totale', w: '14%', cls: 'q' }],
     righe: corpo,
     piede: '<div class="tot"><span class="lab">Totale ordine' + (daDef ? ' (righe senza prezzo escluse)' : '') + '</span><b>' + esc(euro(totale)) + '</b></div>'
-      + '<div class="an">' + cartaCella('Note', of.note || 'Il materiale in conto lavorazione viene consegnato da noi con DDT. Prezzi IVA esclusa.') + '</div>'
+      + '<div class="an">' + cartaCella('Note', of.note || (acq
+        ? 'Prezzi IVA esclusa. Indicare il numero d’ordine sul DDT e sulla fattura.'
+        : 'Il materiale in conto lavorazione viene consegnato da noi con DDT. Prezzi IVA esclusa.')) + '</div>'
       + '<div class="fi f2"><div><div class="lab">Cablotec S.R.L. · firma</div></div><div><div class="lab">Fornitore · timbro e firma per accettazione</div></div></div>',
-    conta: righe.length + (righe.length === 1 ? ' commessa' : ' commesse'),
+    conta: righe.length + (acq ? (righe.length === 1 ? ' riga' : ' righe') : (righe.length === 1 ? ' commessa' : ' commesse')),
   }, finestra);
 }
 
