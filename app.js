@@ -586,7 +586,7 @@ async function afterLogin() {
   $('#auth-screen').style.display = 'none';
   $('#app-screen').style.display = 'block';
   $('#user-name').innerHTML = '<b>'+(state.profile.nome || state.profile.email)+'</b>';
-  $('#role-pill').innerHTML = eSuperAdmin() ? '<span class="badge bvio">super admin</span>'
+  $('#role-pill').innerHTML = eSuperAdmin() ? '<span class="badge byel">super admin</span>'
     : state.profile.ruolo === 'admin' ? '<span class="badge bvio">admin</span>' : '<span class="badge bgry">user</span>';
   $('#area-gestione').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   $('#area-impostazioni').style.display = eSuperAdmin() ? '' : 'none';
@@ -2675,9 +2675,13 @@ function renderOperatori(root) {
   state.utenti.filter(u => !isKioskRecord(u)).forEach(u => {
     const account = u.account_id ? state.profiliById[u.account_id] : null;
     const accountCell = account
-      ? el('span', { class:'badge bok', title:account.email },
-          (account.super_admin === true && account.ruolo === 'admin' ? '★★ super admin'
-            : account.ruolo === 'admin' ? '★ admin' : '✓ user'))
+      // Un colore per ruolo (18 nov, Nico: "per riconoscerli meglio"):
+      // super admin oro, admin viola come la pillola in alto, user verde.
+      ? (account.super_admin === true && account.ruolo === 'admin'
+          ? el('span', { class:'badge byel', title:account.email }, '★★ super admin')
+          : account.ruolo === 'admin'
+            ? el('span', { class:'badge bvio', title:account.email }, '★ admin')
+            : el('span', { class:'badge bok', title:account.email }, '✓ user'))
       : el('span', { class:'badge bgry' }, 'nessuno');
 
     const azioniCell = el('td', { class:'tc' },
@@ -2690,7 +2694,9 @@ function renderOperatori(root) {
     if (account && intoccabile) {
       azioniCell.append(' ', el('span', { class:'sub', style:'font-size:11px;' }, 'gestito da lui'));
     } else if (account) {
-      azioniCell.append(' ', el('button', {
+      // Sul super admin niente «Rendi user»: un clic per sbaglio gli toglierebbe
+      // il super admin (vale solo con ruolo admin) e si rimedierebbe solo da SQL.
+      if (account.super_admin !== true) azioniCell.append(' ', el('button', {
         class:'btnsm', onclick:()=>toggleRuolo(account),
         title:'Cambia ruolo dell\'account collegato',
       }, account.ruolo==='admin' ? 'Rendi user' : 'Rendi admin'));
