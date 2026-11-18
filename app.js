@@ -13027,6 +13027,12 @@ function openOperazioneModal(o, opts) {
   // scatena quegli eventi, quindi le precompilazioni automatiche non
   // fanno falsi allarmi.
   let modificato = false;
+  // ⚠ Le spunte della scheda (senza distinta, materiali da DDT) aspettano il
+  // Salva come gli altri campi (18 nov, Nico: "rimangono modificate anche se
+  // non salvo"). Prima si scrivevano al clic: uscendo con «Esci senza
+  // salvare» restavano lo stesso. Qui solo quelle TOCCATE, che quindi hanno
+  // la colonna (la casella compare solo se la colonna c'e').
+  const spunteInSospeso = {};
   // Impostata piu sotto e solo per l'admin: senza il bottone Salva non c'e
   // niente da salvare, e la scelta non va nemmeno offerta.
   let salvaOra = null;
@@ -13758,7 +13764,7 @@ function openOperazioneModal(o, opts) {
         renderOreEsterne();
         if (aggiornaTotaliCons) aggiornaTotaliCons();
         if (aggiornaBarraOre) aggiornaBarraOre();
-      } }, '+ Aggiungi ore');
+      } }, '+ Registra ore');
       wrapOreEsterne.append(
         el('div', { style:'display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;' },
           selAz, inOre, inData, inRif, btnAdd, notaTar));
@@ -13853,28 +13859,8 @@ function openOperazioneModal(o, opts) {
       if (!isNew && isAdmin && senzaDistintaDichiarabile()) {
         const chk = el('input', { type:'checkbox', id:'chk-senza-distinta',
           style:'width:16px;height:16px;cursor:pointer;margin:0;' });
-        chk.checked = dichiarataSenza;
-        chk.onchange = async () => {
-          const val = chk.checked;
-          chk.disabled = true;
-          try {
-            const { data, error } = await eseguiConRetry(
-              () => sb.from('operazioni').update({ senza_distinta: val }).eq('id', o.id).select().single(),
-              { label: 'dichiara senza distinta' });
-            if (error) throw new Error(error.message);
-            Object.assign(o, data);
-            // ⚠ Anche la copia in `state`: la tabella Ordini cliente legge da
-            // li', e senza questo l'avviso resterebbe acceso finche' non si
-            // ricarica la pagina — cioe' sembrerebbe che la spunta non funzioni.
-            const inState = (state.operazioni || []).find(x => x.id === o.id);
-            if (inState) Object.assign(inState, data);
-            toast(val ? 'Dichiarata senza distinta' : 'Dichiarazione tolta', 'ok');
-            renderMancanti();
-          } catch (e) {
-            chk.checked = !val; chk.disabled = false;
-            toast('Errore: ' + (e.message || e), 'err');
-          }
-        };
+        chk.checked = ('senza_distinta' in spunteInSospeso) ? spunteInSospeso.senza_distinta : dichiarataSenza;
+        chk.onchange = () => { spunteInSospeso.senza_distinta = chk.checked; };
         sezMateriali.append(el('label', {
           style:'display:flex;align-items:flex-start;gap:8px;margin-top:10px;cursor:pointer;'
             + 'font-size:12px;max-width:560px;line-height:1.5;' },
@@ -14002,25 +13988,8 @@ function openOperazioneModal(o, opts) {
     if (isAdmin && Object.prototype.hasOwnProperty.call(o, 'materiali_da_ddt')) {
       const chkDdt = el('input', { type:'checkbox',
         style:'width:15px;height:15px;cursor:pointer;margin:0;' });
-      chkDdt.checked = !!o.materiali_da_ddt;
-      chkDdt.onchange = async () => {
-        const val = chkDdt.checked;
-        chkDdt.disabled = true;
-        try {
-          const { data, error } = await eseguiConRetry(
-            () => sb.from('operazioni').update({ materiali_da_ddt: val }).eq('id', o.id).select().single(),
-            { label: 'materiali da DDT' });
-          if (error) throw new Error(error.message);
-          Object.assign(o, data);
-          const inState = (state.operazioni || []).find(x => x.id === o.id);
-          if (inState) Object.assign(inState, data);
-          toast(val ? 'Materiale del cliente contato dai DDT' : 'Materiale del cliente di nuovo da Alnus', 'ok');
-          renderMancanti();
-        } catch (e) {
-          chkDdt.checked = !val; chkDdt.disabled = false;
-          toast('Errore: ' + (e.message || e), 'err');
-        }
-      };
+      chkDdt.checked = ('materiali_da_ddt' in spunteInSospeso) ? spunteInSospeso.materiali_da_ddt : !!o.materiali_da_ddt;
+      chkDdt.onchange = () => { spunteInSospeso.materiali_da_ddt = chkDdt.checked; };
       listaBox.append(el('label', {
         style:'display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;cursor:pointer;'
           + 'font-size:12px;max-width:620px;line-height:1.5;' },
@@ -14766,7 +14735,7 @@ function openOperazioneModal(o, opts) {
       const inOreM = el('input', { type:'number', step:'0.25', min:'0', placeholder:'ore',
         style:'width:80px;' });
       const inNoteM = el('input', { type:'text', placeholder:'perché (consigliato)', style:'min-width:170px;' });
-      const btnOreM = el('button', { type:'button', class:'btnsm' }, '+ Aggiungi ore a mano');
+      const btnOreM = el('button', { type:'button', class:'btnsm' }, '+ Registra ore a mano');
 
       btnOreM.onclick = async () => {
         const ore = parseFloat((inOreM.value || '').replace(',', '.')) || 0;
@@ -14791,7 +14760,7 @@ function openOperazioneModal(o, opts) {
         const { data: nuova, error } = await eseguiConRetry(
           () => sb.from('sessioni_lavoro').insert(riga).select().single(),
           { label: 'ore a mano' });
-        btnOreM.disabled = false; btnOreM.textContent = '+ Aggiungi ore a mano';
+        btnOreM.disabled = false; btnOreM.textContent = '+ Registra ore a mano';
         if (error) return toast(error.message, 'err');
         if (!state.sessioni.find(x => x.id === nuova.id)) state.sessioni.unshift(nuova);
         inOreM.value = ''; inNoteM.value = '';
@@ -15950,6 +15919,7 @@ function openOperazioneModal(o, opts) {
         const v = parseFloat((fd.get('prezzo_unitario') || '').toString().replace(',', '.'));
         payload.prezzo_unitario = (Number.isFinite(v) && v >= 0) ? v : null;
       }
+      if (!isNew) Object.assign(payload, spunteInSospeso);
       if (!isNew && o.stato === 'spedita') {
         payload.consegnato_il = fd.get('consegnato_il') || null;
         payload.giustificazione_ritardo = (fd.get('giustificazione_ritardo')||'').trim() || null;
@@ -16134,6 +16104,12 @@ function openOperazioneModal(o, opts) {
         // Refresha la tab da cui è stato aperto il modal (Pianificazione, Gantt,
         // Storico…), non forzare un cambio di vista. Il modal vive fuori da
         // `#tab-content`, quindi ridisegnare la tab sotto non lo tocca.
+        // Le spunte cambiano la scheda Ciclo produttivo, che legge `o`.
+        if (!isNew && Object.keys(spunteInSospeso).length) {
+          Object.keys(spunteInSospeso).forEach(k => delete spunteInSospeso[k]);
+          Object.assign(o, data);
+          renderMancanti();
+        }
         renderTab(state.currentTab || 'pianificazione');
         // SALVANDO UNA MODIFICA LA FINESTRA RESTA APERTA (4 set, richiesta
         // Nico): si apre un ordine per correggere due campi, e chiudere a

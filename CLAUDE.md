@@ -16,7 +16,7 @@
   - ✅ **Zero regole copiate** fra le pagine. Restano in comune solo `$` (scorciatoia per trovare un elemento, UI) e omonimi che non sono copie (`renderAuth`, `renderMezzi`, `state`: schermate e dati diversi). `test-tabelle-coerenti.js` sorveglia che nessuna delle regole spostate rinasca in una pagina.
   - **Prossimo, quando si vorra'**: spezzare `app.js` in file per area.
   - ⚠ Una regola che sta in `app.js` va prima **spostata** nel motore: caricare `app.js` nel telefono NON e' la strada, 1 MB di schermate del gestionale.
-- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-11-17.09`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
+- **Cache**: a ogni deploy bump `?v=YYYY-MM-DD.N` nei 4 gusci. Attuale: `v=2026-11-18.01`. **Versione visibile sotto il logo** (gestionale e kiosk): prima verifica quando "non si vede una modifica".
 - **Kiosk**: auto-update ogni 5 min (ricarica da solo su versione nuova, solo da schermata identificazione).
 
 ## Nico (titolare) — stile
@@ -399,6 +399,7 @@ Chiesto da Nico, dal file *"Riunione 01-10-2026.xlsx"*: una sezione che vedono S
 - **`chiediConferma({titolo, testo, bottoni})`** — finestra vera al posto del `confirm()` del browser, ritorna l'id del bottone. ⚠⚠ **NON passa da `openModal`**: quello svuota `#modal-root` e si porterebbe via la scheda che si sta proteggendo. Appende un **secondo velo**. Esc annulla la conferma e non tocca il modal sotto.
 - **`lasciaCommessa(poi)` / `lasciaArticolo(poi)`**: ⚠ **LASCIARE LA SCHEDA E SEMPRE LO STESSO GESTO**, che si esca del tutto o si vada altrove. Una domanda sola per la ✕, per Esc, per la matita ✎ e per il salto a un sottoassieme. Due domande diverse avrebbero voluto dire che quella dimenticata diventava la scorciatoia per perdere il lavoro.
 - Si avvisa **solo se qualcosa e stato toccato** (eventi `input`/`change` in cattura sul modal, che valgono anche per i campi nati dopo; assegnare da codice non li scatena, quindi le precompilazioni non fanno falsi allarmi). **Un avviso che compare sempre si impara a scacciare.**
+- ⚠⚠ **UNA REGOLA SOLA PER COSA SI SALVA** (`2026-11-18.01`, Nico: *"alcune cose rimangono modificate anche se non salvo"*). Tutto cio' che ha l'aspetto di un CAMPO (caselle, tendine, spunte) aspetta il Salva. Le spunte «Questa commessa non ha distinta» e «Materiali da DDT» si scrivevano al clic: ora vanno in `spunteInSospeso` e partono col payload del Salva (solo quelle toccate). Restano IMMEDIATE solo le REGISTRAZIONI col loro bottone «+ Registra …» (produzione, spedizione, ore a mano, ore dei fornitori): sono fatti, non bozze. Proposto da Nico di togliere il Salva e chiedere conferma a ogni modifica: scartato (stati a meta' nel database, conferme da scacciare). Un campo nuovo che scrive al clic e' un difetto.
 - **Tolto il tasto "Chiudi" accanto a Salva**: due uscite affiancate a un salvataggio sono un invito a sbagliare bottone.
 - `window.__modalGuardia` e `window.__confermaChiudi`, azzerate da `closeModal`: la guardia non sopravvive al modal che l'ha dichiarata.
 
