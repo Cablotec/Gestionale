@@ -5371,8 +5371,7 @@ function stampaRichiestaTerzista(x) {
 // fra gli invii confermati ai terzisti, in ordine di conferma. Regge perche'
 // un invio confermato non si elimina mai (solo gli annullati, che non
 // contano). La testata (colli, peso, vettore…) resta nel browser che l'ha
-// scritta; l'intestazione del mittente sta in `impostazioni.ddt_mittente`
-// (non nel codice: il repo e' pubblico).
+// scritta; l'intestazione del mittente e' fissa, `INTESTAZIONE_CABLOTEC`.
 function numeroDdtFacSimile(x) {
   if (!x || x.stato !== 'inviato' || eReparto(x.terzista_id) || !x.inviato_il) return null;
   const anno = String(x.inviato_il).slice(0, 4);
@@ -5404,10 +5403,6 @@ function apriDdtTerzista(x) {
   try { salvata = JSON.parse(localStorage.getItem(chiaveLoc) || '{}') || {}; } catch (e) { salvata = {}; }
   const v = veloTerzista('DDT fac simile ' + num + ' · ' + nomeAziendaDi(x.terzista_id), 760);
   const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
-  const mittIniziale = (state.impostazioni && state.impostazioni.ddt_mittente) || '';
-  const inMitt = el('textarea', { rows:'3', style:'width:100%;font-size:12px;',
-    placeholder:'Ragione sociale, indirizzo, P.IVA del mittente' });
-  inMitt.value = mittIniziale;
   const inCaus = el('input', { type:'text', value: salvata.causale || 'Conto lavorazione' });
   const inAsp = el('input', { type:'text', value: salvata.aspetto || 'Sfuso' });
   const inColli = el('input', { type:'text', inputmode:'numeric', value: salvata.colli || '' });
@@ -5428,7 +5423,6 @@ function apriDdtTerzista(x) {
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
       'Documento di prova: esce con la scritta FAC SIMILE e non vale come DDT. '
       + righe.length + (righe.length === 1 ? ' riga' : ' righe') + ', con le quantità confermate alla spedizione.'),
-    campo('Mittente (intestazione)', inMitt),
     el('div', { class:'frow' }, campo('Causale del trasporto', inCaus), campo('Aspetto dei beni', inAsp)),
     el('div', { class:'frow' }, campo('N. colli', inColli), campo('Peso netto kg', inPesoN), campo('Peso lordo kg', inPeso), campo('Resa (porto)', inPorto)),
     el('div', { class:'frow' }, campo('Trasporto a cura del', selCura), campo('Vettore', inVett), campo('Inizio trasporto', inInizio)),
@@ -5439,21 +5433,23 @@ function apriDdtTerzista(x) {
       pesoNetto: inPesoN.value.trim(), peso: inPeso.value.trim(), porto: inPorto.value.trim(), cura: selCura.value, vettore: inVett.value.trim(),
       inizio: inInizio.value, annotazioni: inAnn.value.trim() };
     try { localStorage.setItem(chiaveLoc, JSON.stringify(t)); } catch (e) { /* solo comodita' */ }
-    const mitt = inMitt.value.trim();
-    // La finestra si apre SUBITO, dentro il clic: dopo un `await` il browser la blocca.
-    stampaDdtTerzista(x, num, mitt, t);
-    if (mitt !== mittIniziale && eAdminOra()) {
-      try {
-        const { error } = await sb.from('impostazioni').upsert([{ chiave:'ddt_mittente', valore: mitt,
-          aggiornato_il: new Date().toISOString() }], { onConflict:'chiave' });
-        if (error) throw new Error(error.message);
-        state.impostazioni.ddt_mittente = mitt;
-        toast('Intestazione del mittente salvata', 'ok');
-      } catch (e) { toast('Intestazione non salvata: ' + (e.message || e), 'err', 9000); }
-    }
+    stampaDdtTerzista(x, num, INTESTAZIONE_CABLOTEC.join('\n'), t);
   };
   v.piede.append(el('button', { class:'btng', onclick: v.chiudi }, 'Chiudi'), ok);
 }
+
+// Intestazione FISSA del DDT (18 nov, Nico: "quelle info devono essere fisse
+// sul documento"). Prima era una casella modificabile salvata in
+// `impostazioni.ddt_mittente`, per tenerla fuori dal codice pubblico: ma sono
+// dati che per legge stanno su ogni documento che esce (registro imprese), non
+// segreti. La prima riga e' la ragione sociale in grande.
+const INTESTAZIONE_CABLOTEC = [
+  'Cablotec S.R.L.',
+  'Via Farlotta N° 12 - 48025 Riolo Terme (RA) - Italy',
+  'Tel. (+39) 0546 70570 - Fax (+39) 0546 70570',
+  'C.F./P.IVA 02170690396 - Codice SDI: A4707H7',
+  'Pec: cablotec.pec@legalmail.it',
+];
 
 // Logo Cablotec per la stampa del DDT (solo tracciati, dal vettoriale ufficiale).
 // Dentro il codice e non come file: la stampa e' una finestra scritta con
