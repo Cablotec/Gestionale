@@ -641,34 +641,70 @@ const APP_VERSIONE = (() => {
     return sc ? (sc.getAttribute('src').split('v=')[1] || '') : '';
   } catch (e) { return ''; }
 })();
+// Dove sta la scritta della versione: gestionale (sotto il logo) e kiosk
+// (sotto il titolo). Accanto, quando serve, compare il tasto «Aggiorna».
+let _versioneBox = null;
 (function mostraVersione() {
   if (!APP_VERSIONE) return;
   const sub = document.querySelector('.topbar .sub');
-  if (sub) sub.textContent = 'Sistema Gestionale — v. ' + APP_VERSIONE;
+  if (sub) {
+    sub.textContent = 'Sistema Gestionale — v. ' + APP_VERSIONE;
+    _versioneBox = sub;
+  }
   // Anche sul kiosk (sotto il titolo): le postazioni restano accese per
   // giorni, senza questa scritta non si sa mai cosa stanno eseguendo.
   const kt = document.querySelector('.kiosk-title');
-  if (kt) kt.append(el('div', {
-    style:'font-size:11px;color:var(--mut);font-family:JetBrains Mono,monospace;letter-spacing:.05em;margin-top:2px;',
-  }, 'v. ' + APP_VERSIONE));
+  if (kt) {
+    const kv = el('div', {
+      style:'font-size:11px;color:var(--mut);font-family:JetBrains Mono,monospace;letter-spacing:.05em;margin-top:2px;',
+    }, 'v. ' + APP_VERSIONE);
+    kt.append(kv);
+    if (IS_KIOSK) _versioneBox = kv;
+  }
 })();
 
-// ── Auto-aggiornamento kiosk ──
-// Ogni 5 minuti controlla se il server pubblica una versione nuova (il ?v=
-// nel guscio HTML). Se sì e la postazione è ferma sulla schermata di
-// identificazione (nessuno sta lavorando), ricarica da sola: mai più
-// postazioni rimaste indietro di giorni.
-if (IS_KIOSK && APP_VERSIONE) {
+// ── Versione nuova pubblicata ──
+// UN controllo solo, per gestionale e kiosk: rilegge il guscio HTML dal
+// server (il ?v= di app.js) e lo confronta con quello caricato.
+async function versionePubblicata() {
+  try {
+    const res = await fetch(location.pathname + '?nc=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return null;
+    const m = (await res.text()).match(/app\.js\?v=([0-9A-Za-z.\-]+)/);
+    return m ? m[1] : null;
+  } catch (e) { return null; } // offline o rete lenta: si riprova al giro dopo
+}
+
+// Ricarica prendendo davvero la versione nuova: prima si riscarica il guscio
+// scavalcando la cache del browser (Pages lo tiene 10 minuti), poi reload.
+// Gli script hanno il ?v= nuovo nel guscio, quindi arrivano freschi da soli.
+async function ricaricaVersioneNuova() {
+  try { await fetch(location.pathname, { cache: 'reload' }); } catch (e) {}
+  location.reload();
+}
+
+function mostraTastoAggiorna(nuova) {
+  if (!_versioneBox || _versioneBox.querySelector('.btn-aggiorna')) return;
+  _versioneBox.append(el('button', {
+    class:'btnsm btn-aggiorna', type:'button',
+    title:'È pubblicata la versione ' + nuova + ': ricarica la pagina per usarla',
+    onclick: (e) => { e.stopPropagation(); e.currentTarget.disabled = true; ricaricaVersioneNuova(); },
+  }, '⟳ Aggiorna'));
+}
+
+// Ogni 5 minuti. Gestionale: compare il tasto «Aggiorna», decide la persona
+// (potrebbe avere una scheda aperta a meta'). Kiosk: compare il tasto e, se
+// la postazione e' ferma sulla schermata di identificazione (nessuno sta
+// lavorando), ricarica da sola: mai piu' postazioni rimaste indietro di giorni.
+if (APP_VERSIONE) {
   setInterval(async () => {
-    try {
-      const res = await fetch(location.pathname + '?nc=' + Date.now(), { cache: 'no-store' });
-      if (!res.ok) return;
-      const html = await res.text();
-      const m = html.match(/app\.js\?v=([0-9A-Za-z.\-]+)/);
-      if (!m || m[1] === APP_VERSIONE) return;
+    const v = await versionePubblicata();
+    if (!v || v === APP_VERSIONE) return;
+    mostraTastoAggiorna(v);
+    if (IS_KIOSK) {
       const stepId = document.getElementById('kiosk-step-id');
-      if (stepId && stepId.style.display !== 'none') location.reload();
-    } catch (e) { /* offline o rete lenta: si riprova al giro dopo */ }
+      if (stepId && stepId.style.display !== 'none') ricaricaVersioneNuova();
+    }
   }, 5 * 60 * 1000);
 }
 
@@ -19784,7 +19820,6 @@ function kioskRenderOpList() {
 
   $('#kiosk-op-name').textContent = 'Ciao ' + u.nome + ' — seleziona operazione';
   const root = $('#kiosk-op-list-content');
-  root.innerHTML = '';
   // ⚠ QUI, prima del ciclo, e non dentro `kioskOpCard`: il conto di una
   // commessa ricostruisce la domanda di TUTTE (la giacenza si divide fra chi
   // vuole lo stesso codice), e rifarlo per ogni card vorrebbe dire rifare
@@ -19821,29 +19856,43 @@ function kioskRenderOpList() {
   // dell'operatore trascinando le schede direttamente nella lista.
   const isAdmin = !!kioskState.isAdmin;
 
-  // Box ricerca
-  const searchBox = el('div', { class:'kiosk-op-search-box' });
-  const inp = el('input', {
-    type:'text', placeholder:'🔍 Cerca (codice, ordine, OP, cliente, note)…',
-    value: kCom.search,
-    oninput: (e) => {
-      kCom.search = e.target.value;
-      kioskRenderOpList();
-      // Mantieni focus
-      setTimeout(() => {
-        const newInp = root.querySelector('.kiosk-op-search-box input');
-        if (newInp) { newInp.focus(); newInp.setSelectionRange(newInp.value.length, newInp.value.length); }
-      }, 0);
-    },
-  });
-  searchBox.append(inp);
-
-  const toggleBtn = el('button', { class:'kiosk-op-toggle-altre',
-    onclick: () => { kCom.vediAltre = !kCom.vediAltre; kioskRenderOpList(); }
-  }, kCom.vediAltre ? '✕ Nascondi altre' : '+ Vedi tutte');
-  searchBox.append(toggleBtn);
-
-  root.append(searchBox);
+  // Box ricerca. ⚠ La casella si crea UNA volta e poi si ridisegnano solo i
+  // risultati (`.kiosk-op-results`). Prima ogni tasto ridisegnava tutto,
+  // casella compresa, e la rimetteva a fuoco con un setTimeout: sui PC lenti
+  // i tasti battuti fra la vecchia casella tolta e la nuova a fuoco andavano
+  // persi (e il realtime, ridisegnando, la toglieva di mano a chi scriveva).
+  let searchBox = root.querySelector('.kiosk-op-search-box');
+  let risultati = root.querySelector('.kiosk-op-results');
+  if (!searchBox || !risultati) {
+    root.innerHTML = '';
+    searchBox = el('div', { class:'kiosk-op-search-box' });
+    const inp = el('input', {
+      type:'text', placeholder:'🔍 Cerca (codice, ordine, OP, rif. cliente, cliente, note)…',
+      value: kCom.search,
+      oninput: (e) => {
+        kCom.search = e.target.value;
+        clearTimeout(kCom._cercaTimer);
+        kCom._cercaTimer = setTimeout(() => {
+          if ($('#kiosk-step-op-list').style.display !== 'none') kioskRenderOpList();
+        }, 200);
+      },
+    });
+    const toggleBtn = el('button', { class:'kiosk-op-toggle-altre',
+      onclick: () => { kCom.vediAltre = !kCom.vediAltre; kioskRenderOpList(); }
+    });
+    searchBox.append(inp, toggleBtn);
+    risultati = el('div', { class:'kiosk-op-results' });
+    root.append(searchBox, risultati);
+  }
+  {
+    const inp = searchBox.querySelector('input');
+    // Ricerca azzerata da fuori (cambio operatore): la casella si allinea,
+    // ma mai mentre qualcuno ci sta scrivendo.
+    if (inp && inp.value !== kCom.search && document.activeElement !== inp) inp.value = kCom.search;
+    searchBox.querySelector('.kiosk-op-toggle-altre').textContent =
+      kCom.vediAltre ? '✕ Nascondi altre' : '+ Vedi tutte';
+  }
+  risultati.innerHTML = '';
 
   const q = kCom.search.toLowerCase();
   // L'OP sul foglio è scritto 2026OP1727, nel gestionale è 2026/OP/01727:
@@ -19859,6 +19908,7 @@ function kioskRenderOpList() {
       if ((o.numero_op||'').toLowerCase().includes(q)) return true;
       return (o.numero_ordine||'').toLowerCase().includes(q)
           || (o.pos||'').toLowerCase().includes(q)
+          || (o.riferimento_cliente||'').toLowerCase().includes(q)
           || (cli?.nome||'').toLowerCase().includes(q)
           || (art?.codice||'').toLowerCase().includes(q)
           || (art?.descrizione||'').toLowerCase().includes(q)
@@ -19934,7 +19984,7 @@ function kioskRenderOpList() {
       grid.append(card);
     });
     sec.append(grid);
-    root.append(sec);
+    risultati.append(sec);
   }
 
   // Sezione "Le tue operazioni"
@@ -19954,9 +20004,9 @@ function kioskRenderOpList() {
     });
     if (dndOn) kioskAttachReorder(grid);
     sec.append(grid);
-    root.append(sec);
+    risultati.append(sec);
   } else if (!q && !kCom.vediAltre && riprendi.length === 0) {
-    root.append(el('div', { class:'kiosk-empty', style:'padding:20px;' },
+    risultati.append(el('div', { class:'kiosk-empty', style:'padding:20px;' },
       'Nessuna operazione assegnata a te. Clicca "Vedi tutte" per scegliere da quelle aperte.'));
   }
 
@@ -19969,9 +20019,9 @@ function kioskRenderOpList() {
       const grid = el('div', { class:'kiosk-op-grid' });
       altreFiltered.forEach(o => grid.append(kioskOpCard(o)));
       sec.append(grid);
-      root.append(sec);
+      risultati.append(sec);
     } else if (q && mieFiltered.length === 0) {
-      root.append(el('div', { class:'kiosk-empty' }, 'Nessuna operazione trovata per "' + kCom.search + '"'));
+      risultati.append(el('div', { class:'kiosk-empty' }, 'Nessuna operazione trovata per "' + kCom.search + '"'));
     }
   }
 
@@ -19992,7 +20042,7 @@ function kioskRenderOpList() {
       completateFiltered.forEach(o => grid.append(kioskOpCard(o, { readonly: true, reopen: true })));
       sec.append(grid);
     }
-    root.append(sec);
+    risultati.append(sec);
   }
 }
 

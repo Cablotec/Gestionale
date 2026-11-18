@@ -959,3 +959,6 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
   .kib-cod{font-size:17px;}
 }
 
+/* Tasto «Aggiorna» accanto alla versione (gestionale e kiosk) */
+.btn-aggiorna{margin-left:8px;padding:2px 8px;border-color:var(--acc);color:var(--acc);vertical-align:middle;}
+.btn-aggiorna:hover{background:var(--acc);color:var(--bg);border-color:var(--acc);}
