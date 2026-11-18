@@ -227,17 +227,18 @@ function opMinutiEffettivi(op) {
 function opSequenziale(op) { return true; }
 // Assegnatari di una fase: i suoi addetti/fornitori (per fase_id). Se la fase
 // non ne ha di propri, ripiega sugli assegnatari "a tutta la commessa" (fase_id nullo).
+// ⚠⚠ I FORNITORI NON PIANIFICANO PIU' (18 nov, Nico: "nel gantt puoi
+// toglierli del tutto"). Non danno capacita' e non dividono la quota degli
+// operai: il calendario va per i NOSTRI addetti. `fornitori` resta nella
+// forma (sempre vuoto) perche' tutti i chiamanti lo destrutturano.
+// I fornitori della commessa stanno nel Ciclo produttivo e nel Consuntivo.
 function faseAssegnatari(op, faseId) {
   const add = (state.opAddetti || []).filter(r => r.operazione_id === op.id && r.fase_id === faseId).map(r => r.utente_id);
-  const forn = (state.opFornitori || []).filter(r => r.operazione_id === op.id && r.fase_id === faseId)
-    .map(r => ({ azienda_id: r.azienda_id, allocazione: r.allocazione }));
-  if (add.length === 0 && forn.length === 0) {
+  if (add.length === 0) {
     const addC = (state.opAddetti || []).filter(r => r.operazione_id === op.id && r.fase_id == null).map(r => r.utente_id);
-    const fornC = (state.opFornitori || []).filter(r => r.operazione_id === op.id && r.fase_id == null)
-      .map(r => ({ azienda_id: r.azienda_id, allocazione: r.allocazione }));
-    return { addetti: addC, fornitori: fornC };
+    return { addetti: addC, fornitori: [] };
   }
-  return { addetti: add, fornitori: forn };
+  return { addetti: add, fornitori: [] };
 }
 // Inizio/fine di una singola fase (a ritroso / in avanti), con fallback 8h/giorno
 // se la fase non ha capacità (nessun assegnatario).
@@ -553,15 +554,10 @@ function opCalcInizio(op, addettiOverride, fornitoriOverride, pezziOverride) {
   if (!addetti) {
     addetti = (typeof getOperazioneAddetti === 'function') ? getOperazioneAddetti(op.id) : [];
   }
-  let fornitori = fornitoriOverride;
-  if (!fornitori) {
-    fornitori = (typeof getOperazioneFornitoriDettaglio === 'function') ? getOperazioneFornitoriDettaglio(op.id) : [];
-  }
-  if (fornitori.length && typeof fornitori[0] === 'string') {
-    fornitori = fornitori.map(id => ({ azienda_id: id, allocazione: 1.0 }));
-  }
-  if (addetti.length > 0 || fornitori.length > 0) {
-    return indietroOreCapacita(op.scadenza, ore, addetti, fornitori);
+  // I fornitori non pianificano (vedi faseAssegnatari): `fornitoriOverride`
+  // resta nella firma per i chiamanti, e non conta.
+  if (addetti.length > 0) {
+    return indietroOreCapacita(op.scadenza, ore, addetti, []);
   }
   const giorni = Math.ceil(ore / 8);
   if (giorni <= 0) return op.scadenza;
@@ -614,13 +610,8 @@ function opFineLavoro(op, inizioIso) {
   const ore = op.inizio_manuale ? opCalcOre(op) : opCalcOreResidue(op);
   if (ore <= 0) return inizioIso;
   let addetti = (typeof getOperazioneAddetti === 'function') ? getOperazioneAddetti(op.id) : [];
-  let fornitori = (typeof getOperazioneFornitoriDettaglio === 'function')
-    ? getOperazioneFornitoriDettaglio(op.id) : [];
-  if (fornitori.length && typeof fornitori[0] === 'string') {
-    fornitori = fornitori.map(id => ({ azienda_id: id, allocazione: 1.0 }));
-  }
-  if (addetti.length > 0 || fornitori.length > 0) {
-    return avantiOreCapacita(inizioIso, ore, addetti, fornitori);
+  if (addetti.length > 0) {
+    return avantiOreCapacita(inizioIso, ore, addetti, []);
   }
   const giorni = Math.ceil(ore / 8);
   if (giorni <= 0) return inizioIso;
@@ -703,7 +694,7 @@ function distribuisciOreOperazione(inizioIso, scadenzaIso, oreAddetto) {
 // gli addetti, e viceversa.
 function pesiEntitaCommessa(opId) {
   const addetti = getOperazioneAddetti(opId);
-  const fornitoriRows = getOperazioneFornitoriDettaglio(opId);
+  const fornitoriRows = [];   // i fornitori non pianificano (vedi faseAssegnatari)
   const pesiAdd = new Map();
   const pesiFor = new Map();
   let totale = 0;

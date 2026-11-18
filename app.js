@@ -4350,6 +4350,37 @@ async function seminaSenzaDistinta(r) {
 // mancanti. Best-effort resta (un errore qui non ferma l'ordine), ma da oggi
 // un passo che non scrive niente si DICHIARA nel riepilogo: vedi
 // `avvisaListeMateriali`.
+// FORNITORI DAL PRODOTTO (18 nov, Nico): i fornitori della scheda prodotto
+// (linguetta Fasi: materiali da mandare o solo €/pz) diventano i fornitori
+// della commessa quando nasce. E' un SEME: poi la commessa e' padrona del suo
+// dato, e cambiare la scheda prodotto non tocca le commesse gia' nate.
+// Nell'ordine della linguetta Fasi; il reparto non e' un fornitore.
+function fornitoriDaProdotto(articoloId) {
+  const art = (state.articoli || []).find(x => x.id === articoloId);
+  if (!art) return [];
+  const ok = (id) => !!id && (state.aziende || []).some(a => a.id === id && a.is_fornitore && a.attivo !== false);
+  const ids = [];
+  (Array.isArray(art.fasi_esterne) ? art.fasi_esterne : []).forEach(f => {
+    if (f && !f.reparto && ok(f.fornitore) && !ids.includes(f.fornitore)) ids.push(f.fornitore); });
+  (Array.isArray(art.prezzi_fornitori) ? art.prezzi_fornitori : []).forEach(pf => {
+    if (pf && ok(pf.fornitore) && !ids.includes(pf.fornitore)) ids.push(pf.fornitore); });
+  return ids;
+}
+// Il seme sulle commesse appena nate dalla griglia e dall'import (il modal lo
+// mette nel suo payload). Solo dove la commessa non ha ancora fornitori.
+// Best-effort: una commessa senza fornitori nasce lo stesso.
+async function seminaFornitoriCommesse(righe) {
+  for (const r of (righe || [])) {
+    try {
+      if (!r || !r.id) continue;
+      if ((state.opFornitori || []).some(x => x.operazione_id === r.id)) continue;
+      const ids = fornitoriDaProdotto(r.articolo_id);
+      if (!ids.length) continue;
+      await syncOperazioneFornitori(r.id, ids.map(id => ({ azienda_id: id, numero_ordine: null, fase_id: null })));
+    } catch (e) {}
+  }
+}
+
 async function creaMaterialiPerCommesse(righe, conto) {
   const c = conto || {};
   ['liste', 'seminate'].forEach(k => { if (!(k in c)) c[k] = 0; });
@@ -5537,17 +5568,24 @@ function richiesteDiCommessa(o) {
 // Le fasi della commessa in sequenza: [{ id, voci, richieste, fuori }].
 // Prima l'ordine del prodotto, poi chi ha richieste o materiale fuori ma non
 // sta (piu') nel prodotto: una fase con la sua storia non sparisce.
-function sequenzaFasiCommessa(o, art) {
+// `fornIds`: i fornitori della commessa (dal modal, anche non ancora salvati;
+// altrimenti quelli a database). Dal 18 nov ogni fornitore della commessa e'
+// una fase, anche senza materiali da mandare (Nico: "un terzista potrebbe
+// benissimo avere solo prezzo senza materiali").
+function sequenzaFasiCommessa(o, art, fornIds) {
   const rep = repartoId();
   const fasi = fasiCommessa(o);
   const mie = richiesteDiCommessa(o);
   const fuori = fuoriSedeCommessa(o);
-  const usata = (id) => fasi.has(id) || mie.some(x => x.terzista_id === id) || fuori.some(g => g.presso_id === id);
+  const forn = new Set(Array.isArray(fornIds) ? fornIds
+    : (state.opFornitori || []).filter(r => r.operazione_id === o.id).map(r => r.azienda_id));
+  const usata = (id) => fasi.has(id) || forn.has(id) || mie.some(x => x.terzista_id === id) || fuori.some(g => g.presso_id === id);
   const ids = [];
   const metti = (id) => { if (id && !ids.includes(id) && usata(id)) ids.push(id); };
   (Array.isArray(art && art.fasi_esterne) ? art.fasi_esterne : [])
     .forEach(f => { if (f) metti(f.reparto ? rep : f.fornitore); });
   fasi.forEach((_, id) => { if (!eReparto(id)) metti(id); });
+  forn.forEach(id => { if (!eReparto(id)) metti(id); });
   mie.forEach(x => { if (!eReparto(x.terzista_id)) metti(x.terzista_id); });
   fuori.forEach(g => { if (!eReparto(g.presso_id)) metti(g.presso_id); });
   metti(rep);
@@ -5572,6 +5610,29 @@ function passiFase(o, f, poi) {
   const primaInv = inviate.slice().sort((a, b) => String(a.inviato_il || '').localeCompare(String(b.inviato_il || '')))[0];
   const prepara = () => apriRichiestaTerzista(o, poi, { terzista: f.id });
   const passi = [];
+
+  // TERZISTA SENZA MATERIALI (18 nov): solo prezzo, nessuna lista da fare
+  // ne' materiale da mandare. Restano il lavoro da lui e il rientro.
+  if (!rep && !f.voci.length && !f.richieste.length && !f.fuori.length) {
+    const totPz0 = Number(o.quantita) || 0;
+    const rientri0 = rientriDiFase(o, f.id);
+    const rientrati0 = rientri0.reduce((a, r) => a + (Number(r.pezzi) || 0), 0);
+    const completo0 = totPz0 > 0 && rientrati0 >= totPz0;
+    passi.push({ nome:'Dal terzista', stato: completo0 ? 'fatto' : (viva ? 'ora' : 'poi'),
+      dett: completo0 ? 'lavorazione finita' : (rientrati0 > 0 ? 'in parte rientrata' : '') });
+    if (!Array.isArray(state.rientriTerzista)) {
+      passi.push({ nome:'Rientro (DDT)', stato:'poi', dett:'non ancora registrabile' });
+    } else {
+      const ultimo0 = rientri0[rientri0.length - 1];
+      passi.push({ nome:'Rientro (DDT)', stato: completo0 ? 'fatto' : (viva ? 'ora' : 'poi'),
+        dett: rientrati0 > 0
+          ? nfIT(rientrati0) + ' di ' + nfIT(totPz0) + ' pz' + (ultimo0 ? ' · ultimo il ' + giorno(ultimo0.data) : '')
+          : (viva ? 'da registrare' : ''),
+        azione: (!completo0 && viva) ? btn('↩ Registra rientro', () => apriRientroTerzista(o, f.id, poi),
+          'Il lavoro è tornato: data, DDT del terzista, pezzi') : '' });
+    }
+    return passi;
+  }
 
   // 1. LA LISTA (la richiesta al magazzino)
   if (daPrep.length) {
@@ -5726,8 +5787,9 @@ const COLORI_PASSO = { fatto:'var(--grn)', ora:'var(--blu)', avviso:'var(--or)',
 
 // La sezione intera, o null se la commessa non ha fasi (allora la linguetta
 // resta la lista dei materiali, come prima).
-function sezioneCicloProduttivo(o, art, poi) {
-  const seq = sequenzaFasiCommessa(o, art);
+function sezioneCicloProduttivo(o, art, poi, opts) {
+  opts = opts || {};
+  const seq = sequenzaFasiCommessa(o, art, opts.fornitori);
   if (!seq.length) return null;
   const tot = Number(o.quantita) || 0;
   const spediti = quantitaSpedita(o.id);
@@ -5764,7 +5826,10 @@ function sezioneCicloProduttivo(o, art, poi) {
     card.append(el('div', { style:'display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px;' },
       el('span', { style:'font-weight:700;font-size:13px;' }, (i + 1) + ' · ' + (rep ? 'Reparto' : nomeAziendaDi(f.id))),
       el('span', { class:'sub', style:'font-size:11px;' }, (rep ? 'in casa' : 'terzista')
-        + (nMat ? ' · ' + nMat + (nMat === 1 ? ' materiale' : ' materiali') : ''))));
+        + (nMat ? ' · ' + nMat + (nMat === 1 ? ' materiale' : ' materiali') : (rep ? '' : ' · nessun materiale da mandare')))));
+    // N. OF e € ordine del fornitore, nella sua scheda (li passa il modal).
+    const campi = (!rep && opts.campiFornitore) ? opts.campiFornitore(f.id) : null;
+    if (campi) card.append(campi);
     // I passi in fila: una barretta colorata sopra ciascuno.
     const griglia = el('div', { style:'display:grid;grid-template-columns:repeat(' + passi.length + ',minmax(0,1fr));gap:8px;' });
     passi.forEach(p => griglia.append(el('div', {
@@ -10628,6 +10693,7 @@ async function operazioniImportEsegui(piano) {
     // Stesso principio: best-effort. Un import che si ferma perche un
     // articolo non ha la distinta sarebbe un rimedio peggiore del male.
     await creaMaterialiPerCommesse(nate, contoListe);
+    await seminaFornitoriCommesse(nate);
 
   } catch (e) {
     toast('Import interrotto: ' + (e.message || e), 'err');
@@ -11825,6 +11891,7 @@ function openNuovoOrdineModal() {
       // La lista materiali nasce con l ordine, dalla distinta dell articolo.
       const contoListe = {};
       await creaMaterialiPerCommesse(data || [], contoListe);
+      await seminaFornitoriCommesse(data || []);
       // Semina i minuti pagati sull'anagrafica articolo SOLO dove mancano
       // (stesso pattern del modal commessa: si popola il vuoto, mai si
       // sovrascrive uno standard già impostato). Copre i codici creati al
@@ -13406,6 +13473,19 @@ function openOperazioneModal(o, opts) {
     if (e.target && (e.target.name === 'quantita' || e.target.id === 'minuti-input')) aggiornaSuggFornitori();
   });
   const forSelectedWrap = el('div', { class:'util-selected', style:'display:flex;flex-direction:column;gap:8px;' });
+  // FORNITORI NEL CICLO PRODUTTIVO (18 nov, Nico: "in lavorazione togli i
+  // fornitori gia' presenti in ciclo produttivo"). Un fornitore che ha la sua
+  // scheda nel ciclo porta li' n. OF e € ordine; nel blocco Fornitori restano
+  // solo quelli che nel ciclo non compaiono (commessa nuova, senza lista,
+  // ciclo non disponibile). Lo stato e' sempre `fornitoriSel`, salvato dal Salva.
+  let fornNelCiclo = new Set();
+  const ridisegnaFornitori = () => {
+    try { renderMancanti(); } catch (e) {}   // ridisegna il ciclo, poi la lista sopra
+    renderForSelected(); renderForDropList();
+    if (typeof renderFasiComm === 'function') renderFasiComm();
+    if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
+    if (aggiornaPreviewInizio) aggiornaPreviewInizio();
+  };
   const forSearchInput = el('input', {
     type:'text', class:'util-search',
     placeholder: aziendeFornitrici.length === 0
@@ -13443,10 +13523,7 @@ function openOperazioneModal(o, opts) {
         title:'Aggiunge il fornitore a questa commessa',
         onclick: () => {
           fornitoriSel.push({ azienda_id: id, numero_ordine: '', allocazione: 1.0, fase_keys: [] });
-          renderForSelected(); renderForDropList();
-          if (typeof renderFasiComm === 'function') renderFasiComm();
-          if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
-          if (aggiornaPreviewInizio) aggiornaPreviewInizio();
+          ridisegnaFornitori();
               } }, '+ ' + nomeAziendaDi(id) + (pp ? ' · ' + String(pp.prezzoPz).replace('.', ',') + ' €/pz' : '')));
     });
   };
@@ -13455,21 +13532,30 @@ function openOperazioneModal(o, opts) {
     suggFornitoriUpd.length = 0;
     if (typeof aggiornaDataRealistica === 'function') aggiornaDataRealistica();
     try { renderForSugg(); } catch (e) {}
-    if (fornitoriSel.length === 0) {
-      forSelectedWrap.append(el('span', { class:'util-empty' }, 'Nessun fornitore'));
+    const fuoriCiclo = fornitoriSel.filter(sel => !fornNelCiclo.has(sel.azienda_id));
+    if (fuoriCiclo.length === 0) {
+      forSelectedWrap.append(el('span', { class:'util-empty' }, fornitoriSel.length
+        ? 'Tutti i fornitori sono nelle loro fasi, qui sotto.' : 'Nessun fornitore'));
       return;
     }
-    fornitoriSel.forEach((sel, idx) => {
+    fuoriCiclo.forEach(sel => { const r = rigaFornitore(sel); if (r) forSelectedWrap.append(r); });
+  };
+  // La riga di un fornitore: n. OF, € ordine, ✕. `senzaNome` quando sta dentro
+  // la scheda della sua fase nel ciclo, che il nome lo dice gia'.
+  const rigaFornitore = (sel, senzaNome) => {
       const a = state.aziende.find(x => x.id === sel.azienda_id);
-      if (!a) return;
+      if (!a) return null;
       // flex-wrap: con tante fasi le chips vanno a capo invece di SCHIACCIARE
       // il nome a larghezza zero (successo con Tecnocab su commesse a 3+ fasi).
       const row = el('div', {
-        style:'display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 10px;background:rgba(212,140,40,.08);border:1px solid rgba(212,140,40,.3);border-radius:4px;',
+        style: senzaNome
+          ? 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:-2px 0 8px;'
+          : 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 10px;background:rgba(212,140,40,.08);border:1px solid rgba(212,140,40,.3);border-radius:4px;',
       });
       // Nome fornitore: mai sotto i 140px, come le righe addetti
-      row.append(el('div', { style:'flex:1 1 auto;min-width:140px;color:var(--yel);font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+      if (!senzaNome) row.append(el('div', { style:'flex:1 1 auto;min-width:140px;color:var(--yel);font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
         a.nome));
+      else row.append(el('span', { class:'sub', style:'font-size:11px;' }, 'Ordine al fornitore'));
       // Input numero ordine fornitore.
       // Accetta sia OF (Ordine Fornitore) sia OL (Ordine Lavorazione).
       // Precompilo con OF perché caso più frequente; l'utente sostituisce
@@ -13534,11 +13620,8 @@ function openOperazioneModal(o, opts) {
           style:'background:none;border:none;color:var(--yel);font-size:14px;cursor:pointer;padding:0 4px;',
           title:'Rimuovi questo fornitore',
           onclick: () => {
-            fornitoriSel = fornitoriSel.filter((_, i) => i !== idx);
-            renderForSelected(); renderForDropList();
-            if (typeof renderFasiComm === 'function') renderFasiComm();
-            if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
-            if (aggiornaPreviewInizio) aggiornaPreviewInizio();
+            fornitoriSel = fornitoriSel.filter(x => x !== sel);
+            ridisegnaFornitori();
           },
         }, '✕'));
       }
@@ -13561,8 +13644,7 @@ function openOperazioneModal(o, opts) {
         upd();
         row.append(sugg);
       }
-      forSelectedWrap.append(row);
-    });
+      return row;
   };
   const renderForDropList = () => {
     const q = forSearchInput.value.trim().toLowerCase();
@@ -13592,10 +13674,7 @@ function openOperazioneModal(o, opts) {
               fase_keys: [],
             });
           }
-          renderForSelected(); renderForDropList();
-          if (typeof renderFasiComm === 'function') renderFasiComm();
-          if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm();
-          if (aggiornaPreviewInizio) aggiornaPreviewInizio();
+          ridisegnaFornitori();
         },
       },
         el('span', { class:'util-row-chk' }, isSel ? '✓' : ''),
@@ -13814,7 +13893,13 @@ function openOperazioneModal(o, opts) {
   // quanto ce n'e in magazzino e su quale OF sta cambiano ogni giorno.
   const sezMateriali = el('div', { style:'margin-top:6px;' });
   let listaMatAperta = null;
+  // Ridisegnando il ciclo cambia quali fornitori hanno la loro scheda li':
+  // il blocco Fornitori in testa si ridisegna sempre dopo.
   const renderMancanti = () => {
+    fornNelCiclo = new Set();
+    try { renderMancantiDentro(); } finally { renderForSelected(); }
+  };
+  const renderMancantiDentro = () => {
     sezMateriali.innerHTML = '';
     const art = (state.articoli || []).find(x => x.id === o.articolo_id);
     const ordinati = Number(o.quantita) || 0;
@@ -13943,8 +14028,14 @@ function openOperazioneModal(o, opts) {
     }
     // CICLO PRODUTTIVO (17 nov): le fasi a tappe. Calcolato qui sopra perche'
     // se c'e' il reparto il suo bottone sta nella sua scheda, non in testa.
-    const ciclo = (!isNew && richiesteTerzistaPossibili()) ? sezioneCicloProduttivo(o, art, renderMancanti) : null;
-    const cicloHaReparto = !!(ciclo && repartoId() && sequenzaFasiCommessa(o, art).some(f => eReparto(f.id)));
+    const fornIds = fornitoriSel.map(s => s.azienda_id);
+    const ciclo = (!isNew && richiesteTerzistaPossibili()) ? sezioneCicloProduttivo(o, art, renderMancanti, {
+      fornitori: fornIds,
+      campiFornitore: (id) => { const sel = fornitoriSel.find(s => s.azienda_id === id); return sel ? rigaFornitore(sel, true) : null; },
+    }) : null;
+    const seqCiclo = ciclo ? sequenzaFasiCommessa(o, art, fornIds) : [];
+    fornNelCiclo = new Set(seqCiclo.map(f => f.id));
+    const cicloHaReparto = !!(ciclo && repartoId() && seqCiclo.some(f => eReparto(f.id)));
     // RICHIESTA PER TERZISTA (5 nov): la lista da far preparare al magazzino
     // per una fase esterna. Si conferma la spedizione dopo, dalla richiesta.
     if (!isNew && isAdmin && richiesteTerzistaPossibili()) {
@@ -14244,7 +14335,12 @@ function openOperazioneModal(o, opts) {
   const pCons = el('div', { class:'optab-panel' });
   form.append(pDati, pMat, pLav, pProd, pCons);
   // La sezione dei materiali e tutto il contenuto della sua scheda.
-  pMat.append(sezMateriali);
+  pMat.append(el('div', { class:'field', style:'margin-bottom:10px;' }, el('label', {}, 'Fornitori'),
+      forSelectedWrap, forSuggWrap, forDropWrap,
+      el('div', { class:'sub', style:'margin-top:4px;' },
+        'Ditte che lavorano questa commessa. Chi ha una fase nel ciclo qui sotto ha n. OF e € ordine nella sua scheda. '
+        + 'Il costo viene dal €/pz della scheda prodotto (o dall’«€ ordine»); il conto è nella scheda Consuntivo.')),
+    sezMateriali);
 
   pDati.append(
     el('div', { class:'frow' },
@@ -14427,11 +14523,6 @@ function openOperazioneModal(o, opts) {
       addSelectedWrap, addDropWrap,
       el('div', { class:'sub', style:'margin-top:4px;' },
         'Puoi assegnare più persone. Il lavoro verrà ripartito tra loro.')),
-    el('div', { class:'field' }, el('label', {}, 'Fornitori'),
-      forSelectedWrap, forSuggWrap, forDropWrap,
-      el('div', { class:'sub', style:'margin-top:4px;' },
-        'Ditte che lavorano questa commessa con noi. Il costo viene dal €/pz della scheda prodotto '
-        + '(o dall’«€ ordine» scritto qui); il conto completo è nella scheda Consuntivo.')),
     ...(fieldRealistica ? [fieldRealistica] : []),
     el('div', { class:'frow' },
       el('div', { class:'field' }, el('label', {}, 'Preparazione materiale'), selPrep),
@@ -15467,13 +15558,10 @@ function openOperazioneModal(o, opts) {
       // Assegnatari per fase dai dati live (addettoFase: uid→_k; fornitoriSel.fase_keys),
       // con ripiego sugli assegnati "a tutta la commessa" (senza fase).
       const assegnLive = (faseK) => {
+        // I fornitori non pianificano (18 nov): come faseAssegnatari nel motore.
         let add = addettiSel.filter(uid => (addettoFase[uid] || '') === faseK);
-        let forn = fornitoriSel.filter(s => (s.fase_keys || []).includes(faseK)).map(s => ({ azienda_id: s.azienda_id, allocazione: s.allocazione }));
-        if (!add.length && !forn.length) {
-          add = addettiSel.filter(uid => !addettoFase[uid]);
-          forn = fornitoriSel.filter(s => !(s.fase_keys || []).length).map(s => ({ azienda_id: s.azienda_id, allocazione: s.allocazione }));
-        }
-        return { add, forn };
+        if (!add.length) add = addettiSel.filter(uid => !addettoFase[uid]);
+        return { add, forn: [] };
       };
       if (!tmp.scadenza) {
         inizioCalc = null;
@@ -15491,7 +15579,7 @@ function openOperazioneModal(o, opts) {
     } else {
       ore = opCalcOre(tmp);
       // Override locali (addettiSel + fornitoriSel): preview senza dipendere dal DB.
-      inizioCalc = opCalcInizio(tmp, addettiSel, fornitoriSel);
+      inizioCalc = opCalcInizio(tmp, addettiSel, []);
     }
     const giorni = Math.ceil(ore / 8);
     const conAddetti = (addettiSel && addettiSel.length > 0) || conFasi;
@@ -16085,6 +16173,12 @@ function openOperazioneModal(o, opts) {
         // 3) Fornitori: un fornitore su più fasi → una riga per (azienda, fase).
         //    Nessuna fase selezionata = una riga con fase_id null (tutta la commessa).
         const fornitoriPayload = [];
+        // Commessa nuova: i fornitori della scheda prodotto entrano da soli
+        // (seme, vedi fornitoriDaProdotto), oltre a quelli scelti qui.
+        if (isNew) fornitoriDaProdotto(data.articolo_id).forEach(id => {
+          if (!fornitoriSel.some(s => s.azienda_id === id))
+            fornitoriSel.push({ azienda_id: id, numero_ordine: '', allocazione: 1.0, fase_keys: [] });
+        });
         fornitoriSel.forEach(s => {
           const base = { azienda_id: s.azienda_id, numero_ordine: s.numero_ordine, allocazione: s.allocazione,
             ...(importoForAttivo ? { importo: s.importo != null ? s.importo : null } : {}) };
@@ -22186,10 +22280,6 @@ function renderGanttCommesse(root) {
 
       const art = state.articoli.find(a => a.id === c.op.articolo_id);
       const cli = state.aziende.find(x => x.id === c.op.cliente_id);
-      // Fornitori coinvolti sulla commessa: dichiarati nel tooltip (in quota)
-      const fornNomi = [...new Set((state.opFornitori || [])
-        .filter(r => r.operazione_id === c.op.id)
-        .map(r => (state.aziende.find(a => a.id === r.azienda_id) || {}).nome || '?'))];
 
       const bar = el('div', {
         class: 'gantt-cmbar' + (sfora ? ' sfora' : '') + (c.ritardo ? ' inritardo' : '')
@@ -22210,7 +22300,6 @@ function renderGanttCommesse(root) {
           + '\nSuo consuntivo: ' + cons.toFixed(1) + ' h'
           + (prev > 0 ? '  (' + Math.round(perc*100) + '%)' : '')
           + (sfora ? '\n⚠ SFORAMENTO quota: +' + (cons-prev).toFixed(1) + ' h' : '')
-          + (fornNomi.length ? '\nCon fornitore (in quota): ' + fornNomi.join(', ') : '')
           + (attiva ? '\n● sta lavorando ora' : '')
           + '\nLavoro: ' + fmtIT(c.inizio) + ' → ' + fmtIT(c.fine)
           + '\nScadenza: ' + fmtIT(c.scadenza)
