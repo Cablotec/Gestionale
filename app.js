@@ -5790,7 +5790,7 @@ const COLORI_PASSO = { fatto:'var(--grn)', ora:'var(--blu)', avviso:'var(--or)',
 function sezioneCicloProduttivo(o, art, poi, opts) {
   opts = opts || {};
   const seq = sequenzaFasiCommessa(o, art, opts.fornitori);
-  if (!seq.length) return null;
+  if (!seq.length) return opts.piede ? el('div', { class:'ciclo-prod', style:'margin:4px 0 14px;' }, opts.piede) : null;
   const tot = Number(o.quantita) || 0;
   const spediti = quantitaSpedita(o.id);
   const fasi = seq.map(f => ({ f, passi: passiFase(o, f, poi) }));
@@ -5826,7 +5826,8 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
     card.append(el('div', { style:'display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px;' },
       el('span', { style:'font-weight:700;font-size:13px;' }, (i + 1) + ' · ' + (rep ? 'Reparto' : nomeAziendaDi(f.id))),
       el('span', { class:'sub', style:'font-size:11px;' }, (rep ? 'in casa' : 'terzista')
-        + (nMat ? ' · ' + nMat + (nMat === 1 ? ' materiale' : ' materiali') : (rep ? '' : ' · nessun materiale da mandare')))));
+        + (nMat ? ' · ' + nMat + (nMat === 1 ? ' materiale' : ' materiali') : (rep ? '' : ' · nessun materiale da mandare'))),
+      (!rep && opts.azioniFornitore) ? (opts.azioniFornitore(f) || '') : ''));
     // N. OF e € ordine del fornitore, nella sua scheda (li passa il modal).
     const campi = (!rep && opts.campiFornitore) ? opts.campiFornitore(f.id) : null;
     if (campi) card.append(campi);
@@ -5930,6 +5931,7 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
     }
     box.append(card);
   });
+  if (opts.piede) box.append(opts.piede);
   return box;
 }
 
@@ -13479,6 +13481,106 @@ function openOperazioneModal(o, opts) {
   // solo quelli che nel ciclo non compaiono (commessa nuova, senza lista,
   // ciclo non disponibile). Lo stato e' sempre `fornitoriSel`, salvato dal Salva.
   let fornNelCiclo = new Set();
+  // ⚠ Niente barra in cima (18 nov, Nico: "togli tutta la barra dei
+  // fornitori, vorrei una cosa piu' pulita"). Il blocco esiste solo come
+  // RIPIEGO: compare se un fornitore della commessa non ha la sua scheda nel
+  // ciclo (ciclo non disponibile perche' i movimenti non si sono letti).
+  const fornTop = el('div', { class:'field', style:'margin-bottom:10px;display:none;' },
+    el('label', {}, 'Fornitori'), forSelectedWrap);
+  // Le quote dei terzisti sulla lista materiali, cambiate da «Cambia» e
+  // «Togli fase» e non ancora salvate: aspettano il Salva come tutto il resto.
+  let materialiInSospeso = null;
+  const vistaCiclo = () => materialiInSospeso ? Object.assign({}, o, { materiali: materialiInSospeso }) : o;
+  // Sposta la quota per pezzo di un terzista su un altro (o la toglie: va in
+  // casa, perche' il reparto prende quello che resta dopo i terzisti).
+  const spostaQuote = (daId, aId) => {
+    const base = materialiInSospeso || (Array.isArray(o.materiali) ? o.materiali : null);
+    if (!base) return;
+    materialiInSospeso = base.map(r => {
+      const fe = r && r.fasi_esterne;
+      if (!fe || typeof fe !== 'object' || !(daId in fe)) return r;
+      const nf = Object.assign({}, fe);
+      const q = Number(nf[daId]) || 0;
+      delete nf[daId];
+      if (aId) nf[aId] = (Number(nf[aId]) || 0) + q;
+      return Object.assign({}, r, { fasi_esterne: nf });
+    });
+  };
+  // Scegliere un terzista: finestra con ricerca, esclusi quelli gia' sulla commessa.
+  const scegliTerzista = (titolo, escludi, poi) => {
+    const v = veloTerzista(titolo, 460);
+    const cerca = el('input', { type:'text', placeholder:'Cerca terzista…', autocomplete:'off', style:'width:100%;margin-bottom:8px;' });
+    const lista = el('div', { style:'max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:2px;' });
+    const disegna = () => {
+      lista.innerHTML = '';
+      const q = cerca.value.trim().toLowerCase();
+      const ok = aziendeFornitrici.filter(a => !escludi.includes(a.id) && (!q || (a.nome || '').toLowerCase().includes(q)));
+      if (!ok.length) { lista.append(el('div', { class:'sub', style:'font-size:12px;padding:6px;' }, 'Nessun terzista trovato')); return; }
+      ok.forEach(a => lista.append(el('button', { type:'button', class:'btng', style:'text-align:left;justify-content:flex-start;',
+        onclick: () => { v.chiudi(); poi(a.id); } }, a.nome)));
+    };
+    cerca.oninput = disegna;
+    v.corpo.append(cerca, lista);
+    v.piede.append(el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'));
+    disegna();
+    setTimeout(() => cerca.focus(), 0);
+  };
+  // Una fase con richieste, materiale fuori sede o rientri ha gia' una storia
+  // legata a QUEL terzista: cambiarlo o toglierlo la lascerebbe orfana.
+  const faseConStoria = (f) => f.richieste.some(x => x.stato !== 'annullato') || f.fuori.length > 0
+    || rientriDiFase(o, f.id).length > 0;
+  const azioniFornitore = (f) => {
+    if (!canEdit) return null;
+    const bloc = faseConStoria(f);
+    const tit = bloc ? 'Questa fase ha già richieste, materiale fuori o rientri con ' + nomeAziendaDi(f.id)
+      + ': annullali o falli rientrare prima.' : '';
+    const b = (txt, fn, t) => el('button', { type:'button', class:'btnsm', style:'font-size:11px;padding:2px 8px;',
+      disabled: bloc, title: tit || t, onclick: fn }, txt);
+    return el('span', { style:'display:flex;gap:6px;margin-left:auto;' },
+      b('⇄ Cambia terzista', () => scegliTerzista('Cambia ' + nomeAziendaDi(f.id) + ' con…',
+        fornitoriSel.map(s => s.azienda_id), (nuovo) => {
+          const sel = fornitoriSel.find(s => s.azienda_id === f.id);
+          if (sel) Object.assign(sel, { azienda_id: nuovo, numero_ordine: '', importo: null, fase_keys: [] });
+          else fornitoriSel.push({ azienda_id: nuovo, numero_ordine: '', allocazione: 1.0, fase_keys: [] });
+          spostaQuote(f.id, nuovo);
+          modificato = true;
+          ridisegnaFornitori();
+        }), 'Un altro terzista fa questa fase: i materiali da mandare passano a lui'),
+      b('✕ Togli fase', async () => {
+        const n = f.voci.length;
+        const scelta = await chiediConferma({ titolo: 'Togliere la fase di ' + nomeAziendaDi(f.id) + '?',
+          testo: 'Il terzista esce da questa commessa' + (n ? ' e i suoi ' + n + (n === 1 ? ' materiale resta' : ' materiali restano')
+            + ' in casa, in reparto' : '') + '. Diventa definitivo quando salvi.',
+          bottoni: [{ id:'togli', etichetta:'Togli la fase', tipo:'pericolo' }, { id:'annulla', etichetta:'Annulla', tipo:'primario' }] });
+        if (scelta !== 'togli') return;
+        fornitoriSel = fornitoriSel.filter(s => s.azienda_id !== f.id);
+        spostaQuote(f.id, null);
+        modificato = true;
+        ridisegnaFornitori();
+      }, 'Lo facciamo noi: la fase sparisce e i materiali restano in casa'));
+  };
+  const btnAggiungiFase = () => canEdit ? el('button', { type:'button', class:'btnsm', style:'margin-top:2px;',
+    title:'Aggiunge un terzista a questa commessa',
+    onclick: () => scegliTerzista('Aggiungi un terzista', fornitoriSel.map(s => s.azienda_id), (id) => {
+      fornitoriSel.push({ azienda_id: id, numero_ordine: '', allocazione: 1.0, fase_keys: [] });
+      modificato = true;
+      ridisegnaFornitori();
+    }) }, '+ Fase terzista') : null;
+  // Il ciclo della scheda, uguale nei due rami (con e senza lista materiali).
+  const cicloDellaScheda = (art) => {
+    if (isNew || !richiesteTerzistaPossibili()) return { ciclo: null, seq: [] };
+    const oV = vistaCiclo();
+    const fornIds = fornitoriSel.map(s => s.azienda_id);
+    const ciclo = sezioneCicloProduttivo(oV, art, renderMancanti, {
+      fornitori: fornIds,
+      campiFornitore: (id) => { const sel = fornitoriSel.find(s => s.azienda_id === id); return sel ? rigaFornitore(sel, true) : null; },
+      azioniFornitore,
+      piede: btnAggiungiFase(),
+    });
+    const seq = ciclo ? sequenzaFasiCommessa(oV, art, fornIds) : [];
+    fornNelCiclo = new Set(seq.map(f => f.id));
+    return { ciclo, seq };
+  };
   const ridisegnaFornitori = () => {
     try { renderMancanti(); } catch (e) {}   // ridisegna il ciclo, poi la lista sopra
     renderForSelected(); renderForDropList();
@@ -13533,11 +13635,9 @@ function openOperazioneModal(o, opts) {
     if (typeof aggiornaDataRealistica === 'function') aggiornaDataRealistica();
     try { renderForSugg(); } catch (e) {}
     const fuoriCiclo = fornitoriSel.filter(sel => !fornNelCiclo.has(sel.azienda_id));
-    if (fuoriCiclo.length === 0) {
-      forSelectedWrap.append(el('span', { class:'util-empty' }, fornitoriSel.length
-        ? 'Tutti i fornitori sono nelle loro fasi, qui sotto.' : 'Nessun fornitore'));
-      return;
-    }
+    // `fornTop` nasce dopo questa funzione: alla prima chiamata non c'e' ancora.
+    try { fornTop.style.display = fuoriCiclo.length ? '' : 'none'; } catch (e) {}
+    if (fuoriCiclo.length === 0) return;
     fuoriCiclo.forEach(sel => { const r = rigaFornitore(sel); if (r) forSelectedWrap.append(r); });
   };
   // La riga di un fornitore: n. OF, € ordine, ✕. `senzaNome` quando sta dentro
@@ -13613,8 +13713,9 @@ function openOperazioneModal(o, opts) {
               if (typeof aggiornaConfrontoComm === 'function') aggiornaConfrontoComm(); } }, '✕')] : [])));
       }
 
-      // Bottone elimina
-      if (canEdit) {
+      // Bottone elimina: solo nel blocco di ripiego. Nella scheda della fase
+      // c'e' gia' «✕ Togli fase», e due uscite per lo stesso gesto confondono.
+      if (canEdit && !senzaNome) {
         row.append(el('button', {
           type:'button',
           style:'background:none;border:none;color:var(--yel);font-size:14px;cursor:pointer;padding:0 4px;',
@@ -13987,6 +14088,9 @@ function openOperazioneModal(o, opts) {
         };
         sezMateriali.append(btn);
       }
+      // Anche senza lista i fornitori della commessa sono fasi (solo prezzo).
+      const { ciclo: cicloSenzaLista } = cicloDellaScheda(art);
+      if (cicloSenzaLista) sezMateriali.append(el('div', { style:'margin-top:12px;' }, cicloSenzaLista));
       return;
     }
 
@@ -14028,13 +14132,7 @@ function openOperazioneModal(o, opts) {
     }
     // CICLO PRODUTTIVO (17 nov): le fasi a tappe. Calcolato qui sopra perche'
     // se c'e' il reparto il suo bottone sta nella sua scheda, non in testa.
-    const fornIds = fornitoriSel.map(s => s.azienda_id);
-    const ciclo = (!isNew && richiesteTerzistaPossibili()) ? sezioneCicloProduttivo(o, art, renderMancanti, {
-      fornitori: fornIds,
-      campiFornitore: (id) => { const sel = fornitoriSel.find(s => s.azienda_id === id); return sel ? rigaFornitore(sel, true) : null; },
-    }) : null;
-    const seqCiclo = ciclo ? sequenzaFasiCommessa(o, art, fornIds) : [];
-    fornNelCiclo = new Set(seqCiclo.map(f => f.id));
+    const { ciclo, seq: seqCiclo } = cicloDellaScheda(art);
     const cicloHaReparto = !!(ciclo && repartoId() && seqCiclo.some(f => eReparto(f.id)));
     // RICHIESTA PER TERZISTA (5 nov): la lista da far preparare al magazzino
     // per una fase esterna. Si conferma la spedizione dopo, dalla richiesta.
@@ -14059,7 +14157,8 @@ function openOperazioneModal(o, opts) {
     const listaBox = el('div', {});
     if (ciclo) {
       sezMateriali.append(ciclo);
-      if (listaMatAperta === null) listaMatAperta = false;
+      // Senza fasi il ciclo e' solo il bottone «+ Fase terzista»: la lista resta aperta.
+      if (listaMatAperta === null) listaMatAperta = !seqCiclo.length;
       const etiLista = () => (listaMatAperta ? '▾ ' : '▸ ') + 'Lista materiali completa · '
         + righe.length + (righe.length === 1 ? ' componente' : ' componenti');
       const togLista = el('button', { type:'button', class:'btnsm', style:'margin:2px 0 10px;' }, etiLista());
@@ -14335,12 +14434,7 @@ function openOperazioneModal(o, opts) {
   const pCons = el('div', { class:'optab-panel' });
   form.append(pDati, pMat, pLav, pProd, pCons);
   // La sezione dei materiali e tutto il contenuto della sua scheda.
-  pMat.append(el('div', { class:'field', style:'margin-bottom:10px;' }, el('label', {}, 'Fornitori'),
-      forSelectedWrap, forSuggWrap, forDropWrap,
-      el('div', { class:'sub', style:'margin-top:4px;' },
-        'Ditte che lavorano questa commessa. Chi ha una fase nel ciclo qui sotto ha n. OF e € ordine nella sua scheda. '
-        + 'Il costo viene dal €/pz della scheda prodotto (o dall’«€ ordine»); il conto è nella scheda Consuntivo.')),
-    sezMateriali);
+  pMat.append(fornTop, sezMateriali);
 
   pDati.append(
     el('div', { class:'frow' },
@@ -16008,6 +16102,7 @@ function openOperazioneModal(o, opts) {
         payload.prezzo_unitario = (Number.isFinite(v) && v >= 0) ? v : null;
       }
       if (!isNew) Object.assign(payload, spunteInSospeso);
+      if (!isNew && materialiInSospeso) payload.materiali = materialiInSospeso;
       if (!isNew && o.stato === 'spedita') {
         payload.consegnato_il = fd.get('consegnato_il') || null;
         payload.giustificazione_ritardo = (fd.get('giustificazione_ritardo')||'').trim() || null;
@@ -16199,8 +16294,9 @@ function openOperazioneModal(o, opts) {
         // Storico…), non forzare un cambio di vista. Il modal vive fuori da
         // `#tab-content`, quindi ridisegnare la tab sotto non lo tocca.
         // Le spunte cambiano la scheda Ciclo produttivo, che legge `o`.
-        if (!isNew && Object.keys(spunteInSospeso).length) {
+        if (!isNew && (Object.keys(spunteInSospeso).length || materialiInSospeso)) {
           Object.keys(spunteInSospeso).forEach(k => delete spunteInSospeso[k]);
+          materialiInSospeso = null;
           Object.assign(o, data);
           renderMancanti();
         }
