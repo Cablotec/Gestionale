@@ -589,7 +589,7 @@ async function afterLogin() {
   $('#role-pill').innerHTML = eSuperAdmin() ? '<span class="badge bvio">super admin</span>'
     : state.profile.ruolo === 'admin' ? '<span class="badge bvio">admin</span>' : '<span class="badge bgry">user</span>';
   $('#area-gestione').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
-  $('#area-impostazioni').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
+  $('#area-impostazioni').style.display = eSuperAdmin() ? '' : 'none';
   $('#area-strumenti').style.display = state.profile.ruolo === 'admin' ? '' : 'none';
   // Riunioni: prima di bindTabs, che riapre la scheda dell'indirizzo e deve
   // gia' sapere se questa persona la puo' vedere.
@@ -1665,16 +1665,20 @@ const TAB_STRUCTURE = {
   impostazioni: {
     label: 'Impostazioni',
     adminOnly: true,
+    // ⚠ SOLO IL SUPER ADMIN (18 nov, Nico: "il pannello impostazioni lo posso
+    // vedere solo io", "utenti solo io"). Chiuso anche nel database: policy
+    // RESTRICTIVE `solo_super_admin_*` (strumenti/migrazione-impostazioni-super-admin.sql).
+    soloSuperAdmin: true,
     tabs: [
       // ⚠ TRE SCHEDE FUSE IN UNA (mezzi, chiusure, tipi assenza) insieme
       // alle finestre ferie che erano gia' qui. Era il sintomo scritto in
       // CLAUDE.md: le finestre ferie stavano in Impostazioni e i tipi assenza
       // in Gestione — **due meta' della stessa regola in due macro-aree
       // diverse**, e non le trovava nemmeno chi le aveva appena fatte.
-      { id: 'imp_calendari',  label: 'Calendari',         adminOnly: true },
-      { id: 'tipi_lav',       label: 'Tipi lavorazione',  adminOnly: true },
-      { id: 'operatori',      label: 'Utenti',            adminOnly: true },
-      { id: 'attivita_extra', label: 'Attività extra',    adminOnly: true },
+      { id: 'imp_calendari',  label: 'Calendari',         adminOnly: true, soloSuperAdmin: true },
+      { id: 'tipi_lav',       label: 'Tipi lavorazione',  adminOnly: true, soloSuperAdmin: true },
+      { id: 'operatori',      label: 'Utenti',            adminOnly: true, soloSuperAdmin: true },
+      { id: 'attivita_extra', label: 'Attività extra',    adminOnly: true, soloSuperAdmin: true },
     ],
   },
 };
@@ -1717,6 +1721,7 @@ function schedaDaIndirizzo() {
 // membro delle riunioni dove serve. Una regola, usata da menu e indirizzo.
 function puoVedereVoce(v) {
   if (v.adminOnly && state.profile?.ruolo !== 'admin') return false;
+  if (v.soloSuperAdmin && !eSuperAdmin()) return false;
   if (v.soloRiunioni && !state.membroRiunioni) return false;
   return true;
 }
@@ -2285,7 +2290,8 @@ function renderCalendar(root) {
     // telefono, quindi un evento di piu' giorni compare su tutti, qui come li'.
     if (isGenerale && typeof eventiDelGiorno === 'function') {
       eventiDelGiorno(iso).forEach(ev => {
-        const apribile = state.profile?.ruolo === 'admin';
+        // Gli eventi si modificano in Impostazioni: solo il super admin (18 nov).
+        const apribile = eSuperAdmin();
         cell.append(el('div', {
           class: 'cal-evt',
           style: 'border-left-color:var(--blu);background:rgba(78,184,255,.15);color:var(--blu);font-weight:600;'
