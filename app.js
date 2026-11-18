@@ -2825,6 +2825,13 @@ function sezioneChiVedeRiunioni() {
   const corpo = el('div', { class:'sub' }, 'Lettura…');
   box.append(corpo);
   (async () => {
+    // ⚠ Chi non e' membro riceve un elenco VUOTO, non un errore (la RLS
+    // filtra): direbbe "nessuno la vede", che e' falso. Lo si dichiara.
+    if (!state.membroRiunioni) {
+      corpo.textContent = 'Non sei nell\'elenco di Riunioni: il database non ti mostra chi c\'è.';
+      corpo.style.color = 'var(--yel)';
+      return;
+    }
     let ids;
     try {
       const { data, error } = await sb.from('riunioni_membri').select('profilo_id');
