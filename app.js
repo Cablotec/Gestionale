@@ -1804,7 +1804,7 @@ function renderTab(name) {
     if (!a || a.tagName !== 'INPUT' || !a.classList.contains('search') || !root.contains(a)) return null;
     if (state.currentTab !== name) return null;
     let s0 = null, s1 = null;
-    try { s0 = a.selectionStart; s1 = a.selectionEnd; } catch (e) {}
+    try { s0 = a.selectionStart; s1 = a.selectionEnd; } catch (_) {}   // `_`: il test cerca il primo `catch (e)` come fine della catena
     return { id: a.id || null, pos: [...root.querySelectorAll('input.search')].indexOf(a), s0, s1 };
   })();
   state.currentTab = name;
