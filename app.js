@@ -8091,13 +8091,13 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
     // Il codice apre il dettaglio delle commesse che lo usano, quando ce n'e'.
     { k:'codice', t:'Codice', ord: m => String(m.codice || ''),
       cella: (m) => {
-        if (!usiDi(m.codice).length) return el('span', { style:'white-space:nowrap;' },
-          el('span', { class:'mono', style:'font-size:11px;' }, m.codice), bottoneSchedaCodice(m.codice));
+        // Niente 📇 qui (19 nov, Nico): la scheda si apre cliccando la riga.
+        if (!usiDi(m.codice).length) return el('span', { class:'mono', style:'font-size:11px;' }, m.codice);
         const aperto = matAperti.has(String(m.codice).trim());
-        return el('span', { style:'white-space:nowrap;' }, el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);',
+        return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);white-space:nowrap;',
           title:'Mostra le commesse che usano questo codice',
           onclick:(e)=>{ e.preventDefault(); e.stopPropagation(); apriChiudi(m.codice); } },
-          (aperto ? '▾ ' : '▸ ') + m.codice), bottoneSchedaCodice(m.codice));
+          (aperto ? '▾ ' : '▸ ') + m.codice);
       } },
     { k:'descrizione', t:'Descrizione', ord: m => String(m.descrizione || '').toUpperCase(),
       cella: (m) => el('span', { style:'display:block;max-width:280px;overflow:hidden;'
@@ -8112,12 +8112,12 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
     // sapere quale. "Gestionale" porta ai suoi movimenti.
     { k:'fonte', t:'Fonte', ord: m => m.fonte === 'gestionale' ? 'Gestionale' : 'Alnus',
       cella: (m) => m.fonte === 'gestionale'
-        ? el('a', { href:'#', class:'badge bblu', style:'text-decoration:none;',
+        // Senza clic verso Movimenti (19 nov, Nico): gli ultimi movimenti stanno nella scheda del codice.
+        ? el('span', { class:'badge bblu',
             title:'Giacenza = somma dei movimenti del gestionale (' + (m.n_movimenti || 0)
               + ' movimenti)' + (m.presso_terzisti > 0
                 ? ', di cui ' + nf(m.presso_terzisti) + ' presso terzisti (nostro, fuori sede)' : '')
-              + '. Clic: i movimenti di questo codice.',
-            onclick:(e)=>{ e.preventDefault(); e.stopPropagation(); movCerca = m.codice; movFiltroDoc = ''; movQuante = 400; selectTab('movimenti'); } },
+              + '. I movimenti sono nella scheda del codice (clic sulla riga).' },
             'Gestionale')
         : el('span', { class:'sub', style:'font-size:11px;', title:"Dall'ultima estrazione del magazzino Alnus" }, 'Alnus') },
     { k:'impegno', t:'Impegno', tr:true, num:true, giuInizio:true, ord: m => Number(m.impegno),
@@ -8615,7 +8615,7 @@ function renderFabbisogno(root) {
     // su TUTTE le righe — e' solo il disegno a essere pigro.
     righe.slice(0, matQuante).forEach(m => {
       // Clic sulla riga = scheda del codice (19 nov, Nico). Stato (menu), codice
-      // (commesse che lo usano) e Fonte hanno il loro clic.
+      // (commesse che lo usano) hanno il loro clic.
       const tr = el('tr', { style:'cursor:pointer;', title:'Clic: scheda del codice',
         onclick: () => apriSchedaCodice(m.codice) });
       colonne.forEach(c => tr.append(el('td', { class: c.tr ? 'tr' : '' }, c.cella(m))));
