@@ -6917,7 +6917,7 @@ function bloccoProduzioneDaRientri(o, qta) {
   if (!scarsi.length) return null;
   const minimo = Math.min(...scarsi.map(x => x.rientrati));
   const ancora = Math.max(0, minimo - prodotti);
-  return 'Non si produce piu\' di quanto e\' rientrato dal terzista: '
+  return 'Non si produce più di quanto è rientrato dal terzista: '
     + scarsi.map(x => nomeAziendaDi(x.id) + ' ' + nfIT(x.rientrati) + ' pz rientrati').join(', ')
     + ', prodotti ' + nfIT(prodotti) + '. '
     + (ancora > 0 ? 'Si possono registrare ancora ' + nfIT(ancora) + ' pz.' : 'Prima registra il rientro («↩ Registra rientro» nella scheda del terzista).');
