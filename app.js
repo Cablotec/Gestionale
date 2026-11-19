@@ -5664,6 +5664,12 @@ async function caricaOrdiniFornitore() {
   } catch (e) { state.ordiniFornitore = null; }
 }
 function numeroOrdineFornitore(of) { return of ? 'OFS ' + of.numero + '/' + of.anno : ''; }
+// ✎ Modifica di un ordine emesso (19 nov): la finestra del suo tipo, precompilata.
+function modificaOrdineFornitore(of, poi) {
+  if (!of || of.stato !== 'emesso') return toast('Un ordine annullato non si modifica.', 'err');
+  if (of.tipo === 'acquisto') apriOrdineAcquisto(poi, of);
+  else apriOrdineTerzista(null, of.fornitore_id, poi, of);
+}
 // L'ordine EMESSO a questo terzista che contiene la commessa, o null.
 function ordineTerzistaDi(opId, terzistaId) {
   return (state.ordiniFornitore || []).find(of => of.stato === 'emesso' && of.tipo === 'terzista'
@@ -5690,81 +5696,135 @@ function rigaOrdineTerzista(o, terzistaId) {
     pezzi, prezzo_pz, totale, fonte, rif_cliente: o.riferimento_cliente || null, scadenza: o.scadenza || null };
 }
 
-function apriOrdineTerzista(o, terzistaId, poi) {
+// Salva un ordine (nuovo o modificato) e lo stampa nella finestra gia' aperta.
+// Una porta sola per le due finestre (terzista e acquisto), cosi' creare e
+// modificare hanno la stessa sorte: database, stato in memoria, stampa.
+// MODIFICA (19 nov, Nico: "possibilita' di modificare OFS"): stesso numero,
+// `revisione` + 1 (la stampa la mostra), solo ordini emessi, solo admin
+// (`modifica_ordine_fornitore`). Ritorna l'ordine salvato o lancia l'errore.
+async function salvaOrdineFornitore(of, campi) {
+  const { data, error } = of
+    ? await sb.rpc('modifica_ordine_fornitore', { p_id: of.id, p_consegna: campi.consegna, p_note: campi.note, p_righe: campi.righe })
+    : await sb.rpc('crea_ordine_fornitore', { p_tipo: campi.tipo, p_fornitore: campi.fornitore,
+      p_data: toLocalISO(new Date()), p_consegna: campi.consegna, p_note: campi.note, p_righe: campi.righe });
+  if (error) {
+    if (of && /modifica_ordine_fornitore/.test(error.message || '') && /(could not find|does not exist|schema cache)/i.test(error.message || ''))
+      throw new Error('la modifica non è ancora attiva: manca lo SQL migrazione-modifica-ordini-fornitore.sql');
+    throw new Error(error.message);
+  }
+  const nuovo = Array.isArray(data) ? data[0] : data;
+  if (!nuovo || !nuovo.id) throw new Error('il database non ha restituito l’ordine');
+  state.ordiniFornitore = state.ordiniFornitore || [];
+  const i = state.ordiniFornitore.findIndex(z => z.id === nuovo.id);
+  if (i >= 0) state.ordiniFornitore[i] = nuovo; else state.ordiniFornitore.push(nuovo);
+  return nuovo;
+}
+// Il bottone «Crea / Salva» delle due finestre: apre la stampa DENTRO il clic
+// (dopo l'await il browser la bloccherebbe), salva, stampa.
+async function confermaOrdineFornitore(of, campi, ok, chiudi, poi) {
+  const testoOk = ok.textContent;
+  const w = window.open('', '_blank');
+  if (w) w.document.write('<p style="font-family:sans-serif">' + (of ? 'Salvataggio' : 'Creazione') + ' dell’ordine…</p>');
+  ok.disabled = true; ok.textContent = of ? 'Salvataggio…' : 'Creazione…';
+  try {
+    const nuovo = await salvaOrdineFornitore(of, campi);
+    chiudi();
+    toast('Ordine ' + numeroOrdineFornitore(nuovo) + (of ? ' modificato (revisione ' + nuovo.revisione + ')' : ' a ' + nomeAziendaDi(nuovo.fornitore_id) + ' creato'), 'ok');
+    stampaOrdineFornitore(nuovo, w);
+    if (typeof poi === 'function') poi();
+  } catch (e) {
+    if (w) w.close();
+    ok.disabled = false; ok.textContent = testoOk;
+    toast('Ordine non ' + (of ? 'modificato' : 'creato') + ': ' + (e.message || e), 'err', 9000);
+  }
+}
+
+// La finestra dell'ordine al terzista: nuovo (da una commessa) o MODIFICA di
+// un ordine emesso (`of`). Pezzi e €/pz si possono correggere riga per riga
+// (19 nov): la proposta viene dalla commessa e dalla scheda prodotto, ma il
+// prezzo concordato puo' essere un altro, e «da definire» si scrive qui.
+// In modifica: le commesse dell'ordine spuntate con i valori salvati, sotto
+// le altre commesse libere di quel terzista non spuntate (si aggiungono).
+function apriOrdineTerzista(o, terzistaId, poi, of) {
   if (state.ordiniFornitore == null) return toast('Gli ordini fornitore non sono attivi: manca la tabella (migrazione-ordini-fornitore.sql).', 'err', 9000);
-  const gia = ordineTerzistaDi(o.id, terzistaId);
-  if (gia) return stampaOrdineFornitore(gia);
+  if (of) terzistaId = of.fornitore_id;
+  if (!of && o) {
+    const gia = ordineTerzistaDi(o.id, terzistaId);
+    if (gia) return stampaOrdineFornitore(gia);
+  }
   const nome = nomeAziendaDi(terzistaId);
-  const v = veloTerzista('Ordine al terzista · ' + nome, 820);
-  const lista = commesseOrdinabiliTerzista(terzistaId);
-  if (!lista.some(c => c.id === o.id)) lista.unshift(o);
-  const scelte = new Map(lista.map(c => [c.id, true]));
-  const righe = new Map(lista.map(c => [c.id, rigaOrdineTerzista(c, terzistaId)]));
-  const euro = (n) => n == null ? '—' : cartaEuro(n);
+  const v = veloTerzista((of ? 'Modifica ' + numeroOrdineFornitore(of) : 'Ordine al terzista') + ' · ' + nome, 900);
+  // voci: { id, riga, scelta, questa }
+  const voci = [];
+  if (of) (of.righe || []).forEach(r => voci.push({ id: r.operazione_id, riga: { ...r }, scelta: true }));
+  commesseOrdinabiliTerzista(terzistaId).forEach(c => {
+    if (!voci.some(x => x.id === c.id)) voci.push({ id: c.id, riga: rigaOrdineTerzista(c, terzistaId), scelta: !of });
+  });
+  if (!of && o && !voci.some(x => x.id === o.id)) voci.unshift({ id: o.id, riga: rigaOrdineTerzista(o, terzistaId), scelta: true });
+  voci.forEach(x => { x.questa = !!(o && x.id === o.id); });
   const tabella = el('div');
   const totEl = el('span', { style:'font-weight:700;' });
-  const C = 'display:grid;grid-template-columns:24px minmax(150px,1fr) minmax(150px,1.4fr) 60px 80px 90px;gap:8px;align-items:baseline;';
+  const C = 'display:grid;grid-template-columns:24px minmax(150px,1fr) minmax(150px,1.3fr) 70px 96px 96px;gap:8px;align-items:center;';
   const et = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const ricalcola = (r) => { r.totale = (r.prezzo_pz != null && !isNaN(r.prezzo_pz) && r.pezzi > 0) ? Math.round(r.pezzi * r.prezzo_pz * 100) / 100 : null; };
   const ridisegnaTot = () => {
-    const sel = lista.filter(c => scelte.get(c.id)).map(c => righe.get(c.id));
+    const sel = voci.filter(x => x.scelta).map(x => x.riga);
     const daDef = sel.filter(r => r.totale == null).length;
-    totEl.textContent = sel.length + (sel.length === 1 ? ' commessa' : ' commesse') + ' · totale ' + euro(sel.reduce((s, r) => s + (r.totale || 0), 0))
+    totEl.textContent = sel.length + (sel.length === 1 ? ' commessa' : ' commesse') + ' · totale ' + cartaEuro(sel.reduce((s, r) => s + (r.totale || 0), 0))
       + (daDef ? ' · ' + daDef + ' senza prezzo' : '');
   };
   tabella.append(el('div', { style: C + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
     el('span'), et('Commessa'), et('Prodotto'), et('Pz', 1), et('€/pz', 1), et('Totale', 1)));
-  lista.forEach(c => {
-    const r = righe.get(c.id);
+  voci.forEach(x => {
+    const r = x.riga;
     const cb = el('input', { type:'checkbox' });
-    cb.checked = true;
-    cb.onchange = () => { scelte.set(c.id, cb.checked); ridisegnaTot(); };
-    tabella.append(el('label', { style: C + 'padding:4px 0;border-bottom:1px solid var(--brd);font-size:12px;cursor:pointer;' },
+    cb.checked = x.scelta;
+    cb.onchange = () => { x.scelta = cb.checked; ridisegnaTot(); };
+    const totR = el('span', { class:'mono', style:'text-align:right;font-weight:700;font-size:12px;' });
+    const segna = () => { totR.textContent = r.totale == null ? '—' : cartaEuro(r.totale); ridisegnaTot(); };
+    const inPz = el('input', { type:'text', inputmode:'decimal', value: r.pezzi ? nfIT(r.pezzi) : '', class:'mono', style:'font-size:12px;text-align:right;' });
+    inPz.oninput = () => { const n = numeroDaTesto(inPz.value); r.pezzi = n == null || isNaN(n) ? 0 : n;
+      inPz.style.color = n != null && isNaN(n) ? 'var(--red)' : ''; ricalcola(r); segna(); };
+    const inP = el('input', { type:'text', inputmode:'decimal', class:'mono', style:'font-size:12px;text-align:right;', placeholder:'da definire',
+      value: r.prezzo_pz != null ? String(r.prezzo_pz).replace('.', ',') : '' });
+    inP.oninput = () => { const n = numeroDaTesto(inP.value); r.prezzo_pz = n; r.fonte = 'manuale';
+      inP.style.color = n != null && isNaN(n) ? 'var(--red)' : ''; ricalcola(r); segna(); };
+    const noteRiga = [x.questa ? 'questa commessa' : '', (of && !x.scelta) ? 'libera' : '',
+      r.scadenza ? 'scade ' + fmtIT(String(r.scadenza).slice(0, 10)) : '',
+      r.fonte === 'commessa' ? 'prezzo da «€ ordine»' : r.fonte === 'prodotto' ? 'prezzo da scheda prodotto' : ''].filter(Boolean).join(' · ');
+    tabella.append(el('div', { style: C + 'padding:4px 0;border-bottom:1px solid var(--brd);font-size:12px;' },
       cb,
       el('span', {}, el('span', { class:'mono', style:'font-weight:700;' }, r.etichetta),
-        el('div', { class:'sub', style:'font-size:11px;' }, (c.id === o.id ? 'questa commessa' : '')
-          + (r.scadenza ? (c.id === o.id ? ' · ' : '') + 'scade ' + fmtIT(String(r.scadenza).slice(0, 10)) : ''))),
+        el('div', { class:'sub', style:'font-size:11px;' }, noteRiga)),
       el('span', { style:'min-width:0;' }, el('span', { class:'mono' }, r.articolo || '—'),
         el('div', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: r.descrizione }, r.descrizione)),
-      el('span', { class:'mono', style:'text-align:right;' }, nfIT(r.pezzi)),
-      el('span', { class:'mono', style:'text-align:right;' + (r.prezzo_pz == null ? 'color:var(--or);' : '') }, r.prezzo_pz == null ? 'da definire' : euro(r.prezzo_pz, 5)),
-      el('span', { class:'mono', style:'text-align:right;font-weight:700;' }, euro(r.totale))));
+      inPz, inP, totR));
+    segna();
   });
-  const inCons = el('input', { type:'date' });
+  const inCons = el('input', { type:'date', value: of && of.consegna ? String(of.consegna).slice(0, 10) : '' });
   const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
   v.corpo.append(
-    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
-      'Ordine di prova: esce con la scritta FAC SIMILE. Sono già spuntate tutte le commesse aperte di ' + nome
-      + ' non ancora ordinate: togli quelle da non ordinare adesso, restano libere per il prossimo ordine. '
-      + 'Prezzo dal «€ ordine» della commessa o dalla scheda prodotto.'),
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' }, of
+      ? 'Correggi pezzi, prezzi e consegna, togli o aggiungi commesse (sotto quelle libere di ' + nome + '). '
+        + 'Il numero resta ' + numeroOrdineFornitore(of) + ', la stampa porta la revisione ' + ((of.revisione || 0) + 1) + '.'
+      : 'Ordine di prova: esce con la scritta FAC SIMILE. Sono già spuntate tutte le commesse aperte di ' + nome
+        + ' non ancora ordinate: togli quelle da non ordinare adesso, restano libere per il prossimo ordine. '
+        + 'Prezzo proposto dal «€ ordine» della commessa o dalla scheda prodotto: si può correggere.'),
     tabella,
     el('div', { style:'display:flex;justify-content:flex-end;margin:8px 0 12px;font-size:12px;' }, totEl),
     el('div', { class:'frow' }, campo('Consegna richiesta', inCons)));
   ridisegnaTot();
   const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
-  const ok = el('button', { class:'btnp' }, '🖨 Crea e stampa OF');
-  ok.onclick = async () => {
-    const sel = lista.filter(c => scelte.get(c.id)).map(c => righe.get(c.id));
-    if (!sel.length) { msg.textContent = 'Spunta almeno una commessa'; msg.style.color = 'var(--red)'; return; }
-    // La finestra di stampa si apre ADESSO, dentro il clic: dopo l'await il browser la bloccherebbe.
-    const w = window.open('', '_blank');
-    if (w) w.document.write('<p style="font-family:sans-serif">Creazione dell’ordine…</p>');
-    ok.disabled = true; ok.textContent = 'Creazione…';
-    try {
-      const { data, error } = await sb.rpc('crea_ordine_fornitore', { p_tipo: 'terzista', p_fornitore: terzistaId,
-        p_data: toLocalISO(new Date()), p_consegna: inCons.value || null, p_note: null, p_righe: sel });
-      if (error) throw new Error(error.message);
-      const of = Array.isArray(data) ? data[0] : data;
-      if (!of || !of.id) throw new Error('il database non ha restituito l’ordine');
-      (state.ordiniFornitore = state.ordiniFornitore || []).push(of);
-      v.chiudi();
-      toast('Ordine ' + numeroOrdineFornitore(of) + ' a ' + nome + ' creato', 'ok');
-      stampaOrdineFornitore(of, w);
-      if (typeof poi === 'function') poi();
-    } catch (e) {
-      if (w) w.close();
-      ok.disabled = false; ok.textContent = '🖨 Crea e stampa OF';
-      toast('Ordine non creato: ' + (e.message || e), 'err', 9000);
-    }
+  const ok = el('button', { class:'btnp' }, of ? '💾 Salva e ristampa' : '🖨 Crea e stampa OF');
+  ok.onclick = () => {
+    const sel = voci.filter(x => x.scelta).map(x => x.riga);
+    const err = !sel.length ? (of ? 'Senza commesse l’ordine non resta: annullalo con ✕' : 'Spunta almeno una commessa')
+      : sel.some(r => !(r.pezzi > 0)) ? 'Ogni commessa vuole i pezzi'
+      : sel.some(r => r.prezzo_pz != null && (isNaN(r.prezzo_pz) || r.prezzo_pz < 0)) ? 'C’è un prezzo che non è un numero'
+      : null;
+    if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
+    confermaOrdineFornitore(of, { tipo: 'terzista', fornitore: terzistaId, consegna: inCons.value || null,
+      note: of ? of.note : null, righe: sel }, ok, v.chiudi, poi);
   };
   v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
 }
@@ -5822,10 +5882,11 @@ function daOrdinarePerFornitore() {
   return { per, senza };
 }
 // L'ultimo prezzo pagato a un fornitore per un codice: { prezzo, data, numero } o null.
-function ultimoPrezzoAcquisto(fornitoreId, codice) {
+// `escludiId`: l'ordine che si sta modificando, che non e' «l'ultimo prezzo» di se stesso.
+function ultimoPrezzoAcquisto(fornitoreId, codice, escludiId) {
   const c = String(codice || '').trim().toUpperCase();
   if (!c) return null;
-  const ofs = (state.ordiniFornitore || []).filter(of => of.tipo === 'acquisto' && of.stato === 'emesso' && of.fornitore_id === fornitoreId)
+  const ofs = (state.ordiniFornitore || []).filter(of => of.tipo === 'acquisto' && of.stato === 'emesso' && of.fornitore_id === fornitoreId && of.id !== escludiId)
     .sort((a, b) => String(b.data).localeCompare(String(a.data)) || (b.anno - a.anno) || (b.numero - a.numero));
   for (const o2 of ofs) {
     const r = (o2.righe || []).find(x => String(x.codice || '').trim().toUpperCase() === c && x.prezzo != null);
@@ -5840,12 +5901,14 @@ function numeroDaTesto(s) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-async function apriOrdineAcquisto(poi) {
+// `of`: un ordine d'acquisto emesso da MODIFICARE (19 nov): stessa finestra,
+// fornitore fisso, righe/consegna/note precompilate; salva con la revisione.
+async function apriOrdineAcquisto(poi, of) {
   if (state.ordiniFornitore == null) return toast('Gli ordini fornitore non sono attivi: manca la tabella.', 'err', 9000);
   if (!matAbituali) await caricaFornitoriAbituali();
   const { per, senza } = daOrdinarePerFornitore();
-  const v = veloTerzista('Nuovo ordine d’acquisto', 980);
-  const euro = (n) => n == null || isNaN(n) ? '—' : cartaEuro(n);
+  const v = veloTerzista(of ? 'Modifica ' + numeroOrdineFornitore(of) + ' · ' + nomeAziendaDi(of.fornitore_id) : 'Nuovo ordine d’acquisto', 980);
+  const escludi = of ? of.id : null;
   // Fornitori: prima chi ha codici da ordinare (i piu' carichi in alto), poi gli altri.
   const fornitori = (state.aziende || []).filter(a => a.attivo !== false && a.is_fornitore);
   const conDaOrd = fornitori.filter(a => per.has(a.id)).sort((a, b) => per.get(b.id).length - per.get(a.id).length);
@@ -5892,7 +5955,7 @@ async function apriOrdineAcquisto(poi) {
       const inCod = el('input', { type:'text', value: r.codice, class:'mono', style:'font-size:12px;', placeholder:'codice' });
       inCod.onchange = () => {
         r.codice = inCod.value.trim().toUpperCase(); inCod.value = r.codice;
-        r.ultimo = ultimoPrezzoAcquisto(selForn.value, r.codice);
+        r.ultimo = ultimoPrezzoAcquisto(selForn.value, r.codice, escludi);
         if ((r.prezzo == null || isNaN(r.prezzo)) && r.ultimo) r.prezzo = r.ultimo.prezzo;
         completa(r, disegna);
       };
@@ -5919,7 +5982,7 @@ async function apriOrdineAcquisto(poi) {
   selForn.onchange = () => {
     const fid = selForn.value;
     righe = (fid && per.has(fid) ? per.get(fid) : []).map(x => {
-      const ul = ultimoPrezzoAcquisto(fid, x.codice);
+      const ul = ultimoPrezzoAcquisto(fid, x.codice, escludi);
       return { codice: x.codice, descrizione: x.descrizione, um: x.um, qta: x.qta, daOrdinare: x.qta, prezzo: ul ? ul.prezzo : null, ultimo: ul };
     });
     disegna();
@@ -5931,8 +5994,10 @@ async function apriOrdineAcquisto(poi) {
   const inNote = el('textarea', { rows:'2', style:'width:100%;font-size:12px;', placeholder:'Facoltative: imballo, certificati, riferimenti…' });
   const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
   v.corpo.append(
-    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
-      'Ordine di prova: esce con la scritta FAC SIMILE e non cambia i mancanti (l’«in arrivo» resta quello di Alnus). '
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' }, of
+      ? 'Correggi, togli o aggiungi righe, consegna e note. Il numero resta ' + numeroOrdineFornitore(of)
+        + ', la stampa porta la revisione ' + ((of.revisione || 0) + 1) + '.'
+      : 'Ordine di prova: esce con la scritta FAC SIMILE e non cambia i mancanti (l’«in arrivo» resta quello di Alnus). '
       + 'Scegliendo il fornitore compaiono i codici «da ordinare» di Materiali che hanno lui come fornitore abituale, col prezzo dell’ultimo ordine.'
       + (senza.length ? ' ' + senza.length + (senza.length === 1 ? ' codice da ordinare non ha' : ' codici da ordinare non hanno')
         + ' un fornitore abituale con la scheda in Aziende: si aggiungono a mano.' : '')),
@@ -5941,10 +6006,22 @@ async function apriOrdineAcquisto(poi) {
     el('div', { style:'display:flex;justify-content:flex-end;margin:8px 0 12px;font-size:12px;' }, totEl),
     el('div', { class:'frow' }, campo('Consegna richiesta', inCons)),
     campo('Note', inNote));
+  if (of) {
+    // Il fornitore di un ordine non cambia (sarebbe un altro ordine): fisso.
+    if (![...selForn.options].some(op => op.value === of.fornitore_id))
+      selForn.append(el('option', { value: of.fornitore_id }, nomeAziendaDi(of.fornitore_id)));
+    selForn.value = of.fornitore_id;
+    selForn.disabled = true;
+    righe = (of.righe || []).map(r => ({ codice: r.codice || '', descrizione: r.descrizione || '', um: r.um || '',
+      qta: Number(r.qta) || 0, prezzo: r.prezzo == null ? null : Number(r.prezzo),
+      ultimo: ultimoPrezzoAcquisto(of.fornitore_id, r.codice, escludi) }));
+    inCons.value = of.consegna ? String(of.consegna).slice(0, 10) : '';
+    inNote.value = of.note || '';
+  }
   disegna();
   const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
-  const ok = el('button', { class:'btnp' }, '🖨 Crea e stampa OF');
-  ok.onclick = async () => {
+  const ok = el('button', { class:'btnp' }, of ? '💾 Salva e ristampa' : '🖨 Crea e stampa OF');
+  ok.onclick = () => {
     const fid = selForn.value;
     const valide = righe.filter(r => r.codice);
     const err = !fid ? 'Scegli il fornitore'
@@ -5955,26 +6032,8 @@ async function apriOrdineAcquisto(poi) {
     if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
     const payload = valide.map(r => ({ codice: r.codice, descrizione: r.descrizione || '', um: r.um || '', qta: r.qta,
       prezzo: r.prezzo == null ? null : r.prezzo, totale: r.prezzo == null ? null : Math.round(r.qta * r.prezzo * 100) / 100 }));
-    // La finestra di stampa si apre ADESSO, dentro il clic: dopo l'await il browser la bloccherebbe.
-    const w = window.open('', '_blank');
-    if (w) w.document.write('<p style="font-family:sans-serif">Creazione dell’ordine…</p>');
-    ok.disabled = true; ok.textContent = 'Creazione…';
-    try {
-      const { data, error } = await sb.rpc('crea_ordine_fornitore', { p_tipo: 'acquisto', p_fornitore: fid,
-        p_data: toLocalISO(new Date()), p_consegna: inCons.value || null, p_note: inNote.value.trim() || null, p_righe: payload });
-      if (error) throw new Error(error.message);
-      const of = Array.isArray(data) ? data[0] : data;
-      if (!of || !of.id) throw new Error('il database non ha restituito l’ordine');
-      (state.ordiniFornitore = state.ordiniFornitore || []).push(of);
-      v.chiudi();
-      toast('Ordine ' + numeroOrdineFornitore(of) + ' a ' + nomeAziendaDi(fid) + ' creato', 'ok');
-      stampaOrdineFornitore(of, w);
-      if (typeof poi === 'function') poi();
-    } catch (e) {
-      if (w) w.close();
-      ok.disabled = false; ok.textContent = '🖨 Crea e stampa OF';
-      toast('Ordine non creato: ' + (e.message || e), 'err', 9000);
-    }
+    confermaOrdineFornitore(of, { tipo: 'acquisto', fornitore: fid, consegna: inCons.value || null,
+      note: inNote.value.trim() || null, righe: payload }, ok, v.chiudi, poi);
   };
   v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
 }
@@ -6034,6 +6093,8 @@ function renderOrdiniFornitore(root) {
     const ann = of.stato === 'annullato';
     tb.append(el('tr', { style: ann ? 'opacity:.55;' : '' },
       el('td', {}, el('span', { class:'mono', style:'font-weight:700;white-space:nowrap;' }, numeroOrdineFornitore(of)),
+        of.revisione ? el('span', { class:'sub', style:'margin-left:6px;font-size:11px;', title: of.modificato_il
+          ? 'Modificato il ' + fmtIT(String(of.modificato_il).slice(0, 10)) : '' }, 'rev. ' + of.revisione) : '',
         ann ? el('span', { class:'badge bgry', style:'margin-left:6px;' }, 'annullato') : ''),
       el('td', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, fmtIT(String(of.data || '').slice(0, 10))),
       el('td', {}, el('span', { class:'badge ' + (of.tipo === 'terzista' ? 'bvio' : 'bblu') }, of.tipo === 'terzista' ? 'terzista' : 'acquisto')),
@@ -6044,7 +6105,9 @@ function renderOrdiniFornitore(root) {
       el('td', { style:'white-space:nowrap;text-align:right;' },
         el('button', { type:'button', class:'btnsm', title:'Stampa l’ordine', onclick: () => stampaOrdineFornitore(of) }, '🖨'),
         (eAdminOra() && !ann) ? el('button', { type:'button', class:'btnsm', style:'margin-left:4px;', title:'Annulla l’ordine',
-          onclick: () => annullaOrdineFornitore(of, ridisegna) }, '✕') : '')));
+          onclick: () => annullaOrdineFornitore(of, ridisegna) }, '✕') : '',
+        (eAdminOra() && !ann) ? el('button', { type:'button', class:'btnsm', style:'margin-left:4px;', title:'Modifica l’ordine: stesso numero, nuova revisione',
+          onclick: () => modificaOrdineFornitore(of, ridisegna) }, '✎') : '')));
   });
   tbl.append(tb);
   root.append(el('div', { style:'overflow-x:auto;' }, tbl));
@@ -6072,7 +6135,8 @@ function stampaOrdineFornitore(of, finestra) {
   const operatore = state.profile && state.profile.nome ? state.profile.nome : '';
   const consegna = of.consegna ? fmtIT(String(of.consegna).slice(0, 10)) : 'da concordare';
   return stampaCartaCablotec({
-    titolo: 'Ordine fornitore', sottotitolo: acq ? 'Acquisto materiale' : 'Conto lavorazione',
+    titolo: 'Ordine fornitore', sottotitolo: (acq ? 'Acquisto materiale' : 'Conto lavorazione')
+      + (of.revisione ? ' · revisione ' + of.revisione : ''),
     titoloFinestra: 'OF fac simile ' + numeroOrdineFornitore(of),
     numero: numeroOrdineFornitore(of), data: fmtIT(String(of.data).slice(0, 10)),
     schede: [{ lab: 'Fornitore', nome: az.nome || nomeAziendaDi(of.fornitore_id), righe: cartaIndirizzo(az), nota: az.p_iva ? 'P.IVA ' + az.p_iva : '' },
@@ -6617,6 +6681,7 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
               + (of.consegna ? 'consegna ' + fmtIT(String(of.consegna).slice(0, 10)) + ' · ' : '')
               + (altre.length ? 'insieme a ' + altre.join(', ') + ' · ' : '') + 'fac simile',
             bt('🖨 OF', () => stampaOrdineFornitore(of), 'Ristampa l’ordine fac simile'),
+            eAdminOra() ? bt('✎', () => modificaOrdineFornitore(of, poi), 'Modifica l’ordine: stesso numero, nuova revisione') : null,
             eAdminOra() ? bt('✕', () => annullaOrdineFornitore(of, poi), 'Annulla l’ordine: le sue commesse tornano libere') : null));
         } else {
           docs.append(rigaDoc('📑', 'Ordine al terzista', 'non ancora emesso',
