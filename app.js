@@ -6865,6 +6865,54 @@ function passiFase(o, f, poi) {
 function rientriDiFase(o, terzistaId) {
   return (state.rientriTerzista || []).filter(r => r.operazione_id === o.id && r.terzista_id === terzistaId);
 }
+// UN LOTTO DI PRODUZIONE, UNA PORTA SOLA (19 nov): il form «+ Registra produzione» e il
+// rientro dal terzista. Scrive il lotto, rilegge i movimenti se la commessa scarica dal
+// magazzino (trigger dei lotti), e al 100% scrive «completata» (solo da aperta/sospesa,
+// e non se il form dice gia' completata/spedita: `opts.statoForm`).
+// Ritorna { lotto, completata, erroreStato } o lancia l'errore.
+async function registraLottoProduzione(o, campi, opts) {
+  opts = opts || {};
+  const qtaOrd = Number(o.quantita || 0);
+  const residuo = qtaOrd - quantitaConsegnata(o.id);
+  const qta = Number(campi.quantita);
+  if (!(qta > 0)) throw new Error('quantità non valida');
+  if (qta > residuo) throw new Error('Da produrre: ' + residuo + ' pz. Non puoi produrre ' + qta + ' pz.');
+  const { data: nuova, error } = await sb.from('consegne_commessa').insert({
+    operazione_id: o.id, data: campi.data, quantita: qta, ddt: campi.ddt || null, nota: campi.nota || null,
+    creato_da: state.profile?.id || null }).select().single();
+  if (error) throw new Error(error.message);
+  state.consegneCommessa = state.consegneCommessa || [];
+  if (!state.consegneCommessa.find(x => x.id === nuova.id)) state.consegneCommessa.push(nuova);
+  // Il database ha appena scritto gli scarichi (trigger del 14 ott): si rileggono.
+  if (o.materiali_da_ddt) caricaMovimenti();
+  let completata = false, erroreStato = null;
+  const statoForm = opts.statoForm || o.stato;
+  if (qtaOrd > 0 && quantitaConsegnata(o.id) >= qtaOrd && (o.stato === 'aperta' || o.stato === 'sospesa')
+      && statoForm !== 'completata' && statoForm !== 'spedita') {
+    const { data: agg, error: errSt } = await eseguiConRetry(
+      () => sb.from('operazioni').update({ stato: 'completata' }).eq('id', o.id).select().single(),
+      { label: 'stato completata' });
+    if (errSt) erroreStato = errSt.message;
+    else {
+      Object.assign(o, agg);
+      const idx = state.operazioni.findIndex(x => x.id === agg.id);
+      if (idx >= 0) state.operazioni[idx] = agg;
+      completata = true;
+    }
+  }
+  return { lotto: nuova, completata, erroreStato };
+}
+// PRODUZIONE LEGATA AI RIENTRI (19 nov, Nico: "leghiamoli"). I terzisti della commessa
+// gestiti qui (con un OF emesso: gli altri sono ancora su Alnus e non hanno rientri
+// registrati) che hanno fatto rientrare MENO pezzi di quanti risulterebbero prodotti.
+// [{ id, rientrati }]. Senza la tabella dei rientri: [] (non si accusa).
+function rientriInsufficienti(o, prodottiDopo) {
+  if (!Array.isArray(state.rientriTerzista) || !Array.isArray(state.ordiniFornitore)) return [];
+  return [...new Set((state.opFornitori || []).filter(r => r.operazione_id === o.id).map(r => r.azienda_id))]
+    .filter(id => id && !eReparto(id) && ordineTerzistaDi(o.id, id))
+    .map(id => ({ id, rientrati: rientriDiFase(o, id).reduce((a, r) => a + (Number(r.pezzi) || 0), 0) }))
+    .filter(x => x.rientrati < prodottiDopo);
+}
 function apriRientroTerzista(o, terzistaId, poi) {
   const gia = rientriDiFase(o, terzistaId).reduce((a, r) => a + (Number(r.pezzi) || 0), 0);
   const tot = Number(o.quantita) || 0;
@@ -6876,12 +6924,29 @@ function apriRientroTerzista(o, terzistaId, poi) {
   const inPz = el('input', { type:'text', inputmode:'decimal', value: resto > 0 ? String(resto) : '' });
   const inNota = el('input', { type:'text', placeholder:'Nota (facoltativa)' });
   const msg = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
+  // PRODUZIONE INSIEME AL RIENTRO (19 nov, Nico: "leghiamoli"): i pezzi tornati dal
+  // terzista sono pezzi prodotti. Spuntato di serie, fino a quanto resta da produrre;
+  // si toglie se dopo il terzista la lavorazione continua in casa.
+  const daProdurre = Math.max(0, tot - quantitaConsegnata(o.id));
+  const chkLotto = el('input', { type:'checkbox', style:'width:15px;height:15px;margin:0;' });
+  chkLotto.checked = daProdurre > 0;
+  const eti = el('span', {});
+  const scriviEti = () => {
+    const pz = Number(String(inPz.value).replace(',', '.')) || 0;
+    eti.textContent = 'Registra anche la produzione: ' + nfIT(Math.min(pz, daProdurre)) + ' pz'
+      + ' (prodotti finora ' + nfIT(tot - daProdurre) + ' di ' + nfIT(tot) + ')';
+  };
+  inPz.addEventListener('input', scriviEti);
+  scriviEti();
   v.corpo.append(
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
       'Il semilavorato è tornato. Ordinati ' + nfIT(tot) + ' pz' + (gia > 0 ? ', già rientrati ' + nfIT(gia) : '')
       + '. La giacenza non si muove: il materiale lo scarica il lotto, gli avanzi tornano con «↩ Avanzi in sede».'),
     el('div', { class:'frow' }, campo('Data', inData), campo('DDT del terzista', inDdt), campo('Pezzi rientrati', inPz)),
-    campo('Nota', inNota));
+    campo('Nota', inNota),
+    daProdurre > 0
+      ? el('label', { style:'display:flex;gap:8px;align-items:center;font-size:12px;margin-top:8px;cursor:pointer;' }, chkLotto, eti)
+      : el('div', { class:'sub', style:'font-size:12px;margin-top:8px;' }, 'La produzione è già tutta registrata (' + nfIT(tot) + ' pz).'));
   const ok = el('button', { class:'btnp' }, 'Registra');
   ok.onclick = async () => {
     const pz = Number(String(inPz.value).replace(',', '.'));
@@ -6894,8 +6959,22 @@ function apriRientroTerzista(o, terzistaId, poi) {
       if (error) throw new Error(error.message);
       if (!data || !data.length) throw new Error('il database non l’ha registrato (non sei admin?)');
       (state.rientriTerzista = state.rientriTerzista || []).push(data[0]);
+      let dettLotto = '';
+      if (daProdurre > 0 && chkLotto.checked) {
+        const qLotto = Math.min(pz, Math.max(0, tot - quantitaConsegnata(o.id)));
+        if (qLotto > 0) {
+          try {
+            const r = await registraLottoProduzione(o, { data: inData.value, quantita: qLotto,
+              ddt: inDdt.value.trim() ? 'DDT ' + inDdt.value.trim() : null, nota: 'Rientro da ' + nomeAziendaDi(terzistaId) });
+            dettLotto = ' · produzione ' + nfIT(qLotto) + ' pz' + (r.completata ? ' · commessa completata' : '');
+            if (r.erroreStato) toast('Lotto salvato, ma lo stato non si è aggiornato: ' + r.erroreStato, 'err', 9000);
+          } catch (e2) {
+            toast('Rientro registrato, ma la produzione no: ' + (e2.message || e2), 'err', 10000);
+          }
+        }
+      }
       v.chiudi();
-      toast('Rientro da ' + nomeAziendaDi(terzistaId) + ' registrato: ' + nfIT(pz) + ' pz', 'ok');
+      toast('Rientro da ' + nomeAziendaDi(terzistaId) + ' registrato: ' + nfIT(pz) + ' pz' + dettLotto, 'ok');
       if (typeof poi === 'function') poi();
     } catch (e) {
       ok.disabled = false; ok.textContent = 'Registra';
@@ -15359,10 +15438,13 @@ function openOperazioneModal(o, opts) {
   // ridisegni interni (lotto, spedizione) continuano a funzionare.
   const prodWrap = el('div', { class:'prod-sped',
     style:'border:1px solid var(--brd);border-radius:8px;padding:2px 12px 10px;margin-top:10px;' });
+  let rifaiProduzione = null;   // la assegna la sezione lotti/spedizioni, piu' sotto
+  let rifaiConsegne = null;     // la sezione lotti sta in un altro blocco: si passa da qui
   const agganciaProduzione = () => {
     if (isNew) return;
     const c = sezMateriali.querySelector('.ciclo-prod');
     (c || sezMateriali).append(prodWrap);
+    if (rifaiProduzione) rifaiProduzione();
   };
   const renderMancanti = () => {
     fornNelCiclo = new Set();
@@ -16506,58 +16588,36 @@ function openOperazioneModal(o, opts) {
             return toast(`Da produrre: ${residuoOra} pz. Non puoi produrre ${qta} pz.`, 'err');
           }
 
+          // PRODUZIONE LEGATA AI RIENTRI (19 nov): con un terzista gestito qui (OF
+          // emesso) i pezzi prodotti non dovrebbero superare quelli tornati da lui.
+          const scarsi = rientriInsufficienti(o, quantitaConsegnata(o.id) + qta);
+          if (scarsi.length && !confirm('Dal terzista non sono ancora rientrati tutti questi pezzi:\n\n'
+            + scarsi.map(x => '· ' + nomeAziendaDi(x.id) + ': rientrati ' + x.rientrati + ' pz').join('\n')
+            + '\n\nCon questo lotto i prodotti diventerebbero ' + (quantitaConsegnata(o.id) + qta) + ' pz.'
+            + '\nDi solito il rientro si registra dalla scheda del terzista («↩ Registra rientro»), che registra anche la produzione.'
+            + '\n\nRegistrare comunque il lotto?')) return;
+
           btnAdd.disabled = true; btnAdd.textContent = 'Salvataggio…';
-          const payload = {
-            operazione_id: o.id,
-            data,
-            quantita: qta,
-            ddt: ddt || null,
-            nota: nota || null,
-            creato_da: state.profile?.id || null,
-          };
-          const { data: nuova, error } = await sb.from('consegne_commessa')
-            .insert(payload).select().single();
-          btnAdd.disabled = false; btnAdd.textContent = '+ Registra produzione';
-          if (error) return toast('Errore registrazione: '+error.message, 'err');
-
-          // Aggiorno la cache locale subito (il realtime arriverà comunque)
-          if (!state.consegneCommessa.find(x => x.id === nuova.id)) {
-            state.consegneCommessa.push(nuova);
-          }
-          toast('Lotto registrato');
-          // Il database ha appena scritto gli scarichi (trigger del 14 ott):
-          // senza rileggerli, la scheda Materiali e Movimenti direbbero ancora
-          // il magazzino di prima del lotto.
-          if (o.materiali_da_ddt) caricaMovimenti();
-
+          // Una porta sola per il lotto (anche il rientro dal terzista ci passa).
           // Al 100% lo stato si SCRIVE, non si propone (28 set) — gemello di
-          // `sincronizzaSpedita`. Prima cambiava solo la tendina con "ricordati
-          // di salvare": chi chiudeva la scheda lasciava la commessa aperta con
-          // tutti i pezzi fatti (2026/OC/00233/0010, 4 su 4, trovata lo stesso
-          // giorno). Le due meta' dello stesso gesto devono avere la stessa sorte.
-          // Il rovescio sta nel ✕ del lotto: riapre solo se la completata era
-          // retta dai pezzi (dal 1 ott; prima togliere un lotto non riapriva).
-          const nuovoTot = quantitaConsegnata(o.id);
-          const statoForm = form.querySelector('[name="stato"]')?.value;
-          const daChiudere = (o.stato === 'aperta' || o.stato === 'sospesa')
-            && statoForm !== 'completata' && statoForm !== 'spedita';
-          if (qtaOrd > 0 && nuovoTot >= qtaOrd && daChiudere) {
-            const { data: agg, error: errSt } = await eseguiConRetry(
-              () => sb.from('operazioni').update({ stato: 'completata' }).eq('id', o.id).select().single(),
-              { label: 'stato completata' });
-            if (errSt) {
-              // Il lotto c'e' comunque: lo stato si puo' correggere a mano.
-              toast('Lotto salvato, ma lo stato non si è aggiornato: ' + errSt.message, 'err');
-            } else {
-              Object.assign(o, agg);
-              const idx = state.operazioni.findIndex(x => x.id === agg.id);
-              if (idx >= 0) state.operazioni[idx] = agg;
-              // Il form si allinea a quello gia' scritto, cosi' salvando dopo
-              // non si rimanda indietro lo stato appena messo.
-              const sel = form.querySelector('[name="stato"]');
-              if (sel) sel.value = 'completata';
-              toast('Tutto prodotto · stato impostato a "completata"');
-            }
+          // `sincronizzaSpedita`; il rovescio sta nel ✕ del lotto.
+          let esito;
+          try {
+            esito = await registraLottoProduzione(o, { data, quantita: qta, ddt, nota },
+              { statoForm: form.querySelector('[name="stato"]')?.value });
+          } catch (e) {
+            btnAdd.disabled = false; btnAdd.textContent = '+ Registra produzione';
+            return toast('Errore registrazione: ' + (e.message || e), 'err');
+          }
+          btnAdd.disabled = false; btnAdd.textContent = '+ Registra produzione';
+          toast('Lotto registrato');
+          if (esito.erroreStato) toast('Lotto salvato, ma lo stato non si è aggiornato: ' + esito.erroreStato, 'err');
+          if (esito.completata) {
+            // Il form si allinea a quello gia' scritto, cosi' salvando dopo
+            // non si rimanda indietro lo stato appena messo.
+            const sel = form.querySelector('[name="stato"]');
+            if (sel) sel.value = 'completata';
+            toast('Tutto prodotto · stato impostato a "completata"');
           }
 
           renderConsegne();
@@ -16580,6 +16640,7 @@ function openOperazioneModal(o, opts) {
       }
     };
 
+    rifaiConsegne = renderConsegne;
     renderConsegne();
   }
 
@@ -16889,6 +16950,18 @@ function openOperazioneModal(o, opts) {
     };
 
     renderSpedizioni();
+    // Un rientro dal terzista registra anche un lotto (19 nov): quando il ciclo si
+    // ridisegna, lotti e spedizioni si rileggono, e la tendina stato si allinea
+    // se il lotto ha completato la commessa.
+    rifaiProduzione = () => {
+      const fresca = (state.operazioni || []).find(x => x.id === o.id);
+      if (fresca && fresca.stato !== o.stato) {
+        o.stato = fresca.stato;
+        const sel = form.querySelector('[name="stato"]');
+        if (sel && fresca.stato === 'completata' && (sel.value === 'aperta' || sel.value === 'sospesa')) sel.value = 'completata';
+      }
+      if (rifaiConsegne) rifaiConsegne(); renderSpedizioni();
+    };
   }
 
   // Preview calcoli
