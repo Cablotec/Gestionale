@@ -7387,33 +7387,14 @@ function apriMail(email) {
   document.body.append(a); a.click(); a.remove();
 }
 
-// Chiede da chi si compra un codice e lo salva come abituale. Ritorna il nome.
-async function chiediFornitoreAbituale(codice, attuale) {
-  const nomi = new Set((state.aziende || []).filter(a => a.is_fornitore && a.attivo !== false).map(a => a.nome));
-  (state.mancanti || []).forEach(m => (m.consegne || []).forEach(c => { if (c && c.fornitore) nomi.add(c.fornitore); }));
-  const v = await chiediTesto({ titolo: 'Da chi compri ' + codice + '?', valore: attuale || '',
-    placeholder: 'nome del fornitore', conferma: 'Salva',
-    suggerimenti: [...nomi].sort((x, y) => x.localeCompare(y, 'it')),
-    testo: 'Diventa il fornitore abituale del codice: le prossime volte la mail parte già indirizzata.' });
-  if (v == null) return null;
-  try {
-    await impostaFornitoreAbituale([codice], v, false);
-    toast('Fornitore abituale di ' + codice + ': ' + v, 'ok');
-    if (matAbituali) { matAbituali.set(String(codice).trim(), v); if (typeof matRidisegna === 'function') matRidisegna(); }
-  } catch (e) {
-    toast('Fornitore abituale non salvato: ' + (e.message || e), 'err', 9000);
-  }
-  return v;
-}
 
-// Il menu vero e proprio, sotto la cella cliccata.
-//   info = { codice, stato (da materialeStatoRiga), op (la commessa) }
 // SCHEDA DEL CODICE (19 nov, Nico: "per ogni codice nostro, all'interno della
 // sua scheda voglio poter mettere uno o piu' cod. fornitori"). Un nostro codice
 // componente non aveva una scheda: c'era solo il menu sullo stato. Qui: dati
-// dell'anagrafica `materiali` (sola lettura), fornitore abituale, e i CODICI
-// FORNITORE (`codici_fornitore`: chi lo vende e come lo chiama), modificabili
-// da admin. Li usano il carico a mano dei DDT e l'automazione delle scansioni
+// dell'anagrafica `materiali` (sola lettura), FORNITORE ABITUALE (modificabile da
+// tutti: dal 19 nov si imposta solo qui, non piu' dal menu sullo stato), i CODICI
+// FORNITORE (`codici_fornitore`: chi lo vende e come lo chiama, modificabili da
+// admin) e gli ULTIMI MOVIMENTI del codice (10, con «Tutti in Movimenti»). Li usano il carico a mano dei DDT e l'automazione delle scansioni
 // per tradurre un codice del fornitore nel nostro.
 // Il bottoncino 📇 accanto a un codice (19 nov, Nico: "non ho capito dove vedo la scheda"):
 // la scheda si apre dal codice, non solo dal menu sullo stato. Col numero dei codici fornitore.
@@ -7427,35 +7408,56 @@ async function apriSchedaCodice(codice) {
   const cod = chiaveCodice(codice);
   if (!cod) return;
   if (state.codiciFornitore === undefined) await caricaCodiciFornitore();
-  const v = veloTerzista('Codice ' + cod, 720);
+  const v = veloTerzista('Codice ' + cod, 820);
   const admin = eAdminOra();
-  const info = el('div', { class:'sub', style:'font-size:12px;line-height:1.7;margin-bottom:12px;' }, 'Leggo l’anagrafica…');
+  const titoloSez = (t) => el('div', { style:'font-weight:700;font-size:12px;margin:14px 0 6px;' }, t);
+  const et = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const info = el('div', { class:'sub', style:'font-size:12px;line-height:1.7;' }, 'Leggo l’anagrafica…');
   v.corpo.append(info);
+
+  // ── ANAGRAFICA (sola lettura) ──
+  let m = null, abOk = true;
   try {
-    const { data } = await sb.from('materiali').select('descrizione,um,tipo_parte,fornitore').eq('codice', cod).limit(1);
-    const m = data && data[0];
-    const mov = (state.movimenti || []).slice().reverse().find(x => chiaveCodice(x.codice) === cod && x.descrizione);
-    info.replaceChildren(
-      el('div', { style:'font-size:14px;color:var(--txt);font-weight:600;' }, (m && m.descrizione) || (mov && mov.descrizione) || 'Descrizione non nota'),
-      el('div', {}, [m && m.um ? 'UM ' + m.um : '', m && m.tipo_parte ? 'tipo ' + m.tipo_parte : '',
-        m ? '' : 'non in anagrafica materiali', 'fornitore abituale: ' + ((m && m.fornitore) || '—')].filter(Boolean).join(' · ')));
-  } catch (e) { info.textContent = 'Anagrafica non letta.'; }
-  if (state.codiciFornitore == null) {
-    v.corpo.append(el('div', { class:'empty' }, 'I codici fornitore non sono ancora attivi: manca lo SQL migrazione-codici-fornitore.sql.'));
-    v.piede.append(el('button', { class:'btng', onclick: v.chiudi }, 'Chiudi'));
-    return;
-  }
+    const { data, error } = await sb.from('materiali').select('descrizione,um,tipo_parte,fornitore').eq('codice', cod).limit(1);
+    if (error) abOk = false;
+    m = (data && data[0]) || null;
+  } catch (e) { abOk = false; }
+  const movCod = (state.movimenti || []).filter(x => chiaveCodice(x.codice) === cod);
+  const movD = movCod.slice().reverse().find(x => x.descrizione);
+  info.replaceChildren(
+    el('div', { style:'font-size:14px;color:var(--txt);font-weight:600;' }, (m && m.descrizione) || (movD && movD.descrizione) || 'Descrizione non nota'),
+    el('div', {}, [m && m.um ? 'UM ' + m.um : '', m && m.tipo_parte ? 'tipo ' + m.tipo_parte : '',
+      m ? '' : 'non in anagrafica materiali'].filter(Boolean).join(' · ') || ' '));
+
+  // ── FORNITORE ABITUALE (19 nov, Nico: si imposta QUI, non piu' dal menu sullo stato) ──
+  // `materiali.fornitore` (nome come lo scrive Alnus), scritto da `materiali_imposta_fornitore`.
+  // Lo cambia chiunque, come prima dal menu. Serve un codice dell'anagrafica materiali.
+  const abPrima = (m && m.fornitore) || '';
   const fornitori = (state.aziende || []).filter(a => a.attivo !== false && a.is_fornitore)
     .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
-  let righe = codiciFornitoreDi(cod).map(x => ({ id: x.id, azienda_id: x.azienda_id, codice_fornitore: x.codice_fornitore, nota: x.nota || '' }));
+  const azAb = abPrima ? aziendaPerNome(abPrima) : null;
+  const selAb = el('select', { style:'min-width:260px;' }, el('option', { value:'' }, '— nessuno —'),
+    ...fornitori.map(a => el('option', { value: a.nome }, a.nome)));
+  if (abPrima && !azAb) selAb.append(el('option', { value: abPrima }, abPrima + ' (da Alnus, senza scheda in Aziende)'));
+  selAb.value = azAb ? azAb.nome : abPrima;
+  const abValoreIniziale = selAb.value;
+  v.corpo.append(titoloSez('Fornitore abituale'));
+  if (!abOk) v.corpo.append(el('div', { class:'sub', style:'font-size:12px;' }, 'Non leggibile: manca la migrazione del fornitore abituale.'));
+  else if (!m) v.corpo.append(el('div', { class:'sub', style:'font-size:12px;' }, 'Il codice non è nell’anagrafica materiali: il fornitore abituale non si può salvare.'));
+  else v.corpo.append(el('div', { style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;' }, selAb,
+    el('span', { class:'sub', style:'font-size:11px;' }, 'Da chi lo compriamo di solito: la mail dal menu sullo stato parte già indirizzata, e il nuovo OF d’acquisto lo propone a lui.')));
+
+  // ── CODICI FORNITORE (admin) ──
+  const codiciOk = state.codiciFornitore != null;
+  let righe = codiciOk ? codiciFornitoreDi(cod).map(x => ({ id: x.id, azienda_id: x.azienda_id, codice_fornitore: x.codice_fornitore, nota: x.nota || '' })) : [];
   const prima = righe.map(r => ({ ...r }));
   const lista = el('div');
   const C = 'display:grid;grid-template-columns:minmax(180px,1fr) 170px minmax(120px,1fr) 28px;gap:6px;align-items:center;';
-  const et = (t) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' }, t);
   const disegna = () => {
     lista.innerHTML = '';
-    lista.append(el('div', { style:'font-weight:700;font-size:12px;margin:4px 0 6px;' }, 'Codici fornitore'));
-    if (!righe.length) lista.append(el('div', { class:'sub', style:'font-size:12px;padding:4px 0 8px;' },
+    lista.append(titoloSez('Codici fornitore'));
+    if (!codiciOk) { lista.append(el('div', { class:'sub', style:'font-size:12px;' }, 'Non attivi: manca lo SQL migrazione-codici-fornitore.sql.')); return; }
+    if (!righe.length) lista.append(el('div', { class:'sub', style:'font-size:12px;padding:2px 0 6px;' },
       admin ? 'Nessuno: «+ Codice fornitore» per aggiungerne.' : 'Nessun codice fornitore.'));
     else lista.append(el('div', { style: C + 'border-bottom:1px solid var(--brd);padding-bottom:3px;' }, et('Fornitore'), et('Suo codice'), et('Nota'), el('span')));
     righe.forEach((r, i) => {
@@ -7481,9 +7483,40 @@ async function apriSchedaCodice(codice) {
   };
   disegna();
   v.corpo.append(lista);
+
+  // ── ULTIMI MOVIMENTI (19 nov, Nico) ──
+  v.corpo.append(titoloSez('Ultimi movimenti'));
+  if (!Array.isArray(state.movimenti)) v.corpo.append(el('div', { class:'sub', style:'font-size:12px;' }, 'Movimenti non letti.'));
+  else if (!movCod.length) v.corpo.append(el('div', { class:'sub', style:'font-size:12px;' }, 'Nessun movimento di questo codice nel gestionale.'));
+  else {
+    const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+    const saldo = inConto(movCod).reduce((a, x) => a + (Number(x.qta) || 0), 0);
+    const ultimi = movCod.slice().sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')) || String(b.creato_il || '').localeCompare(String(a.creato_il || ''))).slice(0, 10);
+    const CM = 'display:grid;grid-template-columns:78px 96px 70px minmax(130px,1fr) minmax(110px,.9fr);gap:8px;align-items:center;';
+    const box = el('div', { style:'font-size:12px;' },
+      el('div', { style: CM + 'border-bottom:1px solid var(--brd);padding-bottom:3px;' }, et('Data'), et('Tipo'), et('Q.tà', 1), et('Documento'), et('Da / dove')));
+    ultimi.forEach(x => {
+      const e = MOV_TIPO_ETI[x.tipo] || { txt: x.tipo || '—', cls:'bgry' };
+      const q = Number(x.qta) || 0;
+      box.append(el('div', { style: CM + 'padding:3px 0;border-bottom:1px solid var(--brd);', title: x.note || '' },
+        el('span', { class:'mono', style:'font-size:11px;' }, x.data ? fmtIT(String(x.data).slice(0, 10)) : '—'),
+        el('span', {}, el('span', { class:'badge ' + e.cls }, e.txt)),
+        el('span', { class:'mono', style:'text-align:right;font-weight:700;color:' + (q < 0 ? 'var(--red)' : 'var(--grn)') + ';' }, (q > 0 ? '+' : '') + nf(q) + (x.um ? ' ' + x.um : '')),
+        el('span', { class:'mono', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+          x.documento_numero ? (x.documento_tipo || 'DOC') + ' ' + x.documento_numero : (x.documento_tipo || '—')),
+        el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+          [x.presso_id ? dovePosto(x.presso_id) : (x.mittente || 'sede'), x.fuori_giacenza ? 'fuori giacenza' : ''].filter(Boolean).join(' · '))));
+    });
+    v.corpo.append(box, el('div', { style:'display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:12px;' },
+      el('span', { class:'sub' }, movCod.length + (movCod.length === 1 ? ' movimento' : ' movimenti') + ' · saldo nel gestionale ' + nf(saldo)),
+      el('a', { href:'#', onclick: (ev) => { ev.preventDefault(); v.chiudi(); movCerca = cod; movFiltroDoc = ''; movFiltroTipo = ''; movFiltroMitt = ''; movFiltroOrd = ''; movQuante = 400; selectTab('movimenti'); } }, 'Tutti in Movimenti →')));
+  }
+
+  // ── SALVA ──
   const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
-  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, admin ? 'Annulla' : 'Chiudi'));
-  if (!admin) return;
+  const puoAb = abOk && !!m;
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, (admin || puoAb) ? 'Annulla' : 'Chiudi'));
+  if (!admin && !puoAb) return;
   const ok = el('button', { class:'btnp' }, '💾 Salva');
   ok.onclick = async () => {
     const valide = righe.filter(r => r.azienda_id || String(r.codice_fornitore || '').trim());
@@ -7492,7 +7525,8 @@ async function apriSchedaCodice(codice) {
     // Lo stesso codice dello stesso fornitore gia' su un ALTRO nostro codice: il DDT non saprebbe quale scegliere.
     const altrove = valide.map(r => ({ r, x: (state.codiciFornitore || []).find(z => z.azienda_id === r.azienda_id
       && chiaveCodice(z.codice_fornitore) === chiaveCodice(r.codice_fornitore) && chiaveCodice(z.codice) !== cod) })).find(o => o.x);
-    const err = valide.some(r => !r.azienda_id) ? 'Ogni riga vuole il fornitore'
+    const err = !admin ? null
+      : valide.some(r => !r.azienda_id) ? 'Ogni codice fornitore vuole il fornitore'
       : valide.some(r => !String(r.codice_fornitore || '').trim()) ? 'Ogni riga vuole il codice del fornitore'
       : doppia ? 'Lo stesso codice dello stesso fornitore è scritto due volte'
       : altrove ? 'Il codice ' + altrove.r.codice_fornitore + ' di ' + nomeAziendaDi(altrove.r.azienda_id) + ' è già sul nostro ' + altrove.x.codice
@@ -7500,27 +7534,33 @@ async function apriSchedaCodice(codice) {
     if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
     ok.disabled = true; ok.textContent = 'Salvataggio…';
     try {
-      const tenute = new Set(valide.filter(r => r.id).map(r => r.id));
-      const via = prima.filter(p => !tenute.has(p.id)).map(p => p.id);
-      if (via.length) {
-        const { data, error } = await sb.from('codici_fornitore').delete().in('id', via).select('id');
-        if (error) throw error;
-        if ((data || []).length !== via.length) throw new Error('non autorizzato a togliere (serve un admin)');
+      if (puoAb && selAb.value !== abValoreIniziale) {
+        await impostaFornitoreAbituale([cod], selAb.value, false);
+        if (matAbituali) { if (selAb.value) matAbituali.set(cod, selAb.value); else matAbituali.delete(cod); }
       }
-      for (const r of valide) {
-        const riga = { codice: cod, azienda_id: r.azienda_id, codice_fornitore: String(r.codice_fornitore).trim(), nota: String(r.nota || '').trim() || null };
-        const p = r.id ? prima.find(z => z.id === r.id) : null;
-        if (p && p.azienda_id === riga.azienda_id && p.codice_fornitore === riga.codice_fornitore && (p.nota || null) === riga.nota) continue;
-        const { data, error } = r.id
-          ? await sb.from('codici_fornitore').update(riga).eq('id', r.id).select('id')
-          : await sb.from('codici_fornitore').insert(riga).select('id');
-        if (error) throw error;
-        if (!(data || []).length) throw new Error('non autorizzato a scrivere (serve un admin)');
+      if (admin && codiciOk) {
+        const tenute = new Set(valide.filter(r => r.id).map(r => r.id));
+        const via = prima.filter(p => !tenute.has(p.id)).map(p => p.id);
+        if (via.length) {
+          const { data, error } = await sb.from('codici_fornitore').delete().in('id', via).select('id');
+          if (error) throw error;
+          if ((data || []).length !== via.length) throw new Error('non autorizzato a togliere (serve un admin)');
+        }
+        for (const r of valide) {
+          const riga = { codice: cod, azienda_id: r.azienda_id, codice_fornitore: String(r.codice_fornitore).trim(), nota: String(r.nota || '').trim() || null };
+          const p = r.id ? prima.find(z => z.id === r.id) : null;
+          if (p && p.azienda_id === riga.azienda_id && p.codice_fornitore === riga.codice_fornitore && (p.nota || null) === riga.nota) continue;
+          const { data, error } = r.id
+            ? await sb.from('codici_fornitore').update(riga).eq('id', r.id).select('id')
+            : await sb.from('codici_fornitore').insert(riga).select('id');
+          if (error) throw error;
+          if (!(data || []).length) throw new Error('non autorizzato a scrivere (serve un admin)');
+        }
+        await caricaCodiciFornitore();
       }
-      await caricaCodiciFornitore();
       v.chiudi();
-      toast('Codici fornitore di ' + cod + ' salvati', 'ok');
-      // Il numero accanto al 📇 delle liste si aggiorna ridisegnando la scheda aperta.
+      toast('Scheda di ' + cod + ' salvata', 'ok');
+      // Il 📇 col numero e la colonna Fornitore delle liste si aggiornano ridisegnando la scheda aperta.
       if (state.currentTab) renderTab(state.currentTab);
     } catch (e) {
       ok.disabled = false; ok.textContent = '💾 Salva';
@@ -7531,6 +7571,8 @@ async function apriSchedaCodice(codice) {
   v.piede.append(ok);
 }
 
+// Il menu vero e proprio, sotto la cella cliccata.
+//   info = { codice, stato (da materialeStatoRiga), op (la commessa) }
 function apriMenuMateriale(ancora, info) {
   document.querySelectorAll('.menu-mat').forEach(m => m.remove());
   const { codice, stato: r, op } = info;
@@ -7615,22 +7657,19 @@ function apriMenuMateriale(ancora, info) {
         if (!giaMostrate.has(chiaveDest({ nome: ab.fornitore }))) {
           contatti({ nome: ab.fornitore }, ab.fornitore, 'fornitore abituale', vAb);
         }
-        voce('✎ Cambia fornitore abituale', () => chiediFornitoreAbituale(codice, ab.fornitore), '', vAb);
         vAb.remove();
       } else if (!ab.inAnagrafica) {
         vAb.replaceChildren('Fornitore abituale', subEl('codice non in anagrafica materiali'));
       } else {
-        vAb.replaceChildren('✉ Contatta il fornitore…', subEl('nessun fornitore abituale: te lo chiedo e lo ricordo'));
+        // Il fornitore abituale si scrive nella SCHEDA del codice (19 nov, Nico:
+        // "non piu' cliccando sullo stato"): da qui si rimanda li'.
+        vAb.replaceChildren('Fornitore abituale: nessuno', subEl('si imposta nella scheda del codice'));
         vAb.disabled = false;
-        vAb.onclick = async (e) => {
-          e.stopPropagation(); chiudi();
-          const n = await chiediFornitoreAbituale(codice, '');
-          if (n) contattaAzienda({ nome: n }, 'mail');
-        };
+        vAb.onclick = (e) => { e.stopPropagation(); chiudi(); apriSchedaCodice(codice); };
       }
     });
   }
-  voce('📇 Scheda del codice', () => apriSchedaCodice(codice), 'codici dei fornitori, anagrafica');
+  voce('📇 Scheda del codice', () => apriSchedaCodice(codice), 'fornitore abituale, codici dei fornitori, ultimi movimenti');
   voce('⧉ Copia codice', () => copiaTesto(codice, 'Codice'));
   if (r.of) voce('⧉ Copia OF ' + r.of, () => copiaTesto(r.of, 'OF'));
 
@@ -8057,7 +8096,7 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
         const aperto = matAperti.has(String(m.codice).trim());
         return el('span', { style:'white-space:nowrap;' }, el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);',
           title:'Mostra le commesse che usano questo codice',
-          onclick:(e)=>{ e.preventDefault(); apriChiudi(m.codice); } },
+          onclick:(e)=>{ e.preventDefault(); e.stopPropagation(); apriChiudi(m.codice); } },
           (aperto ? '▾ ' : '▸ ') + m.codice), bottoneSchedaCodice(m.codice));
       } },
     { k:'descrizione', t:'Descrizione', ord: m => String(m.descrizione || '').toUpperCase(),
@@ -8078,7 +8117,7 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
               + ' movimenti)' + (m.presso_terzisti > 0
                 ? ', di cui ' + nf(m.presso_terzisti) + ' presso terzisti (nostro, fuori sede)' : '')
               + '. Clic: i movimenti di questo codice.',
-            onclick:(e)=>{ e.preventDefault(); movCerca = m.codice; movFiltroDoc = ''; movQuante = 400; selectTab('movimenti'); } },
+            onclick:(e)=>{ e.preventDefault(); e.stopPropagation(); movCerca = m.codice; movFiltroDoc = ''; movQuante = 400; selectTab('movimenti'); } },
             'Gestionale')
         : el('span', { class:'sub', style:'font-size:11px;', title:"Dall'ultima estrazione del magazzino Alnus" }, 'Alnus') },
     { k:'impegno', t:'Impegno', tr:true, num:true, giuInizio:true, ord: m => Number(m.impegno),
@@ -8293,9 +8332,10 @@ function renderFabbisogno(root) {
       const rigaCons = (c) => {
         const tardi = c.data < oggi;
         const o = (state.operazioni || []).find(x => x.numero_op === c.numero_op);
-        return el('div', { style:'display:flex;align-items:center;gap:10px;'
+        return el('div', { style:'display:flex;align-items:center;gap:10px;cursor:pointer;'
           + 'font-family:JetBrains Mono,monospace;font-size:11px;padding:3px 0;'
-          + 'border-bottom:1px solid var(--brd);' },
+          + 'border-bottom:1px solid var(--brd);', title:'Clic: scheda del codice ' + c.codice,
+          onclick: () => apriSchedaCodice(c.codice) },
           el('span', { style:'width:78px;flex-shrink:0;font-weight:700;color:'
             + (tardi ? 'var(--red)' : 'var(--txt)') + ';' }, fmtIT(c.data)),
           el('span', { style:'width:66px;text-align:right;flex-shrink:0;' }, nf(c.qta)),
@@ -8311,7 +8351,7 @@ function renderFabbisogno(root) {
           el('span', { style:'width:120px;flex-shrink:0;color:var(--mut);overflow:hidden;'
             + 'text-overflow:ellipsis;white-space:nowrap;' }, c.fornitore || '—'),
           o ? el('a', { href:'#', style:'width:120px;flex-shrink:0;color:var(--blu);',
-                onclick:(e)=>{ e.preventDefault(); openOperazioneModal(o, { scheda:'mat' }); } }, c.numero_op)
+                onclick:(e)=>{ e.preventDefault(); e.stopPropagation(); openOperazioneModal(o, { scheda:'mat' }); } }, c.numero_op)
             : el('span', { style:'width:120px;flex-shrink:0;color:var(--mut);' }, c.numero_op || '—'),
         );
       };
@@ -8327,23 +8367,22 @@ function renderFabbisogno(root) {
           scadute.length
             ? 'In rosso quelle attese prima di oggi e mai arrivate. Dalla più vecchia.'
             : 'Dalla più vicina.'));
-      // I RITARDI SI VEDONO TUTTI, sempre: sono pochi e sono il motivo per
-      // cui il banner esiste. Delle prossime si vedono le prime cinque, che
-      // e' quanto serve per sapere cosa arriva questa settimana.
+      // PRIME 10 RIGHE, poi si apre (19 nov, Nico): prima i ritardi, poi le prossime.
+      // Prima i ritardi si vedevano tutti, e con tanti ritardi il banner copriva la pagina.
       const lista = el('div');
       let aperto = false;
       const disegna = () => {
         lista.innerHTML = '';
-        (aperto ? tutte : scadute.concat(prossime.slice(0, 5))).forEach(c => lista.append(rigaCons(c)));
+        (aperto ? tutte : tutte.slice(0, 10)).forEach(c => lista.append(rigaCons(c)));
       };
       disegna();
       b.append(lista);
-      if (prossime.length > 5) {
+      if (tutte.length > 10) {
         const btn = el('button', { class:'btnsm', style:'margin-top:8px;' },
           'Vedi tutte le ' + tutte.length);
         btn.onclick = () => {
           aperto = !aperto; disegna();
-          btn.textContent = aperto ? 'Mostra solo ritardi e prossime 5' : 'Vedi tutte le ' + tutte.length;
+          btn.textContent = aperto ? 'Mostra le prime 10' : 'Vedi tutte le ' + tutte.length;
         };
         b.append(btn);
       }
@@ -8389,10 +8428,11 @@ function renderFabbisogno(root) {
     let aperto = false;
     const disegna = () => {
       lista.innerHTML = '';
-      (aperto ? gruppi : gruppi.slice(0, 8)).forEach(g => lista.append(
-        el('div', { style:'display:flex;align-items:center;gap:10px;'
+      (aperto ? gruppi : gruppi.slice(0, 10)).forEach(g => lista.append(
+        el('div', { style:'display:flex;align-items:center;gap:10px;cursor:pointer;'
           + 'font-family:JetBrains Mono,monospace;font-size:11px;padding:3px 0;'
-          + 'border-bottom:1px solid var(--brd);' },
+          + 'border-bottom:1px solid var(--brd);', title:'Clic: scheda del codice ' + g.codice,
+          onclick: () => apriSchedaCodice(g.codice) },
           el('span', { style:'width:170px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
             g.codice),
           el('span', { style:'width:90px;text-align:right;flex-shrink:0;font-weight:700;color:var(--yel);' },
@@ -8408,12 +8448,12 @@ function renderFabbisogno(root) {
     };
     disegna();
     b.append(lista);
-    if (gruppi.length > 8) {
+    if (gruppi.length > 10) {
       const btn = el('button', { class:'btnsm', style:'margin-top:8px;' },
         'Vedi tutti i ' + gruppi.length);
       btn.onclick = () => {
         aperto = !aperto; disegna();
-        btn.textContent = aperto ? 'Mostra solo i primi 8' : 'Vedi tutti i ' + gruppi.length;
+        btn.textContent = aperto ? 'Mostra i primi 10' : 'Vedi tutti i ' + gruppi.length;
       };
       b.append(btn);
     }
@@ -8574,7 +8614,10 @@ function renderFabbisogno(root) {
     // di un secondo buono. Filtro, ricerca e ordinamento lavorano comunque
     // su TUTTE le righe — e' solo il disegno a essere pigro.
     righe.slice(0, matQuante).forEach(m => {
-      const tr = el('tr', {});
+      // Clic sulla riga = scheda del codice (19 nov, Nico). Stato (menu), codice
+      // (commesse che lo usano), Fonte e il bottone per togliere la riga hanno il loro clic.
+      const tr = el('tr', { style:'cursor:pointer;', title:'Clic: scheda del codice',
+        onclick: () => apriSchedaCodice(m.codice) });
       colonne.forEach(c => tr.append(el('td', { class: c.tr ? 'tr' : '' }, c.cella(m))));
       // Togliere una riga e' una correzione a mano ("questo è arrivato
       // stamattina") e dura fino al prossimo import: la fotografia resta la
