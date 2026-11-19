@@ -8615,41 +8615,23 @@ function renderFabbisogno(root) {
     // su TUTTE le righe — e' solo il disegno a essere pigro.
     righe.slice(0, matQuante).forEach(m => {
       // Clic sulla riga = scheda del codice (19 nov, Nico). Stato (menu), codice
-      // (commesse che lo usano), Fonte e il bottone per togliere la riga hanno il loro clic.
+      // (commesse che lo usano) e Fonte hanno il loro clic.
       const tr = el('tr', { style:'cursor:pointer;', title:'Clic: scheda del codice',
         onclick: () => apriSchedaCodice(m.codice) });
       colonne.forEach(c => tr.append(el('td', { class: c.tr ? 'tr' : '' }, c.cella(m))));
-      // Togliere una riga e' una correzione a mano ("questo è arrivato
-      // stamattina") e dura fino al prossimo import: la fotografia resta la
-      // fonte. Si offre solo dove c'e' qualcosa da correggere — su una riga
-      // coperta non c'e' niente da togliere.
-      tr.append(el('td', { class:'tc' },
-        // Una riga del gestionale e' un saldo di movimenti: non si "toglie",
-        // si corregge con una rettifica.
-        (mancanteCategoria(m) === 'coperto' || m.fonte === 'gestionale') ? el('span', { style:'color:var(--mut);' }, '') :
-        el('button', { class:'btnd', style:'padding:1px 7px;',
-          title:'Togli questa riga dall\'elenco. Torna al prossimo import se il magazzino la segnala ancora.',
-          onclick: async (e) => {
-            e.stopPropagation();
-            if (!confirm('Togliere ' + m.codice + ' dall\'elenco?\n\n'
-              + 'È una correzione manuale: se la prossima estrazione lo segnala ancora, ricompare.')) return;
-            const { error } = await eseguiConRetry(
-              () => sb.from('mancanti').delete().eq('id', m.id), { label: 'elimina mancante' });
-            if (error) return toast(error.message, 'err');
-            state.mancanti = state.mancanti.filter(x => x.id !== m.id);
-            toast('Riga tolta dall\'elenco');
-            renderFabbisogno(root);
-          } }, '✕')));
+      // ✕ TOLTA (19 nov, Nico: "rischioso eliminare un componente da cui dipendono
+      // altre distinte"): cancellava la riga dell'estrazione Alnus (`mancanti`).
+      // L'elenco si corregge col prossimo import.
       tb.append(tr);
       if (matAperti.has(String(m.codice || '').trim()) && usiDi(m.codice).length) {
-        tb.append(el('tr', {}, el('td', { colspan: String(colonne.length + 1), style:'padding:0;' },
+        tb.append(el('tr', {}, el('td', { colspan: String(colonne.length), style:'padding:0;' },
           matDettaglioUsi(m, usiDi(m.codice), manPerCodice, nf))));
       }
     });
 
     const tw = el('div', { class:'tw' });
     tw.append(el('table', { class:'rt op-table' },
-      el('thead', {}, el('tr', {}, ...colonne.map(intestazione), el('th', { class:'tc' }, ''))),
+      el('thead', {}, el('tr', {}, ...colonne.map(intestazione))),
       tb));
     tabWrap.append(el('div', { class:'sub', style:'margin-bottom:6px;' },
       righe.length.toLocaleString('it-IT') + (righe.length === 1 ? ' codice' : ' codici')
