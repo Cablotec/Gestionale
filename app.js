@@ -4092,6 +4092,28 @@ async function caricaInviiTerzista() {
   } catch (e) { state.inviiTerzista = null; }
   await caricaRientriTerzista();
   await caricaOrdiniFornitore();
+  await caricaCodiciFornitore();
+}
+// CODICI FORNITORE (19 nov): `codici_fornitore`. null = tabella assente
+// (strumenti/migrazione-codici-fornitore.sql non eseguita) o illeggibile.
+async function caricaCodiciFornitore() {
+  try {
+    const { data, error } = await fetchTutte(() =>
+      sb.from('codici_fornitore').select('*').order('codice').order('id'));
+    state.codiciFornitore = error ? null : (data || []);
+  } catch (e) { state.codiciFornitore = null; }
+}
+const chiaveCodice = (c) => String(c || '').trim().toUpperCase();
+// I codici con cui i fornitori chiamano un nostro codice.
+function codiciFornitoreDi(codice) {
+  const c = chiaveCodice(codice);
+  return (state.codiciFornitore || []).filter(x => chiaveCodice(x.codice) === c);
+}
+// Il nostro codice dato il codice di un fornitore (DDT, OF): null se non e' scritto in nessuna scheda.
+function codiceNostroDaFornitore(aziendaId, codiceFornitore) {
+  const c = chiaveCodice(codiceFornitore);
+  const x = c && aziendaId ? (state.codiciFornitore || []).find(z => z.azienda_id === aziendaId && chiaveCodice(z.codice_fornitore) === c) : null;
+  return x ? x.codice : null;
 }
 // RIENTRI DAL TERZISTA (17 nov): `rientri_terzista`. null = tabella assente
 // (strumenti/migrazione-rientri-terzista.sql non eseguita): allora il passo
@@ -6281,7 +6303,8 @@ function codiceInGiacenzaGestionale(codice, mittenteId) {
   return (state.operazioni || []).some(o => o.materiali_da_ddt && (o.stato === 'aperta' || o.stato === 'sospesa')
     && (o.materiali || []).some(x => String(x.codice || '').trim().toUpperCase() === c && eCL(x)));
 }
-function apriDdtEntrataManuale(poi) {
+async function apriDdtEntrataManuale(poi) {
+  if (state.codiciFornitore === undefined) await caricaCodiciFornitore();
   const v = veloTerzista('DDT in entrata · inserimento a mano', 1060);
   const aziende = (state.aziende || []).filter(a => a.attivo !== false)
     .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
@@ -6314,8 +6337,16 @@ function apriDdtEntrataManuale(poi) {
       et('Codice'), et('Descrizione'), et('UM'), et('Q.tà', 1), et('Ordine'), et('Nota'), et('Giacenza'), el('span')));
     if (!righe.length) corpo.append(el('div', { class:'sub', style:'padding:10px 0;font-size:12px;' }, 'Nessuna riga: «+ Riga» per aggiungerne.'));
     righe.forEach((r, i) => {
-      const inCod = el('input', { type:'text', value: r.codice, class:'mono', style:'font-size:12px;', placeholder:'codice nostro' });
-      inCod.onchange = () => { r.codice = inCod.value.trim().toUpperCase(); inCod.value = r.codice; if (r.codice) completa(r); else disegna(); };
+      const inCod = el('input', { type:'text', value: r.codice, class:'mono', style:'font-size:12px;', placeholder:'nostro o del fornitore' });
+      inCod.onchange = () => {
+        r.codice = inCod.value.trim().toUpperCase();
+        // Scritto il codice del FORNITORE: lo si traduce nel nostro dalla scheda del codice (19 nov).
+        const nostro = codiceNostroDaFornitore(selMitt.value, r.codice);
+        if (nostro && chiaveCodice(nostro) !== r.codice) {
+          r.note = [r.note, 'cod. fornitore ' + r.codice].filter(Boolean).join(' · ');
+          r.codice = chiaveCodice(nostro);
+        }
+        inCod.value = r.codice; if (r.codice) completa(r); else disegna(); };
       const inDesc = el('input', { type:'text', value: r.descrizione, style:'font-size:12px;' });
       inDesc.oninput = () => { r.descrizione = inDesc.value; };
       const inUm = el('input', { type:'text', value: r.um, style:'font-size:12px;' });
@@ -6345,6 +6376,7 @@ function apriDdtEntrataManuale(poi) {
   v.corpo.append(
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
       'Per i DDT che l’automazione delle scansioni non legge. Le righe diventano carichi di magazzino, come quelle lette in automatico. '
+      + 'Il codice si può scrivere anche come lo scrive il fornitore: se è nella scheda del codice, diventa il nostro. '
       + 'Un codice la cui giacenza la tiene ancora Alnus resta «solo registro». Un errore dopo il salvataggio si corregge con una rettifica in Movimenti.'),
     el('div', { class:'frow' }, campo('Mittente', selMitt), campo('Numero DDT', inNum), campo('Data DDT', inData), campo('Stesso ordine per tutte le righe', inOrd)),
     corpo, piu);
@@ -7376,6 +7408,119 @@ async function chiediFornitoreAbituale(codice, attuale) {
 
 // Il menu vero e proprio, sotto la cella cliccata.
 //   info = { codice, stato (da materialeStatoRiga), op (la commessa) }
+// SCHEDA DEL CODICE (19 nov, Nico: "per ogni codice nostro, all'interno della
+// sua scheda voglio poter mettere uno o piu' cod. fornitori"). Un nostro codice
+// componente non aveva una scheda: c'era solo il menu sullo stato. Qui: dati
+// dell'anagrafica `materiali` (sola lettura), fornitore abituale, e i CODICI
+// FORNITORE (`codici_fornitore`: chi lo vende e come lo chiama), modificabili
+// da admin. Li usano il carico a mano dei DDT e l'automazione delle scansioni
+// per tradurre un codice del fornitore nel nostro.
+async function apriSchedaCodice(codice) {
+  const cod = chiaveCodice(codice);
+  if (!cod) return;
+  if (state.codiciFornitore === undefined) await caricaCodiciFornitore();
+  const v = veloTerzista('Codice ' + cod, 720);
+  const admin = eAdminOra();
+  const info = el('div', { class:'sub', style:'font-size:12px;line-height:1.7;margin-bottom:12px;' }, 'Leggo l’anagrafica…');
+  v.corpo.append(info);
+  try {
+    const { data } = await sb.from('materiali').select('descrizione,um,tipo_parte,fornitore').eq('codice', cod).limit(1);
+    const m = data && data[0];
+    const mov = (state.movimenti || []).slice().reverse().find(x => chiaveCodice(x.codice) === cod && x.descrizione);
+    info.replaceChildren(
+      el('div', { style:'font-size:14px;color:var(--txt);font-weight:600;' }, (m && m.descrizione) || (mov && mov.descrizione) || 'Descrizione non nota'),
+      el('div', {}, [m && m.um ? 'UM ' + m.um : '', m && m.tipo_parte ? 'tipo ' + m.tipo_parte : '',
+        m ? '' : 'non in anagrafica materiali', 'fornitore abituale: ' + ((m && m.fornitore) || '—')].filter(Boolean).join(' · ')));
+  } catch (e) { info.textContent = 'Anagrafica non letta.'; }
+  if (state.codiciFornitore == null) {
+    v.corpo.append(el('div', { class:'empty' }, 'I codici fornitore non sono ancora attivi: manca lo SQL migrazione-codici-fornitore.sql.'));
+    v.piede.append(el('button', { class:'btng', onclick: v.chiudi }, 'Chiudi'));
+    return;
+  }
+  const fornitori = (state.aziende || []).filter(a => a.attivo !== false && a.is_fornitore)
+    .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
+  let righe = codiciFornitoreDi(cod).map(x => ({ id: x.id, azienda_id: x.azienda_id, codice_fornitore: x.codice_fornitore, nota: x.nota || '' }));
+  const prima = righe.map(r => ({ ...r }));
+  const lista = el('div');
+  const C = 'display:grid;grid-template-columns:minmax(180px,1fr) 170px minmax(120px,1fr) 28px;gap:6px;align-items:center;';
+  const et = (t) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' }, t);
+  const disegna = () => {
+    lista.innerHTML = '';
+    lista.append(el('div', { style:'font-weight:700;font-size:12px;margin:4px 0 6px;' }, 'Codici fornitore'));
+    if (!righe.length) lista.append(el('div', { class:'sub', style:'font-size:12px;padding:4px 0 8px;' },
+      admin ? 'Nessuno: «+ Codice fornitore» per aggiungerne.' : 'Nessun codice fornitore.'));
+    else lista.append(el('div', { style: C + 'border-bottom:1px solid var(--brd);padding-bottom:3px;' }, et('Fornitore'), et('Suo codice'), et('Nota'), el('span')));
+    righe.forEach((r, i) => {
+      if (!admin) {
+        lista.append(el('div', { style: C + 'padding:4px 0;font-size:12px;' }, el('span', {}, nomeAziendaDi(r.azienda_id)),
+          el('span', { class:'mono', style:'font-weight:700;' }, r.codice_fornitore), el('span', { class:'sub' }, r.nota || ''), el('span')));
+        return;
+      }
+      const sel = el('select', { style:'font-size:12px;' }, el('option', { value:'' }, '— fornitore —'),
+        ...fornitori.map(a => el('option', { value: a.id }, a.nome)));
+      if (r.azienda_id && !fornitori.some(a => a.id === r.azienda_id)) sel.append(el('option', { value: r.azienda_id }, nomeAziendaDi(r.azienda_id)));
+      sel.value = r.azienda_id || '';
+      sel.onchange = () => { r.azienda_id = sel.value; };
+      const inC = el('input', { type:'text', class:'mono', value: r.codice_fornitore, style:'font-size:12px;', placeholder:'come lo scrive lui' });
+      inC.oninput = () => { r.codice_fornitore = inC.value; };
+      const inN = el('input', { type:'text', value: r.nota, style:'font-size:12px;', placeholder:'facoltativa' });
+      inN.oninput = () => { r.nota = inN.value; };
+      lista.append(el('div', { style: C + 'padding:3px 0;' }, sel, inC, inN,
+        el('button', { type:'button', class:'btnsm', style:'padding:0 6px;', title:'Togli', onclick: () => { righe.splice(i, 1); disegna(); } }, '✕')));
+    });
+    if (admin) lista.append(el('button', { type:'button', class:'btnsm', style:'margin-top:6px;',
+      onclick: () => { righe.push({ azienda_id:'', codice_fornitore:'', nota:'' }); disegna(); } }, '+ Codice fornitore'));
+  };
+  disegna();
+  v.corpo.append(lista);
+  const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, admin ? 'Annulla' : 'Chiudi'));
+  if (!admin) return;
+  const ok = el('button', { class:'btnp' }, '💾 Salva');
+  ok.onclick = async () => {
+    const valide = righe.filter(r => r.azienda_id || String(r.codice_fornitore || '').trim());
+    const chiave = (r) => r.azienda_id + '|' + chiaveCodice(r.codice_fornitore);
+    const doppia = valide.find((r, i) => valide.findIndex(z => chiave(z) === chiave(r)) !== i);
+    // Lo stesso codice dello stesso fornitore gia' su un ALTRO nostro codice: il DDT non saprebbe quale scegliere.
+    const altrove = valide.map(r => ({ r, x: (state.codiciFornitore || []).find(z => z.azienda_id === r.azienda_id
+      && chiaveCodice(z.codice_fornitore) === chiaveCodice(r.codice_fornitore) && chiaveCodice(z.codice) !== cod) })).find(o => o.x);
+    const err = valide.some(r => !r.azienda_id) ? 'Ogni riga vuole il fornitore'
+      : valide.some(r => !String(r.codice_fornitore || '').trim()) ? 'Ogni riga vuole il codice del fornitore'
+      : doppia ? 'Lo stesso codice dello stesso fornitore è scritto due volte'
+      : altrove ? 'Il codice ' + altrove.r.codice_fornitore + ' di ' + nomeAziendaDi(altrove.r.azienda_id) + ' è già sul nostro ' + altrove.x.codice
+      : null;
+    if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
+    ok.disabled = true; ok.textContent = 'Salvataggio…';
+    try {
+      const tenute = new Set(valide.filter(r => r.id).map(r => r.id));
+      const via = prima.filter(p => !tenute.has(p.id)).map(p => p.id);
+      if (via.length) {
+        const { data, error } = await sb.from('codici_fornitore').delete().in('id', via).select('id');
+        if (error) throw error;
+        if ((data || []).length !== via.length) throw new Error('non autorizzato a togliere (serve un admin)');
+      }
+      for (const r of valide) {
+        const riga = { codice: cod, azienda_id: r.azienda_id, codice_fornitore: String(r.codice_fornitore).trim(), nota: String(r.nota || '').trim() || null };
+        const p = r.id ? prima.find(z => z.id === r.id) : null;
+        if (p && p.azienda_id === riga.azienda_id && p.codice_fornitore === riga.codice_fornitore && (p.nota || null) === riga.nota) continue;
+        const { data, error } = r.id
+          ? await sb.from('codici_fornitore').update(riga).eq('id', r.id).select('id')
+          : await sb.from('codici_fornitore').insert(riga).select('id');
+        if (error) throw error;
+        if (!(data || []).length) throw new Error('non autorizzato a scrivere (serve un admin)');
+      }
+      await caricaCodiciFornitore();
+      v.chiudi();
+      toast('Codici fornitore di ' + cod + ' salvati', 'ok');
+    } catch (e) {
+      ok.disabled = false; ok.textContent = '💾 Salva';
+      msg.textContent = /duplicate|unique/i.test(e.message || '') ? 'Quel codice di quel fornitore è già su un altro nostro codice' : (e.message || String(e));
+      msg.style.color = 'var(--red)';
+    }
+  };
+  v.piede.append(ok);
+}
+
 function apriMenuMateriale(ancora, info) {
   document.querySelectorAll('.menu-mat').forEach(m => m.remove());
   const { codice, stato: r, op } = info;
@@ -7475,6 +7620,7 @@ function apriMenuMateriale(ancora, info) {
       }
     });
   }
+  voce('📇 Scheda del codice', () => apriSchedaCodice(codice), 'codici dei fornitori, anagrafica');
   voce('⧉ Copia codice', () => copiaTesto(codice, 'Codice'));
   if (r.of) voce('⧉ Copia OF ' + r.of, () => copiaTesto(r.of, 'OF'));
 
