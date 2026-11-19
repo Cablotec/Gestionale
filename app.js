@@ -6925,16 +6925,25 @@ function apriRientroTerzista(o, terzistaId, poi) {
   const inNota = el('input', { type:'text', placeholder:'Nota (facoltativa)' });
   const msg = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
   // PRODUZIONE INSIEME AL RIENTRO (19 nov, Nico: "leghiamoli"): i pezzi tornati dal
-  // terzista sono pezzi prodotti. Spuntato di serie, fino a quanto resta da produrre;
-  // si toglie se dopo il terzista la lavorazione continua in casa.
-  const daProdurre = Math.max(0, tot - quantitaConsegnata(o.id));
+  // terzista sono pezzi prodotti. Si registra solo la parte NON ancora coperta da lotti:
+  // rientrati in tutto (con questo) − gia' prodotti, al massimo quanto resta da produrre.
+  // Cosi' una produzione registrata a mano prima del rientro (00385/0050: lotto 215 del
+  // 2 nov, rientro 215 dopo) non si conta due volte. Si toglie se dopo il terzista si
+  // lavora ancora in casa.
+  const prodotti = quantitaConsegnata(o.id);
+  const daProdurre = Math.max(0, tot - prodotti);
+  const lottoPer = (pz) => Math.max(0, Math.min(daProdurre, +(gia + pz - prodotti).toFixed(4)));
   const chkLotto = el('input', { type:'checkbox', style:'width:15px;height:15px;margin:0;' });
-  chkLotto.checked = daProdurre > 0;
   const eti = el('span', {});
+  const rigaLotto = el('label', { style:'display:flex;gap:8px;align-items:center;font-size:12px;margin-top:8px;cursor:pointer;' }, chkLotto, eti);
   const scriviEti = () => {
     const pz = Number(String(inPz.value).replace(',', '.')) || 0;
-    eti.textContent = 'Registra anche la produzione: ' + nfIT(Math.min(pz, daProdurre)) + ' pz'
-      + ' (prodotti finora ' + nfIT(tot - daProdurre) + ' di ' + nfIT(tot) + ')';
+    const q = lottoPer(pz);
+    chkLotto.checked = q > 0; chkLotto.disabled = !(q > 0);
+    eti.textContent = q > 0
+      ? 'Registra anche la produzione: ' + nfIT(q) + ' pz (prodotti finora ' + nfIT(prodotti) + ' di ' + nfIT(tot) + ')'
+      : 'Produzione già registrata per questi pezzi (prodotti ' + nfIT(prodotti) + ' di ' + nfIT(tot)
+        + ', rientrati ' + nfIT(gia + pz) + '): nessun lotto in più';
   };
   inPz.addEventListener('input', scriviEti);
   scriviEti();
@@ -6944,8 +6953,7 @@ function apriRientroTerzista(o, terzistaId, poi) {
       + '. La giacenza non si muove: il materiale lo scarica il lotto, gli avanzi tornano con «↩ Avanzi in sede».'),
     el('div', { class:'frow' }, campo('Data', inData), campo('DDT del terzista', inDdt), campo('Pezzi rientrati', inPz)),
     campo('Nota', inNota),
-    daProdurre > 0
-      ? el('label', { style:'display:flex;gap:8px;align-items:center;font-size:12px;margin-top:8px;cursor:pointer;' }, chkLotto, eti)
+    daProdurre > 0 ? rigaLotto
       : el('div', { class:'sub', style:'font-size:12px;margin-top:8px;' }, 'La produzione è già tutta registrata (' + nfIT(tot) + ' pz).'));
   const ok = el('button', { class:'btnp' }, 'Registra');
   ok.onclick = async () => {
@@ -6961,7 +6969,7 @@ function apriRientroTerzista(o, terzistaId, poi) {
       (state.rientriTerzista = state.rientriTerzista || []).push(data[0]);
       let dettLotto = '';
       if (daProdurre > 0 && chkLotto.checked) {
-        const qLotto = Math.min(pz, Math.max(0, tot - quantitaConsegnata(o.id)));
+        const qLotto = lottoPer(pz);
         if (qLotto > 0) {
           try {
             const r = await registraLottoProduzione(o, { data: inData.value, quantita: qLotto,
