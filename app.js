@@ -15351,9 +15351,22 @@ function openOperazioneModal(o, opts) {
   let listaMatAperta = null;
   // Ridisegnando il ciclo cambia quali fornitori hanno la loro scheda li':
   // il blocco Fornitori in testa si ridisegna sempre dopo.
+  // PRODUZIONE E SPEDIZIONI DENTRO IL CICLO PRODUTTIVO (19 nov, Nico: "la scheda
+  // «Produzione & spedizioni» dovrebbe essere inglobata nel ciclo produttivo").
+  // Lotti e spedizioni stanno in `prodWrap`, un nodo che NON si ricrea: ogni
+  // ridisegno del ciclo (che svuota `sezMateriali`) lo riaggancia in fondo al
+  // ciclo, dopo le fasi; senza ciclo va in fondo alla sezione. Cosi' i suoi
+  // ridisegni interni (lotto, spedizione) continuano a funzionare.
+  const prodWrap = el('div', { class:'prod-sped',
+    style:'border:1px solid var(--brd);border-radius:8px;padding:2px 12px 10px;margin-top:10px;' });
+  const agganciaProduzione = () => {
+    if (isNew) return;
+    const c = sezMateriali.querySelector('.ciclo-prod');
+    (c || sezMateriali).append(prodWrap);
+  };
   const renderMancanti = () => {
     fornNelCiclo = new Set();
-    try { renderMancantiDentro(); } finally { renderForSelected(); }
+    try { renderMancantiDentro(); } finally { renderForSelected(); agganciaProduzione(); }
   };
   const renderMancantiDentro = () => {
     sezMateriali.innerHTML = '';
@@ -15792,9 +15805,8 @@ function openOperazioneModal(o, opts) {
   // Dati, e li facevano scorrere un pannello che parla d'altro.
   const pMat  = el('div', { class:'optab-panel' });
   const pLav  = el('div', { class:'optab-panel' });
-  const pProd = el('div', { class:'optab-panel' });
   const pCons = el('div', { class:'optab-panel' });
-  form.append(pDati, pMat, pLav, pProd, pCons);
+  form.append(pDati, pMat, pLav, pCons);
   // La sezione dei materiali e tutto il contenuto della sua scheda.
   pMat.append(fornTop, sezMateriali);
 
@@ -16334,15 +16346,15 @@ function openOperazioneModal(o, opts) {
   // Validazioni: data obbligatoria, quantità > 0, quantità <= residuo.
   // Al raggiungimento del 100% propone di marcare la commessa come 'completata'.
   if (!isNew) {
-    pProd.append(
-      el('div', { class:'sub', style:'margin:18px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
+    prodWrap.append(
+      el('div', { class:'sub', style:'margin:10px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
         '── Produzione ──'),
     );
 
     // Container che ri-renderizza solo la sezione consegne dopo ogni operazione
     // (insert/delete), senza ricostruire l'intero modal.
     const consegneBox = el('div');
-    pProd.append(consegneBox);
+    prodWrap.append(consegneBox);
 
     const renderConsegne = () => {
       consegneBox.innerHTML = '';
@@ -16582,13 +16594,13 @@ function openOperazioneModal(o, opts) {
   // Al raggiungimento del 100% spedito, marca automaticamente la commessa
   // come 'spedita' (sincronizzazione automatica dello stato).
   if (!isNew) {
-    pProd.append(
+    prodWrap.append(
       el('div', { style:'margin-top:14px;padding-top:14px;border-top:1px solid var(--brd);font-family:monospace;font-size:11px;font-weight:600;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;' },
         '── Spedizioni ──'),
     );
 
     const spedBox = el('div', { style:'margin-top:8px;' });
-    pProd.append(spedBox);
+    prodWrap.append(spedBox);
 
     // Lo stato al 100% si SCRIVE, non si propone (27 ago). Sta qui fuori
     // perche la chiamano in due: chi registra una spedizione e chi conferma
@@ -17249,13 +17261,14 @@ function openOperazioneModal(o, opts) {
     { id:'lav', label:'Lavorazione', panel:pLav },
   ];
   if (!isNew) {
-    tabs.push({ id:'prod', label:'Produzione & Spedizioni', panel:pProd });
+    // «Produzione & Spedizioni» non e' piu' una linguetta (19 nov): sta nel Ciclo produttivo.
     tabs.push({ id:'cons', label:'Consuntivo', panel:pCons });
   }
   const tabBar = el('div', { class:'optabs' });
   const tabBtns = {};
-  const schedaIniziale = (opts && opts.scheda && tabs.some(t => t.id === opts.scheda))
-    ? opts.scheda : 'dati';
+  const schedaChiesta = opts && opts.scheda === 'prod' ? 'mat' : (opts && opts.scheda);
+  const schedaIniziale = (schedaChiesta && tabs.some(t => t.id === schedaChiesta))
+    ? schedaChiesta : 'dati';
   const switchTab = (id) => {
     tabs.forEach(t => {
       t.panel.classList.toggle('on', t.id === id);
