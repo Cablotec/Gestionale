@@ -7051,15 +7051,21 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
       + (stato === 'poi' ? 'var(--mut)' : COLORI_PASSO[stato]) + ';' + (stato === 'ora' || stato === 'avviso' ? 'font-weight:700;' : '') },
     (segno ? segno + ' ' : '') + testo);
   const freccia = () => el('span', { class:'sub', style:'font-size:12px;' }, '→');
+  // UNA STRADA SOLA, NUMERATA (19 nov, Nico: "1. Materiali 2. Terzista 3. Reparto
+  // 4. Produzione 5. Spedizione"): i riquadri sotto hanno gli stessi numeri.
   const strada = el('div', { style:'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px;' },
-    tappa('Materiali', 'fatto', '✓'));
+    tappa('1 · Materiali', 'fatto', '✓'));
   fasi.forEach(({ f, passi }, i) => {
     const s = statoFase(passi);
-    strada.append(freccia(), tappa((i + 1) + ' · ' + (eReparto(f.id) ? 'Reparto' : nomeAziendaDi(f.id)), s,
+    strada.append(freccia(), tappa((i + 2) + ' · ' + (eReparto(f.id) ? 'Reparto' : nomeAziendaDi(f.id)), s,
       s === 'fatto' ? '✓' : (s === 'avviso' ? '⚠' : '')));
   });
+  const prodotti = quantitaConsegnata(o.id);
+  const pStato = (tot > 0 && prodotti >= tot) || o.stato === 'completata' || o.stato === 'spedita' ? 'fatto' : (prodotti > 0 ? 'ora' : 'poi');
+  strada.append(freccia(), tappa((fasi.length + 2) + ' · Produzione'
+    + (prodotti > 0 && pStato !== 'fatto' ? ' ' + nfIT(prodotti) + '/' + nfIT(tot) : ''), pStato, pStato === 'fatto' ? '✓' : ''));
   const sStato = (tot > 0 && spediti >= tot) || o.stato === 'spedita' ? 'fatto' : (spediti > 0 ? 'ora' : 'poi');
-  strada.append(freccia(), tappa('Spedizione' + (spediti > 0 && sStato !== 'fatto' ? ' ' + nfIT(spediti) + '/' + nfIT(tot) : ''),
+  strada.append(freccia(), tappa((fasi.length + 3) + ' · Spedizione' + (spediti > 0 && sStato !== 'fatto' ? ' ' + nfIT(spediti) + '/' + nfIT(tot) : ''),
     sStato, sStato === 'fatto' ? '✓' : ''));
   box.append(strada);
 
@@ -7072,7 +7078,7 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
       + ';border-radius:8px;padding:10px 12px;margin-bottom:8px;' });
     const nMat = f.voci.length;
     card.append(el('div', { style:'display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px;' },
-      el('span', { style:'font-weight:700;font-size:13px;' }, (i + 1) + ' · ' + (rep ? 'Reparto' : nomeAziendaDi(f.id))),
+      el('span', { style:'font-weight:700;font-size:13px;' }, (i + 2) + ' · ' + (rep ? 'Reparto' : nomeAziendaDi(f.id))),
       el('span', { class:'sub', style:'font-size:11px;' }, (rep ? 'in casa' : 'terzista')
         + (nMat ? ' · ' + nMat + (nMat === 1 ? ' materiale' : ' materiali') : (rep ? '' : ' · nessun materiale da mandare'))),
       (!rep && opts.azioniFornitore) ? (opts.azioniFornitore(f) || '') : ''));
@@ -15460,14 +15466,24 @@ function openOperazioneModal(o, opts) {
   // ridisegno del ciclo (che svuota `sezMateriali`) lo riaggancia in fondo al
   // ciclo, dopo le fasi; senza ciclo va in fondo alla sezione. Cosi' i suoi
   // ridisegni interni (lotto, spedizione) continuano a funzionare.
-  const prodWrap = el('div', { class:'prod-sped',
-    style:'border:1px solid var(--brd);border-radius:8px;padding:2px 12px 10px;margin-top:10px;' });
+  // Due riquadri come quelli delle fasi, numerati di seguito (19 nov, Nico: "come
+  // prosecuzione lineare": Materiali → fasi → Produzione → Spedizione).
+  const stileCard = 'border:1px solid var(--brd);border-radius:8px;padding:10px 12px;margin-bottom:8px;';
+  const titoloProd = el('div', { style:'font-weight:700;font-size:13px;margin-bottom:4px;' }, 'Produzione');
+  const titoloSped = el('div', { style:'font-weight:700;font-size:13px;margin-bottom:4px;' }, 'Spedizione');
+  const cardProd = el('div', { class:'ciclo-produzione', style: stileCard }, titoloProd);
+  const cardSped = el('div', { class:'ciclo-spedizione', style: stileCard }, titoloSped);
+  const prodWrap = el('div', { class:'prod-sped', style:'margin-top:10px;' }, cardProd, cardSped);
   let rifaiProduzione = null;   // la assegna la sezione lotti/spedizioni, piu' sotto
   let rifaiConsegne = null;     // la sezione lotti sta in un altro blocco: si passa da qui
   const agganciaProduzione = () => {
     if (isNew) return;
     const c = sezMateriali.querySelector('.ciclo-prod');
     (c || sezMateriali).append(prodWrap);
+    // Numeri di seguito alle fasi: 1 Materiali, 2..n fasi, poi Produzione e Spedizione.
+    const nFasi = c ? c.querySelectorAll(':scope > .ciclo-fase').length : 0;
+    titoloProd.textContent = (c ? (nFasi + 2) + ' · ' : '') + 'Produzione';
+    titoloSped.textContent = (c ? (nFasi + 3) + ' · ' : '') + 'Spedizione';
     if (rifaiProduzione) rifaiProduzione();
   };
   const renderMancanti = () => {
@@ -15635,6 +15651,13 @@ function openOperazioneModal(o, opts) {
     // sarebbe solo un clic in piu'. Aperta/chiusa resiste ai ridisegni.
     const listaBox = el('div', {});
     if (ciclo) {
+      // «1 · MATERIALI» (19 nov): quello che stava sopra il ciclo (da che distinta,
+      // n. componenti, ⟳ Rigenera) e la lista completa diventano il primo riquadro.
+      const cardMat = el('div', { class:'ciclo-materiali',
+        style:'border:1px solid var(--brd);border-radius:8px;padding:10px 12px;margin-bottom:8px;' },
+        el('div', { style:'font-weight:700;font-size:13px;margin-bottom:6px;' }, '1 · Materiali'));
+      while (sezMateriali.firstChild) cardMat.append(sezMateriali.firstChild);
+      ciclo.insertBefore(cardMat, ciclo.children[1] || null);
       sezMateriali.append(ciclo);
       // Senza fasi il ciclo e' solo il bottone «+ Fase terzista»: la lista resta aperta.
       if (listaMatAperta === null) listaMatAperta = !seqCiclo.length;
@@ -15644,9 +15667,8 @@ function openOperazioneModal(o, opts) {
       togLista.onclick = () => { listaMatAperta = !listaMatAperta; listaBox.style.display = listaMatAperta ? '' : 'none';
         togLista.textContent = etiLista(); };
       listaBox.style.display = listaMatAperta ? '' : 'none';
-      sezMateriali.append(togLista);
-    }
-    sezMateriali.append(listaBox);
+      cardMat.append(togLista, listaBox);
+    } else sezMateriali.append(listaBox);
 
     // ── LA SPUNTA "Materiali da DDT" (13 ott, pilota Enviro) ─────────────
     // I codici C/L di questa commessa si contano dai DDT letti in automatico
@@ -16452,15 +16474,11 @@ function openOperazioneModal(o, opts) {
   // Validazioni: data obbligatoria, quantità > 0, quantità <= residuo.
   // Al raggiungimento del 100% propone di marcare la commessa come 'completata'.
   if (!isNew) {
-    prodWrap.append(
-      el('div', { class:'sub', style:'margin:10px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
-        '── Produzione ──'),
-    );
 
     // Container che ri-renderizza solo la sezione consegne dopo ogni operazione
     // (insert/delete), senza ricostruire l'intero modal.
     const consegneBox = el('div');
-    prodWrap.append(consegneBox);
+    cardProd.append(consegneBox);
 
     const renderConsegne = () => {
       consegneBox.innerHTML = '';
@@ -16675,13 +16693,8 @@ function openOperazioneModal(o, opts) {
   // Al raggiungimento del 100% spedito, marca automaticamente la commessa
   // come 'spedita' (sincronizzazione automatica dello stato).
   if (!isNew) {
-    prodWrap.append(
-      el('div', { style:'margin-top:14px;padding-top:14px;border-top:1px solid var(--brd);font-family:monospace;font-size:11px;font-weight:600;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;' },
-        '── Spedizioni ──'),
-    );
-
-    const spedBox = el('div', { style:'margin-top:8px;' });
-    prodWrap.append(spedBox);
+    const spedBox = el('div', {});
+    cardSped.append(spedBox);
 
     // Lo stato al 100% si SCRIVE, non si propone (27 ago). Sta qui fuori
     // perche la chiamano in due: chi registra una spedizione e chi conferma
