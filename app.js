@@ -7396,14 +7396,6 @@ function apriMail(email) {
 // FORNITORE (`codici_fornitore`: chi lo vende e come lo chiama, modificabili da
 // admin) e gli ULTIMI MOVIMENTI del codice (10, con «Tutti in Movimenti»). Li usano il carico a mano dei DDT e l'automazione delle scansioni
 // per tradurre un codice del fornitore nel nostro.
-// Il bottoncino 📇 accanto a un codice (19 nov, Nico: "non ho capito dove vedo la scheda"):
-// la scheda si apre dal codice, non solo dal menu sullo stato. Col numero dei codici fornitore.
-function bottoneSchedaCodice(codice) {
-  const n = codiciFornitoreDi(codice).length;
-  return el('button', { type:'button', class:'btnsm', style:'padding:0 5px;font-size:10px;margin-left:4px;line-height:16px;',
-    title:'Scheda del codice: codici dei fornitori' + (n ? ' (' + n + ')' : ''),
-    onclick: (e) => { e.preventDefault(); e.stopPropagation(); apriSchedaCodice(codice); } }, '📇' + (n ? ' ' + n : ''));
-}
 async function apriSchedaCodice(codice) {
   const cod = chiaveCodice(codice);
   if (!cod) return;
@@ -7560,7 +7552,7 @@ async function apriSchedaCodice(codice) {
       }
       v.chiudi();
       toast('Scheda di ' + cod + ' salvata', 'ok');
-      // Il 📇 col numero e la colonna Fornitore delle liste si aggiornano ridisegnando la scheda aperta.
+      // La colonna Fornitore delle liste si aggiorna ridisegnando la scheda aperta.
       if (state.currentTab) renderTab(state.currentTab);
     } catch (e) {
       ok.disabled = false; ok.textContent = '💾 Salva';
@@ -9412,12 +9404,12 @@ function renderMovimenti(root) {
         return (eAdminOra() && eRettificaManuale(m))
           ? el('span', { style:'display:inline-flex;gap:4px;align-items:center;white-space:nowrap;' }, b,
               el('button', { type:'button', class:'btnsm', style:'padding:0 5px;', title:'Modifica questa rettifica',
-                onclick: () => apriModificaRettifica(m, dopoRettifica) }, '✎'))
+                onclick: (e) => { e.stopPropagation(); apriModificaRettifica(m, dopoRettifica); } }, '✎'))
           : b; } },
     { k:'codice', t:'Codice', ord: m => String(m.codice || ''),
-      cella: m => el('span', { style:'white-space:nowrap;' }, el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);',
+      cella: m => el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);white-space:nowrap;',
         title:'Mostra solo i movimenti di questo codice, col totale',
-        onclick:(e)=>{ e.preventDefault(); movCerca = m.codice; movQuante = 400; renderMovimenti(root); } }, m.codice), bottoneSchedaCodice(m.codice)) },
+        onclick:(e)=>{ e.preventDefault(); e.stopPropagation(); movCerca = m.codice; movQuante = 400; renderMovimenti(root); } }, m.codice) },
     { k:'descrizione', t:'Descrizione', ord: m => String(m.descrizione || '').toUpperCase(),
       cella: m => el('span', { style:'display:block;max-width:260px;overflow:hidden;'
         + 'text-overflow:ellipsis;white-space:nowrap;', title: m.descrizione || '' }, m.descrizione || '—') },
@@ -9453,7 +9445,7 @@ function renderMovimenti(root) {
         if (!o) return el('span', { class:'mono', style:'font-size:11px;' }, m.ordine_rif);
         return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);',
           title:'Apri la commessa ' + (o.numero_ordine || '') + '/' + (o.pos || '') + ' (scheda Ciclo produttivo)',
-          onclick:(e)=>{ e.preventDefault(); openOperazioneModal(o, { scheda:'mat' }); } }, m.ordine_rif); } },
+          onclick:(e)=>{ e.preventDefault(); e.stopPropagation(); openOperazioneModal(o, { scheda:'mat' }); } }, m.ordine_rif); } },
     { k:'note', t:'Note', ord: m => String(m.note || ''),
       cella: m => el('span', { class:'sub', style:'display:block;font-size:11px;max-width:220px;overflow:hidden;'
         + 'text-overflow:ellipsis;white-space:nowrap;' + (m.note ? 'color:var(--or);' : ''),
@@ -9588,7 +9580,10 @@ function renderMovimenti(root) {
       } }, c.t + (movSortKey === c.k ? (movSortDir === 1 ? ' ↑' : ' ↓') : ''));
     const tb = el('tbody');
     righe.slice(0, movQuante).forEach(m => {
-      const tr = el('tr', {});
+      // Clic sulla riga = scheda del codice (19 nov, Nico: al posto del 📇). Codice
+      // (filtra), ✎ della rettifica e ordine (apre la commessa) tengono il loro clic.
+      const tr = el('tr', { style:'cursor:pointer;', title:'Clic: scheda del codice ' + m.codice,
+        onclick: () => apriSchedaCodice(m.codice) });
       colonne.forEach(c => tr.append(el('td', { class: c.tr ? 'tr' : '' }, c.cella(m))));
       tb.append(tr);
     });
@@ -15493,7 +15488,7 @@ function openOperazioneModal(o, opts) {
       // lista mostra le foglie: questa riga e' il filo fra le due.
       const origini = Array.isArray(r.da) ? r.da.filter(Boolean) : [];
       const cellaCod = el('div', { style:'min-width:0;display:flex;flex-direction:column;gap:1px;' },
-        el('span', { style:'white-space:nowrap;' }, el('span', { class:'mono', style:'font-size:11px;' }, r.codice), bottoneSchedaCodice(r.codice)));
+        el('span', { class:'mono', style:'font-size:11px;' }, r.codice));
       if (origini.length) {
         cellaCod.append(el('span', { class:'sub',
           style:'font-size:10px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
@@ -15503,7 +15498,9 @@ function openOperazioneModal(o, opts) {
             : 'Arriva da piu sottoassiemi: ' + origini.join(', ') },
           '◂ da ' + origini[0] + (origini.length > 1 ? '  +' + (origini.length - 1) : '')));
       }
-      listaBox.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
+      // Clic sulla riga = scheda del codice (19 nov, Nico: al posto del 📇).
+      listaBox.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);cursor:pointer;',
+          title:'Clic: scheda del codice ' + r.codice, onclick: () => apriSchedaCodice(r.codice) },
         cellaCod,
         el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
           title: r.descrizione || '' }, r.descrizione || '—'),
