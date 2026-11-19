@@ -1621,6 +1621,10 @@ const TAB_STRUCTURE = {
       // ORDINI FORNITORE (18 nov, Nico): tutti gli OF fac simile, d'acquisto
       // e ai terzisti. Admin: ci sono i prezzi d'acquisto.
       { id: 'ordini_fornitore', label: 'Ordini fornitore', adminOnly: true },
+      // DOCUMENTI (19 nov, Nico): registro dei documenti in entrata e in uscita,
+      // ricavato (DDT ricevuti, rientri, DDT fac simile, OF). Per tutti; gli OF
+      // dentro si vedono solo da admin.
+      { id: 'documenti',      label: 'Documenti',      adminOnly: false },
       // Ricerca sui timbri NON legati a commessa (6 ago). L'anagrafica delle
       // attività resta in Gestione: qui si guarda cosa è stato fatto.
       { id: 'timbri_extra',   label: 'Attività extra', adminOnly: false },
@@ -1824,6 +1828,7 @@ function renderTab(name) {
     else if (name === 'prelievi') renderPrelievi(root);
     else if (name === 'movimenti') renderMovimenti(root);
     else if (name === 'ordini_fornitore') renderOrdiniFornitore(root);
+    else if (name === 'documenti') renderDocumenti(root);
     else if (name === 'riunioni') renderRiunioni(root);
     else if (name === 'storico') renderStorico(root);
     else if (name === 'gantt_live') renderGanttLiveTab(root);
@@ -6191,6 +6196,138 @@ function stampaOrdineFornitore(of, finestra) {
       + '<div class="fi f2"><div><div class="lab">Cablotec S.R.L. · firma</div></div><div><div class="lab">Fornitore · timbro e firma per accettazione</div></div></div>',
     conta: righe.length + (acq ? (righe.length === 1 ? ' riga' : ' righe') : (righe.length === 1 ? ' commessa' : ' commesse')),
   }, finestra);
+}
+
+// ═══ DOCUMENTI IN ENTRATA E IN USCITA (19 nov, Nico: "un posto per i
+// documenti in entrata ed uscita") ═══
+// Un REGISTRO, non un archivio: nessuna tabella, nessun file. Ogni riga e'
+// ricavata dai dati che esistono gia', e il documento si apre dove vive:
+//  entrata · DDT ricevuti (carichi in `movimenti_magazzino`, per documento)
+//          · DDT di rientro dei terzisti (`rientri_terzista`)
+//  uscita  · DDT fac simile ai terzisti (`invii_terzista` spediti)
+//          · ordini fornitore emessi (`ordini_fornitore`, solo admin: prezzi)
+// Movimenti interni (lotti, rettifiche, passaggi in reparto) non sono documenti.
+const DOC_TIPI = {
+  ddt_ricevuto: { verso: 'entrata', txt: 'DDT ricevuto' },
+  ddt_rientro:  { verso: 'entrata', txt: 'DDT di rientro' },
+  ddt_fs:       { verso: 'uscita',  txt: 'DDT al terzista' },
+  of:           { verso: 'uscita',  txt: 'Ordine fornitore' },
+};
+let docVerso = 'tutti', docTipo = '', docCerca = '';
+function documentiRegistro() {
+  const out = [], nonLetti = [];
+  const opDi = (id) => (state.operazioni || []).find(o => o.id === id) || null;
+  const giorno = (d) => d ? String(d).slice(0, 10) : '';
+  // 1. DDT ricevuti: i carichi raggruppati per documento, come la vista
+  // «Per documento» di Movimenti (stessa chiave, cosi' il clic ci arriva).
+  if (Array.isArray(state.movimenti)) {
+    const per = new Map();
+    state.movimenti.filter(m => m.tipo === 'carico' && m.documento_numero).forEach(m => {
+      const k = movChiaveDoc(m);
+      if (!per.has(k)) per.set(k, { k, m, righe: 0, ordini: new Set() });
+      const d = per.get(k); d.righe++; if (m.ordine_rif) d.ordini.add(String(m.ordine_rif));
+    });
+    per.forEach(d => {
+      const commesse = [...d.ordini].map(rif => {
+        const o = (state.operazioni || []).find(z => String(z.riferimento_cliente || '') === rif);
+        return o ? etiOpTerzista(o) + ' (ord. ' + rif + ')' : 'ord. ' + rif;
+      });
+      out.push({ tipo: 'ddt_ricevuto', data: giorno(d.m.documento_data || d.m.data),
+        numero: (d.m.documento_tipo || 'DDT') + ' ' + d.m.documento_numero, azienda: d.m.mittente || '—',
+        rif: commesse.join(', '), contenuto: d.righe + (d.righe === 1 ? ' riga' : ' righe'),
+        azioni: [{ t: 'Righe', title: 'Apri le righe di questo DDT in Movimenti', fn: () => {
+          movFiltroTipo = ''; movFiltroMitt = ''; movFiltroOrd = ''; movCerca = '';
+          movFiltroDoc = d.k; movVista = 'righe'; movQuante = 400; selectTab('movimenti'); } }] });
+    });
+  } else nonLetti.push('DDT ricevuti');
+  // 2. DDT di rientro: il documento e' del terzista, qui c'e' la traccia.
+  if (Array.isArray(state.rientriTerzista)) {
+    state.rientriTerzista.forEach(r => {
+      const o = opDi(r.operazione_id);
+      out.push({ tipo: 'ddt_rientro', data: giorno(r.data), numero: r.ddt_numero ? 'DDT ' + r.ddt_numero : 'DDT senza numero',
+        azienda: nomeAziendaDi(r.terzista_id), rif: o ? etiOpTerzista(o) : '', contenuto: nfIT(r.pezzi) + ' pz' + (r.nota ? ' · ' + r.nota : ''),
+        azioni: o ? [{ t: 'Commessa', title: 'Apri la commessa (Ciclo produttivo)', fn: () => openOperazioneModal(o, { scheda: 'mat' }) }] : [] });
+    });
+  } else if (state.rientriTerzista === null) nonLetti.push('DDT di rientro');
+  // 3. DDT fac simile ai terzisti (il reparto no: non e' un documento che esce).
+  if (Array.isArray(state.inviiTerzista)) {
+    state.inviiTerzista.filter(x => x.stato === 'inviato' && !eReparto(x.terzista_id)).forEach(x => {
+      const n = righeDdtTerzista(x).length;
+      out.push({ tipo: 'ddt_fs', data: giorno(x.inviato_il), numero: 'DDT ' + (numeroDdtFacSimile(x) || '—'),
+        azienda: nomeAziendaDi(x.terzista_id), rif: commesseDiRichiesta(x).map(etiOpTerzista).join(', '),
+        contenuto: n + (n === 1 ? ' riga' : ' righe'), facSimile: true,
+        azioni: [{ t: '🖨 DDT', title: 'Apri e stampa il DDT fac simile', fn: () => apriDdtTerzista(x) }] });
+    });
+  } else nonLetti.push('DDT ai terzisti');
+  // 4. Ordini fornitore: solo admin (come la scheda Ordini fornitore), solo emessi.
+  if (eAdminOra()) {
+    if (Array.isArray(state.ordiniFornitore)) {
+      state.ordiniFornitore.filter(of => of.stato === 'emesso').forEach(of => {
+        const righe = of.righe || [];
+        const tot = righe.reduce((s, r) => s + (Number(r.totale) || 0), 0);
+        out.push({ tipo: 'of', data: giorno(of.data), numero: numeroOrdineFornitore(of) + (of.revisione ? ' rev. ' + of.revisione : ''),
+          azienda: nomeAziendaDi(of.fornitore_id),
+          rif: of.tipo === 'terzista' ? righe.map(r => r.etichetta).join(', ') : righe.map(r => r.codice).join(', '),
+          contenuto: (of.tipo === 'terzista' ? 'conto lavoro · ' : 'acquisto · ') + righe.length
+            + (righe.length === 1 ? ' riga' : ' righe') + (tot ? ' · ' + cartaEuro(tot) : ''), facSimile: true,
+          azioni: [{ t: '🖨 OF', title: 'Ristampa l’ordine fac simile', fn: () => stampaOrdineFornitore(of) }] });
+      });
+    } else nonLetti.push('ordini fornitore');
+  }
+  out.sort((a, b) => String(b.data).localeCompare(String(a.data)) || String(b.numero).localeCompare(String(a.numero), 'it', { numeric: true }));
+  return { lista: out, nonLetti };
+}
+function renderDocumenti(root) {
+  root.innerHTML = '';
+  const ridisegna = () => renderDocumenti(root);
+  const ricarica = el('button', { class:'btnsm', title:'Rileggi movimenti, DDT e ordini dal database',
+    onclick: async () => { ricarica.disabled = true; await caricaMovimenti(); ridisegna(); } }, '⟳ Aggiorna');
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Documenti'), ricarica));
+  const { lista: tutti, nonLetti } = documentiRegistro();
+  const selVerso = el('select', { onchange: (e) => { docVerso = e.target.value; ridisegna(); } },
+    ...[['tutti', 'Entrata e uscita'], ['entrata', '↓ In entrata'], ['uscita', '↑ In uscita']].map(([v, t]) => el('option', { value: v }, t)));
+  selVerso.value = docVerso;
+  const selTipo = el('select', { onchange: (e) => { docTipo = e.target.value; ridisegna(); } },
+    el('option', { value: '' }, 'Tutti i tipi'),
+    ...Object.entries(DOC_TIPI).filter(([k]) => k !== 'of' || eAdminOra()).map(([k, v]) => el('option', { value: k }, v.txt)));
+  selTipo.value = docTipo;
+  const cerca = el('input', { type:'text', class:'search', id:'doc-cerca', value: docCerca, style:'min-width:300px;',
+    placeholder:'Cerca numero, azienda, commessa, codice…',
+    oninput: (e) => { docCerca = e.target.value; ridisegnaDopoRicerca('documenti'); } });
+  root.append(el('div', { style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;' }, selVerso, selTipo, cerca));
+  if (nonLetti.length) root.append(el('div', { class:'sub', style:'margin:-4px 0 10px;font-size:12px;color:var(--or);' },
+    'Non letti: ' + nonLetti.join(', ') + '. Premi ⟳ Aggiorna; quei documenti mancano dall’elenco.'));
+  const q = docCerca.trim().toLowerCase();
+  const lista = tutti.filter(d => (docVerso === 'tutti' || DOC_TIPI[d.tipo].verso === docVerso)
+    && (!docTipo || d.tipo === docTipo)
+    && (!q || [d.numero, d.azienda, d.rif, d.contenuto].some(s => String(s || '').toLowerCase().includes(q))));
+  const nE = lista.filter(d => DOC_TIPI[d.tipo].verso === 'entrata').length;
+  root.append(el('div', { class:'sub', style:'margin:-4px 0 10px;font-size:12px;' },
+    lista.length + (lista.length === 1 ? ' documento' : ' documenti') + ' · ' + nE + ' in entrata · ' + (lista.length - nE) + ' in uscita'
+    + '. Registro ricavato dai movimenti, dalle spedizioni ai terzisti e dagli ordini: non si scrive qui.'));
+  if (!lista.length) {
+    root.append(el('div', { class:'empty' }, tutti.length ? 'Nessun documento con questi filtri.' : 'Nessun documento ancora.'));
+    return;
+  }
+  const tbl = el('table', { class:'rt' });
+  tbl.append(el('thead', {}, el('tr', {}, ...['Data', '', 'Tipo', 'Numero', 'Azienda', 'Commesse / riferimenti', 'Contenuto', ''].map(t => el('th', {}, t)))));
+  const tb = el('tbody');
+  lista.forEach(d => {
+    const ent = DOC_TIPI[d.tipo].verso === 'entrata';
+    tb.append(el('tr', {},
+      el('td', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, d.data ? fmtIT(d.data) : '—'),
+      el('td', {}, el('span', { class:'badge ' + (ent ? 'bok' : 'bor'), title: ent ? 'In entrata' : 'In uscita' }, ent ? '↓ entrata' : '↑ uscita')),
+      el('td', { style:'font-size:12px;white-space:nowrap;' }, DOC_TIPI[d.tipo].txt,
+        d.facSimile ? el('span', { class:'sub', style:'margin-left:6px;font-size:10px;' }, 'fac simile') : ''),
+      el('td', {}, el('span', { class:'mono', style:'font-weight:700;white-space:nowrap;' }, d.numero)),
+      el('td', { style:'font-size:12px;' }, d.azienda),
+      el('td', { style:'max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;', class:'mono', title: d.rif }, d.rif || '—'),
+      el('td', { style:'font-size:12px;white-space:nowrap;' }, d.contenuto),
+      el('td', { style:'white-space:nowrap;text-align:right;' }, ...d.azioni.map(a =>
+        el('button', { type:'button', class:'btnsm', style:'margin-left:4px;', title: a.title, onclick: a.fn }, a.t)))));
+  });
+  tbl.append(tb);
+  root.append(el('div', { style:'overflow-x:auto;' }, tbl));
 }
 
 // ── 3. LA CONFERMA (quantita' reali -> movimenti) ───────────────────
