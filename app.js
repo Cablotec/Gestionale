@@ -6205,13 +6205,13 @@ function stampaOrdineFornitore(of, finestra) {
 //  entrata · DDT ricevuti (carichi in `movimenti_magazzino`, per documento)
 //          · DDT di rientro dei terzisti (`rientri_terzista`)
 //  uscita  · DDT fac simile ai terzisti (`invii_terzista` spediti)
-//          · ordini fornitore emessi (`ordini_fornitore`, solo admin: prezzi)
+// Solo DDT (19 nov, Nico: "gli ordini OFS hanno gia' la loro scheda").
+// «＋ DDT in entrata» (admin) carica a mano un DDT che l'automazione non legge.
 // Movimenti interni (lotti, rettifiche, passaggi in reparto) non sono documenti.
 const DOC_TIPI = {
   ddt_ricevuto: { verso: 'entrata', txt: 'DDT ricevuto' },
   ddt_rientro:  { verso: 'entrata', txt: 'DDT di rientro' },
   ddt_fs:       { verso: 'uscita',  txt: 'DDT al terzista' },
-  of:           { verso: 'uscita',  txt: 'Ordine fornitore' },
 };
 let docVerso = 'tutti', docTipo = '', docCerca = '';
 function documentiRegistro() {
@@ -6259,37 +6259,131 @@ function documentiRegistro() {
         azioni: [{ t: '🖨 DDT', title: 'Apri e stampa il DDT fac simile', fn: () => apriDdtTerzista(x) }] });
     });
   } else nonLetti.push('DDT ai terzisti');
-  // 4. Ordini fornitore: solo admin (come la scheda Ordini fornitore), solo emessi.
-  if (eAdminOra()) {
-    if (Array.isArray(state.ordiniFornitore)) {
-      state.ordiniFornitore.filter(of => of.stato === 'emesso').forEach(of => {
-        const righe = of.righe || [];
-        const tot = righe.reduce((s, r) => s + (Number(r.totale) || 0), 0);
-        out.push({ tipo: 'of', data: giorno(of.data), numero: numeroOrdineFornitore(of) + (of.revisione ? ' rev. ' + of.revisione : ''),
-          azienda: nomeAziendaDi(of.fornitore_id),
-          rif: of.tipo === 'terzista' ? righe.map(r => r.etichetta).join(', ') : righe.map(r => r.codice).join(', '),
-          contenuto: (of.tipo === 'terzista' ? 'conto lavoro · ' : 'acquisto · ') + righe.length
-            + (righe.length === 1 ? ' riga' : ' righe') + (tot ? ' · ' + cartaEuro(tot) : ''), facSimile: true,
-          azioni: [{ t: '🖨 OF', title: 'Ristampa l’ordine fac simile', fn: () => stampaOrdineFornitore(of) }] });
-      });
-    } else nonLetti.push('ordini fornitore');
-  }
   out.sort((a, b) => String(b.data).localeCompare(String(a.data)) || String(b.numero).localeCompare(String(a.numero), 'it', { numeric: true }));
   return { lista: out, nonLetti };
+}
+// ＋ DDT IN ENTRATA A MANO (19 nov, Nico: "DDT in entrata da inserire
+// manualmente"). Le righe diventano carichi come quelli dell'automazione,
+// scritti da `mov_carica_ddt` (admin, tutto-o-niente, niente doppioni).
+// ⚠ GIACENZA: un codice entra nel conto del gestionale solo se ci sta gia'
+// (ha movimenti in conto) o e' un C/L di una commessa «Materiali da DDT»;
+// tutti gli altri (ACQ di Fabbi, Comet…) li conta ancora Alnus e la riga
+// parte `fuori_giacenza`: resta nel registro ma non prende il posto della
+// riga Alnus (vedi «Un codice, una fonte» in CLAUDE.md).
+function codiceInGiacenzaGestionale(codice) {
+  const c = String(codice || '').trim().toUpperCase();
+  if (!c) return false;
+  if (inConto(state.movimenti || []).some(m => String(m.codice || '').trim().toUpperCase() === c)) return true;
+  return (state.operazioni || []).some(o => o.materiali_da_ddt && (o.stato === 'aperta' || o.stato === 'sospesa')
+    && (o.materiali || []).some(x => String(x.codice || '').trim().toUpperCase() === c && eCL(x)));
+}
+function apriDdtEntrataManuale(poi) {
+  const v = veloTerzista('DDT in entrata · inserimento a mano', 1060);
+  const aziende = (state.aziende || []).filter(a => a.attivo !== false)
+    .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
+  const selMitt = el('select', {}, el('option', { value:'' }, '— mittente —'),
+    ...aziende.map(a => el('option', { value: a.id }, a.nome)));
+  const inNum = el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' });
+  const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
+  const inOrd = el('input', { type:'text', class:'mono', placeholder:'es. OFS 3/2026 o ordine cliente' });
+  let righe = [];   // { codice, descrizione, um, qta, ordine_rif, note }
+  const corpo = el('div');
+  const C = 'display:grid;grid-template-columns:150px minmax(170px,1fr) 52px 80px 130px minmax(110px,.8fr) 120px 28px;gap:6px;align-items:center;';
+  const et = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const completa = async (r) => {
+    const c = r.codice;
+    const mv = (state.movimenti || []).slice().reverse().find(m => String(m.codice || '').toUpperCase() === c && m.descrizione);
+    const mn = (state.mancanti || []).find(x => String(x.codice || '').trim().toUpperCase() === c);
+    const fonte = mv || mn;
+    if (fonte) { if (!r.descrizione) r.descrizione = fonte.descrizione || ''; if (!r.um) r.um = fonte.um || ''; }
+    else if (!r.descrizione) {
+      try {
+        const { data } = await sb.from('materiali').select('descrizione,um').eq('codice', c).limit(1);
+        if (data && data[0]) { r.descrizione = data[0].descrizione || ''; if (!r.um) r.um = data[0].um || ''; }
+      } catch (e) { /* si scrive a mano */ }
+    }
+    disegna();
+  };
+  const disegna = () => {
+    corpo.innerHTML = '';
+    corpo.append(el('div', { style: C + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
+      et('Codice'), et('Descrizione'), et('UM'), et('Q.tà', 1), et('Ordine'), et('Nota'), et('Giacenza'), el('span')));
+    if (!righe.length) corpo.append(el('div', { class:'sub', style:'padding:10px 0;font-size:12px;' }, 'Nessuna riga: «+ Riga» per aggiungerne.'));
+    righe.forEach((r, i) => {
+      const inCod = el('input', { type:'text', value: r.codice, class:'mono', style:'font-size:12px;', placeholder:'codice nostro' });
+      inCod.onchange = () => { r.codice = inCod.value.trim().toUpperCase(); inCod.value = r.codice; if (r.codice) completa(r); else disegna(); };
+      const inDesc = el('input', { type:'text', value: r.descrizione, style:'font-size:12px;' });
+      inDesc.oninput = () => { r.descrizione = inDesc.value; };
+      const inUm = el('input', { type:'text', value: r.um, style:'font-size:12px;' });
+      inUm.oninput = () => { r.um = inUm.value.trim(); };
+      const inQ = el('input', { type:'text', inputmode:'decimal', value: r.qta ? nfIT(r.qta) : '', class:'mono', style:'font-size:12px;text-align:right;' });
+      inQ.oninput = () => { const n = numeroDaTesto(inQ.value); r.qta = n == null || isNaN(n) ? 0 : n; inQ.style.color = n != null && isNaN(n) ? 'var(--red)' : ''; };
+      const inO = el('input', { type:'text', value: r.ordine_rif, class:'mono', style:'font-size:12px;' });
+      inO.oninput = () => { r.ordine_rif = inO.value.trim(); };
+      const inN = el('input', { type:'text', value: r.note, style:'font-size:12px;' });
+      inN.oninput = () => { r.note = inN.value; };
+      const gest = r.codice ? codiceInGiacenzaGestionale(r.codice) : null;
+      const giac = r.codice ? el('span', { class:'badge ' + (gest ? 'bok' : 'bgry'), style:'white-space:nowrap;font-size:10px;',
+        title: gest ? 'Il codice è già contato dal gestionale: il carico entra nella sua giacenza'
+          : 'La giacenza di questo codice la tiene ancora Alnus: il carico resta nel registro, fuori giacenza' },
+        gest ? 'gestionale' : 'solo registro') : el('span');
+      const via = el('button', { type:'button', class:'btnsm', style:'padding:0 6px;', title:'Togli la riga', onclick: () => { righe.splice(i, 1); disegna(); } }, '✕');
+      corpo.append(el('div', { style: C + 'padding:3px 0;' }, inCod, inDesc, inUm, inQ, inO, inN, giac, via));
+    });
+  };
+  const nuovaRiga = () => ({ codice:'', descrizione:'', um:'', qta:0, ordine_rif: inOrd.value.trim(), note:'' });
+  inOrd.onchange = () => { righe.forEach(r => { r.ordine_rif = inOrd.value.trim(); }); disegna(); };
+  const piu = el('button', { type:'button', class:'btnsm', style:'margin-top:6px;', onclick: () => {
+    righe.push(nuovaRiga()); disegna(); const c = corpo.querySelectorAll('input.mono'); if (c.length) c[c.length - 3].focus(); } }, '+ Riga');
+  const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
+  righe = [nuovaRiga()];
+  disegna();
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Per i DDT che l’automazione delle scansioni non legge. Le righe diventano carichi di magazzino, come quelle lette in automatico. '
+      + 'Un codice la cui giacenza la tiene ancora Alnus resta «solo registro». Un errore dopo il salvataggio si corregge con una rettifica in Movimenti.'),
+    el('div', { class:'frow' }, campo('Mittente', selMitt), campo('Numero DDT', inNum), campo('Data DDT', inData), campo('Stesso ordine per tutte le righe', inOrd)),
+    corpo, piu);
+  const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
+  const ok = el('button', { class:'btnp' }, '↓ Carica il DDT');
+  ok.onclick = async () => {
+    const valide = righe.filter(r => r.codice);
+    const err = !selMitt.value ? 'Scegli il mittente' : !inNum.value.trim() ? 'Scrivi il numero del DDT' : !inData.value ? 'Manca la data'
+      : !valide.length ? 'Aggiungi almeno una riga' : valide.some(r => !(r.qta > 0)) ? 'Ogni riga vuole una quantità maggiore di zero' : null;
+    if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
+    ok.disabled = true; ok.textContent = 'Caricamento…';
+    const p_righe = valide.map(r => ({ codice: r.codice, descrizione: r.descrizione || '', um: r.um || '', qta: r.qta,
+      ordine_rif: r.ordine_rif || '', note: r.note || '', fuori_giacenza: !codiceInGiacenzaGestionale(r.codice) }));
+    const { data, error } = await sb.rpc('mov_carica_ddt', { p_azienda: selMitt.value, p_numero: inNum.value.trim(), p_data: inData.value, p_righe });
+    if (error) {
+      ok.disabled = false; ok.textContent = '↓ Carica il DDT';
+      const manca = /mov_carica_ddt/.test(error.message || '') && /(could not find|does not exist|schema cache)/i.test(error.message || '');
+      msg.textContent = manca ? 'Non ancora attivo: manca lo SQL migrazione-ddt-entrata-manuale.sql' : error.message;
+      msg.style.color = 'var(--red)'; return;
+    }
+    v.chiudi();
+    toast('DDT ' + inNum.value.trim() + ' caricato: ' + (data || valide.length) + (valide.length === 1 ? ' riga' : ' righe'), 'ok');
+    await caricaMovimenti();
+    if (typeof poi === 'function') poi();
+  };
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
 }
 function renderDocumenti(root) {
   root.innerHTML = '';
   const ridisegna = () => renderDocumenti(root);
-  const ricarica = el('button', { class:'btnsm', title:'Rileggi movimenti, DDT e ordini dal database',
+  const ricarica = el('button', { class:'btnsm', title:'Rileggi movimenti e DDT dal database',
     onclick: async () => { ricarica.disabled = true; await caricaMovimenti(); ridisegna(); } }, '⟳ Aggiorna');
-  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Documenti'), ricarica));
+  root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Documenti'), ricarica,
+    (eAdminOra() && Array.isArray(state.movimenti)) ? el('button', { class:'btnp', style:'margin-left:auto;',
+      title:'Registra a mano un DDT ricevuto: le sue righe diventano carichi di magazzino',
+      onclick: () => apriDdtEntrataManuale(ridisegna) }, '＋ DDT in entrata') : ''));
   const { lista: tutti, nonLetti } = documentiRegistro();
   const selVerso = el('select', { onchange: (e) => { docVerso = e.target.value; ridisegna(); } },
     ...[['tutti', 'Entrata e uscita'], ['entrata', '↓ In entrata'], ['uscita', '↑ In uscita']].map(([v, t]) => el('option', { value: v }, t)));
   selVerso.value = docVerso;
   const selTipo = el('select', { onchange: (e) => { docTipo = e.target.value; ridisegna(); } },
     el('option', { value: '' }, 'Tutti i tipi'),
-    ...Object.entries(DOC_TIPI).filter(([k]) => k !== 'of' || eAdminOra()).map(([k, v]) => el('option', { value: k }, v.txt)));
+    ...Object.entries(DOC_TIPI).map(([k, v]) => el('option', { value: k }, v.txt)));
   selTipo.value = docTipo;
   const cerca = el('input', { type:'text', class:'search', id:'doc-cerca', value: docCerca, style:'min-width:300px;',
     placeholder:'Cerca numero, azienda, commessa, codice…',
@@ -6304,7 +6398,7 @@ function renderDocumenti(root) {
   const nE = lista.filter(d => DOC_TIPI[d.tipo].verso === 'entrata').length;
   root.append(el('div', { class:'sub', style:'margin:-4px 0 10px;font-size:12px;' },
     lista.length + (lista.length === 1 ? ' documento' : ' documenti') + ' · ' + nE + ' in entrata · ' + (lista.length - nE) + ' in uscita'
-    + '. Registro ricavato dai movimenti, dalle spedizioni ai terzisti e dagli ordini: non si scrive qui.'));
+    + '. I DDT ricevuti entrano dall’automazione delle scansioni o da «＋ DDT in entrata»; quelli in uscita dalle spedizioni ai terzisti.'));
   if (!lista.length) {
     root.append(el('div', { class:'empty' }, tutti.length ? 'Nessun documento con questi filtri.' : 'Nessun documento ancora.'));
     return;
