@@ -5123,7 +5123,8 @@ function apriRichiestaTerzista(o, poi, opts) {
   const disegnaCommesse = () => {
     boxCommesse.innerHTML = '';
     const cand = candidati();
-    spunte = new Map(cand.map(x => [x.id, (o && x.id === o.id) || (!!opts.tutte && !eReparto(selTer.value)) || (!o && cand.length === 1)]));
+    spunte = new Map(cand.map(x => [x.id, (o && x.id === o.id)
+      || (!!opts.tutte && !eReparto(selTer.value) && !mancaOfTerzista(x.id, selTer.value)) || (!o && cand.length === 1)]));
     if (cand.length <= 1 && o) return;  // da sola: niente da scegliere
     boxCommesse.append(el('div', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;' },
       'Commesse insieme' + (o ? ' — spunta le altre per una lista sola' : '')));
@@ -5139,7 +5140,8 @@ function apriRichiestaTerzista(o, poi, opts) {
         chk, el('span', { class:'mono', style:'font-weight:700;' }, etiOpTerzista(x)),
         el('span', { class:'sub' }, (art ? art.codice + ' · ' : '')
           + (x.scadenza ? 'scade ' + fmtIT(x.scadenza) : 'senza scadenza') + ' · ' + nfIT(daFareDi(x)) + ' pz da fare'),
-        questa ? el('span', { class:'sub', style:'color:var(--or);' }, '(questa)') : ''));
+        questa ? el('span', { class:'sub', style:'color:var(--or);' }, '(questa)') : '',
+        mancaOfTerzista(x.id, selTer.value) ? el('span', { style:'color:var(--red);font-weight:700;font-size:11px;' }, '⚠ manca l’ordine fornitore') : ''));
     });
     boxCommesse.append(griglia);
   };
@@ -5193,6 +5195,18 @@ function apriRichiestaTerzista(o, poi, opts) {
     if (!comm.length) {
       tab.append(el('div', { class:'sub', style:'padding:10px 0;' }, 'Spunta almeno una commessa.'));
       aggiorna();
+      return;
+    }
+    // Senza ordine fornitore la lista non parte (19 nov, Nico).
+    const senzaOf = comm.filter(c => mancaOfTerzista(c.id, selTer.value));
+    if (senzaOf.length) {
+      tab.append(el('div', { style:'padding:10px 12px;margin-top:6px;border:1px solid var(--red);border-radius:6px;font-size:12px;line-height:1.6;' },
+        el('b', { style:'color:var(--red);' }, '⚠ Manca l’ordine fornitore a ' + nomeAziendaDi(selTer.value)),
+        el('div', {}, 'Per ' + senzaOf.map(etiOpTerzista).join(', ') + ' non c’è un OF emesso: senza ordine non si prepara il materiale. '
+          + 'Crealo dal Ciclo produttivo della commessa («＋ Crea OF»)' + (comm.length > senzaOf.length ? ', o togli la spunta a quelle commesse.' : '.'))));
+      crea.disabled = true;
+      riepilogo.textContent = 'Manca l’ordine fornitore';
+      riepilogo.style.color = 'var(--red)';
       return;
     }
     tab.append(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);position:sticky;top:0;background:var(--sur);z-index:1;' },
@@ -5286,6 +5300,7 @@ function apriRichiestaTerzista(o, poi, opts) {
     const daPreparare = new Set(righe.filter(r => r.qta > 0).map(r => r.codice)).size;
     if (!daPreparare) return;
     const comm = scelte_commesse();
+    if (comm.some(c => mancaOfTerzista(c.id, selTer.value))) return toast('Manca l’ordine fornitore: la lista non parte.', 'err', 9000);
     crea.disabled = true; crea.textContent = 'Salvataggio…';
     try {
       const { data, error } = await sb.from('invii_terzista').insert({
@@ -5701,6 +5716,15 @@ function modificaOrdineFornitore(of, poi) {
 function ordineTerzistaDi(opId, terzistaId) {
   return (state.ordiniFornitore || []).find(of => of.stato === 'emesso' && of.tipo === 'terzista'
     && of.fornitore_id === terzistaId && (of.righe || []).some(r => r.operazione_id === opId)) || null;
+}
+// OF PRIMA DEL MATERIALE (19 nov, Nico: "segnalare se manca ordine fornitore, senza
+// quello non dovrebbero partire nemmeno lista preparazione materiale e conseguente DDT").
+// Vero quando a quel terzista, per quella commessa, non c'e' un OF emesso. Solo
+// terzisti (il reparto e' casa nostra) e solo se gli ordini si sono potuti leggere:
+// con la tabella assente o illeggibile non si blocca niente.
+function mancaOfTerzista(opId, terzistaId) {
+  if (!Array.isArray(state.ordiniFornitore) || !opId || !terzistaId || eReparto(terzistaId)) return false;
+  return !ordineTerzistaDi(opId, terzistaId);
 }
 // Le commesse ordinabili a un terzista: lui e' sulla commessa, la commessa e'
 // aperta o sospesa, e non e' gia' in un ordine emesso a lui.
@@ -6465,6 +6489,10 @@ function renderDocumenti(root) {
 // il materiale presso il terzista resta riservato al suo ordine.
 function apriConfermaInvioTerzista(x, poi) {
   const comm = commesseDiRichiesta(x);
+  // Senza ordine fornitore non si spedisce e non nasce il DDT (19 nov, Nico).
+  const senzaOf = comm.filter(c => c && c.id && mancaOfTerzista(c.id, x.terzista_id));
+  if (senzaOf.length) return toast('Non si spedisce: manca l’ordine fornitore a ' + nomeAziendaDi(x.terzista_id) + ' per '
+    + senzaOf.map(etiOpTerzista).join(', ') + '. Crealo dal Ciclo produttivo della commessa («＋ Crea OF»).', 'err', 10000);
   const multi = comm.length > 1;
   const opDi = (r) => comm.find(c => c.id === opDiRigaTerzista(x, r)) || {};
   const rep = eReparto(x.terzista_id);
@@ -6627,9 +6655,12 @@ function rigaRichiestaTerzista(x, poi, conCommessa, opQui) {
     azioni.append(el('button', { type:'button', class:'btnsm', title:'DDT fac simile di questa spedizione',
       onclick: () => apriDdtTerzista(x) }, '📄 DDT ' + (numeroDdtFacSimile(x) || '')));
   }
+  const senzaOfR = x.stato === 'da_preparare' && comm.some(c => c && c.id && mancaOfTerzista(c.id, x.terzista_id));
+  if (senzaOfR) azioni.append(el('span', { style:'color:var(--red);font-weight:700;font-size:11px;align-self:center;',
+    title:'Senza ordine fornitore non si spedisce: crealo dal Ciclo produttivo della commessa' }, '⚠ manca OF'));
   if (x.stato === 'da_preparare' && eAdminOra()) {
     azioni.append(
-      el('button', { type:'button', class:'btnsm', onclick: () => apriConfermaInvioTerzista(x, poi) }, rep ? '✓ In reparto' : '✓ Spedita'),
+      senzaOfR ? '' : el('button', { type:'button', class:'btnsm', onclick: () => apriConfermaInvioTerzista(x, poi) }, rep ? '✓ In reparto' : '✓ Spedita'),
       el('button', { type:'button', class:'btnsm', title:'Annulla la richiesta',
         onclick: () => annullaRichiestaTerzista(x, poi) }, '✕'));
   }
@@ -6710,6 +6741,17 @@ function passiFase(o, f, poi) {
   const prepara = () => apriRichiestaTerzista(o, poi, { terzista: f.id });
   const passi = [];
 
+  // 0. L'ORDINE FORNITORE (19 nov, Nico): viene prima di tutto. Senza, la lista
+  // e la spedizione non partono (vedi `mancaOfTerzista`).
+  const senzaOf = !rep && mancaOfTerzista(o.id, f.id);
+  if (!rep && Array.isArray(state.ordiniFornitore) && o.id) {
+    const of = ordineTerzistaDi(o.id, f.id);
+    passi.push(of
+      ? { nome:'Ordine (OF)', stato:'fatto', dett: numeroOrdineFornitore(of) + ' del ' + giorno(of.data) }
+      : { nome:'Ordine (OF)', stato: viva ? 'avviso' : 'poi', dett: viva ? 'manca: senza OF non parte il materiale' : '',
+          azione: viva ? btn('＋ Crea OF', () => apriOrdineTerzista(o, f.id, poi), 'Ordine fac simile a ' + nomeAziendaDi(f.id)) : '' });
+  }
+
   // TERZISTA SENZA MATERIALI (18 nov): solo prezzo, nessuna lista da fare
   // ne' materiale da mandare. Restano il lavoro da lui e il rientro.
   if (!rep && !f.voci.length && !f.richieste.length && !f.fuori.length) {
@@ -6740,6 +6782,8 @@ function passiFase(o, f, poi) {
     passi.push({ nome:'Lista preparata', stato:'fatto', dett:'chiesta il ' + giorno(x.creato_il) });
   } else if (vive.length) {
     passi.push({ nome:'Lista preparata', stato:'fatto', dett:'chiesta il ' + giorno(vive[vive.length - 1].creato_il) });
+  } else if (senzaOf) {
+    passi.push({ nome:'Lista da preparare', stato:'poi', dett: viva ? 'prima l’ordine fornitore' : 'commessa chiusa' });
   } else if (rep && repartoDaPreparare(o)) {
     passi.push({ nome:'Lista da preparare', stato:'avviso', dett:'la lavorazione è già partita',
       azione: btn('↗ Prepara', prepara, 'Il materiale per il gestionale è ancora sullo scaffale, libero per le altre commesse') });
@@ -6750,7 +6794,9 @@ function passiFase(o, f, poi) {
 
   // 2. L'USCITA: spedita al terzista / portata in reparto
   const nomeUscita = rep ? 'Portato in reparto' : 'Uscita (DDT)';
-  if (daPrep.length) {
+  if (daPrep.length && senzaOf) {
+    passi.push({ nome: nomeUscita, stato:'avviso', dett:'non si spedisce senza ordine fornitore' });
+  } else if (daPrep.length) {
     const x = daPrep[0];
     passi.push({ nome: nomeUscita, stato:'ora', dett: inviate.length ? 'un\'altra parte già uscita' : 'da confermare',
       azione: btn(rep ? '✓ In reparto' : '✓ Spedita', () => apriConfermaInvioTerzista(x, poi)) });
@@ -6949,9 +6995,10 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
           '🔔 Arrivati i mancanti: ' + pm.righe.length + (pm.righe.length === 1 ? ' materiale ora in sede' : ' materiali ora in sede')),
         el('span', { class:'sub', style:'font-size:11px;' },
           pm.righe.map(r => r.codice + ' (serve ' + nfIT(r.serve) + ', in sede ' + nfIT(r.libero) + ')').join(' · ')),
-        eAdminOra() ? el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
+        (eAdminOra() && !mancaOfTerzista(o.id, f.id)) ? el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
           title:'Nuova richiesta: propone solo quello che manca ancora',
-          onclick: () => apriRichiestaTerzista(o, poi, { terzista: f.id }) }, '↗ Prepara la richiesta') : ''));
+          onclick: () => apriRichiestaTerzista(o, poi, { terzista: f.id }) }, '↗ Prepara la richiesta')
+          : (mancaOfTerzista(o.id, f.id) ? el('span', { style:'margin-left:auto;color:var(--red);font-weight:700;font-size:11px;' }, 'prima l’ordine fornitore') : '')));
     }
     // I DOCUMENTI SEMPRE IN VISTA (17 nov, Nico: "senza che rimangano
     // nascosti"): ogni lista di preparazione e il suo DDT, in ordine di data,
@@ -6985,7 +7032,7 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
             eAdminOra() ? bt('✎', () => modificaOrdineFornitore(of, poi), 'Modifica l’ordine: stesso numero, nuova revisione') : null,
             eAdminOra() ? bt('✕', () => annullaOrdineFornitore(of, poi), 'Annulla l’ordine: le sue commesse tornano libere') : null));
         } else {
-          docs.append(rigaDoc('📑', 'Ordine al terzista', 'non ancora emesso',
+          docs.append(rigaDoc('📑', 'Ordine al terzista', 'non ancora emesso · senza OF non partono lista né DDT',
             eAdminOra() ? bt('＋ Crea OF', () => apriOrdineTerzista(o, f.id, poi), 'Ordine fac simile a ' + nomeAziendaDi(f.id)
               + ', con le sue altre commesse aperte') : null));
         }
@@ -7000,7 +7047,7 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
           bt('🖨 Stampa', () => stampaRichiestaTerzista(x), 'Stampa la lista per il magazzino'),
           // La conferma anche QUI, sulla sua lista (17 nov, Nico: "come la
           // confermo?"): il passo «Uscita» conferma solo la piu' vecchia.
-          (!inv && eAdminOra()) ? bt(rep ? '✓ In reparto' : '✓ Spedita', () => apriConfermaInvioTerzista(x, poi),
+          (!inv && eAdminOra() && !mancaOfTerzista(o.id, f.id)) ? bt(rep ? '✓ In reparto' : '✓ Spedita', () => apriConfermaInvioTerzista(x, poi),
             rep ? 'Conferma cosa hai portato in reparto' : 'Conferma cosa è partito: poi si apre il DDT') : null,
           (!inv && eAdminOra()) ? bt('✕', () => annullaRichiestaTerzista(x, poi), 'Annulla la richiesta') : null));
         if (inv && !rep) {
