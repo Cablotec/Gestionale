@@ -6877,6 +6877,8 @@ async function registraLottoProduzione(o, campi, opts) {
   const qta = Number(campi.quantita);
   if (!(qta > 0)) throw new Error('quantità non valida');
   if (qta > residuo) throw new Error('Da produrre: ' + residuo + ' pz. Non puoi produrre ' + qta + ' pz.');
+  const blocco = bloccoProduzioneDaRientri(o, qta);
+  if (blocco) throw new Error(blocco);
   const { data: nuova, error } = await sb.from('consegne_commessa').insert({
     operazione_id: o.id, data: campi.data, quantita: qta, ddt: campi.ddt || null, nota: campi.nota || null,
     creato_da: state.profile?.id || null }).select().single();
@@ -6902,10 +6904,24 @@ async function registraLottoProduzione(o, campi, opts) {
   }
   return { lotto: nuova, completata, erroreStato };
 }
-// PRODUZIONE LEGATA AI RIENTRI (19 nov, Nico: "leghiamoli"). I terzisti della commessa
+// PRODUZIONE LEGATA AI RIENTRI (19 nov, Nico: "leghiamoli"; poi "e' corretto che vincoli
+// la produzione": e' un BLOCCO, non una conferma). I terzisti della commessa
 // gestiti qui (con un OF emesso: gli altri sono ancora su Alnus e non hanno rientri
 // registrati) che hanno fatto rientrare MENO pezzi di quanti risulterebbero prodotti.
 // [{ id, rientrati }]. Senza la tabella dei rientri: [] (non si accusa).
+// Il messaggio unico del blocco (19 nov, Nico: "senza la consegna, anche di parziali,
+// non potro' mai produrre almeno un pezzo"): null se il lotto e' permesso.
+function bloccoProduzioneDaRientri(o, qta) {
+  const prodotti = quantitaConsegnata(o.id);
+  const scarsi = rientriInsufficienti(o, prodotti + qta);
+  if (!scarsi.length) return null;
+  const minimo = Math.min(...scarsi.map(x => x.rientrati));
+  const ancora = Math.max(0, minimo - prodotti);
+  return 'Non si produce piu\' di quanto e\' rientrato dal terzista: '
+    + scarsi.map(x => nomeAziendaDi(x.id) + ' ' + nfIT(x.rientrati) + ' pz rientrati').join(', ')
+    + ', prodotti ' + nfIT(prodotti) + '. '
+    + (ancora > 0 ? 'Si possono registrare ancora ' + nfIT(ancora) + ' pz.' : 'Prima registra il rientro («↩ Registra rientro» nella scheda del terzista).');
+}
 function rientriInsufficienti(o, prodottiDopo) {
   if (!Array.isArray(state.rientriTerzista) || !Array.isArray(state.ordiniFornitore)) return [];
   return [...new Set((state.opFornitori || []).filter(r => r.operazione_id === o.id).map(r => r.azienda_id))]
@@ -16597,13 +16613,9 @@ function openOperazioneModal(o, opts) {
           }
 
           // PRODUZIONE LEGATA AI RIENTRI (19 nov): con un terzista gestito qui (OF
-          // emesso) i pezzi prodotti non dovrebbero superare quelli tornati da lui.
-          const scarsi = rientriInsufficienti(o, quantitaConsegnata(o.id) + qta);
-          if (scarsi.length && !confirm('Dal terzista non sono ancora rientrati tutti questi pezzi:\n\n'
-            + scarsi.map(x => '· ' + nomeAziendaDi(x.id) + ': rientrati ' + x.rientrati + ' pz').join('\n')
-            + '\n\nCon questo lotto i prodotti diventerebbero ' + (quantitaConsegnata(o.id) + qta) + ' pz.'
-            + '\nDi solito il rientro si registra dalla scheda del terzista («↩ Registra rientro»), che registra anche la produzione.'
-            + '\n\nRegistrare comunque il lotto?')) return;
+          // emesso) non si produce piu' di quanto e' tornato da lui. Blocco, non conferma.
+          const bloccoR = bloccoProduzioneDaRientri(o, qta);
+          if (bloccoR) return toast(bloccoR, 'err', 10000);
 
           btnAdd.disabled = true; btnAdd.textContent = 'Salvataggio…';
           // Una porta sola per il lotto (anche il rientro dal terzista ci passa).
@@ -18374,6 +18386,13 @@ function fattiPerStato(op, nuovoStato) {
   // produzione mai avvenuta per far quadrare una marcia indietro.
   const RANGO = { aperta: 0, sospesa: 0, completata: 1, spedita: 2 };
   if ((RANGO[nuovoStato] || 0) <= (RANGO[op.stato] || 0)) return vuoto;
+
+  // Il lotto automatico della chiusura vale come un lotto vero: oltre i rientrati
+  // dal terzista non si crea (19 nov). Si chiude a saldo togliendo prima i pezzi.
+  if ((nuovoStato === 'completata' || nuovoStato === 'spedita') && residuo > 0 && typeof bloccoProduzioneDaRientri === 'function') {
+    const bloccoR = bloccoProduzioneDaRientri(op, residuo);
+    if (bloccoR) { alert('Lo stato non cambia: servirebbe un lotto di ' + residuo + ' pz.\n\n' + bloccoR); return { ok: false }; }
+  }
 
   if (nuovoStato === 'completata' && residuo > 0) {
     const ok = confirm(
