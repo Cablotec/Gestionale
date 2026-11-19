@@ -6270,9 +6270,13 @@ function documentiRegistro() {
 // tutti gli altri (ACQ di Fabbi, Comet…) li conta ancora Alnus e la riga
 // parte `fuori_giacenza`: resta nel registro ma non prende il posto della
 // riga Alnus (vedi «Un codice, una fonte» in CLAUDE.md).
-function codiceInGiacenzaGestionale(codice) {
+// Un CLIENTE (non anche fornitore) che manda il suo materiale in conto lavoro (Tema): tutto in
+// giacenza, come fa l'automazione delle scansioni per i clienti di config.json.
+function codiceInGiacenzaGestionale(codice, mittenteId) {
   const c = String(codice || '').trim().toUpperCase();
   if (!c) return false;
+  const az = mittenteId ? (state.aziende || []).find(a => a.id === mittenteId) : null;
+  if (az && az.is_cliente && !az.is_fornitore) return true;
   if (inConto(state.movimenti || []).some(m => String(m.codice || '').trim().toUpperCase() === c)) return true;
   return (state.operazioni || []).some(o => o.materiali_da_ddt && (o.stato === 'aperta' || o.stato === 'sospesa')
     && (o.materiali || []).some(x => String(x.codice || '').trim().toUpperCase() === c && eCL(x)));
@@ -6281,7 +6285,7 @@ function apriDdtEntrataManuale(poi) {
   const v = veloTerzista('DDT in entrata · inserimento a mano', 1060);
   const aziende = (state.aziende || []).filter(a => a.attivo !== false)
     .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
-  const selMitt = el('select', {}, el('option', { value:'' }, '— mittente —'),
+  const selMitt = el('select', { onchange: () => disegna() }, el('option', { value:'' }, '— mittente —'),
     ...aziende.map(a => el('option', { value: a.id }, a.nome)));
   const inNum = el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' });
   const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
@@ -6322,9 +6326,9 @@ function apriDdtEntrataManuale(poi) {
       inO.oninput = () => { r.ordine_rif = inO.value.trim(); };
       const inN = el('input', { type:'text', value: r.note, style:'font-size:12px;' });
       inN.oninput = () => { r.note = inN.value; };
-      const gest = r.codice ? codiceInGiacenzaGestionale(r.codice) : null;
+      const gest = r.codice ? codiceInGiacenzaGestionale(r.codice, selMitt.value) : null;
       const giac = r.codice ? el('span', { class:'badge ' + (gest ? 'bok' : 'bgry'), style:'white-space:nowrap;font-size:10px;',
-        title: gest ? 'Il codice è già contato dal gestionale: il carico entra nella sua giacenza'
+        title: gest ? 'Materiale del cliente, o codice già contato dal gestionale: il carico entra nella sua giacenza'
           : 'La giacenza di questo codice la tiene ancora Alnus: il carico resta nel registro, fuori giacenza' },
         gest ? 'gestionale' : 'solo registro') : el('span');
       const via = el('button', { type:'button', class:'btnsm', style:'padding:0 6px;', title:'Togli la riga', onclick: () => { righe.splice(i, 1); disegna(); } }, '✕');
@@ -6353,7 +6357,7 @@ function apriDdtEntrataManuale(poi) {
     if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
     ok.disabled = true; ok.textContent = 'Caricamento…';
     const p_righe = valide.map(r => ({ codice: r.codice, descrizione: r.descrizione || '', um: r.um || '', qta: r.qta,
-      ordine_rif: r.ordine_rif || '', note: r.note || '', fuori_giacenza: !codiceInGiacenzaGestionale(r.codice) }));
+      ordine_rif: r.ordine_rif || '', note: r.note || '', fuori_giacenza: !codiceInGiacenzaGestionale(r.codice, selMitt.value) }));
     const { data, error } = await sb.rpc('mov_carica_ddt', { p_azienda: selMitt.value, p_numero: inNum.value.trim(), p_data: inData.value, p_righe });
     if (error) {
       ok.disabled = false; ok.textContent = '↓ Carica il DDT';

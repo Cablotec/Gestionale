@@ -2,7 +2,7 @@
 
 È la porta d'ingresso del magazzino del Gestionale, che un giorno sostituirà Alnus.
 Legge i DDT in arrivo (scansioni o PDF), li registra in `movimenti_magazzino` e in un registro Excel parallelo, poi archivia il file.
-Pilota: Enviro di Tema. Sistema avviato il 13 ott 2026; prima era un progetto a parte, dal 28 ott fa parte del Gestionale.
+Pilota: Enviro di Tema. Sistema avviato il 13 ott 2026; prima era un progetto a parte, dal 28 ott fa parte del Gestionale. **Dal 19 nov legge i DDT di qualsiasi azienda dell'anagrafica**, non solo di Tema.
 
 > **Dove sta il codice** (dal 28 ott):
 > - Script, config, registro Excel, distinte d'ordine e JSON estratti stanno in `Z:\SOFTWARE\MegaAPP\DDT_arrivi\`. È accanto a questo repository e non dentro, perché il repository è pubblicato su GitHub Pages.
@@ -38,12 +38,25 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
 | `watcher.ps1` | Sorveglia la cartella (notifica + controllo ogni 60 s). Aspetta che lo scanner finisca, lancia Claude, sposta l'originale. Massimo 2 tentativi per file. Resiste alla rete assente. |
 | `installa.ps1` | Registra l'attività di Windows: parte all'accesso, senza finestra (`conhost --headless`); ogni 10 minuti la rilancia se è caduta (`IgnoreNew`). `-Rimuovi` la toglie. **La lancia Nico:** dalla sessione di Claude Windows risponde "Accesso negato". |
 | `prompt.txt` | Le istruzioni che riceve Claude a ogni elaborazione. |
-| `config.json` | I clienti: come riconoscerli, il prefisso del codice Cablotec (Tema = `TS-`) e le distinte d'ordine per il confronto in Excel. |
+| `config.json` | I clienti che mandano materiale in conto lavoro: come riconoscerli, il prefisso del codice Cablotec (Tema = `TS-`) e le distinte d'ordine per il confronto in Excel. |
+| `aziende.js` → `aziende.json` | (19 nov) L'anagrafica del Gestionale (id, nome, P.IVA, ruolo). Il watcher la riscarica nella cartella locale prima di ogni elaborazione; Claude ci riconosce il mittente di un DDT che non è in `config.json`. |
+| `accesso.js` | Il login come `ai@cablotec.local`, comune a `aziende.js` e `invia-movimenti.js`. |
 | `registra.py` | Aggiunge il DDT al registro Excel senza doppioni, ricalcola il "Confronto ordini" e poi lancia `invia-movimenti.js`. Se l'Excel è aperto, lo segnala e scrive comunque nel Gestionale. |
-| `invia-movimenti.js` | Scrive le righe come carichi in `movimenti_magazzino`, come `ai@cablotec.local`. La password la legge da `Z:\SOFTWARE\MegaAPP\PW.txt` tramite `strumenti/credenziali.js` e non la stampa mai. Salta le righe già presenti. Con `--prova` fa solo il controllo. |
+| `invia-movimenti.js` | Scrive le righe come carichi in `movimenti_magazzino`, come `ai@cablotec.local`. La password la legge da `Z:\SOFTWARE\MegaAPP\PW.txt` tramite `strumenti/credenziali.js` e non la stampa mai. Salta le righe già presenti. Con `--prova` fa solo il controllo. Per i DDT dei fornitori decide quali righe vanno «fuori giacenza» (vedi sotto). |
 | `Registro_arrivi.xlsx` | Registro parallelo per la durata della prova. Da dismettere quando il Gestionale sarà affidabile. |
 | `estratti\`, `distinte\` | I JSON letti dai DDT (archivio) e le distinte d'ordine dei clienti per il confronto. |
 | `ultimo_riepilogo.txt` | Esito dell'ultima elaborazione. `watcher.log` e i `run_*.txt` stanno invece nella cartella locale, sotto `log\`. |
+
+## DDT dei fornitori (19 nov)
+
+Nico: *"ddt automatici da scansione ok per tutti i fornitori"*.
+- **Mittente:** prima i clienti di `config.json` (come prima), poi `aziende.json` per P.IVA e per nome. Il JSON estratto porta `azienda_id` e `cliente_key` = nome in maiuscolo (es. `FABBI_IMOLA_SRL`, cartella `ELABORATI\FABBI_IMOLA_SRL6`). Un mittente che non è in anagrafica va in `DA_VERIFICARE`: si crea la sua scheda in Aziende e si rimette il file nella cartella.
+- **Codici:** Claude scrive il NOSTRO codice se il DDT lo riporta («Vs. codice»), se no quello del fornitore con una nota; il codice del fornitore va sempre come 7o elemento della riga (`codice_mittente`). Nessun prefisso.
+- **Ordine:** il nostro numero d'ordine se stampato sul DDT (es. «OFS 3/2026»), in `ordine_rif`. Servirà ad abbinare gli arrivi agli OF quando gli ordini partiranno dal Gestionale.
+- ⚠ **Giacenza:** una riga di un fornitore entra nella giacenza del Gestionale solo se il codice è già del Gestionale (ha movimenti in conto) o è un C/L di una commessa viva «Materiali da DDT». Tutte le altre partono `fuori_giacenza` («solo registro»): la giacenza di quei codici (ACQ) la tiene ancora Alnus, e un carico in conto farebbe sostituire nel Gestionale la riga Alnus con la sola quantità del DDT. È la stessa regola del carico a mano (Produzione → Documenti → «＋ DDT in entrata»). I clienti di `config.json` restano come prima: tutto in giacenza.
+- Si vedono in **Produzione → Documenti** come «DDT ricevuto».
+- Provato a secco il 19 nov (`--prova`): un DDT Fabbi di prova con un codice già del Gestionale (in giacenza) e un connettore ACQ (fuori giacenza); un DDT Tema già caricato resta «0 da inserire»; il registro Excel riconosce lo stesso DDT anche col nome scritto diverso. Il primo DDT vero di un fornitore non è ancora passato.
+- Copie di prima: `*.bak-1119` in `Z:\SOFTWARE\MegaAPP\DDT_arrivi`.
 
 ## Nel Gestionale
 
@@ -57,7 +70,8 @@ in\<file>.esito.json  ->  il watcher sposta l'originale in ELABORATI\<CLIENTE>\<
 ## Operazioni frequenti
 
 - **Un ordine con piu' articoli** (es. Tema 4700000482: 358010100 e 358010075): in `distinte_ordini` l'ordine prende una LISTA di distinte, una per articolo, e il Confronto ordini somma le quantita'. Senza, i codici dell'articolo mancante escono "NON IN DISTINTA".
-- **Aggiungere un cliente:** aggiungi la sua voce in `clienti` dentro `config.json`, con il nome che lo riconosce e il prefisso del codice. Finché manca, i suoi DDT finiscono in `DA_VERIFICARE`.
+- **Aggiungere un cliente che manda materiale in conto lavoro:** aggiungi la sua voce in `clienti` dentro `config.json`, con il nome che lo riconosce, il prefisso del codice e `azienda_id`. Finché manca, i suoi DDT si leggono come quelli di un fornitore (righe fuori giacenza se il codice non è già del Gestionale).
+- **Un fornitore nuovo:** basta la sua scheda in Aziende (meglio con la P.IVA). Il watcher riscarica l'anagrafica a ogni elaborazione.
 - **Rilanciare un DDT a mano** (non crea doppioni né in Excel né nel Gestionale). Va lanciato dalla cartella locale `C:\Users\User032\Cablotec\DDT_arrivi`: da `\\SRV02\...` Node non parte (`ERR_INVALID_PACKAGE_CONFIG`) e i movimenti non arrivano.
   ```
   python registra.py estratti\<file>.json
