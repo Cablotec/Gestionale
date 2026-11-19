@@ -7018,30 +7018,73 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
       card.append(docs);
     }
     // Il dettaglio, chiuso: materiali della fase e richieste annullate.
+    // GIA' CONSEGNATI NASCOSTI (19 nov, Nico: "nascondi i materiali gia'
+    // consegnati ai terzisti e lascia evidenziati quelli ancora da dargli"):
+    // consegnato = somma delle quantita' PARTITE (`qta_inviata`) nelle richieste
+    // spedite a questo terzista per QUESTA commessa; resta = da mandare - consegnato.
+    // Chi e' a zero non si vede (si possono rimostrare); gli altri sono in arancio
+    // con quanto manca. Vale anche per il reparto («portato»).
     const annullate = f.richieste.filter(x => x.stato === 'annullato');
     const nRich = annullate.length;
+    const consegnato = new Map();
+    f.richieste.filter(x => x.stato === 'inviato').forEach(x => (x.righe || []).forEach(r => {
+      if (opDiRigaTerzista(x, r) !== o.id) return;
+      const k = chiaveCodice(r.codice);
+      const q = Number(r.qta_inviata != null ? r.qta_inviata : r.qta) || 0;
+      consegnato.set(k, (consegnato.get(k) || 0) + q);
+    }));
+    const voci = f.voci.map(v => {
+      const serve = +(v.qta_pz * tot).toFixed(4);
+      const dato = +(consegnato.get(chiaveCodice(v.riga.codice)) || 0).toFixed(4);
+      return Object.assign({}, v, { serve, dato, resta: Math.max(0, +(serve - dato).toFixed(4)) });
+    });
+    const daDare = voci.filter(v => v.resta > 0), dati = voci.filter(v => v.resta <= 0);
+    const verbo = (n) => (n === 1 ? (rep ? 'portato in reparto' : 'già consegnato') : (rep ? 'portati in reparto' : 'già consegnati'));
     if (nMat || nRich) {
       const dett = el('div', { style:'display:none;margin-top:8px;' });
+      let mostraDati = false;
       const etich = () => (dett.style.display === 'none' ? '▸ ' : '▾ ')
-        + [nMat ? nMat + (nMat === 1 ? ' materiale' : ' materiali') : '',
+        + [nMat ? (daDare.length ? daDare.length + (daDare.length === 1 ? ' materiale' : ' materiali') + (rep ? ' da portare' : ' da dare') : 'materiali tutti ' + (rep ? 'portati' : 'consegnati'))
+            + (dati.length && daDare.length ? ' · ' + dati.length + ' ' + verbo(dati.length) : '') : '',
           nRich ? nRich + (nRich === 1 ? ' richiesta annullata' : ' richieste annullate') : ''].filter(Boolean).join(' · ');
-      const tog = el('button', { type:'button', class:'btnsm', style:'margin-top:8px;font-size:11px;' });
+      const tog = el('button', { type:'button', class:'btnsm',
+        style:'margin-top:8px;font-size:11px;' + (daDare.length ? 'border-color:var(--or);color:var(--or);font-weight:700;' : '') });
       tog.textContent = etich();
       tog.onclick = () => { dett.style.display = dett.style.display === 'none' ? '' : 'none'; tog.textContent = etich(); };
       if (nMat) {
-        const C = 'display:grid;grid-template-columns:minmax(140px,1fr) minmax(140px,1.5fr) 70px 80px 44px;gap:8px;align-items:baseline;';
+        const C = 'display:grid;grid-template-columns:minmax(140px,1fr) minmax(140px,1.5fr) 70px 80px 90px 44px;gap:8px;align-items:baseline;';
         const et = (t, dx) => el('span', { class:'sub',
           style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
-        dett.append(el('div', { style: C + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
-          et('Codice'), et('Descrizione'), et('Per pz', 1), et(rep ? 'In casa' : 'Da mandare', 1), et('UM')));
-        f.voci.slice().sort((a, b) => String(a.riga.codice).localeCompare(String(b.riga.codice), 'it', { numeric: true }))
-          .forEach(({ riga, qta_pz }) => dett.append(el('div', { style: C + 'padding:3px 0;border-bottom:1px solid var(--brd);' },
-            el('span', { class:'mono', style:'font-size:11px;' }, riga.codice),
+        const lista = el('div');
+        const disegnaMat = () => {
+          lista.innerHTML = '';
+          lista.append(el('div', { style: C + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
+            et('Codice'), et('Descrizione'), et('Per pz', 1), et(rep ? 'In casa' : 'Da mandare', 1), et(rep ? 'Da portare' : 'Da dare', 1), et('UM')));
+          const ord = (a, b) => String(a.riga.codice).localeCompare(String(b.riga.codice), 'it', { numeric: true });
+          const riga = (v, fatto) => el('div', { style: C + 'padding:3px 0;border-bottom:1px solid var(--brd);'
+              + (fatto ? 'opacity:.55;' : 'background:color-mix(in srgb, var(--or) 10%, transparent);'),
+              title: fatto ? 'Già ' + (rep ? 'portato in reparto' : 'consegnato al terzista') + ': ' + nfIT(v.dato)
+                : (v.dato ? 'Consegnati ' + nfIT(v.dato) + ' su ' + nfIT(v.serve) : 'Non ancora consegnato') },
+            el('span', { class:'mono', style:'font-size:11px;' + (fatto ? '' : 'font-weight:700;') }, v.riga.codice),
             el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
-              title: riga.descrizione || '' }, riga.descrizione || '—'),
-            el('span', { class:'mono', style:'font-size:11px;text-align:right;color:var(--mut);' }, nfIT(qta_pz)),
-            el('span', { class:'mono', style:'font-size:11px;text-align:right;font-weight:700;' }, nfIT(+(qta_pz * tot).toFixed(4))),
-            el('span', { class:'sub', style:'font-size:11px;' }, riga.um || ''))));
+              title: v.riga.descrizione || '' }, v.riga.descrizione || '—'),
+            el('span', { class:'mono', style:'font-size:11px;text-align:right;color:var(--mut);' }, nfIT(v.qta_pz)),
+            el('span', { class:'mono', style:'font-size:11px;text-align:right;color:var(--mut);' }, nfIT(v.serve)),
+            el('span', { class:'mono', style:'font-size:11px;text-align:right;font-weight:700;color:' + (fatto ? 'var(--grn)' : 'var(--or)') + ';' },
+              fatto ? '✓ ' + (rep ? 'portato' : 'dato') : nfIT(v.resta)),
+            el('span', { class:'sub', style:'font-size:11px;' }, v.riga.um || ''));
+          daDare.slice().sort(ord).forEach(v => lista.append(riga(v, false)));
+          if (!daDare.length) lista.append(el('div', { class:'sub', style:'font-size:11px;padding:6px 0;color:var(--grn);' },
+            '✓ Tutti i materiali sono ' + (rep ? 'stati portati in reparto.' : 'stati consegnati al terzista.')));
+          if (dati.length) {
+            if (mostraDati) dati.slice().sort(ord).forEach(v => lista.append(riga(v, true)));
+            lista.append(el('a', { href:'#', class:'sub', style:'display:inline-block;font-size:11px;margin-top:4px;',
+              onclick: (e) => { e.preventDefault(); mostraDati = !mostraDati; disegnaMat(); } },
+              (mostraDati ? 'Nascondi ' : 'Mostra ') + (dati.length === 1 ? 'quello ' : 'i ' + dati.length + ' ') + verbo(dati.length)));
+          }
+        };
+        disegnaMat();
+        dett.append(lista);
       }
       if (nRich) {
         dett.append(el('div', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin:10px 0 2px;' },
