@@ -7415,6 +7415,14 @@ async function chiediFornitoreAbituale(codice, attuale) {
 // FORNITORE (`codici_fornitore`: chi lo vende e come lo chiama), modificabili
 // da admin. Li usano il carico a mano dei DDT e l'automazione delle scansioni
 // per tradurre un codice del fornitore nel nostro.
+// Il bottoncino 📇 accanto a un codice (19 nov, Nico: "non ho capito dove vedo la scheda"):
+// la scheda si apre dal codice, non solo dal menu sullo stato. Col numero dei codici fornitore.
+function bottoneSchedaCodice(codice) {
+  const n = codiciFornitoreDi(codice).length;
+  return el('button', { type:'button', class:'btnsm', style:'padding:0 5px;font-size:10px;margin-left:4px;line-height:16px;',
+    title:'Scheda del codice: codici dei fornitori' + (n ? ' (' + n + ')' : ''),
+    onclick: (e) => { e.preventDefault(); e.stopPropagation(); apriSchedaCodice(codice); } }, '📇' + (n ? ' ' + n : ''));
+}
 async function apriSchedaCodice(codice) {
   const cod = chiaveCodice(codice);
   if (!cod) return;
@@ -7512,6 +7520,8 @@ async function apriSchedaCodice(codice) {
       await caricaCodiciFornitore();
       v.chiudi();
       toast('Codici fornitore di ' + cod + ' salvati', 'ok');
+      // Il numero accanto al 📇 delle liste si aggiorna ridisegnando la scheda aperta.
+      if (state.currentTab) renderTab(state.currentTab);
     } catch (e) {
       ok.disabled = false; ok.textContent = '💾 Salva';
       msg.textContent = /duplicate|unique/i.test(e.message || '') ? 'Quel codice di quel fornitore è già su un altro nostro codice' : (e.message || String(e));
@@ -8042,12 +8052,13 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
     // Il codice apre il dettaglio delle commesse che lo usano, quando ce n'e'.
     { k:'codice', t:'Codice', ord: m => String(m.codice || ''),
       cella: (m) => {
-        if (!usiDi(m.codice).length) return el('span', { class:'mono', style:'font-size:11px;' }, m.codice);
+        if (!usiDi(m.codice).length) return el('span', { style:'white-space:nowrap;' },
+          el('span', { class:'mono', style:'font-size:11px;' }, m.codice), bottoneSchedaCodice(m.codice));
         const aperto = matAperti.has(String(m.codice).trim());
-        return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);',
+        return el('span', { style:'white-space:nowrap;' }, el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);',
           title:'Mostra le commesse che usano questo codice',
           onclick:(e)=>{ e.preventDefault(); apriChiudi(m.codice); } },
-          (aperto ? '▾ ' : '▸ ') + m.codice);
+          (aperto ? '▾ ' : '▸ ') + m.codice), bottoneSchedaCodice(m.codice));
       } },
     { k:'descrizione', t:'Descrizione', ord: m => String(m.descrizione || '').toUpperCase(),
       cella: (m) => el('span', { style:'display:block;max-width:280px;overflow:hidden;'
@@ -9379,9 +9390,9 @@ function renderMovimenti(root) {
                 onclick: () => apriModificaRettifica(m, dopoRettifica) }, '✎'))
           : b; } },
     { k:'codice', t:'Codice', ord: m => String(m.codice || ''),
-      cella: m => el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);',
+      cella: m => el('span', { style:'white-space:nowrap;' }, el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--txt);',
         title:'Mostra solo i movimenti di questo codice, col totale',
-        onclick:(e)=>{ e.preventDefault(); movCerca = m.codice; movQuante = 400; renderMovimenti(root); } }, m.codice) },
+        onclick:(e)=>{ e.preventDefault(); movCerca = m.codice; movQuante = 400; renderMovimenti(root); } }, m.codice), bottoneSchedaCodice(m.codice)) },
     { k:'descrizione', t:'Descrizione', ord: m => String(m.descrizione || '').toUpperCase(),
       cella: m => el('span', { style:'display:block;max-width:260px;overflow:hidden;'
         + 'text-overflow:ellipsis;white-space:nowrap;', title: m.descrizione || '' }, m.descrizione || '—') },
@@ -15457,7 +15468,7 @@ function openOperazioneModal(o, opts) {
       // lista mostra le foglie: questa riga e' il filo fra le due.
       const origini = Array.isArray(r.da) ? r.da.filter(Boolean) : [];
       const cellaCod = el('div', { style:'min-width:0;display:flex;flex-direction:column;gap:1px;' },
-        el('span', { class:'mono', style:'font-size:11px;' }, r.codice));
+        el('span', { style:'white-space:nowrap;' }, el('span', { class:'mono', style:'font-size:11px;' }, r.codice), bottoneSchedaCodice(r.codice)));
       if (origini.length) {
         cellaCod.append(el('span', { class:'sub',
           style:'font-size:10px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
