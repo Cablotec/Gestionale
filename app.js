@@ -6545,7 +6545,8 @@ async function importaOfAlnus(f, poi) {
     const { data, error } = await sb.from('alnus_fotografie').insert({ tipo: 'of', preso_il: presoIl, righe: o.righe.length, file: f.name }).select().single();
     if (error) throw new Error(error.message);
     foto = data;
-    await inserisciATranche('alnus_of_righe', o.righe.map(r => Object.assign({ fotografia_id: foto.id }, r)));
+    // La data d'immissione serve solo agli ordini (sincronizzaOfAlnus): la fotografia non ha la colonna.
+    await inserisciATranche('alnus_of_righe', o.righe.map(({ data, ...r }) => Object.assign({ fotografia_id: foto.id }, r)));
     const vecchie = ((state.alnus && state.alnus.fotografie) || []).filter(x => x.tipo === 'of' && x.id !== foto.id).map(x => x.id);
     if (vecchie.length) await sb.from('alnus_fotografie').delete().in('id', vecchie);
     toast('OF aperti importati: ' + plAlnus(o.righe.length, 'riga', 'righe') + ' di ' + plAlnus(nOf, 'ordine', 'ordini'), 'ok');
