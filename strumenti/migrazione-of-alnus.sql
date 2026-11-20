@@ -17,7 +17,17 @@ alter table public.ordini_fornitore add column if not exists origine text not nu
 alter table public.ordini_fornitore add column if not exists sincronizzato_il timestamptz;
 
 -- Lo stato «chiuso» (evaso o chiuso in Alnus).
-alter table public.ordini_fornitore drop constraint if exists ordini_fornitore_stato_check;
+-- (il vecchio controllo sullo stato, qualunque nome abbia)
+do $$
+declare c text;
+begin
+  for c in select con.conname from pg_constraint con join pg_class t on t.oid = con.conrelid
+            where t.relname = 'ordini_fornitore' and con.contype = 'c'
+              and pg_get_constraintdef(con.oid) ilike '%stato%'
+  loop
+    execute format('alter table public.ordini_fornitore drop constraint %I', c);
+  end loop;
+end $$;
 alter table public.ordini_fornitore add constraint ordini_fornitore_stato_check
   check (stato in ('emesso', 'annullato', 'chiuso'));
 
