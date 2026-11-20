@@ -176,5 +176,46 @@ sez('Il fabbisogno fatto dal gestionale (stessa forma di mancanti)');
   t('senza scaduti: l\'OF di marzo non conta', s.find(x => x.codice === 'A1').qta_da_ordinare === 50);
 }
 
+sez('Giacenza del gestionale (foto Alnus + nostri fatti)');
+{
+  const FOTO = '2026-11-20T10:33:11';
+  const MAG = new Set(['01', 'WIP']);
+  const apertura = [{ codice: '05 095 0146', magazzino: '01', qta: 130 }, { codice: 'A1', magazzino: 'WIP', qta: 10 },
+    { codice: 'A1', magazzino: 'SPK', qta: 99 }, { codice: 'CL', magazzino: '02', qta: 50 }];
+  const movimenti = [
+    { codice: 'A1', tipo: 'carico', qta: 100, fuori_giacenza: true, creato_il: '2026-11-21T08:00:00' },
+    { codice: 'A1', tipo: 'carico', qta: 7, creato_il: '2026-11-19T08:00:00' },
+    { codice: 'TS-1', tipo: 'carico', qta: 40, creato_il: '2026-10-01T08:00:00' },
+    { codice: 'TS-1', tipo: 'scarico', qta: -12, creato_il: '2026-11-21T09:00:00' },
+    { codice: 'TS-1', tipo: 'trasferimento', qta: -5, fuori_giacenza: true, creato_il: '2026-11-21T09:00:00' },
+    { codice: 'A1', tipo: 'rettifica', qta: -3, creato_il: '2026-11-22T09:00:00' } ];
+  const commesse = new Map([
+    ['c1', { materiali: [{ codice: 'A1', qta_pz: 2, tipo: 'ACQ' }, { codice: 'M', qta_pz: 1, tipo: 'MAC' }, { codice: 'cl', qta_pz: 1, tipo: 'C/L' }] }],
+    ['c2', { materiali_da_ddt: true, materiali: [{ codice: 'TS-1', qta_pz: 3, tipo: 'C/L' }, { codice: '05 095 0146', qta_pz: 1, tipo: 'ACQ' }] }],
+    ['c3', { materiali: [] }] ]);
+  const lotti = [
+    { operazione_id: 'c1', quantita: 5, creato_il: '2026-11-21T10:00:00' },
+    { operazione_id: 'c1', quantita: 50, creato_il: '2026-11-20T09:00:00' },
+    { operazione_id: 'c2', quantita: 4, creato_il: '2026-11-21T10:00:00' },
+    { operazione_id: 'c3', quantita: 1, creato_il: '2026-11-21T10:00:00' } ];
+  const r = A.giacenzaGestionale({ apertura, aperturaIl: FOTO, magazzini: MAG, movimenti, lotti, commesse });
+  const g = c => r.per.get(c);
+  t('solo in foto: 130 − 4 del lotto (ACQ di commessa da DDT)', g('05 095 0146').totale === 126);
+  t('A1: 10 (SPK fuori) + 100 DDT fornitore dopo − 10 consumo − 3 rettifica; carico di prima no', g('A1').totale === 97 && g('A1').carichi === 100);
+  t('C/L di commessa normale scaricato (02 dentro 01)', g('CL').totale === 45);
+  t('MAC non scaricato', !g('M'));
+  t('TS-1: 40 di prima − 12 del trigger, il C/L da DDT non si riscarica', g('TS-1').totale === 28 && g('TS-1').consumi === 0);
+  t('lotto prima della foto ignorato, lotto senza lista dichiarato', g('A1').consumi === -10 && r.lottiSenzaLista.length === 1);
+  const al = A.giacenzaAlnus(apertura, [], FOTO);
+  const conf = A.confrontoGiacenze(r.per, al, MAG);
+  const di = c => conf.find(x => x.codice === c);
+  t('confronto: differenza = gestionale − Alnus', di('05 095 0146').qAlnus === 130 && di('05 095 0146').differenza === -4);
+  t('confronto: codice solo nel gestionale, segnato', di('TS-1').qAlnus === 0 && di('TS-1').differenza === 28 && di('TS-1').soloGestionale && !di('A1').soloGestionale);
+  const neg = A.giacenzaGestionale({ apertura: [{ codice: 'N', magazzino: '01', qta: -340 }], aperturaIl: FOTO, magazzini: MAG });
+  t('negativo in Alnus: confronto alla pari, non portato a zero', A.confrontoGiacenze(neg.per, A.giacenzaAlnus([{ codice: 'N', magazzino: '01', qta: -340 }], [], FOTO), MAG)[0].differenza === 0);
+  const zero = A.giacenzaGestionale({ apertura, aperturaIl: FOTO, magazzini: MAG, movimenti: [], lotti: [], commesse });
+  t('senza fatti dopo la foto: identica ad Alnus', A.confrontoGiacenze(zero.per, al, MAG).every(x => x.differenza === 0));
+}
+
 console.log('\n' + ok + ' ok, ' + ko + ' KO');
 process.exit(ko ? 1 : 0);

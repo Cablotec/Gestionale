@@ -6795,46 +6795,62 @@ function righeFabbisognoGestionale() {
       : ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, oggi),
     ofNostri, contaScaduti: alnusContaScaduti });
 }
-// GIACENZA UNICA di un codice (20 nov): specchio Alnus + movimenti del gestionale
-// (`giacenzaUnica` in domain/alnus.js). Legge lo specchio se non e' ancora in
-// memoria; per chi non e' admin la RLS lo da' vuoto e resta il solo gestionale.
-let alnusGiacCache = null;   // { chiave, mappa } per non rifare il conto a ogni scheda
+// GIACENZA DEL GESTIONALE (20 nov): foto d'apertura di Alnus + i fatti del
+// gestionale (DDT, consumi dei lotti, rettifiche) — `giacenzaGestionale` in
+// domain/alnus.js. Alnus (foto + suoi movimenti) e' il termine di confronto.
+// Legge lo specchio se serve; per chi non e' admin la RLS lo da' vuoto, e allora
+// il gestionale non ha un punto di partenza: si dice, non si inventa.
+async function giacenzeGestionaleOra() {
+  if (state.alnus === undefined) { try { await caricaAlnus(); } catch (e) {} }
+  const A = state.alnus;
+  if (!A || !A.apertura) return { letto: false, motivo: !A ? 'lo specchio Alnus non si legge' : 'manca la foto d’apertura di Alnus' };
+  const magazzini = alnusMagazziniContati([...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
+    .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean));
+  const commesse = new Map((state.operazioni || []).map(o => [o.id, o]));
+  const r = giacenzaGestionale({ apertura: A.giacApertura, aperturaIl: A.apertura.preso_il, magazzini,
+    movimenti: Array.isArray(state.movimenti) ? state.movimenti : [], lotti: state.consegneCommessa || [], commesse });
+  const alnus = giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il);
+  return { letto: true, per: r.per, lottiSenzaLista: r.lottiSenzaLista, alnus, magazzini,
+    confronto: confrontoGiacenze(r.per, alnus, magazzini), aperturaIl: A.apertura.preso_il,
+    movimentiLetti: Array.isArray(state.movimenti) };
+}
 async function giacenzaUnicaOra(codice) {
   const cod = chiaveCodice(codice);
-  if (state.alnus === undefined) { try { await caricaAlnus(); } catch (e) {} }
-  const A = state.alnus, letto = !!(A && A.apertura);
-  let gA = null, magazzini = null;
-  if (letto) {
-    const chiave = A.apertura.id + '|' + A.movimenti.length + '|' + A.giacApertura.length;
-    if (!alnusGiacCache || alnusGiacCache.chiave !== chiave) {
-      const m = new Map();
-      giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il).forEach((v, c) => m.set(chiaveCodice(c), v));
-      alnusGiacCache = { chiave, mappa: m };
-    }
-    gA = alnusGiacCache.mappa.get(cod) || null;
-    magazzini = alnusMagazziniContati([...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
-      .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean));
+  const G = await giacenzeGestionaleOra();
+  if (!G.letto) {
+    const mov = Array.isArray(state.movimenti) ? inConto(state.movimenti.filter(x => chiaveCodice(x.codice) === cod)) : null;
+    return { letto: false, motivo: G.motivo, saldo: mov ? +mov.reduce((s, x) => s + (Number(x.qta) || 0), 0).toFixed(6) : null };
   }
-  const mov = Array.isArray(state.movimenti) ? state.movimenti.filter(x => chiaveCodice(x.codice) === cod) : null;
-  return Object.assign(giacenzaUnica(gA, magazzini, letto, mov), { perMag: gA ? gA.perMag : null,
-    aperturaIl: letto ? A.apertura.preso_il : null });
+  const riga = G.confronto.find(x => chiaveCodice(x.codice) === cod)
+    || { codice: cod, gestionale: null, qGest: 0, qAlnus: 0, differenza: 0 };
+  return Object.assign({ letto: true, aperturaIl: G.aperturaIl, movimentiLetti: G.movimentiLetti }, riga);
 }
 // La riga che la dice, uguale nella scheda del codice e in Movimenti.
 function rigaGiacenzaUnica(u, um) {
   const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  const segno = (n) => (n > 0 ? '+' : '') + nf(n);
   const u_ = um ? ' ' + um : '';
+  if (!u.letto) return el('div', { style:'font-size:12px;' },
+    el('span', { style:'font-weight:700;font-size:14px;' }, u.saldo == null ? 'Giacenza non calcolabile' : 'Saldo dei movimenti ' + nf(u.saldo) + u_),
+    el('div', { class:'sub', style:'font-size:11px;margin-top:3px;' }, 'Senza foto d’apertura il gestionale non ha un punto di partenza (' + u.motivo + ').'));
+  const g = u.gestionale;
   const pezzi = [];
-  if (u.alnus != null) pezzi.push('Alnus ' + nf(u.alnus) + (u.perMag ? ' (' + Object.entries(u.perMag).map(([m, q]) => m + ' ' + nf(q)).join(', ') + ')' : ''));
-  else pezzi.push('specchio Alnus non letto');
-  if (u.gestionale != null) pezzi.push('gestionale ' + nf(u.gestionale));
-  else pezzi.push('movimenti non letti');
+  if (g) {
+    if (g.inFoto) pezzi.push('foto Alnus ' + nf(g.apertura)); else if (g.prima) pezzi.push('saldo di prima ' + nf(g.prima));
+    if (g.carichi) pezzi.push('DDT ' + segno(g.carichi));
+    if (g.consumi) pezzi.push('lotti ' + segno(g.consumi));
+    if (g.movimenti) pezzi.push('altri movimenti ' + segno(g.movimenti));
+  }
+  const pari = Math.abs(u.differenza) < 1e-9;
   return el('div', { style:'font-size:12px;' },
-    el('span', { style:'font-weight:700;font-size:14px;' + (u.doppia ? 'color:var(--or);' : '') }, 'Giacenza ' + nf(u.totale) + u_),
-    el('span', { class:'sub' }, ' · ' + pezzi.join(' + ')
-      + (u.aperturaIl ? ' · specchio dall’apertura del ' + fmtQuando(u.aperturaIl) : '')),
-    u.doppia ? el('div', { style:'color:var(--or);font-size:11px;margin-top:3px;' },
-      '⚠ Questo codice ha giacenza sia in Alnus sia nei movimenti del gestionale: è sommata, controlla che non sia lo stesso materiale entrato due volte.') : '',
-    !u.completa ? el('div', { class:'sub', style:'font-size:11px;margin-top:3px;' }, 'Giacenza parziale: una delle due fonti non si è potuta leggere.') : '');
+    el('span', { style:'font-weight:700;font-size:14px;' }, 'Giacenza ' + nf(u.qGest) + u_),
+    el('span', { class:'sub' }, pezzi.length ? ' · ' + pezzi.join(' ') : ' · nessun dato su questo codice'),
+    u.soloGestionale
+      ? el('div', { class:'sub', style:'font-size:11px;margin-top:3px;' }, 'Alnus non ha questo codice: lo conta solo il gestionale.')
+      : el('div', { style:'font-size:11px;margin-top:3px;color:' + (pari ? 'var(--grn)' : 'var(--or)') + ';' },
+        (pari ? '✓ uguale ad Alnus (' : '⚠ Alnus dice ' + nf(u.qAlnus) + ' · differenza ' + segno(u.differenza) + ' (')
+        + 'partenza dalla foto del ' + fmtQuando(u.aperturaIl) + ')'),
+    u.movimentiLetti ? '' : el('div', { class:'sub', style:'font-size:11px;margin-top:3px;' }, 'Movimenti non letti: mancano DDT e rettifiche.'));
 }
 
 // La pillola in alto: chi ha acceso il gestionale come fonte non deve dimenticarlo.
@@ -6975,6 +6991,10 @@ function renderAlnus(root) {
         : '✓ Controllo del ' + fmtQuando(A.controllo.preso_il) + ': la giacenza calcolata torna su tutti i codici.'),
       diversi.length ? apri : '', lista));
   }
+  // Giacenza del gestionale contro Alnus (20 nov): stessa partenza, fatti diversi.
+  const giacSez = el('div', { style: 'margin-bottom:14px;' }, el('div', { class: 'sub' }, 'Calcolo la giacenza del gestionale…'));
+  root.append(giacSez);
+  giacenzeGestionaleOra().then(G => disegnaGiacenzaParallela(giacSez, G)).catch(e => { giacSez.textContent = 'Giacenza del gestionale non calcolabile: ' + (e.message || e); });
   // L'interruttore della fonte (solo questo browser).
   const gest = fonteFabbisogno() === 'gestionale';
   const radio = (val, testo) => el('label', { style: 'display:inline-flex;gap:6px;align-items:center;margin-right:18px;cursor:pointer;font-size:13px;' },
@@ -7047,6 +7067,61 @@ function renderAlnus(root) {
   root.append(el('div', { style: 'overflow-x:auto;' }, tbl));
   if (!alnusTutte && vis.length > 200) root.append(el('button', { class: 'btnsm', style: 'margin-top:8px;',
     onclick: () => { alnusTutte = true; ridisegna(); } }, 'Mostra tutti i ' + vis.length));
+}
+
+// La tabella «Giacenza: gestionale contro Alnus» dello Specchio. Di serie solo i
+// codici che non tornano; clic sulla riga = scheda del codice.
+let alnusGiacTutti = '', alnusGiacCerca = '';   // filtro: '' non tornano, 'soli', 'tutti'
+function disegnaGiacenzaParallela(box, G) {
+  box.innerHTML = '';
+  if (!G.letto) { box.append(el('div', { class: 'sub' }, 'Giacenza del gestionale non calcolabile: ' + G.motivo + '.')); return; }
+  const tutte = G.confronto;
+  const soli = tutte.filter(r => r.soloGestionale);
+  const diverse = tutte.filter(r => !r.soloGestionale && Math.abs(r.differenza) >= 0.0005);
+  const fatti = tutte.filter(r => r.gestionale && (r.gestionale.carichi || r.gestionale.consumi || r.gestionale.movimenti)).length;
+  const nf = (x) => x ? nfIT(x) : '—';
+  const sg = (x) => x ? (x > 0 ? '+' : '') + nfIT(x) : '—';
+  box.append(el('h3', { style: 'margin:6px 0 6px;' }, 'Giacenza: gestionale contro Alnus'),
+    el('div', { class: 'sub', style: 'font-size:12px;line-height:1.6;margin-bottom:6px;max-width:980px;' },
+      'Il gestionale parte dalla foto del ' + fmtQuando(G.aperturaIl) + ' e va avanti solo coi suoi fatti: DDT registrati, consumi dei lotti di produzione '
+      + '(lista della commessa × pezzi, MAC esclusi), rettifiche. Alnus va avanti coi suoi movimenti importati. Stessi magazzini per tutti e due. '
+      + plAlnus(tutte.length, 'codice', 'codici') + ' · ' + plAlnus(fatti, 'codice mosso', 'codici mossi') + ' dal gestionale dopo la foto · '
+      + (diverse.length ? diverse.length + ' non tornano' : 'tutti uguali ad Alnus')
+      + (soli.length ? ' · ' + plAlnus(soli.length, 'codice', 'codici') + ' solo del gestionale (Alnus non li ha, come i TS- di Tema)' : '')
+      + (G.lottiSenzaLista.length ? ' · ⚠ ' + plAlnus(G.lottiSenzaLista.length, 'lotto', 'lotti') + ' dopo la foto su commesse senza lista materiali: non scaricano niente' : '')
+      + (G.movimentiLetti ? '' : ' · ⚠ movimenti del gestionale non letti')));
+  const cerca = el('input', { type: 'text', class: 'search', id: 'alnus-giac-cerca', value: alnusGiacCerca, placeholder: 'Cerca codice…',
+    oninput: (e) => { alnusGiacCerca = e.target.value; disegnaGiacenzaParallela(box, G); const c = document.getElementById('alnus-giac-cerca'); if (c) { c.focus(); c.setSelectionRange(c.value.length, c.value.length); } } });
+  box.append(el('div', { style: 'display:flex;gap:14px;align-items:center;margin-bottom:8px;flex-wrap:wrap;' },
+    el('select', { style: 'font-size:12px;', onchange: (e) => { alnusGiacTutti = e.target.value; disegnaGiacenzaParallela(box, G); } },
+      ...[['', 'Codici che non tornano'], ['soli', 'Codici solo del gestionale'], ['tutti', 'Tutti i codici']]
+        .map(([v, t]) => el('option', { value: v, selected: (alnusGiacTutti || '') === v ? true : null }, t))), cerca));
+  const q = alnusGiacCerca.trim().toLowerCase();
+  const base = alnusGiacTutti === 'tutti' ? tutte : alnusGiacTutti === 'soli' ? soli : diverse;
+  const vis = base.filter(r => !q || r.codice.toLowerCase().includes(q));
+  if (!vis.length) { box.append(el('div', { class: 'empty', style: 'padding:14px;' }, q || alnusGiacTutti ? 'Nessun codice con questi filtri.' : '✓ Gestionale e Alnus danno la stessa giacenza su tutti i codici.')); return; }
+  const tbl = el('table', { class: 'rt' });
+  tbl.append(el('thead', {}, el('tr', {}, ...['Codice', 'Partenza', 'DDT', 'Lotti', 'Altri mov.', 'Gestionale', 'Alnus', 'Differenza']
+    .map((t, i) => el('th', { style: i >= 1 ? 'text-align:right;' : '' }, t)))));
+  const tb = el('tbody');
+  vis.slice(0, 300).forEach(r => {
+    const g = r.gestionale || {};
+    const dif = r.differenza;
+    tb.append(el('tr', { style: 'cursor:pointer;', title: 'Apri la scheda del codice', onclick: () => apriSchedaCodice(r.codice) },
+      el('td', { class: 'mono', style: 'font-weight:700;white-space:nowrap;' }, r.codice),
+      el('td', { class: 'mono', style: 'text-align:right;', title: g.inFoto ? 'dalla foto di Alnus' : g.prima ? 'non nella foto: saldo dei movimenti di prima' : '' },
+        g.inFoto ? nf(g.apertura) : g.prima ? nf(g.prima) + ' *' : '—'),
+      el('td', { class: 'mono', style: 'text-align:right;' }, sg(g.carichi)),
+      el('td', { class: 'mono', style: 'text-align:right;' }, sg(g.consumi)),
+      el('td', { class: 'mono', style: 'text-align:right;' }, sg(g.movimenti)),
+      el('td', { class: 'mono', style: 'text-align:right;font-weight:700;' }, nfIT(r.qGest)),
+      el('td', { class: 'mono', style: 'text-align:right;' }, nfIT(r.qAlnus)),
+      el('td', { class: 'mono', style: 'text-align:right;font-weight:700;color:' + (Math.abs(dif) < 0.0005 ? 'var(--grn)' : 'var(--or)') + ';' },
+        Math.abs(dif) < 0.0005 ? '=' : (dif > 0 ? '+' : '') + nfIT(dif))));
+  });
+  tbl.append(tb);
+  box.append(el('div', { style: 'overflow-x:auto;' }, tbl));
+  if (vis.length > 300) box.append(el('div', { class: 'sub', style: 'font-size:12px;margin-top:6px;' }, 'Primi 300 di ' + vis.length + ': usa la ricerca.'));
 }
 
 // ── IL DETTAGLIO DI UN ORDINE (20 nov, Nico: "invece della sola stampa vorrei cliccare

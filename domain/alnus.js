@@ -194,22 +194,92 @@ function giacenzaContata(g, magazzini) {
   return Math.max(0, +t.toFixed(6));
 }
 
-// GIACENZA UNICA di un codice (20 nov, Nico): specchio Alnus (magazzini contati)
-// + saldo dei movimenti del gestionale in conto. Oggi i due conti riguardano
-// codici diversi (i TS- di Tema in Alnus non ci sono, i carichi dei fornitori
-// partono fuori giacenza), quindi si sommano. Se un codice li ha TUTTI E DUE
-// non si somma in silenzio: `doppia` lo dichiara.
-//   gAlnus     = voce di giacenzaAlnus per quel codice (o null)
-//   alnusLetto = lo specchio c'e' (apertura letta): senza, `alnus` e' null
-//   movCodice  = movimenti del gestionale di quel codice (null = non letti)
-function giacenzaUnica(gAlnus, magazzini, alnusLetto, movCodice) {
-  const alnus = alnusLetto ? giacenzaContata(gAlnus, magazzini) : null;
-  const inConto = Array.isArray(movCodice) ? movCodice.filter(m => m && !m.fuori_giacenza) : null;
-  const gestionale = inConto ? +inConto.reduce((s, m) => s + (Number(m.qta) || 0), 0).toFixed(6) : null;
-  const haAlnus = !!(alnusLetto && gAlnus && Object.keys(gAlnus.perMag || {}).length);
-  const haGest = !!(inConto && inConto.length);
-  return { alnus, gestionale, totale: +((alnus || 0) + (gestionale || 0)).toFixed(6),
-    doppia: haAlnus && haGest, completa: alnus != null && gestionale != null };
+// GIACENZA DEL GESTIONALE (20 nov, Nico: *"se i numeri di partenza sono uguali,
+// il nostro gestionale dovrebbe viaggiare in modo praticamente uguale"*).
+// Parte dalla FOTO d'apertura di Alnus e va avanti SOLO coi fatti del gestionale:
+//   + carichi    DDT registrati dopo la foto (anche quelli «fuori giacenza» dei
+//                fornitori: qui contano tutti, e' il nostro conto)
+//   - consumi    ogni lotto di produzione registrato dopo la foto scarica la
+//                lista della sua commessa (qta_pz x pezzi), MAC esclusi; sulle
+//                commesse «Materiali da DDT» i C/L li ha gia' scaricati il
+//                trigger (stanno nei movimenti) e qui si saltano
+//   +/- movimenti  rettifiche, scarichi dei trigger, trasferimenti in conto
+//   + prima      codici che nella foto NON ci sono (i TS- di Tema): il saldo
+//                dei loro movimenti di prima della foto
+// "Dopo la foto" = registrato (creato_il) dopo l'ora della foto. Non scrive
+// niente: e' un calcolo, Alnus resta il termine di confronto.
+// o = { apertura: righe {codice, magazzino, qta}, aperturaIl, magazzini (Set|null),
+//       movimenti, lotti (consegne_commessa), commesse: Map id -> operazione }
+// Ritorna { per: Map CODICE -> voce, lottiSenzaLista: [lotto] }.
+function giacenzaGestionale(o) {
+  const K = c => String(c == null ? '' : c).trim().toUpperCase();
+  const tFoto = alnusMs(o.aperturaIl);
+  const dopo = (x) => { const t = alnusMs(x.creato_il || x.data); return t != null && tFoto != null && t > tFoto; };
+  const per = new Map();
+  const voce = (cod, codice) => {
+    if (!per.has(cod)) per.set(cod, { codice: String(codice || cod).trim(), inFoto: false, apertura: 0, prima: 0,
+      carichi: 0, consumi: 0, movimenti: 0, totale: 0, lotti: 0 });
+    return per.get(cod);
+  };
+  (o.apertura || []).forEach(r => {
+    const cod = K(r.codice); if (!cod) return;
+    const v = voce(cod, r.codice); v.inFoto = true;
+    const mag = magazzinoAlnus(r.magazzino);
+    if (mag && (!o.magazzini || o.magazzini.has(mag))) v.apertura += Number(r.qta) || 0;
+  });
+  (o.movimenti || []).forEach(m => {
+    const cod = K(m.codice); if (!cod) return;
+    const q = Number(m.qta) || 0;
+    if (dopo(m)) {
+      if (m.tipo === 'carico') voce(cod, m.codice).carichi += q;
+      else if (!m.fuori_giacenza) voce(cod, m.codice).movimenti += q;
+    } else if (!m.fuori_giacenza && !(per.get(cod) || {}).inFoto) voce(cod, m.codice).prima += q;
+  });
+  const lottiSenzaLista = [];
+  (o.lotti || []).forEach(l => {
+    if (!dopo(l)) return;
+    const c = o.commesse ? o.commesse.get(l.operazione_id) : null;
+    if (!c || !Array.isArray(c.materiali) || !c.materiali.length) { lottiSenzaLista.push(l); return; }
+    const pz = Number(l.quantita) || 0;
+    c.materiali.forEach(r => {
+      const cod = K(r && r.codice); if (!cod) return;
+      const tipo = String(r.tipo || '').trim().toUpperCase();
+      if (tipo === 'MAC') return;
+      if (c.materiali_da_ddt && tipo === 'C/L') return;
+      const v = voce(cod, r.codice);
+      v.consumi -= (Number(r.qta_pz) || 0) * pz; v.lotti++;
+    });
+  });
+  per.forEach(v => {
+    ['apertura', 'prima', 'carichi', 'consumi', 'movimenti'].forEach(k => { v[k] = +v[k].toFixed(6); });
+    v.totale = +(v.apertura + v.prima + v.carichi + v.consumi + v.movimenti).toFixed(6);
+  });
+  return { per, lottiSenzaLista };
+}
+
+// Il confronto per codice: gestionale contro Alnus (foto + movimenti di Alnus,
+// magazzini contati). `gestionale` = giacenzaGestionale(...).per, `alnus` =
+// giacenzaAlnus(...). Righe ordinate per codice.
+// ⚠ Qui Alnus NON si porta a zero se e' negativo (giacenzaContata lo fa per il
+// da ordinare): il gestionale parte dallo stesso negativo, e il confronto deve
+// essere fra due conti fatti allo stesso modo. `soloGestionale` = codice che
+// Alnus non ha mai avuto (i TS- di Tema): non e' una differenza da spiegare.
+function confrontoGiacenze(gestionale, alnus, magazzini) {
+  const K = c => String(c == null ? '' : c).trim().toUpperCase();
+  const al = new Map();
+  (alnus || new Map()).forEach((g, c) => {
+    const q = Object.entries(g.perMag || {}).reduce((s, [m, x]) => s + ((!magazzini || magazzini.has(m)) ? x : 0), 0);
+    al.set(K(c), { codice: String(c).trim(), q: +q.toFixed(6) });
+  });
+  const codici = new Set([...(gestionale || new Map()).keys(), ...al.keys()]);
+  const righe = [];
+  codici.forEach(cod => {
+    const g = gestionale ? gestionale.get(cod) : null, a = al.get(cod);
+    const qG = g ? g.totale : 0, qA = a ? a.q : 0;
+    righe.push({ codice: (g && g.codice) || (a && a.codice) || cod, gestionale: g || null, qGest: qG, qAlnus: qA,
+      differenza: +(qG - qA).toFixed(6), soloGestionale: !a && !!g && !g.inFoto });
+  });
+  return righe.sort((x, y) => x.codice.localeCompare(y.codice, 'it', { numeric: true }));
 }
 
 // OF di Alnus ancora da arrivare: residua della fotografia meno i carichi
@@ -352,5 +422,5 @@ function righeFabbisognoSpecchio(o) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { numAlnus, dataAlnus, leggiGiacenzeAlnus, leggiMovimentiAlnus, leggiOfAlnus, dataCella,
-    magazzinoAlnus, MAGAZZINI_CONTATI_DI_SERIE, giacenzaAlnus, giacenzaContata, giacenzaUnica, ofAlnusAperti, confrontoDaOrdinare, controlloGiacenze, righeFabbisognoSpecchio };
+    magazzinoAlnus, MAGAZZINI_CONTATI_DI_SERIE, giacenzaAlnus, giacenzaContata, giacenzaGestionale, confrontoGiacenze, ofAlnusAperti, confrontoDaOrdinare, controlloGiacenze, righeFabbisognoSpecchio };
 }
