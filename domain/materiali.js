@@ -696,17 +696,20 @@ function applicaDistinteProdotti(figliDi, articoli) {
 // ⚠ Regge solo se gli OF d'acquisto si fanno QUI e non anche in Alnus.
 // `movimenti` null (non letti) = nessun arrivo contato: si toglie l'ordine intero,
 // meglio una proposta corta che un ordine doppio.
-// SERIE (20 nov, OF di Alnus nel gestionale): «OFS» = nostri, «OF» e «OL» =
-// ordini di Alnus caricati col loro numero. Il testo sul documento dice la serie:
-// «OF 772/2026» e' di Alnus, «OFS 3/2026» e' nostro. La chiave e' 'SERIE anno/numero'.
+// SERIE (20 nov, OF di Alnus nel gestionale): «OF» acquisto e «OL» conto lavoro,
+// col numero di Alnus; gli ordini fatti nel gestionale proseguono la serie OF
+// (Nico: "vorrei avere solo OF"). Un vecchio testo «OFS» vale come OF.
+// La chiave e' 'SERIE anno/numero'.
 // Un ordine sincronizzato da Alnus (`sincronizzato_il`) ha gia' scalato quanto era
 // arrivato prima: contano solo i carichi DOPO quell'ora. Righe con `qta_residua`
 // (Alnus): conta il residuo, non l'ordinato.
 function chiaveOfDaRif(rif) {
   const m = /\b(OFS|OF|OL)\s*(?:n\.?\s*)?(\d+)\s*\/\s*(\d{4})\b/i.exec(String(rif || ''));
-  return m ? m[1].toUpperCase() + ' ' + Number(m[3]) + '/' + Number(m[2]) : null;
+  if (!m) return null;
+  const serie = m[1].toUpperCase() === 'OL' ? 'OL' : 'OF';
+  return serie + ' ' + Number(m[3]) + '/' + Number(m[2]);
 }
-function chiaveOf(of) { return String((of && of.serie) || 'OFS').toUpperCase() + ' ' + Number(of.anno) + '/' + Number(of.numero); }
+function chiaveOf(of) { return (String((of && of.serie) || 'OF').toUpperCase() === 'OL' ? 'OL' : 'OF') + ' ' + Number(of.anno) + '/' + Number(of.numero); }
 function ordinatoApertoOf(ordini, movimenti, escludiId) {
   const arrivi = new Map();     // 'SERIE anno/numero|CODICE' -> [{ qta, t }]
   (movimenti || []).forEach(m => {
@@ -740,7 +743,7 @@ function ordinatoApertoOf(ordini, movimenti, escludiId) {
       if (!per.has(c)) per.set(c, { aperto: 0, ordini: [] });
       const x = per.get(c);
       x.aperto = +(x.aperto + ap).toFixed(6);
-      x.ordini.push({ id: of.id, serie: String(of.serie || 'OFS').toUpperCase(), anno: of.anno, numero: of.numero,
+      x.ordini.push({ id: of.id, serie: String(of.serie || 'OF').toUpperCase(), anno: of.anno, numero: of.numero,
         ordinato: v.q, arrivato: arr, aperto: ap, consegna: v.consegna, fornitore_id: of.fornitore_id || null,
         origine: of.origine || 'gestionale' });
     });

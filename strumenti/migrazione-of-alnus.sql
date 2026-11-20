@@ -3,16 +3,20 @@
 -- gestionale per buoni?". Gli OF aperti di Alnus entrano in
 -- `ordini_fornitore` come ordini veri, con il LORO numero e una serie a
 -- parte: «OF 830/2026» (acquisto) e «OL 901/2026» (conto lavoro), distinti
--- dai nostri «OFS n/anno». Cosi' gli arrivi si legano da soli: ogni carico
--- di Alnus (causale EA1) porta il numero OF.
+-- dai nostri. Cosi' gli arrivi si legano da soli: ogni carico di Alnus
+-- (causale EA1) porta il numero OF.
+-- ⚠ UNA SERIE SOLA (Nico, 20 nov: "vorrei avere solo OF. Gli OFS li puoi
+-- eliminare"): gli ordini fac simile OFS di prova si CANCELLANO; quelli veri
+-- ai terzisti si abbinano agli OF di Alnus col campo «n. OF» della riga
+-- fornitore sulla commessa. Un ordine creato nel gestionale prende il numero
+-- OF successivo all'ultimo dell'anno (Alnus compreso).
 -- Finche' gli OF si fanno in Alnus, ogni estrazione degli OF aperti li
 -- SINCRONIZZA (sincronizza_of_alnus): nuovi entrano, esistenti si
 -- aggiornano (righe, residuo, consegne), quelli spariti dall'estrazione
 -- diventano «chiuso» (evasi o chiusi in Alnus). Non si modificano ne' si
 -- annullano dal gestionale: comanda Alnus.
--- I nostri OFS continuano la loro numerazione, separata.
-
-alter table public.ordini_fornitore add column if not exists serie text not null default 'OFS';
+alter table public.ordini_fornitore add column if not exists serie text not null default 'OF';
+alter table public.ordini_fornitore alter column serie set default 'OF';
 alter table public.ordini_fornitore add column if not exists origine text not null default 'gestionale';
 alter table public.ordini_fornitore add column if not exists sincronizzato_il timestamptz;
 
@@ -47,7 +51,10 @@ end $$;
 create unique index if not exists ordini_fornitore_serie_anno_numero_uq
   on public.ordini_fornitore (serie, anno, numero);
 
--- crea: numera solo la serie OFS (prima prendeva il massimo dell'anno su tutto).
+-- Via gli ordini fac simile di prova (OFS 1-4/2026): Nico abbina quelli veri.
+delete from public.ordini_fornitore where origine = 'gestionale';
+
+-- crea: serie OF, numero successivo all'ultimo OF dell'anno (Alnus compreso).
 create or replace function crea_ordine_fornitore(
   p_tipo text, p_fornitore uuid, p_data date, p_consegna date, p_note text, p_righe jsonb)
 returns ordini_fornitore
@@ -75,9 +82,9 @@ begin
     end if;
   end if;
   perform pg_advisory_xact_lock(hashtext('ordini_fornitore'), v_anno);
-  select coalesce(max(numero), 0) + 1 into v_num from ordini_fornitore where anno = v_anno and serie = 'OFS';
+  select coalesce(max(numero), 0) + 1 into v_num from ordini_fornitore where anno = v_anno and serie = 'OF';
   insert into ordini_fornitore (tipo, serie, anno, numero, fornitore_id, data, consegna, note, righe)
-  values (p_tipo, 'OFS', v_anno, v_num, p_fornitore, coalesce(p_data, current_date), p_consegna, nullif(trim(p_note), ''), p_righe)
+  values (p_tipo, 'OF', v_anno, v_num, p_fornitore, coalesce(p_data, current_date), p_consegna, nullif(trim(p_note), ''), p_righe)
   returning * into v_riga;
   return v_riga;
 end $$;
@@ -144,6 +151,7 @@ declare
   o jsonb;
   v_id uuid;
   v_chiavi text[] := '{}';
+  v_conflitti text[] := '{}';
   n_nuovi int := 0; n_agg int := 0; n_chiusi int := 0;
 begin
   if not exists (select 1 from profili where id = auth.uid() and ruolo = 'admin') then
@@ -167,10 +175,12 @@ begin
          set fornitore_id = (o->>'fornitore_id')::uuid, consegna = (o->>'consegna')::date, righe = o->'righe',
              stato = 'emesso', sincronizzato_il = p_preso_il
        where id = v_id and origine = 'alnus';
+      -- Stesso numero gia' usato da un ordine creato nel gestionale: non si tocca, si segnala.
       if not found then
-        raise exception 'Il numero % % esiste gia'' come ordine del gestionale', o->>'serie', (o->>'anno') || '/' || (o->>'numero');
+        v_conflitti := v_conflitti || ((o->>'serie') || ' ' || (o->>'numero') || '/' || (o->>'anno'));
+      else
+        n_agg := n_agg + 1;
       end if;
-      n_agg := n_agg + 1;
     end if;
   end loop;
   -- Spariti dall'estrazione degli aperti: evasi o chiusi in Alnus.
@@ -178,7 +188,7 @@ begin
    where origine = 'alnus' and stato = 'emesso'
      and (serie || ' ' || anno || '/' || numero) <> all (v_chiavi);
   get diagnostics n_chiusi = row_count;
-  return jsonb_build_object('nuovi', n_nuovi, 'aggiornati', n_agg, 'chiusi', n_chiusi);
+  return jsonb_build_object('nuovi', n_nuovi, 'aggiornati', n_agg, 'chiusi', n_chiusi, 'conflitti', to_jsonb(v_conflitti));
 end $$;
 
 revoke all on function crea_ordine_fornitore(text, uuid, date, date, text, jsonb) from public, anon;

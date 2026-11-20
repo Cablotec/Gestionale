@@ -11,10 +11,10 @@ const t = (nome, cond) => { if (cond) { ok++; console.log('  ok   ' + nome); }
   else { ko++; console.log('  KO   ' + nome); } };
 
 sez('Il numero d\'ordine scritto sul DDT');
-t('OFS 3/2026', M.chiaveOfDaRif('OFS 3/2026') === 'OFS 2026/3');
+t('OFS 3/2026 (vecchio testo) vale come OF', M.chiaveOfDaRif('OFS 3/2026') === 'OF 2026/3');
 t('of 12 / 2026 (minuscole, spazi): serie OF, Alnus', M.chiaveOfDaRif('of 12 / 2026') === 'OF 2026/12');
 t('OL 901/2026', M.chiaveOfDaRif('OL 901/2026') === 'OL 2026/901');
-t('OFS n. 7/2026', M.chiaveOfDaRif('OFS n. 7/2026') === 'OFS 2026/7');
+t('OF n. 7/2026', M.chiaveOfDaRif('OF n. 7/2026') === 'OF 2026/7');
 t('ordine cliente 4700000482: niente', M.chiaveOfDaRif('4700000482') === null);
 t('2026/OC/00392: niente', M.chiaveOfDaRif('2026/OC/00392') === null);
 t('vuoto: niente', M.chiaveOfDaRif(null) === null);
@@ -60,7 +60,7 @@ sez('L\'ordine che si sta modificando non toglie se stesso');
 sez('Serie: un OF di Alnus col suo numero, sincronizzato');
 {
   const ord = [
-    { id: 'n', tipo: 'acquisto', stato: 'emesso', serie: 'OFS', anno: 2026, numero: 3, righe: [{ codice: 'A', qta: 10 }] },
+    { id: 'n', tipo: 'acquisto', stato: 'emesso', serie: 'OL', anno: 2026, numero: 3, righe: [{ codice: 'A', qta: 10 }] },
     { id: 'a', tipo: 'acquisto', stato: 'emesso', serie: 'OF', origine: 'alnus', anno: 2026, numero: 3, sincronizzato_il: '2026-11-20T10:00:00',
       righe: [{ codice: 'A', qta: 150, qta_residua: 100, consegna: '2026-12-05' }, { codice: 'A', qta: 50, qta_residua: 50, consegna: '2026-12-01' }] },
     { id: 'c', tipo: 'acquisto', stato: 'chiuso', serie: 'OF', anno: 2026, numero: 4, righe: [{ codice: 'A', qta: 999 }] },
@@ -68,14 +68,14 @@ sez('Serie: un OF di Alnus col suo numero, sincronizzato');
   const mv = [
     { tipo: 'carico', codice: 'A', qta: 30, ordine_rif: 'OF 3/2026', data: '2026-11-21T09:00:00' },   // dopo: conta
     { tipo: 'carico', codice: 'A', qta: 40, ordine_rif: 'OF 3/2026', data: '2026-11-19T09:00:00' },   // prima: gia nel residuo
-    { tipo: 'carico', codice: 'A', qta: 4, ordine_rif: 'OFS 3/2026', data: '2026-11-21' },
+    { tipo: 'carico', codice: 'A', qta: 4, ordine_rif: 'OL 3/2026', data: '2026-11-21' },
   ];
   const a = M.ordinatoApertoOf(ord, mv).get('A');
   const di = (id) => a.ordini.find(x => x.id === id);
-  t('OFS 3 e OF 3 non si confondono', di('n').arrivato === 4 && di('n').aperto === 6);
+  t('OL 3 e OF 3 non si confondono', di('n').arrivato === 4 && di('n').aperto === 6);
   t('OF di Alnus: residuo 150 meno i 30 arrivati dopo la sincronizzazione', di('a').ordinato === 150 && di('a').aperto === 120);
   t('consegna = la prima delle righe', di('a').consegna === '2026-12-01');
-  t('serie e origine riportate', di('a').serie === 'OF' && di('a').origine === 'alnus' && di('n').serie === 'OFS');
+  t('serie e origine riportate', di('a').serie === 'OF' && di('a').origine === 'alnus' && di('n').serie === 'OL');
   t('chiuso non conta', a.ordini.length === 2 && a.aperto === 126);
 }
 

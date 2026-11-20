@@ -5740,7 +5740,7 @@ async function caricaOrdiniFornitore() {
   if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
 }
 // Serie (20 nov): «OFS» nostri, «OF»/«OL» ordini di Alnus caricati col loro numero.
-function numeroOrdineFornitore(of) { return of ? (of.serie || 'OFS') + ' ' + of.numero + '/' + of.anno : ''; }
+function numeroOrdineFornitore(of) { return of ? (of.serie || 'OF') + ' ' + of.numero + '/' + of.anno : ''; }
 // ✎ Modifica di un ordine emesso (19 nov): la finestra del suo tipo, precompilata.
 function modificaOrdineFornitore(of, poi) {
   if (!of || of.stato !== 'emesso') return toast('Un ordine annullato non si modifica.', 'err');
@@ -5748,8 +5748,30 @@ function modificaOrdineFornitore(of, poi) {
   if (of.tipo === 'acquisto') apriOrdineAcquisto(poi, of);
   else apriOrdineTerzista(null, of.fornitore_id, poi, of);
 }
-// L'ordine EMESSO a questo terzista che contiene la commessa, o null.
+// L'ordine a questo terzista per la commessa, o null. Due strade:
+//   1. un ordine fatto nel gestionale (tipo terzista) che contiene la commessa;
+//   2. ABBINAMENTO (20 nov, Nico: "ti diro' quelli veri da abbinare che ci sono gia'
+//      su Alnus"): il «n. OF» scritto sulla riga del terzista nella commessa
+//      (2026/OF/00745, 2026/OL/00901). Se quell'ordine e' fra gli OF importati da
+//      Alnus si usa lui; se no vale lo stesso il numero (OF scritto ma non ancora
+//      importato), con `abbinato: true` e senza righe.
+function ofDaNumeroOrdine(testo) {
+  const m = /^(\d{4})\/(OF|OL)\/(\d+)$/.exec(String(testo || '').trim().toUpperCase());
+  return m ? { serie: m[2], anno: Number(m[1]), numero: Number(m[3]) } : null;
+}
 function ordineTerzistaDi(opId, terzistaId) {
+  const fatto = ordineTerzistaFatto(opId, terzistaId);
+  if (fatto) return fatto;
+  const riga = (state.opFornitori || []).find(r => r.operazione_id === opId && r.azienda_id === terzistaId && ofDaNumeroOrdine(r.numero_ordine));
+  if (!riga) return null;
+  const k = ofDaNumeroOrdine(riga.numero_ordine);
+  const vero = (state.ordiniFornitore || []).find(of => of.stato !== 'annullato' && String(of.serie || 'OF').toUpperCase() === k.serie
+    && Number(of.anno) === k.anno && Number(of.numero) === k.numero);
+  return vero ? Object.assign({ abbinato: true }, vero)
+    : { id: null, serie: k.serie, anno: k.anno, numero: k.numero, data: null, consegna: null, righe: [], origine: 'alnus',
+        stato: 'emesso', fornitore_id: terzistaId, abbinato: true, nonImportato: true };
+}
+function ordineTerzistaFatto(opId, terzistaId) {
   return (state.ordiniFornitore || []).find(of => of.stato === 'emesso' && of.tipo === 'terzista'
     && of.fornitore_id === terzistaId && (of.righe || []).some(r => r.operazione_id === opId)) || null;
 }
@@ -5837,7 +5859,8 @@ function apriOrdineTerzista(o, terzistaId, poi, of) {
   if (of) terzistaId = of.fornitore_id;
   if (!of && o) {
     const gia = ordineTerzistaDi(o.id, terzistaId);
-    if (gia) return stampaOrdineFornitore(gia);
+    if (gia && gia.id) return stampaOrdineFornitore(gia);
+    if (gia) return toast('La commessa è abbinata a ' + numeroOrdineFornitore(gia) + ' di Alnus.', 'ok');
   }
   const nome = nomeAziendaDi(terzistaId);
   const v = veloTerzista((of ? 'Modifica ' + numeroOrdineFornitore(of) : 'Ordine al terzista') + ' · ' + nome, 1020);
@@ -6352,7 +6375,7 @@ function renderOrdiniFornitore(root) {
   root.append(el('div', { class:'sub', style:'margin:-4px 0 10px;font-size:12px;' },
     lista.length + (lista.length === 1 ? ' ordine' : ' ordini')
     + (lista.length ? ' · ' + cartaEuro(lista.filter(o => o.stato === 'emesso').reduce((s, o) => s + totOf(o), 0)) + ' emessi' : '')
-    + ' · «OF»/«OL» = ordini di Alnus col loro numero (si aggiornano importando gli OF aperti nello Specchio Alnus); «OFS» = fac simile del gestionale.'));
+    + ' · gli ordini «Alnus» si aggiornano importando gli OF aperti nello Specchio Alnus; quelli ai terzisti si abbinano col «n. OF» sulla commessa.'));
   if (!lista.length) {
     root.append(el('div', { class:'empty' }, state.ordiniFornitore.length ? 'Nessun ordine con questi filtri.'
       : 'Nessun ordine ancora. Gli OF d’acquisto nascono da «＋ Nuovo OF d’acquisto»; quelli ai terzisti dal Ciclo produttivo della commessa.'));
@@ -6576,7 +6599,8 @@ async function sincronizzaOfAlnus(righe, presoIl) {
   await caricaOrdiniFornitore();
   const e = data || {};
   toast('OF di Alnus nel gestionale: ' + plAlnus(e.nuovi || 0, 'nuovo', 'nuovi') + ', ' + plAlnus(e.aggiornati || 0, 'aggiornato', 'aggiornati')
-    + ', ' + plAlnus(e.chiusi || 0, 'chiuso', 'chiusi') + (fuori.size ? ' · ' + plAlnus(fuori.size, 'ordine saltato', 'ordini saltati') + ' (fornitore senza scheda)' : ''), 'ok', 12000);
+    + ', ' + plAlnus(e.chiusi || 0, 'chiuso', 'chiusi')
+    + (Array.isArray(e.conflitti) && e.conflitti.length ? ' · ⚠ stesso numero di un ordine fatto nel gestionale, non toccati: ' + e.conflitti.join(', ') : '') + (fuori.size ? ' · ' + plAlnus(fuori.size, 'ordine saltato', 'ordini saltati') + ' (fornitore senza scheda)' : ''), 'ok', 12000);
 }
 
 async function importaMovimentiAlnus(f, poi) {
@@ -7521,7 +7545,8 @@ function passiFase(o, f, poi) {
   if (!rep && Array.isArray(state.ordiniFornitore) && o.id) {
     const of = ordineTerzistaDi(o.id, f.id);
     passi.push(of
-      ? { nome:'Ordine (OF)', stato:'fatto', dett: numeroOrdineFornitore(of) + ' del ' + giorno(of.data) }
+      ? { nome:'Ordine (OF)', stato:'fatto', dett: numeroOrdineFornitore(of) + (of.data ? ' del ' + giorno(of.data) : '')
+          + (of.origine === 'alnus' ? ' · Alnus' + (of.nonImportato ? ' (non ancora fra gli OF importati)' : '') : '') }
       : { nome:'Ordine (OF)', stato: viva ? 'avviso' : 'poi', dett: viva ? 'manca: senza OF non parte il materiale' : '',
           azione: viva ? btn('＋ Crea OF', () => apriOrdineTerzista(o, f.id, poi), 'Ordine fac simile a ' + nomeAziendaDi(f.id)) : '' });
   }
@@ -7887,7 +7912,14 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
         title: titolo || '', onclick: fn }, txt);
       if (conOrdine) {
         const of = ordineTerzistaDi(o.id, f.id);
-        if (of) {
+        if (of && of.origine === 'alnus') {
+          const tot = (of.righe || []).reduce((s, r) => s + (Number(r.totale) || 0), 0);
+          docs.append(rigaDoc('📑', 'Ordine ' + numeroOrdineFornitore(of) + (of.data ? ' del ' + fmtIT(String(of.data).slice(0, 10)) : ''),
+            of.nonImportato ? 'Alnus · abbinato col «n. OF» della commessa, non ancora fra gli OF importati'
+              : 'Alnus · ' + (tot ? cartaEuro(tot) + ' · ' : '') + (of.consegna ? 'consegna ' + fmtIT(String(of.consegna).slice(0, 10)) + ' · ' : '')
+                + (of.stato === 'chiuso' ? 'chiuso in Alnus' : 'aperto'),
+            of.id ? bt('🖨 OF', () => stampaOrdineFornitore(of), 'Stampa l’ordine come caricato da Alnus') : null));
+        } else if (of) {
           const altre = (of.righe || []).filter(r => r.operazione_id !== o.id).map(r => r.etichetta);
           const tot = (of.righe || []).reduce((s, r) => s + (Number(r.totale) || 0), 0);
           docs.append(rigaDoc('📑', 'Ordine ' + numeroOrdineFornitore(of) + ' del ' + fmtIT(String(of.data || '').slice(0, 10)),
