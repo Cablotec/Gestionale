@@ -94,6 +94,8 @@ const ofM = [
   t('UM ordine diversa: residua in UM interna (1 rotolo = 100 mt)', o.righe[3].qta_residua === 100 && o.righe[3].um === 'mt');
   t('ODL', o.righe[4].odl === '2026/2248' && o.righe[4].sezionale === 'OL');
   t('un altro file: errore', !!A.leggiOfAlnus([['a', 'b']]).errore);
+  const ev = A.leggiOfAlnus([ofM[0], ['X', 2026, 'OF', 950, 10, 'Z9', new Date(2026, 9, 1), 'nr', 4, null, 'EVASA', 'COMET SPA', 1, null, 'nr', 4, null, null]]);
+  t('riga evasa con residua vuota: entra con residuo zero', ev.righe.length === 1 && ev.righe[0].qta_residua === 0 && ev.righe[0].qta_ordinata === 4 && !ev.scartate.length);
   const ap = A.ofAlnusAperti(o.righe, M, '2026-11-20T10:33:11', '2026-11-20');
   const a1 = ap.get('A1');
   t('80 arrivati sull\'OF 772 dopo la fotografia: 100+40−80 = 60, piu i 2 di Botturi', a1.aperto === 62);

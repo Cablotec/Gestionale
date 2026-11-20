@@ -132,7 +132,10 @@ function leggiOfAlnus(matrice) {
     const cod = String(v('codice') == null ? '' : v('codice')).trim();
     const anno = Number(v('anno')), num = Number(v('numero'));
     if (!cod && !num) return;
-    const ord = numAlnus(v('ordinata')), res = numAlnus(v('residua')), int = numAlnus(v('interna'));
+    const ord = numAlnus(v('ordinata')), int = numAlnus(v('interna'));
+    // Nelle righe EVASE (stato 080) Alnus lascia la residua VUOTA: vale zero, non «illeggibile».
+    let res = numAlnus(v('residua'));
+    if (res == null && ord != null && !isNaN(ord)) res = 0;
     if (!cod || !(anno > 0) || !(num > 0) || res == null || isNaN(res)) { scartate.push(cod || String(num)); return; }
     // La residua e' nell'UM dell'ordine: si porta in UM interna con lo stesso rapporto dell'ordinata.
     const f = (ord > 0 && int > 0) ? int / ord : 1;
