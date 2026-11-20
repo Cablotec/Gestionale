@@ -751,8 +751,41 @@ function ordinatoApertoOf(ordini, movimenti, escludiId) {
   return per;
 }
 
+// CODICI NON RICONOSCIUTI NEI DDT (20 nov, Nico: "i movimenti dei cod. che non
+// trovano riscontro dove finiscono?"). Un carico entrato «fuori giacenza» con un
+// codice che non e' nell'anagrafica materiali e' quasi sempre il codice del
+// FORNITORE non tradotto nel nostro (Lovato GX1691U25 = 2900KLOVA00GX1691U25):
+// nel confronto con Alnus diventa un codice in piu' e un nostro codice in meno.
+// I carichi in giacenza (TS- di Tema, C/L con flag) non contano: sono codici veri
+// del gestionale. `codiciNoti` = Set dei codici dell'anagrafica (MAIUSCOLI).
+// `ordini` = ordini_fornitore: se una riga d'ordine dello stesso fornitore ha quel
+// codice fornitore, si propone il nostro. Ritorna una voce per codice + mittente.
+function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
+  const K = c => String(c == null ? '' : c).trim().toUpperCase();
+  const proposte = new Map();   // azienda|codice fornitore -> { codice, ordine }
+  (ordini || []).forEach(o => (o.righe || []).forEach(r => {
+    if (!r || !r.codice_fornitore || !r.codice) return;
+    const k = (o.fornitore_id || '') + '|' + K(r.codice_fornitore);
+    if (!proposte.has(k)) proposte.set(k, { codice: String(r.codice).trim(), ordine: (o.serie || 'OF') + ' ' + o.numero + '/' + o.anno });
+  }));
+  const per = new Map();
+  (movimenti || []).forEach(m => {
+    if (!m || m.tipo !== 'carico' || !m.fuori_giacenza) return;
+    const cod = K(m.codice);
+    if (!cod || codiciNoti.has(cod)) return;
+    const k = cod + '|' + (m.azienda_id || m.mittente || '');
+    if (!per.has(k)) per.set(k, { codice: String(m.codice).trim(), azienda_id: m.azienda_id || null, mittente: m.mittente || '',
+      descrizione: m.descrizione || '', qta: 0, righe: 0, documenti: [],
+      proposta: proposte.get((m.azienda_id || '') + '|' + K(m.codice_mittente || m.codice)) || null });
+    const v = per.get(k);
+    v.qta = +(v.qta + (Number(m.qta) || 0)).toFixed(6); v.righe++;
+    if (m.documento_numero && !v.documenti.includes(m.documento_numero)) v.documenti.push(m.documento_numero);
+  });
+  return [...per.values()].sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true }));
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
+  module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,

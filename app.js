@@ -10657,6 +10657,48 @@ function apriModificaRettifica(m, poi) {
   inQta.focus();
 }
 
+// I codici dell'anagrafica materiali (MAIUSCOLI), letti una volta: servono a
+// riconoscere i carichi entrati col codice del fornitore. null = non letti.
+let codiciAnagrafica;
+async function caricaCodiciAnagrafica() {
+  try {
+    const { data, error } = await fetchTutte(() => sb.from('materiali').select('codice').order('codice'));
+    codiciAnagrafica = error ? null : new Set((data || []).map(x => String(x.codice || '').trim().toUpperCase()));
+  } catch (e) { codiciAnagrafica = null; }
+}
+// Il riquadro in cima a Movimenti (`carichiCodiceSconosciuto` in domain/materiali.js).
+// Vuoto se non c'e' niente; se l'anagrafica non e' ancora letta la legge e ridisegna.
+function avvisoCodiciSconosciuti(ridisegna) {
+  const box = el('div');
+  if (!Array.isArray(state.movimenti)) return box;
+  if (codiciAnagrafica === undefined) { caricaCodiciAnagrafica().then(() => { if (codiciAnagrafica) ridisegna(); }); return box; }
+  if (!codiciAnagrafica) return box;
+  const voci = carichiCodiceSconosciuto(state.movimenti, codiciAnagrafica, state.ordiniFornitore || []);
+  if (!voci.length) return box;
+  const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  box.style.cssText = 'margin:0 0 18px;padding:10px 14px;border:1px solid var(--red);border-radius:6px;max-width:1100px;';
+  box.append(el('div', { style:'font-weight:700;color:var(--red);margin-bottom:2px;' },
+      '⚠ ' + (voci.length === 1 ? 'Un codice non riconosciuto' : voci.length + ' codici non riconosciuti') + ' nei DDT'),
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:6px;' },
+      'Righe caricate con un codice che non è nell’anagrafica materiali: di solito è il codice del fornitore non tradotto nel nostro. '
+      + 'Per i prossimi DDT: apri la scheda del NOSTRO codice e aggiungi il codice fornitore. '
+      + 'La riga già scritta non si modifica: va cancellata e il DDT reinviato (chiedi a Claude).'));
+  const C = 'display:grid;grid-template-columns:minmax(140px,.8fr) minmax(150px,1fr) 70px minmax(120px,.8fr) minmax(220px,1.4fr);gap:10px;align-items:center;font-size:12px;';
+  box.append(el('div', { style: C + 'border-bottom:1px solid var(--brd);padding-bottom:3px;' },
+    ...['Codice sul DDT', 'Fornitore', 'Q.tà', 'DDT', 'Nostro codice'].map((t, i) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (i === 2 ? 'text-align:right;' : '') }, t))));
+  voci.forEach(v => box.append(el('div', { style: C + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
+    el('a', { href:'#', class:'mono', style:'font-weight:700;color:var(--txt);', title:'Mostra i suoi movimenti',
+      onclick: (e) => { e.preventDefault(); movCerca = v.codice; movFiltroDoc = ''; movQuante = 400; ridisegna(); } }, v.codice),
+    el('span', { style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: v.descrizione }, v.azienda_id ? nomeAziendaDi(v.azienda_id) : v.mittente),
+    el('span', { class:'mono', style:'text-align:right;' }, nf(v.qta)),
+    el('span', { class:'mono', style:'font-size:11px;' }, v.documenti.join(', ') || '—'),
+    v.proposta
+      ? el('span', {}, el('a', { href:'#', class:'mono', title:'Apri la scheda del codice', onclick: (e) => { e.preventDefault(); apriSchedaCodice(v.proposta.codice); } }, v.proposta.codice),
+          el('span', { class:'sub', style:'font-size:11px;' }, ' · da ' + v.proposta.ordine))
+      : el('span', { class:'sub', style:'font-size:11px;' }, 'da trovare: nessun OF di questo fornitore lo riporta'))));
+  return box;
+}
+
 function renderMovimenti(root) {
   root.innerHTML = '';
   const nf = (n) => (n == null || n === '' || !Number.isFinite(Number(n)))
@@ -10670,6 +10712,9 @@ function renderMovimenti(root) {
       title:'Aggiusta la giacenza di un codice: scrive un movimento di rettifica col motivo',
       onclick: () => apriRettificaMagazzino(movCerca && /^\S+$/.test(movCerca.trim()) ? movCerca.trim().toUpperCase() : '', dopoRettifica) },
       '± Rettifica') : ''));
+
+  // CODICI NON RICONOSCIUTI NEI DDT (20 nov): in cima, finche' ce ne sono.
+  root.append(avvisoCodiciSconosciuti(() => renderMovimenti(root)));
 
   // DA PREPARARE PER I TERZISTI (5 nov): le richieste aperte di tutte le
   // commesse, in cima. E' la lista di lavoro del magazzino: si stampa da qui.

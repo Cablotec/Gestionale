@@ -258,5 +258,24 @@ sez('Rigenerare tiene i terzisti della commessa');
   t('quantita e codici restano quelli del prodotto', r3.map(r => r.codice + r.qta_pz).join() === 'A2,B3,C1,N1');
 }
 
+sez('Codici non riconosciuti nei DDT (20 nov)');
+{
+  const noti = new Set(['2900KLOVA00GX1691U25', 'A1']);
+  const mov = [
+    { tipo: 'carico', fuori_giacenza: true, codice: 'GX1691U25', codice_mittente: 'GX1691U25', azienda_id: 'lov', mittente: 'LOVATO', qta: 50, documento_numero: '26030479' },
+    { tipo: 'carico', fuori_giacenza: true, codice: 'gx1691u25', azienda_id: 'lov', mittente: 'LOVATO', qta: 10, documento_numero: '26030500' },
+    { tipo: 'carico', fuori_giacenza: true, codice: '2900KLOVA00GX1691U25', azienda_id: 'lov', qta: 50 },
+    { tipo: 'carico', fuori_giacenza: false, codice: 'TS-1', azienda_id: 'tema', qta: 5 },
+    { tipo: 'trasferimento', fuori_giacenza: true, codice: 'MAC-X', qta: -1 },
+    { tipo: 'carico', fuori_giacenza: true, codice: 'ZZ9', azienda_id: 'fab', mittente: 'FABBI', qta: 3, documento_numero: '1' } ];
+  const ordini = [{ serie: 'OF', numero: 762, anno: 2026, fornitore_id: 'lov', righe: [{ codice: '2900KLOVA00GX1691U25', codice_fornitore: 'GX1691U25' }] },
+    { serie: 'OF', numero: 1, anno: 2026, fornitore_id: 'altro', righe: [{ codice: 'A1', codice_fornitore: 'ZZ9' }] }];
+  const r = M.carichiCodiceSconosciuto(mov, noti, ordini);
+  t('due codici sconosciuti (Lovato e Fabbi), TS- e trasferimenti esclusi', r.map(x => x.codice).join() === 'GX1691U25,ZZ9');
+  t('stesso codice in maiuscole diverse: una voce, due DDT', r[0].qta === 60 && r[0].righe === 2 && r[0].documenti.length === 2);
+  t('proposta dal suo OF', r[0].proposta && r[0].proposta.codice === '2900KLOVA00GX1691U25' && r[0].proposta.ordine === 'OF 762/2026');
+  t('proposta solo dallo STESSO fornitore', r[1].proposta === null);
+}
+
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);
