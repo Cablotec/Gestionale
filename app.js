@@ -5746,6 +5746,26 @@ async function caricaOrdiniFornitore() {
   } catch (e) { state.ordiniFornitore = null; }
   if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
 }
+// ── OF DAL GESTIONALE: BLOCCATI FINO AL CAMBIO (20 nov, Nico: "fino al giorno del
+// cambio importeremo sempre da Alnus"; "non toglierei nulla ma bloccherei la pressione
+// dei tasti, un po' come una skill ancora da sbloccare"). I tasti che CREANO un ordine
+// restano al loro posto, col lucchetto, e premuti spiegano perche'. Un ordine creato qui
+// prenderebbe un numero OF che Alnus usera' il giorno dopo. Il giorno del cambio:
+// OF_DAL_GESTIONALE = true e si sbloccano tutti (tasti e funzioni).
+const OF_DAL_GESTIONALE = false;
+const MSG_OF_BLOCCATO = '🔒 Si sblocca il giorno del cambio: fino ad allora gli OF si fanno in Alnus e si importano (Specchio Alnus → Importa OF aperti).';
+function tastoOf(b) {
+  if (OF_DAL_GESTIONALE || !b || !b.tagName) return b;
+  const t = b.cloneNode(true);   // il clone NON porta i click del tasto vero
+  t.textContent = '🔒 ' + String(b.textContent).replace(/^[＋⚡+]\s*/, '');
+  t.title = MSG_OF_BLOCCATO;
+  t.style.opacity = '.55';
+  t.style.cursor = 'not-allowed';
+  t.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); toast(MSG_OF_BLOCCATO, 'err', 8000); });
+  return t;
+}
+function ofBloccato() { if (OF_DAL_GESTIONALE) return false; toast(MSG_OF_BLOCCATO, 'err', 8000); return true; }
+
 // Serie (20 nov): «OFS» nostri, «OF»/«OL» ordini di Alnus caricati col loro numero.
 function numeroOrdineFornitore(of) { return of ? (of.serie || 'OF') + ' ' + of.numero + '/' + of.anno : ''; }
 // ✎ Modifica di un ordine emesso (19 nov): la finestra del suo tipo, precompilata.
@@ -5819,6 +5839,7 @@ function rigaOrdineTerzista(o, terzistaId) {
 // `revisione` + 1 (la stampa la mostra), solo ordini emessi, solo admin
 // (`modifica_ordine_fornitore`). Ritorna l'ordine salvato o lancia l'errore.
 async function salvaOrdineFornitore(of, campi) {
+  if (!of && !OF_DAL_GESTIONALE) throw new Error('gli OF nuovi si fanno in Alnus fino al giorno del cambio');
   const { data, error } = of
     ? await sb.rpc('modifica_ordine_fornitore', { p_id: of.id, p_consegna: campi.consegna, p_note: campi.note, p_righe: campi.righe })
     : await sb.rpc('crea_ordine_fornitore', { p_tipo: campi.tipo, p_fornitore: campi.fornitore,
@@ -5869,6 +5890,7 @@ function apriOrdineTerzista(o, terzistaId, poi, of) {
     if (gia && gia.id) return stampaOrdineFornitore(gia);
     if (gia) return toast('La commessa è abbinata a ' + numeroOrdineFornitore(gia) + ' di Alnus.', 'ok');
   }
+  if (!of && ofBloccato()) return;
   const nome = nomeAziendaDi(terzistaId);
   const v = veloTerzista((of ? 'Modifica ' + numeroOrdineFornitore(of) : 'Ordine al terzista') + ' · ' + nome, 1020);
   // voci: { id, riga, scelta, questa }
@@ -6066,6 +6088,7 @@ function numeroDaTesto(s) {
 // `of`: un ordine d'acquisto emesso da MODIFICARE (19 nov): stessa finestra,
 // fornitore fisso, righe/consegna/note precompilate; salva con la revisione.
 async function apriOrdineAcquisto(poi, of) {
+  if (!of && ofBloccato()) return;
   if (state.ordiniFornitore == null) return toast('Gli ordini fornitore non sono attivi: manca la tabella.', 'err', 9000);
   if (!matAbituali) await caricaFornitoriAbituali();
   const escludi = of ? of.id : null;
@@ -6216,6 +6239,7 @@ async function apriOrdineAcquisto(poi, of) {
 // I codici senza fornitore abituale si elencano: vanno ordinati a mano o
 // gli si da' l'abituale dalla scheda del codice.
 async function apriOfMassivi(poi) {
+  if (ofBloccato()) return;
   if (state.ordiniFornitore == null) return toast('Gli ordini fornitore non sono attivi: manca la tabella.', 'err', 9000);
   if (!matAbituali) await caricaFornitoriAbituali();
   const { per, senza, coperti } = daOrdinarePerFornitore(null);
@@ -6349,12 +6373,12 @@ function renderOrdiniFornitore(root) {
   const ricarica = el('button', { class:'btnsm', title:'Rileggi gli ordini dal database',
     onclick: async () => { ricarica.disabled = true; await caricaOrdiniFornitore(); ridisegna(); } }, '⟳ Aggiorna');
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Ordini fornitore'), ricarica,
-    (eAdminOra() && state.ordiniFornitore != null) ? el('button', { class:'btng', style:'margin-left:auto;',
+    (eAdminOra() && state.ordiniFornitore != null) ? tastoOf(el('button', { class:'btng', style:'margin-left:auto;',
       title:'Una bozza per ogni fornitore abituale coi codici da ordinare di tutte le commesse, da rivedere ed emettere insieme',
-      onclick: () => apriOfMassivi(ridisegna) }, '⚡ Genera OF da ordinare') : '',
-    (eAdminOra() && state.ordiniFornitore != null) ? el('button', { class:'btnp',
+      onclick: () => apriOfMassivi(ridisegna) }, '⚡ Genera OF da ordinare')) : '',
+    (eAdminOra() && state.ordiniFornitore != null) ? tastoOf(el('button', { class:'btnp',
       title:'Ordine d’acquisto a un fornitore: propone i codici da ordinare di cui è fornitore abituale',
-      onclick: () => apriOrdineAcquisto(ridisegna) }, '＋ Nuovo OF d’acquisto') : ''));
+      onclick: () => apriOrdineAcquisto(ridisegna) }, '＋ Nuovo OF d’acquisto')) : ''));
   if (state.ordiniFornitore == null) {
     root.append(el('div', { class:'empty' }, 'Gli ordini fornitore non si sono potuti leggere. Premi ⟳ Aggiorna; '
       + 'se resta così, la tabella `ordini_fornitore` non è raggiungibile.'));
@@ -7599,8 +7623,9 @@ function passiFase(o, f, poi) {
     passi.push(of
       ? { nome:'Ordine (OF)', stato:'fatto', dett: numeroOrdineFornitore(of) + (of.data ? ' del ' + giorno(of.data) : '')
           + (of.origine === 'alnus' ? ' · Alnus' + (of.nonImportato ? ' (non ancora fra gli OF importati)' : '') : '') }
-      : { nome:'Ordine (OF)', stato: viva ? 'avviso' : 'poi', dett: viva ? 'manca: senza OF non parte il materiale' : '',
-          azione: viva ? btn('＋ Crea OF', () => apriOrdineTerzista(o, f.id, poi), 'Ordine fac simile a ' + nomeAziendaDi(f.id)) : '' });
+      : { nome:'Ordine (OF)', stato: viva ? 'avviso' : 'poi', dett: viva ? (OF_DAL_GESTIONALE ? 'manca: senza OF non parte il materiale'
+            : 'manca: scrivi il «n. OF» di Alnus nella scheda del terzista') : '',
+          azione: viva ? tastoOf(btn('＋ Crea OF', () => apriOrdineTerzista(o, f.id, poi), 'Ordine fac simile a ' + nomeAziendaDi(f.id))) : '' });
   }
 
   // TERZISTA SENZA MATERIALI (18 nov): solo prezzo, nessuna lista da fare
@@ -7983,8 +8008,8 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
             eAdminOra() ? bt('✕', () => annullaOrdineFornitore(of, poi), 'Annulla l’ordine: le sue commesse tornano libere') : null));
         } else {
           docs.append(rigaDoc('📑', 'Ordine al terzista', 'non ancora emesso · senza OF non partono lista né DDT',
-            eAdminOra() ? bt('＋ Crea OF', () => apriOrdineTerzista(o, f.id, poi), 'Ordine fac simile a ' + nomeAziendaDi(f.id)
-              + ', con le sue altre commesse aperte') : null));
+            eAdminOra() ? tastoOf(bt('＋ Crea OF', () => apriOrdineTerzista(o, f.id, poi), 'Ordine fac simile a ' + nomeAziendaDi(f.id)
+              + ', con le sue altre commesse aperte')) : null));
         }
       }
       docVive.forEach(x => {
