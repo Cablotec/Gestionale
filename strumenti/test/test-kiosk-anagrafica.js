@@ -18,6 +18,8 @@ function estrai(nome) {
 }
 
 let state, refresh = 0;
+// Come core/db.js (20 nov): l'assistente AI non e' un operatore.
+const eAssistente = (u) => !!(u && u.assistente === true);
 const kioskRefreshActive = () => { refresh++; };
 const toLocalISO = (d) => d.toISOString().slice(0, 10);
 // applyChange finto: solo il pezzo che serve (sostituisci/aggiungi/togli)

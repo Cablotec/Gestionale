@@ -766,7 +766,9 @@ async function loadAllData() {
 
   state.profiliById = Object.fromEntries((profili.data||[]).map(p=>[p.id,p]));
   state.mezzi = mezzi.data || [];
-  state.utenti = utenti.data || [];
+  // Gli assistenti (Claude) stanno a parte: non sono operatori (eAssistente, core/db.js).
+  state.assistenti = (utenti.data || []).filter(eAssistente);
+  state.utenti = (utenti.data || []).filter(u => !eAssistente(u));
   state.utentiById = Object.fromEntries(state.utenti.map(u=>[u.id,u]));
   state.prenotazioni = prenotazioni.data || [];
   state.consegne = consegne.data || [];
@@ -894,11 +896,19 @@ function applyChange(tabella, payload) {
     } else if (ev === 'UPDATE') state.mezzi = state.mezzi.map(x => x.id === row.id ? row : x);
     else if (ev === 'DELETE') state.mezzi = state.mezzi.filter(x => x.id !== oldRow.id);
   } else if (tabella === 'utenti') {
-    if (ev === 'INSERT') {
+    // Un assistente non entra mai fra gli operatori; una scheda che cambia tipo passa di lista.
+    const idU = (row && row.id) || (oldRow && oldRow.id);
+    state.assistenti = (state.assistenti || []).filter(x => x.id !== idU);
+    if (ev !== 'DELETE' && eAssistente(row)) {
+      state.assistenti.push(row);
+      state.utenti = state.utenti.filter(x => x.id !== idU);
+      delete state.utentiById[idU];
+    } else if (ev === 'INSERT') {
       if (!state.utenti.find(x => x.id === row.id)) state.utenti.push(row);
       state.utentiById[row.id] = row;
     } else if (ev === 'UPDATE') {
-      state.utenti = state.utenti.map(x => x.id === row.id ? row : x);
+      if (state.utenti.find(x => x.id === row.id)) state.utenti = state.utenti.map(x => x.id === row.id ? row : x);
+      else state.utenti.push(row);
       state.utentiById[row.id] = row;
     } else if (ev === 'DELETE') {
       state.utenti = state.utenti.filter(x => x.id !== oldRow.id);
@@ -2714,7 +2724,8 @@ function renderOperatori(root) {
     el('th', { class:'tc' }, 'Azioni'),
   )));
   const tb = el('tbody');
-  state.utenti.filter(u => !isKioskRecord(u)).forEach(u => {
+  // In fondo gli assistenti (Claude): stessa tabella, si vedono e si modificano qui.
+  [...state.utenti, ...(state.assistenti || [])].filter(u => !isKioskRecord(u)).forEach(u => {
     const account = u.account_id ? state.profiliById[u.account_id] : null;
     const accountCell = account
       // Un colore per ruolo (18 nov, Nico: "per riconoscerli meglio"):
@@ -2788,14 +2799,16 @@ function renderOperatori(root) {
 
     tb.append(el('tr', {},
       el('td', {}, u.nome),
-      el('td', {}, u.esterno
+      el('td', {}, eAssistente(u)
+        ? el('span', { class:'badge bvio', title:'Non è una persona: account di Claude e dell’automazione DDT. Non compare fra gli operatori.' }, 'assistente AI')
+        : u.esterno
         ? el('span', { class:'badge byel',
             title:'Esterno in sede: timbra al kiosk, ore tenute riconoscibili' },
             'esterno' + (u.azienda_id
               ? ' · ' + ((state.aziende.find(a => a.id === u.azienda_id) || {}).nome || '?')
               : ''))
         : el('span', { class:'badge bblu' }, 'interno')),
-      el('td', {}, selGruppo),
+      el('td', {}, eAssistente(u) ? '—' : selGruppo),
       el('td', {}, accountCell),
       el('td', {}, u.attivo ? el('span', { class:'badge bok' }, 'attivo') : el('span', { class:'badge bgry' }, 'disatt.')),
       azioniCell,
@@ -2838,7 +2851,7 @@ function renderOperatori(root) {
 
   // Account login senza utente collegato (orfani)
   const profili = Object.values(state.profiliById).filter(p => !isKioskRecord(p));
-  const orfani = profili.filter(p => !state.utenti.find(u => u.account_id === p.id));
+  const orfani = profili.filter(p => ![...state.utenti, ...(state.assistenti || [])].find(u => u.account_id === p.id));
   if (orfani.length > 0) {
     box.append(el('div', { style:'margin-top:12px;padding-top:12px;border-top:1px solid var(--brd);' },
       el('div', { class:'kl', style:'color:var(--or);margin-bottom:6px;' },
@@ -2986,6 +2999,7 @@ function openCreaAccountModal(u) {
       // Aggiorna cache locale
       u.account_id = nuovoAccountId;
       state.utenti = state.utenti.map(x => x.id === u.id ? {...x, account_id:nuovoAccountId} : x);
+      state.assistenti = (state.assistenti || []).map(x => x.id === u.id ? {...x, account_id:nuovoAccountId} : x);
       // Il profilo verrà creato dal trigger handle_new_user; lo aggiungiamo in cache se manca
       if (!state.profiliById[nuovoAccountId]) {
         state.profiliById[nuovoAccountId] = {
@@ -3092,7 +3106,7 @@ function openOperatoreModal(u) {
   u = u || { nome:'', email:'', account_id:null, attivo:true, esterno:false, note:'' };
   const accountsLiberi = Object.values(state.profiliById)
     .filter(p => !isKioskRecord(p))
-    .filter(p => !state.utenti.find(x => x.account_id === p.id && x.id !== u.id));
+    .filter(p => ![...state.utenti, ...(state.assistenti || [])].find(x => x.account_id === p.id && x.id !== u.id));
 
   const modal = el('div', { class:'modal' });
   modal.append(el('div', { class:'mhd' },
@@ -3112,10 +3126,13 @@ function openOperatoreModal(u) {
   // del fornitore sulla commessa, dal 14 lug), ma persona di un'altra ditta
   // che lavora IN SEDE e timbra al kiosk. Da qui in poi il flag serve a tenere
   // le sue ore riconoscibili, non a nasconderla.
+  // Terzo tipo «Assistente AI» (20 nov): solo se la colonna `utenti.assistente` c'e'.
+  const assistenteAttivo = [...(state.utenti || []), ...(state.assistenti || [])].some(x => x && ('assistente' in x));
   const selTipo = el('select', { name:'esterno' },
     el('option', { value:'false' }, 'Interno (Cablotec)'),
-    el('option', { value:'true' }, 'Esterno in sede (timbra qui)'));
-  selTipo.value = String(!!u.esterno);
+    el('option', { value:'true' }, 'Esterno in sede (timbra qui)'),
+    assistenteAttivo ? el('option', { value:'assistente' }, 'Assistente AI (non è una persona)') : null);
+  selTipo.value = eAssistente(u) ? 'assistente' : String(!!u.esterno);
 
   // Ditta di provenienza: si accende solo a colonna presente (migrazione
   // utenti.azienda_id) e ha senso solo per gli esterni. Elenco dai fornitori
@@ -3157,7 +3174,8 @@ function openOperatoreModal(u) {
       el('div', { class:'field' }, el('label', {}, 'Tipo'), selTipo,
         el('div', { class:'sub', style:'margin-top:4px;font-size:11px;' },
           'Esterno in sede = persona di un\'altra ditta che lavora QUI e timbra al kiosk. '
-          + 'Il lavoro mandato fuori non si gestisce da qui: quello è un fornitore sulla commessa.')),
+          + 'Il lavoro mandato fuori non si gestisce da qui: quello è un fornitore sulla commessa.'
+          + (assistenteAttivo ? ' Assistente AI = l’account di Claude: non timbra, non compare fra gli operatori.' : ''))),
       el('div', { class:'field' }, el('label', {}, 'Stato'), (() => {
         const s = el('select', { name:'attivo' },
           el('option', { value:'true' }, 'Attivo'),
@@ -3180,6 +3198,7 @@ function openOperatoreModal(u) {
         attivo: fd.get('attivo') === 'true',
         esterno: fd.get('esterno') === 'true',
       };
+      if (assistenteAttivo) payload.assistente = fd.get('esterno') === 'assistente';
       // Ditta solo per gli esterni: se torna interno il legame si azzera, così
       // non restano riferimenti orfani a una ditta che non c'entra più.
       if (aziendaAttiva) {
@@ -3195,9 +3214,10 @@ function openOperatoreModal(u) {
         return toast(error.message, 'err');
       }
       // Aggiorna cache locale
-      if (isNew) state.utenti.push(data);
-      else state.utenti = state.utenti.map(x => x.id === u.id ? data : x);
-      state.utentiById[data.id] = data;
+      state.utenti = state.utenti.filter(x => x.id !== data.id);
+      state.assistenti = (state.assistenti || []).filter(x => x.id !== data.id);
+      if (eAssistente(data)) { state.assistenti.push(data); delete state.utentiById[data.id]; }
+      else { state.utenti.push(data); state.utenti.sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'it')); state.utentiById[data.id] = data; }
       toast(isNew ? 'Utente creato' : 'Utente aggiornato');
       closeModal(); renderTab('operatori');
     }}, 'Salva'),
@@ -19195,6 +19215,7 @@ async function deleteOperatore(u) {
   if (error) return toast(error.message, 'err');
   // Aggiorna subito la cache locale
   state.utenti = state.utenti.filter(x => x.id !== u.id);
+  state.assistenti = (state.assistenti || []).filter(x => x.id !== u.id);
   delete state.utentiById[u.id];
   toast('Utente eliminato'); renderTab('operatori');
 }
@@ -20210,7 +20231,7 @@ async function kioskLoadAll() {
     sb.from('prenotazioni_utenti').select('*'),
   ]);
   state.mezzi = mezzi.data || [];
-  state.utenti = util.data || [];
+  state.utenti = (util.data || []).filter(u => !eAssistente(u));
   state.utentiById = Object.fromEntries(state.utenti.map(u => [u.id, u]));
   state.aziende = (clienti.data || []).filter(a => !(a && a.is_reparto));
   state.articoli = articoli.data || [];
@@ -20370,8 +20391,8 @@ function kioskApplyAnagrafica(tabella, chiave, p, ordinaPer) {
   // qui sotto l'aveva tolta), e l'UPDATE di applyChange sostituisce soltanto
   // — non aggiunge. Senza questo, un mezzo o un operatore riacceso
   // dall'ufficio resterebbe invisibile in reparto fino al riavvio.
-  if (riga && riga.id && riga.attivo !== false && !arr.find(x => x.id === riga.id)) arr.push(riga);
-  let out = arr.filter(r => r && r.attivo !== false);
+  if (riga && riga.id && riga.attivo !== false && !eAssistente(riga) && !arr.find(x => x.id === riga.id)) arr.push(riga);
+  let out = arr.filter(r => r && r.attivo !== false && !eAssistente(r));
   if (ordinaPer) {
     out = out.slice().sort((a, b) => {
       const x = a[ordinaPer], y = b[ordinaPer];

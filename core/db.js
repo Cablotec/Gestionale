@@ -249,6 +249,13 @@ async function assicuraSessioneValida() {
 // UNA per tutte le pagine (30 set): gestionale e prelievo ne avevano una
 // copia a testa, il telefono una terza versione che conosceva solo la
 // password sbagliata.
+// ASSISTENTE AI (20 nov, Nico: "crea un tipo apposta, da aggiungere a interno
+// ed esterno"). `utenti.assistente` = una scheda che NON e' una persona:
+// l'account ai@ di Claude e dell'automazione DDT. Non e' un operatore: fuori
+// da kiosk, telefono, prelievo, Gantt, assegnazioni, ferie. Regola UNA, qui,
+// per tutte le pagine. Senza la colonna (migrazione) e' sempre falso.
+function eAssistente(u) { return !!(u && u.assistente === true); }
+
 function erroreAccessoInItaliano(err) {
   const t = String((err && err.message) || err || '').toLowerCase();
   if (t.includes('invalid login credentials')) return 'Indirizzo o password non corretti.';

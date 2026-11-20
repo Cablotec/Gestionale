@@ -10,7 +10,7 @@
 <title>Prelievo Magazzino — Cablotec</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="core/db.js?v=2026-11-20.08"></script>
+<script src="core/db.js?v=2026-11-20.09"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
 <style>
@@ -313,13 +313,13 @@ async function boot() {
 
 async function loadData() {
   const [ut, op, az, ar] = await Promise.all([
-    sb.from('utenti').select('id,nome,attivo,email').order('nome'),
+    sb.from('utenti').select('*').order('nome'),   // '*': `assistente` (20 nov) nasce da una migrazione
     sb.from('operazioni').select('*').not('stato', 'in', '("spedita","completata")'),
     sb.from('aziende').select('id,nome'),
     sb.from('articoli').select('id,codice,descrizione'),
   ]);
   for (const r of [ut, op, az, ar]) if (r.error) throw r.error;
-  state.utenti = (ut.data || []).filter(u => u.attivo !== false &&
+  state.utenti = (ut.data || []).filter(u => u.attivo !== false && !eAssistente(u) &&
     (u.email || '').toLowerCase() !== KIOSK_EMAIL.toLowerCase());
   state.operazioni = (op.data || []).sort(cmpCommessa);
   state.aziende = az.data || [];
