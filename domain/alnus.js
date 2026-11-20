@@ -259,7 +259,59 @@ function controlloGiacenze(calcolata, stampata, tolleranza) {
   return diversi.sort((x, y) => Math.abs(y.differenza) - Math.abs(x.differenza));
 }
 
+// ── IL FABBISOGNO FATTO DAL GESTIONALE (20 nov, Nico: "se vogliamo far girare
+// il gestionale senza Alnus...") ── Le stesse righe che arrivano dall'import
+// del Fabbisogno Massivo (`mancanti`), con la STESSA FORMA, ma fatte coi
+// nostri dati: cosi' Materiali, triangolini, stato dei materiali, ripartizione
+// e «Genera OF» girano senza sapere da dove vengono. Una riga per codice.
+//   impegno        = quanto chiedono le liste delle commesse vive (a residuo)
+//   giacenza       = specchio (magazzini scelti, mai sotto zero)
+//   qta_richiesta  = impegno − giacenza
+//   qta_da_ordinare= richiesta − in arrivo (OF di Alnus + OF nostri)
+//   consegne       = le righe d'OF ancora aperte, con data, qta, ordine, fornitore
+//   numero_op      = l'OP della commessa servita per prima (come «OdL Prossimo Impegno»)
+// `o`: { fabbisogno: Map codice -> [{ commessa, qta }] gia' in ordine di servizio
+//   (fabbisognoDaListe), tipi, descr, um: Map, giacenza (giacenzaAlnus), magazzini,
+//   ofAlnus (ofAlnusAperti), ofNostri: [{ codice, aperto, consegna, ordine, fornitore }],
+//   contaScaduti }.
+function righeFabbisognoSpecchio(o) {
+  const codici = new Set();
+  (o.fabbisogno || new Map()).forEach((r, c) => codici.add(c));
+  (o.ofAlnus || new Map()).forEach((v, c) => { if (v.aperto > 0) codici.add(c); });
+  (o.ofNostri || []).forEach(x => { if (x.aperto > 0) codici.add(String(x.codice).trim()); });
+  const nostriPer = new Map();
+  (o.ofNostri || []).forEach(x => { const c = String(x.codice).trim(); if (!nostriPer.has(c)) nostriPer.set(c, []); nostriPer.get(c).push(x); });
+  const righe = [];
+  codici.forEach(c => {
+    const dom = (o.fabbisogno && o.fabbisogno.get(c)) || [];
+    const impegno = +dom.reduce((s, x) => s + (Number(x.qta) || 0), 0).toFixed(4);
+    const g = o.giacenza ? o.giacenza.get(c) : null;
+    const giacenza = +giacenzaContata(g, o.magazzini).toFixed(4);
+    const consegne = [];
+    const oa = o.ofAlnus ? o.ofAlnus.get(c) : null;
+    (oa ? oa.righe : []).forEach(r => {
+      if (!(r.aperto > 0) || (o.contaScaduti === false && r.scaduta)) return;
+      consegne.push({ data: r.consegna || null, qta: r.aperto, ordine: (r.sezionale || 'OF') + ' ' + r.numero + '/' + r.anno, fornitore: r.fornitore || null });
+    });
+    (nostriPer.get(c) || []).forEach(x => { if (x.aperto > 0) consegne.push({ data: x.consegna || null, qta: x.aperto, ordine: x.ordine, fornitore: x.fornitore || null }); });
+    const inArrivo = consegne.reduce((s, x) => s + (Number(x.qta) || 0), 0);
+    const richiesta = Math.max(0, +(impegno - giacenza).toFixed(4));
+    const daOrdinare = Math.max(0, +(richiesta - inArrivo).toFixed(4));
+    // Le consegne senza data non entrano nell'elenco datato (come nell'import), ma contano come ordinato.
+    const datate = consegne.filter(x => x.data).sort((a, b) => String(a.data).localeCompare(String(b.data)));
+    const primo = dom.find(x => x.commessa && x.commessa.numero_op);
+    righe.push({ codice: c, descrizione: (o.descr && o.descr.get(c)) || null, um: (o.um && o.um.get(c)) || null,
+      tipo_parte: (o.tipi && o.tipi.get(c)) ? String(o.tipi.get(c)).trim().toUpperCase() : null,
+      numero_op: primo ? primo.commessa.numero_op : null,
+      giacenza, impegno, qta_richiesta: richiesta, qta_da_ordinare: daOrdinare,
+      consegne: datate, prima_consegna: datate.length ? datate[0].data : null,
+      data_arrivo: datate.length ? datate[0].data : null, fornitore: datate.length ? datate[0].fornitore : null,
+      in_arrivo: +inArrivo.toFixed(4), fonte: 'specchio' });
+  });
+  return righe.sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true }));
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { numAlnus, dataAlnus, leggiGiacenzeAlnus, leggiMovimentiAlnus, leggiOfAlnus, dataCella,
-    giacenzaAlnus, giacenzaContata, ofAlnusAperti, confrontoDaOrdinare, controlloGiacenze };
+    giacenzaAlnus, giacenzaContata, ofAlnusAperti, confrontoDaOrdinare, controlloGiacenze, righeFabbisognoSpecchio };
 }

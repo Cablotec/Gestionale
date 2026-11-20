@@ -130,5 +130,33 @@ sez('Controllo delle giacenze');
   t('B sparito dalla stampa e C nuovo', d.length === 2 && d.some(x => x.codice === 'B' && x.differenza === 5) && d.some(x => x.codice === 'C' && x.differenza === -1));
 }
 
+sez('Il fabbisogno fatto dal gestionale (stessa forma di mancanti)');
+{
+  const c1 = { id: 'c1', numero_op: '2026/OP/01917' }, c2 = { id: 'c2', numero_op: '2026/OP/01918' };
+  const fabbisogno = new Map([['A1', [{ commessa: c1, qta: 200 }, { commessa: c2, qta: 100 }]], ['CL1', [{ commessa: c2, qta: 5 }]]]);
+  const giacenza = A.giacenzaAlnus([{ codice: 'A1', magazzino: '01', qta: 120 }, { codice: 'A1', magazzino: 'WIP', qta: 30 }, { codice: 'SOLO-OF', magazzino: '01', qta: 0 }], [], '2026-11-20T10:00:00');
+  const ofAlnus = A.ofAlnusAperti([
+    { anno: 2026, sezionale: 'OF', numero: 772, riga: 10, codice: 'A1', fornitore: 'COMET', qta_residua: 100, consegna: '2026-12-01' },
+    { anno: 2026, sezionale: 'OF', numero: 175, riga: 10, codice: 'A1', fornitore: 'BOTTURI', qta_residua: 5, consegna: '2026-03-01' },
+    { anno: 2026, sezionale: 'OF', numero: 800, riga: 10, codice: 'SOLO-OF', fornitore: 'FABBI', qta_residua: 9, consegna: null }], [], '2026-11-20T10:00:00', '2026-11-20');
+  const r = A.righeFabbisognoSpecchio({ fabbisogno, giacenza, ofAlnus, magazzini: null,
+    ofNostri: [{ codice: 'A1', aperto: 20, consegna: '2026-11-28', ordine: 'OFS 3/2026', fornitore: 'FABBI SRL' }],
+    tipi: new Map([['A1', 'acq'], ['CL1', 'C/L']]), descr: new Map([['A1', 'Faston']]), um: new Map([['A1', 'nr']]) });
+  const di = (c) => r.find(x => x.codice === c);
+  const a = di('A1');
+  t('impegno = somma delle liste', a.impegno === 300);
+  t('giacenza con WIP', a.giacenza === 150);
+  t('richiesta = 300 − 150', a.qta_richiesta === 150);
+  t('da ordinare = 150 − (100 + 5 + 20)', a.qta_da_ordinare === 25);
+  t('consegne in ordine di data, nostro OF compreso', a.consegne.map(x => x.ordine).join(',') === 'OF 175/2026,OFS 3/2026,OF 772/2026');
+  t('prima consegna e fornitore', a.prima_consegna === '2026-03-01' && a.fornitore === 'BOTTURI');
+  t('OP della commessa servita per prima', a.numero_op === '2026/OP/01917');
+  t('tipo maiuscolo, descrizione, um, fonte', a.tipo_parte === 'ACQ' && a.descrizione === 'Faston' && a.um === 'nr' && a.fonte === 'specchio');
+  t('C/L presente col suo tipo', di('CL1').tipo_parte === 'C/L' && di('CL1').qta_da_ordinare === 5);
+  t('codice solo in OF: entra, niente da ordinare, consegna senza data esclusa dall\'elenco', di('SOLO-OF') && di('SOLO-OF').qta_da_ordinare === 0 && di('SOLO-OF').consegne.length === 0 && di('SOLO-OF').in_arrivo === 9);
+  const s = A.righeFabbisognoSpecchio({ fabbisogno, giacenza, ofAlnus, contaScaduti: false });
+  t('senza scaduti: l\'OF di marzo non conta', s.find(x => x.codice === 'A1').qta_da_ordinare === 50);
+}
+
 console.log('\n' + ok + ' ok, ' + ko + ' KO');
 process.exit(ko ? 1 : 0);

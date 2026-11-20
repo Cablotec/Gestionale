@@ -4061,6 +4061,10 @@ async function caricaMancanti() {
     mancantiTabellaOk = true;
     state.mancanti = data || [];
   } catch (e) { mancantiTabellaOk = false; state.mancanti = []; }
+  // FONTE DEL FABBISOGNO (20 nov): l'import di Alnus resta sempre in
+  // `state.mancantiAlnus`; `state.mancanti` e' quello che leggono le schermate.
+  state.mancantiAlnus = state.mancanti;
+  await applicaFonteFabbisogno();
 }
 
 // Movimenti di magazzino (13 ott): oggi i soli carichi letti dai DDT, scritti
@@ -5733,6 +5737,7 @@ async function caricaOrdiniFornitore() {
       sb.from('ordini_fornitore').select('*').order('anno').order('numero'));
     state.ordiniFornitore = error ? null : (data || []);
   } catch (e) { state.ordiniFornitore = null; }
+  if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
 }
 function numeroOrdineFornitore(of) { return of ? 'OFS ' + of.numero + '/' + of.anno : ''; }
 // ✎ Modifica di un ordine emesso (19 nov): la finestra del suo tipo, precompilata.
@@ -6471,7 +6476,8 @@ async function importaGiacenzeAlnus(f, poi) {
     if (foto) await sb.from('alnus_fotografie').delete().eq('id', foto.id);
     toast('Giacenze non salvate: ' + (e.message || e), 'err', 9000);
   }
-  await caricaAlnus(); if (typeof poi === 'function') poi();
+  await caricaAlnus(); if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
+  if (typeof poi === 'function') poi();
 }
 async function importaOfAlnus(f, poi) {
   let o;
@@ -6505,7 +6511,8 @@ async function importaOfAlnus(f, poi) {
     if (foto) await sb.from('alnus_fotografie').delete().eq('id', foto.id);
     toast('OF non salvati: ' + (e.message || e), 'err', 9000);
   }
-  await caricaAlnus(); if (typeof poi === 'function') poi();
+  await caricaAlnus(); if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
+  if (typeof poi === 'function') poi();
 }
 async function importaMovimentiAlnus(f, poi) {
   const m = leggiMovimentiAlnus(await testoAlnus(f));
@@ -6530,14 +6537,97 @@ async function importaMovimentiAlnus(f, poi) {
       + (!ap ? '. Manca ancora la fotografia d’apertura: i movimenti contano solo da lì.' : '')
       + (m.scartate.length ? ', ' + m.scartate.length + ' illeggibili' : ''), 'ok', 12000);
   } catch (e) { toast('Movimenti non salvati: ' + (e.message || e), 'err', 9000); }
-  await caricaAlnus(); if (typeof poi === 'function') poi();
+  await caricaAlnus(); if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
+  if (typeof poi === 'function') poi();
+}
+
+// ── FONTE DEL FABBISOGNO: ALNUS O GESTIONALE (20 nov, Nico: "se vogliamo far
+// girare il gestionale senza Alnus...") ────────────────────────────────────
+// Interruttore PER BROWSER (localStorage): chi lo accende vede Materiali,
+// triangolini, stato dei materiali, ripartizione e «Genera OF» calcolati dal
+// gestionale (`righeFabbisognoSpecchio`, domain/alnus.js: stessa forma delle
+// righe di `mancanti`); gli altri restano su Alnus. L'import del Fabbisogno
+// Massivo continua: resta in `state.mancantiAlnus` come termine di paragone.
+// Se lo specchio non c'e' (tabelle, apertura) si resta su Alnus e lo si dice.
+const FONTE_FABB_CHIAVE = 'cablotec.fonteFabbisogno';
+function fonteFabbisogno() {
+  try { return localStorage.getItem(FONTE_FABB_CHIAVE) === 'gestionale' ? 'gestionale' : 'alnus'; } catch (e) { return 'alnus'; }
+}
+let fonteFabbProblema = null;   // perche' la fonte gestionale non e' applicata, o null
+async function applicaFonteFabbisogno() {
+  fonteFabbProblema = null;
+  const alnus = state.mancantiAlnus || state.mancanti || [];
+  if (fonteFabbisogno() !== 'gestionale') { state.mancanti = alnus; segnaFonteFabbisogno(); return; }
+  if (state.alnus === undefined) await caricaAlnus();
+  if (!alnusTipi) await caricaTipiMateriali();
+  if (!state.alnus || !state.alnus.apertura) {
+    fonteFabbProblema = !state.alnus ? 'lo specchio Alnus non si legge' : 'manca la fotografia d’apertura delle giacenze';
+    state.mancanti = alnus; segnaFonteFabbisogno(); return;
+  }
+  try { const oggi = toLocalISO(new Date()); state.mancanti = righeFabbisognoGestionale().map(r => Object.assign(r, { import_data: oggi })); }
+  catch (e) { fonteFabbProblema = 'errore nel calcolo: ' + (e.message || e); state.mancanti = alnus; }
+  segnaFonteFabbisogno();
+}
+// Le righe: liste delle commesse vive a residuo, specchio, OF di Alnus e nostri.
+function righeFabbisognoGestionale() {
+  const A = state.alnus;
+  const base = materialiBase([]);
+  const tipi = new Map(), descr = new Map(), um = new Map();
+  base.viveConLista.forEach(c => (c.materiali || []).forEach(r => {
+    const cod = String((r && r.codice) || '').trim();
+    if (!cod) return;
+    if (r.tipo && !tipi.has(cod)) tipi.set(cod, r.tipo);
+    if (r.descrizione && !descr.has(cod)) descr.set(cod, r.descrizione);
+    if (r.um && !um.has(cod)) um.set(cod, r.um);
+  }));
+  if (alnusTipi) alnusTipi.forEach((t, c) => { if (!tipi.has(c)) tipi.set(c, t); });
+  (state.mancantiAlnus || []).forEach(m => { const c = String(m.codice || '').trim(); if (c && !tipi.has(c) && m.tipo_parte) tipi.set(c, m.tipo_parte); });
+  A.giacApertura.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); if (!um.has(r.codice) && r.um) um.set(r.codice, r.um); });
+  A.ofRighe.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); });
+  // I nostri OF d'acquisto aperti, riga per riga con la sua consegna.
+  const ofNostri = [];
+  ordinatoApertoOf(state.ordiniFornitore || [], state.movimenti, null).forEach((v, cod) => v.ordini.forEach(x => {
+    if (!(x.aperto > 0)) return;
+    const of = (state.ordiniFornitore || []).find(z => z.id === x.id);
+    const riga = of ? (of.righe || []).find(r => String(r.codice || '').trim().toUpperCase() === cod) : null;
+    ofNostri.push({ codice: riga ? String(riga.codice).trim() : cod, aperto: x.aperto, consegna: of ? consegnaRigaOf(of, riga) : null,
+      ordine: 'OFS ' + x.numero + '/' + x.anno, fornitore: of ? nomeAziendaDi(of.fornitore_id) : null });
+  }));
+  const magazzini = [...new Set(A.giacApertura.map(r => r.magazzino).concat(A.movimenti.map(m => m.magazzino)))]
+    .filter(m => !(alnusMagEsclusi && alnusMagEsclusi.has(m)));
+  return righeFabbisognoSpecchio({ fabbisogno: fabbisognoDaListe(base.viveConLista), tipi, descr, um,
+    giacenza: giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il), magazzini: new Set(magazzini),
+    ofAlnus: ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, toLocalISO(new Date())),
+    ofNostri, contaScaduti: alnusContaScaduti });
+}
+// La pillola in alto: chi ha acceso il gestionale come fonte non deve dimenticarlo.
+function segnaFonteFabbisogno() {
+  const ruolo = document.getElementById('role-pill');
+  if (!ruolo) return;
+  let p = document.getElementById('fonte-pill');
+  if (!p) { p = document.createElement('span'); p.id = 'fonte-pill'; p.style.marginLeft = '6px'; ruolo.after(p); }
+  p.innerHTML = '';
+  if (fonteFabbisogno() !== 'gestionale') return;
+  p.append(el('span', { class: 'badge ' + (fonteFabbProblema ? 'berr' : 'bor'), style: 'cursor:pointer;',
+    title: fonteFabbProblema ? 'Fonte gestionale NON applicata: ' + fonteFabbProblema + '. Si vede Alnus.'
+      : 'Materiali, triangolini e «Genera OF» sono calcolati dal gestionale (prova, solo su questo browser). Clic: Specchio Alnus.',
+    onclick: () => selectTab('alnus') }, fonteFabbProblema ? '⚠ fabbisogno: Alnus' : 'fabbisogno: gestionale'));
+}
+async function cambiaFonteFabbisogno(fonte, poi) {
+  try { if (fonte === 'gestionale') localStorage.setItem(FONTE_FABB_CHIAVE, 'gestionale'); else localStorage.removeItem(FONTE_FABB_CHIAVE); }
+  catch (e) { return toast('Questo browser non salva la scelta: ' + (e.message || e), 'err'); }
+  await applicaFonteFabbisogno();
+  toast(fonteFabbisogno() === 'gestionale'
+    ? (fonteFabbProblema ? 'Fonte gestionale accesa ma non applicata: ' + fonteFabbProblema : 'Fabbisogno calcolato dal gestionale: ' + (state.mancanti || []).length + ' righe')
+    : 'Fabbisogno di nuovo da Alnus', fonteFabbProblema ? 'err' : 'ok', 8000);
+  if (typeof poi === 'function') poi();
 }
 
 // Il confronto: fabbisogno delle liste (commesse vive, a residuo), giacenza
 // dello specchio, OF di Alnus e nostri, contro il «da ordinare» di Alnus.
 function confrontoAlnus(opz) {
   const A = state.alnus;
-  const base = materialiBase(state.mancanti || []);
+  const base = materialiBase([]);
   const fabbisogno = new Map(), tipi = new Map(), descr = new Map();
   base.viveConLista.forEach(c => (c.materiali || []).forEach(r => {
     const cod = String((r && r.codice) || '').trim();
@@ -6548,7 +6638,7 @@ function confrontoAlnus(opz) {
   fabbisognoDaListe(base.viveConLista).forEach((righe, cod) =>
     fabbisogno.set(cod, +righe.reduce((s, x) => s + x.qta, 0).toFixed(6)));
   const daOrdAlnus = new Map();
-  (state.mancanti || []).forEach(m => {
+  (state.mancantiAlnus || state.mancanti || []).forEach(m => {
     const c = String(m.codice || '').trim();
     if (!tipi.has(c) && m.tipo_parte) tipi.set(c, m.tipo_parte);
     if (!descr.has(c) && m.descrizione) descr.set(c, m.descrizione);
@@ -6574,7 +6664,7 @@ function renderAlnus(root) {
   root.innerHTML = '';
   const ridisegna = () => renderAlnus(root);
   const ricarica = el('button', { class: 'btnsm', title: 'Rileggi lo specchio dal database',
-    onclick: async () => { ricarica.disabled = true; await caricaAlnus(); ridisegna(); } }, '⟳ Aggiorna');
+    onclick: async () => { ricarica.disabled = true; await caricaAlnus(); await applicaFonteFabbisogno(); ridisegna(); } }, '⟳ Aggiorna');
   root.append(el('div', { class: 'toolbar' }, el('h2', {}, 'Specchio Alnus'), ricarica));
   if (state.alnus === undefined) {
     root.append(el('div', { class: 'empty' }, 'Lettura dello specchio…'));
@@ -6639,6 +6729,19 @@ function renderAlnus(root) {
         : '✓ Controllo del ' + fmtQuando(A.controllo.preso_il) + ': la giacenza calcolata torna su tutti i codici.'),
       diversi.length ? apri : '', lista));
   }
+  // L'interruttore della fonte (solo questo browser).
+  const gest = fonteFabbisogno() === 'gestionale';
+  const radio = (val, testo) => el('label', { style: 'display:inline-flex;gap:6px;align-items:center;margin-right:18px;cursor:pointer;font-size:13px;' },
+    el('input', { type: 'radio', name: 'fonte-fabb', checked: (gest ? 'gestionale' : 'alnus') === val ? true : null,
+      onchange: () => cambiaFonteFabbisogno(val, ridisegna) }), testo);
+  root.append(el('div', { style: 'margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid ' + (gest ? 'var(--or)' : 'var(--brd)') + ';' },
+    el('div', { style: 'font-weight:700;margin-bottom:6px;' }, 'Fonte del fabbisogno su questo browser'),
+    radio('alnus', 'Alnus (import del Fabbisogno Massivo)'), radio('gestionale', 'Gestionale (liste + specchio + OF)'),
+    el('div', { class: 'sub', style: 'font-size:12px;margin-top:6px;line-height:1.5;' },
+      'Con «Gestionale» Materiali, triangolini in Ordini cliente, stato dei materiali nella commessa e «Genera OF» usano i conti del gestionale. '
+      + 'Vale solo per questo browser: gli altri e il kiosk restano su Alnus. L’import del Fabbisogno continua e resta qui come colonna «Alnus».'
+      + (gest && fonteFabbProblema ? ' ⚠ Non applicata: ' + fonteFabbProblema + '.' : '')
+      + (gest && !fonteFabbProblema ? ' Righe calcolate: ' + (state.mancanti || []).length + '. Si ricalcolano a ogni caricamento e import; dopo una modifica alle commesse, ⟳ Aggiorna.' : ''))));
   // Il confronto del da ordinare.
   const magazzini = [...new Set(A.giacApertura.map(r => r.magazzino).concat(A.movimenti.map(m => m.magazzino)))].sort();
   if (alnusMagEsclusi == null) alnusMagEsclusi = new Set();
@@ -6648,17 +6751,19 @@ function renderAlnus(root) {
   const piuNoi = righe.filter(r => r.differenza >= 0.0005).length, piuAlnus = righe.length - uguali - piuNoi;
   const chip = (m) => el('label', { style: 'display:inline-flex;gap:4px;align-items:center;font-size:12px;margin-right:10px;cursor:pointer;' },
     el('input', { type: 'checkbox', checked: contati.has(m) ? true : null,
-      onchange: (e) => { if (e.target.checked) alnusMagEsclusi.delete(m); else alnusMagEsclusi.add(m); ridisegna(); } }),
+      onchange: async (e) => { if (e.target.checked) alnusMagEsclusi.delete(m); else alnusMagEsclusi.add(m);
+        if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno(); ridisegna(); } }),
     m === 'WIP' ? 'WIP (reparto)' : m);
   const spunta = (testo, val, fn) => el('label', { style: 'display:inline-flex;gap:4px;align-items:center;font-size:12px;margin-right:14px;cursor:pointer;' },
-    el('input', { type: 'checkbox', checked: val ? true : null, onchange: (e) => { fn(e.target.checked); ridisegna(); } }), testo);
+    el('input', { type: 'checkbox', checked: val ? true : null, onchange: async (e) => { fn(e.target.checked);
+      if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno(); ridisegna(); } }), testo);
   const cerca = el('input', { type: 'text', class: 'search', id: 'alnus-cerca', value: alnusCerca, placeholder: 'Cerca codice o descrizione…',
     oninput: (e) => { alnusCerca = e.target.value; ridisegnaDopoRicerca('alnus'); } });
   root.append(el('h3', { style: 'margin:6px 0 6px;' }, 'Da ordinare: gestionale contro Alnus'),
     el('div', { class: 'sub', style: 'font-size:12px;margin-bottom:6px;' },
       plAlnus(righe.length, 'codice', 'codici') + ' (ACQ e senza tipo; C/L e MAC non si comprano) · ' + plAlnus(uguali, 'uguale', 'uguali') + ' · '
       + piuNoi + ' il gestionale ne ordinerebbe di più · ' + piuAlnus + ' Alnus ne ordinerebbe di più'
-      + (state.mancanti && state.mancanti.length ? '' : ' · ⚠ Fabbisogno di Alnus non importato: la colonna Alnus è vuota')),
+      + ((state.mancantiAlnus || state.mancanti || []).length ? '' : ' · ⚠ Fabbisogno di Alnus non importato: la colonna Alnus è vuota')),
     el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px 0;align-items:center;margin-bottom:10px;' },
       el('span', { class: 'sub', style: 'font-size:12px;margin-right:8px;' }, 'Magazzini che contano:'), ...magazzini.map(chip),
       el('span', { style: 'width:16px;' }),
@@ -9037,6 +9142,9 @@ function renderFabbisogno(root) {
   }
 
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Materiali')));
+  if (fonteFabbisogno() === 'gestionale') root.append(el('div', { style:'margin:-4px 0 10px;padding:8px 12px;border-radius:8px;font-size:12px;border:1px solid ' + (fonteFabbProblema ? 'var(--red)' : 'var(--or)') + ';' },
+    fonteFabbProblema ? '⚠ Fonte «gestionale» accesa su questo browser ma non applicata (' + fonteFabbProblema + '): qui sotto c’è Alnus.'
+      : 'Prova senza Alnus: il fabbisogno qui sotto è calcolato dal gestionale (liste delle commesse + specchio + OF), solo su questo browser. Si cambia in Produzione → Specchio Alnus.'));
 
   if (mancantiTabellaOk === false) {
     root.append(el('div', { class:'empty' },
