@@ -211,6 +211,9 @@ sez('Giacenza del gestionale (foto Alnus + nostri fatti)');
   const di = c => conf.find(x => x.codice === c);
   t('confronto: differenza = gestionale − Alnus', di('05 095 0146').qAlnus === 130 && di('05 095 0146').differenza === -4);
   t('confronto: codice solo nel gestionale, segnato', di('TS-1').qAlnus === 0 && di('TS-1').differenza === 28 && di('TS-1').soloGestionale && !di('A1').soloGestionale);
+  const lov = A.giacenzaGestionale({ apertura: [{ codice: 'L', magazzino: 'WIP', qta: 53 }], aperturaIl: '2026-11-20T09:33:11+00:00', magazzini: MAG,
+    movimenti: [{ codice: 'L', tipo: 'carico', qta: 50, fuori_giacenza: true, data: '2026-11-18', creato_il: '2026-11-20T15:06:15+00:00' }] });
+  t('DDT del 18 registrato il 20 dopo la foto: conta (vale creato_il, non la data del DDT)', lov.per.get('L').totale === 103);
   const neg = A.giacenzaGestionale({ apertura: [{ codice: 'N', magazzino: '01', qta: -340 }], aperturaIl: FOTO, magazzini: MAG });
   t('negativo in Alnus: confronto alla pari, non portato a zero', A.confrontoGiacenze(neg.per, A.giacenzaAlnus([{ codice: 'N', magazzino: '01', qta: -340 }], [], FOTO), MAG)[0].differenza === 0);
   const zero = A.giacenzaGestionale({ apertura, aperturaIl: FOTO, magazzini: MAG, movimenti: [], lotti: [], commesse });

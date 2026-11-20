@@ -4088,8 +4088,11 @@ async function caricaMancanti() {
 // Quindi si riprova senza, e `movPressoOk` spegne il bottone d'invio.
 let movPressoOk = null;   // null = da scoprire; false = migrazione mancante
 async function caricaMovimenti() {
+  // creato_il: la giacenza del gestionale conta cio' che e' REGISTRATO dopo la foto di
+  // Alnus (un DDT del 18 registrato il 20 viene dopo); senza, valeva la data del DDT.
+  // codice_mittente e azienda_id: il riquadro dei codici non riconosciuti.
   const BASE = 'id,data,tipo,codice,descrizione,qta,um,mittente,documento_tipo,documento_numero,'
-    + 'documento_data,documento_pos,ordine_rif,note,lotto_id';
+    + 'documento_data,documento_pos,ordine_rif,note,lotto_id,creato_il,codice_mittente,azienda_id';
   const leggi = (colonne) => fetchTutte(() =>
     sb.from('movimenti_magazzino').select(colonne).order('data').order('id'));
   // Dalla lettura piu' ricca alla piu' povera: ogni gradino e' una migrazione
@@ -4106,7 +4109,7 @@ async function caricaMovimenti() {
       const { data, error } = await leggi(g.col);
       if (!error) {
         movPressoOk = g.presso; movFuoriOk = g.fuori;
-        state.movimenti = data || []; return;
+        state.movimenti = data || []; state.movimentiLettiIl = Date.now(); return;
       }
       // Solo "colonna che non esiste" vuol dire migrazione mancante; un errore
       // di rete non deve spegnere il bottone per tutta la sessione.
@@ -6802,6 +6805,9 @@ function righeFabbisognoGestionale() {
 // il gestionale non ha un punto di partenza: si dice, non si inventa.
 async function giacenzeGestionaleOra() {
   if (state.alnus === undefined) { try { await caricaAlnus(); } catch (e) {} }
+  // I movimenti non arrivano in tempo reale: se sono di piu' di un minuto fa si
+  // rileggono, o un DDT scansionato a pagina aperta non entrerebbe nel conto.
+  if (!state.movimentiLettiIl || Date.now() - state.movimentiLettiIl > 60000) { try { await caricaMovimenti(); } catch (e) {} }
   const A = state.alnus;
   if (!A || !A.apertura) return { letto: false, motivo: !A ? 'lo specchio Alnus non si legge' : 'manca la foto d’apertura di Alnus' };
   const magazzini = alnusMagazziniContati([...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
@@ -6926,7 +6932,7 @@ function renderAlnus(root) {
   root.innerHTML = '';
   const ridisegna = () => renderAlnus(root);
   const ricarica = el('button', { class: 'btnsm', title: 'Rileggi lo specchio dal database',
-    onclick: async () => { ricarica.disabled = true; await caricaAlnus(); await applicaFonteFabbisogno(); ridisegna(); } }, '⟳ Aggiorna');
+    onclick: async () => { ricarica.disabled = true; await Promise.all([caricaAlnus(), caricaMovimenti()]); await applicaFonteFabbisogno(); ridisegna(); } }, '⟳ Aggiorna');
   root.append(el('div', { class: 'toolbar' }, el('h2', {}, 'Specchio Alnus'), ricarica));
   if (state.alnus === undefined) {
     root.append(el('div', { class: 'empty' }, 'Lettura dello specchio…'));
