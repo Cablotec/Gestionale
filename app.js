@@ -6422,7 +6422,9 @@ function renderOrdiniFornitore(root) {
       : righe.length + (righe.length === 1 ? ' riga: ' : ' righe: ') + righe.slice(0, 3).map(r => r.codice).join(', ') + (righe.length > 3 ? '…' : '');
     const ann = of.stato === 'annullato' || of.stato === 'chiuso';
     const daAlnus = of.origine === 'alnus';
-    tb.append(el('tr', { style: ann ? 'opacity:.55;' : '' },
+    tb.append(el('tr', { style: (ann ? 'opacity:.55;' : '') + 'cursor:pointer;', title: 'Apri l’ordine',
+      // Clic sulla riga = dettaglio (20 nov, Nico). I tasti della riga tengono il loro clic.
+      onclick: (e) => { if (e.target.closest('button')) return; apriDettaglioOf(of, ridisegna); } },
       el('td', {}, el('span', { class:'mono', style:'font-weight:700;white-space:nowrap;' }, numeroOrdineFornitore(of)),
         of.revisione ? el('span', { class:'sub', style:'margin-left:6px;font-size:11px;', title: of.modificato_il
           ? 'Modificato il ' + fmtIT(String(of.modificato_il).slice(0, 10)) : '' }, 'rev. ' + of.revisione) : '',
@@ -7003,6 +7005,121 @@ function renderAlnus(root) {
   root.append(el('div', { style: 'overflow-x:auto;' }, tbl));
   if (!alnusTutte && vis.length > 200) root.append(el('button', { class: 'btnsm', style: 'margin-top:8px;',
     onclick: () => { alnusTutte = true; ridisegna(); } }, 'Mostra tutti i ' + vis.length));
+}
+
+// ── IL DETTAGLIO DI UN ORDINE (20 nov, Nico: "invece della sola stampa vorrei cliccare
+// sulla riga intera per aprire un OF e vedere le varie informazioni") ───────────────
+// Testata (fornitore, date, stato, origine), righe con ordinato / residuo / arrivato,
+// gli arrivi registrati dopo l'ultimo import, le commesse che lo hanno come «n. OF»
+// e i totali. Sola lettura; da qui si stampa e (ordini del gestionale) si modifica.
+async function apriDettaglioOf(of, poi) {
+  if (!of) return;
+  if (state.alnus === undefined && of.origine === 'alnus') { try { await caricaAlnus(); } catch (e) {} }
+  const v = veloTerzista('Ordine ' + numeroOrdineFornitore(of) + ' · ' + nomeAziendaDi(of.fornitore_id), 1180);
+  const oggi = toLocalISO(new Date());
+  const daAlnus = of.origine === 'alnus';
+  const righe = of.righe || [];
+  const terz = of.tipo === 'terzista';
+  // Arrivi legati: carichi che citano questo ordine, dopo l'ultimo import se e' di Alnus.
+  const k = chiaveOf(of);
+  const dopo = of.sincronizzato_il ? Date.parse(of.sincronizzato_il) : null;
+  const arrivi = movimentiPerOf().filter(m => m.tipo === 'carico' && chiaveOfDaRif(m.ordine_rif) === k
+    && (dopo == null || Date.parse(m.data) > dopo));
+  const arrivatiPer = new Map();
+  arrivi.forEach(m => { const c = String(m.codice || '').trim().toUpperCase(); arrivatiPer.set(c, (arrivatiPer.get(c) || 0) + (Number(m.qta) || 0)); });
+  // Le commesse che lo hanno come «n. OF» (abbinamento) o dentro le righe (ordine al terzista).
+  const commesse = [];
+  (state.opFornitori || []).forEach(r => {
+    const x = ofDaNumeroOrdine(r.numero_ordine);
+    if (!x || x.serie !== String(of.serie || 'OF').toUpperCase() || x.anno !== Number(of.anno) || x.numero !== Number(of.numero)) return;
+    const o = (state.operazioni || []).find(z => z.id === r.operazione_id);
+    if (o && !commesse.includes(o)) commesse.push(o);
+  });
+  righe.forEach(r => { const o = r.operazione_id ? (state.operazioni || []).find(z => z.id === r.operazione_id) : null; if (o && !commesse.includes(o)) commesse.push(o); });
+
+  const scheda = (titolo, valore) => el('div', { style: 'min-width:150px;' },
+    el('div', { class: 'sub', style: 'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' }, titolo),
+    el('div', { style: 'font-size:13px;font-weight:600;margin-top:2px;' }, valore == null || valore === '' ? '—' : valore));
+  const statoTxt = of.stato === 'chiuso' ? 'chiuso (evaso in Alnus)' : of.stato === 'annullato' ? 'annullato' : 'aperto';
+  const tot = righe.reduce((s2, r) => s2 + (Number(r.totale) || 0), 0);
+  v.corpo.append(el('div', { style: 'display:flex;flex-wrap:wrap;gap:14px 24px;margin-bottom:12px;' },
+    scheda('Numero', numeroOrdineFornitore(of) + (of.revisione ? ' · rev. ' + of.revisione : '')),
+    scheda('Fornitore', nomeAziendaDi(of.fornitore_id)),
+    scheda('Data', of.data ? fmtIT(String(of.data).slice(0, 10)) : ''),
+    scheda('Consegna', consegneOfInBreve(of)),
+    scheda('Stato', statoTxt),
+    scheda('Origine', daAlnus ? 'Alnus' + (of.sincronizzato_il ? ' · aggiornato il ' + fmtQuando(of.sincronizzato_il) : '') : 'gestionale'),
+    scheda('Totale', tot ? cartaEuro(tot) : '')));
+  if (of.note) v.corpo.append(el('div', { class: 'sub', style: 'font-size:12px;margin-bottom:10px;' }, 'Note: ' + of.note));
+
+  // Le righe.
+  const tbl = el('table', { class: 'rt' });
+  const th = (t, dx) => el('th', { style: dx ? 'text-align:right;' : '' }, t);
+  const td = (x, dx, extra) => el('td', { class: dx ? 'mono' : '', style: (dx ? 'text-align:right;white-space:nowrap;' : '') + (extra || '') }, x == null || x === '' ? '—' : x);
+  if (terz) {
+    tbl.append(el('thead', {}, el('tr', {}, th('Commessa'), th('Prodotto'), th('Pezzi', 1), th('Consegna'), th('€/pz', 1), th('Totale', 1))));
+    const tb = el('tbody');
+    righe.forEach(r => tb.append(el('tr', {}, td(r.etichetta), td((r.articolo || '') + (r.descrizione ? ' · ' + r.descrizione : '')),
+      td(r.pezzi ? nfIT(r.pezzi) : '', 1), td(consegnaRigaOf(of, r) ? fmtIT(consegnaRigaOf(of, r)) : ''),
+      td(r.prezzo_pz != null ? cartaEuro(r.prezzo_pz, 5) : '', 1), td(r.totale != null ? cartaEuro(r.totale) : '', 1))));
+    tbl.append(tb);
+  } else {
+    tbl.append(el('thead', {}, el('tr', {}, th('Riga'), th('Codice'), th('Descrizione'), th('UM'), th('Ordinato', 1),
+      th(daAlnus ? 'Residuo in Alnus' : 'Arrivato', 1), th('Arrivato dopo', 1), th('Da arrivare', 1), th('Consegna'), th('€/unità', 1), th('Totale', 1), th('Cod. fornitore'))));
+    const tb = el('tbody');
+    const arrivatiResto = new Map(arrivatiPer);
+    righe.forEach(r => {
+      const c = String(r.codice || '').trim().toUpperCase();
+      const ord = Number(r.qta) || 0;
+      const res = r.qta_residua != null ? Number(r.qta_residua) : null;
+      // Gli arrivi dopo l'import si attribuiscono alle righe aperte del codice, nell'ordine.
+      const disp = arrivatiResto.get(c) || 0;
+      const base = res != null ? res : ord;
+      const preso = Math.min(base, disp);
+      arrivatiResto.set(c, disp - preso);
+      const aperto = Math.max(0, base - preso);
+      const cons = consegnaRigaOf(of, r);
+      const scaduta = aperto > 0 && cons && cons < oggi && of.stato === 'emesso';
+      const evasa = !(aperto > 0);
+      tb.append(el('tr', { style: evasa ? 'opacity:.6;' : '' },
+        td(r.riga != null ? String(r.riga) : ''),
+        el('td', { class: 'mono', style: 'font-weight:700;cursor:pointer;white-space:nowrap;', title: 'Scheda del codice',
+          onclick: () => apriSchedaCodice(String(r.codice || '').trim()) }, r.codice || '—'),
+        td(r.descrizione, 0, 'max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;'),
+        td(r.um),
+        td(nfIT(ord), 1),
+        td(daAlnus ? (res != null ? nfIT(res) : '') : nfIT(preso), 1),
+        td(daAlnus && preso ? nfIT(preso) : '', 1),
+        td(aperto > 0 ? nfIT(aperto) : '✓', 1, aperto > 0 ? 'font-weight:700;' : 'color:var(--grn);'),
+        td(cons ? fmtIT(cons) + (scaduta ? ' ⚠' : '') : '', 0, 'white-space:nowrap;' + (scaduta ? 'color:var(--or);font-weight:700;' : '')),
+        td(r.prezzo != null ? cartaEuro(r.prezzo, 5) : '', 1),
+        td(r.totale != null ? cartaEuro(r.totale) : '', 1),
+        td(r.codice_fornitore, 0, 'font-size:11px;')));
+    });
+    tbl.append(tb);
+  }
+  const aperteN = terz ? 0 : righe.filter(r => (r.qta_residua != null ? Number(r.qta_residua) : Number(r.qta) || 0) > 0).length;
+  v.corpo.append(el('div', { class: 'sub', style: 'font-size:12px;margin:4px 0 6px;' },
+    plAlnus(righe.length, 'riga', 'righe') + (terz ? '' : ' · ' + plAlnus(aperteN, 'aperta', 'aperte') + ' · ' + plAlnus(righe.length - aperteN, 'evasa', 'evase'))
+    + (daAlnus ? ' · il residuo è quello dell’ultimo import; «Arrivato dopo» = carichi di Alnus successivi' : '')),
+    el('div', { style: 'overflow-x:auto;max-height:46vh;overflow-y:auto;' }, tbl));
+
+  // Arrivi e commesse.
+  if (arrivi.length) v.corpo.append(el('div', { style: 'margin-top:12px;' },
+    el('div', { style: 'font-weight:700;font-size:13px;margin-bottom:4px;' }, 'Arrivi registrati' + (daAlnus ? ' dopo l’ultimo import' : '')),
+    ...arrivi.slice().sort((a, b) => String(a.data).localeCompare(String(b.data))).map(m => el('div', { class: 'mono', style: 'font-size:12px;padding:1px 0;' },
+      fmtQuando(m.data) + ' · ' + m.codice + ' · ' + nfIT(m.qta)))));
+  v.corpo.append(el('div', { style: 'margin-top:12px;' },
+    el('div', { style: 'font-weight:700;font-size:13px;margin-bottom:4px;' }, 'Commesse collegate'),
+    commesse.length ? el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;' }, ...commesse.map(o => el('button', { type: 'button', class: 'btnsm',
+      title: 'Apri la commessa', onclick: () => { v.chiudi(); openOperazioneModal(o, { scheda: 'mat' }); } },
+      (o.numero_ordine || '') + (o.pos ? '/' + o.pos : '') + (o.stato && o.stato !== 'aperta' ? ' · ' + o.stato : ''))))
+      : el('div', { class: 'sub', style: 'font-size:12px;' }, 'Nessuna commessa ha questo numero nel «n. OF» del terzista.')));
+
+  v.piede.append(
+    el('button', { class: 'btng', onclick: () => stampaOrdineFornitore(of) }, '🖨 Stampa'),
+    (eAdminOra() && !daAlnus && of.stato === 'emesso') ? el('button', { class: 'btng', onclick: () => { v.chiudi(); modificaOrdineFornitore(of, poi); } }, '✎ Modifica') : '',
+    el('button', { class: 'btnp', onclick: v.chiudi }, 'Chiudi'));
 }
 
 function stampaOrdineFornitore(of, finestra) {
