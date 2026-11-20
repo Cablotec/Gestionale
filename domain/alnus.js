@@ -122,7 +122,8 @@ function leggiOfAlnus(matrice) {
     codice: ['Codice Articolo'], descrizione: ['Descrizione Articolo'], fornitore: ['Nomignolo'],
     consegna: ['Data Cons. Confermata', 'Data Rich. Consegna'], ordinata: ['Quantita in UM ordine'],
     residua: [k => /^quantit.*residua$/.test(k)], interna: ['Quantita in UM interna'], um: ['UM In', 'UM Or'],
-    prezzo: ['Prezzo Netto Riga'], codice_fornitore: ['Articolo Cli/For'], anno_odl: ['Anno ODL'], odl: ['Nr. ODL'] });
+    prezzo: ['Prezzo Netto Riga'], codice_fornitore: ['Articolo Cli/For'], anno_odl: ['Anno ODL'], odl: ['Nr. ODL'],
+    data: ['Data Immissione'] });
   for (const k of ['anno', 'numero', 'codice', 'residua']) if (C[k] < 0) return { errore: 'Manca la colonna «' + k + '» negli OF aperti.' };
   const righe = [], scartate = [];
   M.slice(iInt + 1).forEach(r => {
@@ -141,7 +142,7 @@ function leggiOfAlnus(matrice) {
       codice_fornitore: v('codice_fornitore') == null ? null : String(v('codice_fornitore')).trim() || null,
       um: String(v('um') || '').trim() || null, qta_ordinata: ord == null || isNaN(ord) ? null : +(ord * f).toFixed(6),
       qta_residua: +(res * f).toFixed(6), consegna: dataCella(v('consegna')), prezzo: pr == null || isNaN(pr) ? null : pr,
-      odl: v('odl') ? String(v('anno_odl') || '') + '/' + String(v('odl')) : null });
+      odl: v('odl') ? String(v('anno_odl') || '') + '/' + String(v('odl')) : null, data: dataCella(v('data')) });
   });
   return { righe, scartate };
 }

@@ -5739,10 +5739,12 @@ async function caricaOrdiniFornitore() {
   } catch (e) { state.ordiniFornitore = null; }
   if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
 }
-function numeroOrdineFornitore(of) { return of ? 'OFS ' + of.numero + '/' + of.anno : ''; }
+// Serie (20 nov): «OFS» nostri, «OF»/«OL» ordini di Alnus caricati col loro numero.
+function numeroOrdineFornitore(of) { return of ? (of.serie || 'OFS') + ' ' + of.numero + '/' + of.anno : ''; }
 // ✎ Modifica di un ordine emesso (19 nov): la finestra del suo tipo, precompilata.
 function modificaOrdineFornitore(of, poi) {
   if (!of || of.stato !== 'emesso') return toast('Un ordine annullato non si modifica.', 'err');
+  if (of.origine === 'alnus') return toast('È un ordine di Alnus: si modifica in Alnus e si riaggiorna importando gli OF aperti.', 'err', 9000);
   if (of.tipo === 'acquisto') apriOrdineAcquisto(poi, of);
   else apriOrdineTerzista(null, of.fornitore_id, poi, of);
 }
@@ -5957,7 +5959,10 @@ async function annullaOrdineFornitore(of, poi) {
 // Alnus non si aggiorna. `coperti` = codici tutti gia' in un OF aperto.
 // `escludiId`: l'ordine che si sta modificando, che non toglie se stesso.
 function daOrdinarePerFornitore(escludiId) {
-  const aperti = ordinatoApertoOf(state.ordiniFornitore || [], state.movimenti, escludiId);
+  // ⚠ Gli OF di ALNUS non si tolgono: il «da ordinare» di Alnus li conta gia'.
+  // E le righe calcolate dal gestionale (`fonte: 'specchio'`) hanno gia' tolto
+  // tutti gli OF: togliere ancora sarebbe contarli due volte.
+  const aperti = ordinatoApertoOf((state.ordiniFornitore || []).filter(o => o.origine !== 'alnus'), state.movimenti, escludiId);
   const perCodice = new Map();
   (state.mancanti || []).forEach(m => {
     if (typeof mancanteCategoria !== 'function' || mancanteCategoria(m) !== 'da_ordinare') return;
@@ -5965,13 +5970,13 @@ function daOrdinarePerFornitore(escludiId) {
     const q = Number(m.qta_da_ordinare) || 0;
     if (!c || !(q > 0)) return;
     const v = perCodice.get(c);
-    if (!v || q > v.daOrdinare) perCodice.set(c, { codice: c, descrizione: m.descrizione || '', um: m.um || '', daOrdinare: q });
+    if (!v || q > v.daOrdinare) perCodice.set(c, { codice: c, descrizione: m.descrizione || '', um: m.um || '', daOrdinare: q, gestionale: m.fonte === 'specchio' });
   });
   const per = new Map(), senza = [], coperti = [];
   perCodice.forEach(r => {
-    const ap = aperti.get(r.codice.toUpperCase());
+    const ap = r.gestionale ? null : aperti.get(r.codice.toUpperCase());
     r.inOf = ap && ap.aperto > 0 ? ap.aperto : 0;
-    r.ofAperti = ap ? ap.ordini.filter(x => x.aperto > 0).map(x => 'OFS ' + x.numero + '/' + x.anno) : [];
+    r.ofAperti = ap ? ap.ordini.filter(x => x.aperto > 0).map(x => x.serie + ' ' + x.numero + '/' + x.anno) : [];
     r.qta = Math.max(0, +(r.daOrdinare - r.inOf).toFixed(6));
     if (!(r.qta > 0)) { coperti.push(r); return; }
     const nome = matAbitualeDi(r.codice);
@@ -5992,7 +5997,7 @@ function notaDaOrdinare(r) {
 function ultimoPrezzoAcquisto(fornitoreId, codice, escludiId) {
   const c = String(codice || '').trim().toUpperCase();
   if (!c) return null;
-  const ofs = (state.ordiniFornitore || []).filter(of => of.tipo === 'acquisto' && of.stato === 'emesso' && of.fornitore_id === fornitoreId && of.id !== escludiId)
+  const ofs = (state.ordiniFornitore || []).filter(of => of.tipo === 'acquisto' && of.stato !== 'annullato' && of.fornitore_id === fornitoreId && of.id !== escludiId)
     .sort((a, b) => String(b.data).localeCompare(String(a.data)) || (b.anno - a.anno) || (b.numero - a.numero));
   for (const o2 of ofs) {
     const r = (o2.righe || []).find(x => String(x.codice || '').trim().toUpperCase() === c && x.prezzo != null);
@@ -6329,7 +6334,7 @@ function renderOrdiniFornitore(root) {
     ...[['tutti', 'Tutti i tipi'], ['acquisto', 'D’acquisto'], ['terzista', 'Ai terzisti']].map(([v, t]) => el('option', { value: v }, t)));
   selTipo.value = ofFiltroTipo;
   const selStato = el('select', { onchange: (e) => { ofFiltroStato = e.target.value; ridisegna(); } },
-    ...[['emesso', 'Emessi'], ['annullato', 'Annullati'], ['tutti', 'Tutti']].map(([v, t]) => el('option', { value: v }, t)));
+    ...[['emesso', 'Emessi'], ['chiuso', 'Chiusi (evasi in Alnus)'], ['annullato', 'Annullati'], ['tutti', 'Tutti']].map(([v, t]) => el('option', { value: v }, t)));
   selStato.value = ofFiltroStato;
   const cerca = el('input', { type:'text', class:'search', id:'of-cerca', value: ofCerca,
     placeholder:'Cerca fornitore, numero, codice, commessa…',
@@ -6347,7 +6352,7 @@ function renderOrdiniFornitore(root) {
   root.append(el('div', { class:'sub', style:'margin:-4px 0 10px;font-size:12px;' },
     lista.length + (lista.length === 1 ? ' ordine' : ' ordini')
     + (lista.length ? ' · ' + cartaEuro(lista.filter(o => o.stato === 'emesso').reduce((s, o) => s + totOf(o), 0)) + ' emessi' : '')
-    + ' · fac simile: non sostituiscono gli OF di Alnus.'));
+    + ' · «OF»/«OL» = ordini di Alnus col loro numero (si aggiornano importando gli OF aperti nello Specchio Alnus); «OFS» = fac simile del gestionale.'));
   if (!lista.length) {
     root.append(el('div', { class:'empty' }, state.ordiniFornitore.length ? 'Nessun ordine con questi filtri.'
       : 'Nessun ordine ancora. Gli OF d’acquisto nascono da «＋ Nuovo OF d’acquisto»; quelli ai terzisti dal Ciclo produttivo della commessa.'));
@@ -6361,12 +6366,15 @@ function renderOrdiniFornitore(root) {
     const contenuto = of.tipo === 'terzista'
       ? righe.map(r => r.etichetta).join(', ')
       : righe.length + (righe.length === 1 ? ' riga: ' : ' righe: ') + righe.slice(0, 3).map(r => r.codice).join(', ') + (righe.length > 3 ? '…' : '');
-    const ann = of.stato === 'annullato';
+    const ann = of.stato === 'annullato' || of.stato === 'chiuso';
+    const daAlnus = of.origine === 'alnus';
     tb.append(el('tr', { style: ann ? 'opacity:.55;' : '' },
       el('td', {}, el('span', { class:'mono', style:'font-weight:700;white-space:nowrap;' }, numeroOrdineFornitore(of)),
         of.revisione ? el('span', { class:'sub', style:'margin-left:6px;font-size:11px;', title: of.modificato_il
           ? 'Modificato il ' + fmtIT(String(of.modificato_il).slice(0, 10)) : '' }, 'rev. ' + of.revisione) : '',
-        ann ? el('span', { class:'badge bgry', style:'margin-left:6px;' }, 'annullato') : ''),
+        ann ? el('span', { class:'badge bgry', style:'margin-left:6px;' }, of.stato === 'chiuso' ? 'chiuso' : 'annullato') : '',
+        daAlnus ? el('span', { class:'badge bor', style:'margin-left:6px;', title:'Ordine fatto in Alnus e caricato col suo numero: si modifica e si chiude in Alnus'
+          + (of.sincronizzato_il ? ' · aggiornato il ' + fmtIT(String(of.sincronizzato_il).slice(0, 10)) : '') }, 'Alnus') : ''),
       el('td', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, fmtIT(String(of.data || '').slice(0, 10))),
       el('td', {}, el('span', { class:'badge ' + (of.tipo === 'terzista' ? 'bvio' : 'bblu') }, of.tipo === 'terzista' ? 'terzista' : 'acquisto')),
       el('td', {}, nomeAziendaDi(of.fornitore_id)),
@@ -6375,9 +6383,9 @@ function renderOrdiniFornitore(root) {
       el('td', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, consegneOfInBreve(of).replace('da concordare', '—')),
       el('td', { style:'white-space:nowrap;text-align:right;' },
         el('button', { type:'button', class:'btnsm', title:'Stampa l’ordine', onclick: () => stampaOrdineFornitore(of) }, '🖨'),
-        (eAdminOra() && !ann) ? el('button', { type:'button', class:'btnsm', style:'margin-left:4px;', title:'Annulla l’ordine',
+        (eAdminOra() && !ann && !daAlnus) ? el('button', { type:'button', class:'btnsm', style:'margin-left:4px;', title:'Annulla l’ordine',
           onclick: () => annullaOrdineFornitore(of, ridisegna) }, '✕') : '',
-        (eAdminOra() && !ann) ? el('button', { type:'button', class:'btnsm', style:'margin-left:4px;', title:'Modifica l’ordine: stesso numero, nuova revisione',
+        (eAdminOra() && !ann && !daAlnus) ? el('button', { type:'button', class:'btnsm', style:'margin-left:4px;', title:'Modifica l’ordine: stesso numero, nuova revisione',
           onclick: () => modificaOrdineFornitore(of, ridisegna) }, '✎') : '')));
   });
   tbl.append(tb);
@@ -6495,7 +6503,8 @@ async function importaOfAlnus(f, poi) {
   const sc = await chiediConferma({ titolo: 'OF aperti di Alnus', testo: plAlnus(o.righe.length, 'riga', 'righe') + ' di ' + nOf + ' OF, '
     + plAlnus(new Set(o.righe.map(r => r.fornitore)).size, 'fornitore', 'fornitori') + '. ' + plAlnus(scad, 'riga', 'righe') + ' con la consegna già passata: si vedono come «scadute».'
     + (o.scartate.length ? '\n' + o.scartate.length + ' righe illeggibili saltate.' : '')
-    + '\n\nFotografia del ' + fmtQuando(presoIl) + ' (ora del file): i carichi da OF stampati dopo quest’ora la scalano. Sostituisce la fotografia OF precedente.',
+    + '\n\nFotografia del ' + fmtQuando(presoIl) + ' (ora del file): i carichi da OF stampati dopo quest’ora la scalano. Sostituisce la fotografia OF precedente.'
+    + '\n\nGli OF diventano anche ORDINI del gestionale, col loro numero (OF n/anno): nuovi entrano, quelli già caricati si aggiornano, quelli non più aperti diventano «chiuso».',
     conferma: 'Importa', annulla: 'Annulla' });
   if (sc !== 'conferma') return;
   let foto = null;
@@ -6510,10 +6519,66 @@ async function importaOfAlnus(f, poi) {
   } catch (e) {
     if (foto) await sb.from('alnus_fotografie').delete().eq('id', foto.id);
     toast('OF non salvati: ' + (e.message || e), 'err', 9000);
+    await caricaAlnus(); if (typeof poi === 'function') poi();
+    return;
   }
+  await sincronizzaOfAlnus(o.righe, presoIl);
   await caricaAlnus(); if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
   if (typeof poi === 'function') poi();
 }
+// GLI OF APERTI DI ALNUS DIVENTANO ORDINI DEL GESTIONALE (20 nov, Nico: "potremmo
+// caricare gli ordini fornitori attuali nel nostro gestionale per buoni?").
+// Serie «OF»/«OL» col numero di Alnus (`sincronizza_of_alnus`, strumenti/
+// migrazione-of-alnus.sql): nuovi entrano, esistenti si aggiornano, quelli spariti
+// dall'estrazione diventano «chiuso». Fornitore = scheda in Aziende col nome di Alnus;
+// chi non ce l'ha si crea (con conferma) o i suoi ordini restano fuori.
+async function sincronizzaOfAlnus(righe, presoIl) {
+  if (state.ordiniFornitore == null) await caricaOrdiniFornitore();
+  if (state.ordiniFornitore == null) return toast('Ordini fornitore non leggibili: gli OF di Alnus non si caricano come ordini.', 'err', 9000);
+  const nomi = [...new Set(righe.map(r => r.fornitore).filter(Boolean))];
+  const senza = nomi.filter(n => !aziendaPerNome(n)).sort((a, b) => a.localeCompare(b, 'it'));
+  if (senza.length) {
+    const sc = await chiediConferma({ titolo: 'Fornitori senza scheda',
+      testo: plAlnus(senza.length, 'fornitore degli OF di Alnus non ha', 'fornitori degli OF di Alnus non hanno') + ' una scheda in Aziende:\n'
+        + senza.join(' · ') + '\n\nLe creo come fornitori? Senza, i loro ordini non si caricano come ordini del gestionale.',
+      conferma: 'Crea le schede', annulla: 'Salta i loro ordini' });
+    if (sc === 'conferma') {
+      for (const nome of senza) {
+        const { data, error } = await sb.from('aziende').insert({ nome, attivo: true, is_cliente: false, is_fornitore: true }).select().single();
+        if (error) { toast('Scheda «' + nome + '» non creata: ' + error.message, 'err', 9000); continue; }
+        state.aziende.push(data);
+      }
+    }
+  }
+  const gruppi = new Map(), fuori = new Set();
+  righe.forEach(r => {
+    const az = r.fornitore ? aziendaPerNome(r.fornitore) : null;
+    const serie = String(r.sezionale || 'OF').trim().toUpperCase();
+    const k = serie + ' ' + r.anno + '/' + r.numero;
+    if (!az) { fuori.add(k); return; }
+    if (!gruppi.has(k)) gruppi.set(k, { serie, anno: r.anno, numero: r.numero, fornitore_id: az.id, data: null, consegna: null, righe: [] });
+    const g = gruppi.get(k);
+    if (r.data && (!g.data || r.data < g.data)) g.data = r.data;
+    if (r.consegna && (!g.consegna || r.consegna < g.consegna)) g.consegna = r.consegna;
+    const qta = r.qta_ordinata != null ? r.qta_ordinata : r.qta_residua;
+    g.righe.push({ riga: r.riga, codice: r.codice, descrizione: r.descrizione || '', um: r.um || '', qta, qta_residua: r.qta_residua,
+      consegna: r.consegna || null, prezzo: r.prezzo, totale: r.prezzo != null ? Math.round(qta * r.prezzo * 100) / 100 : null,
+      codice_fornitore: r.codice_fornitore || null, odl: r.odl || null });
+  });
+  const ordini = [...gruppi.values()];
+  if (!ordini.length) return toast('Nessun OF di Alnus caricabile come ordine (fornitori senza scheda).', 'err', 9000);
+  const { data, error } = await sb.rpc('sincronizza_of_alnus', { p_ordini: ordini, p_preso_il: presoIl });
+  if (error) {
+    const manca = /(could not find|does not exist|schema cache)/i.test(error.message || '');
+    return toast(manca ? 'Gli OF sono nello specchio, ma per caricarli come ordini manca lo SQL migrazione-of-alnus.sql.'
+      : 'OF di Alnus non caricati come ordini: ' + error.message, 'err', 12000);
+  }
+  await caricaOrdiniFornitore();
+  const e = data || {};
+  toast('OF di Alnus nel gestionale: ' + plAlnus(e.nuovi || 0, 'nuovo', 'nuovi') + ', ' + plAlnus(e.aggiornati || 0, 'aggiornato', 'aggiornati')
+    + ', ' + plAlnus(e.chiusi || 0, 'chiuso', 'chiusi') + (fuori.size ? ' · ' + plAlnus(fuori.size, 'ordine saltato', 'ordini saltati') + ' (fornitore senza scheda)' : ''), 'ok', 12000);
+}
+
 async function importaMovimentiAlnus(f, poi) {
   const m = leggiMovimentiAlnus(await testoAlnus(f));
   if (m.errore) return toast(m.errore, 'err', 9000);
@@ -6549,6 +6614,32 @@ async function importaMovimentiAlnus(f, poi) {
 // righe di `mancanti`); gli altri restano su Alnus. L'import del Fabbisogno
 // Massivo continua: resta in `state.mancantiAlnus` come termine di paragone.
 // Se lo specchio non c'e' (tabelle, apertura) si resta su Alnus e lo si dice.
+// Gli OF di Alnus sono gia' stati caricati come ordini del gestionale?
+function ofAlnusSincronizzati() { return (state.ordiniFornitore || []).some(o => o && o.origine === 'alnus'); }
+// I carichi che legano gli arrivi agli OF: i nostri (DDT) + i carichi da OF di Alnus nello specchio.
+function movimentiPerOf() {
+  const A = state.alnus;
+  const daAlnus = (A && Array.isArray(A.movimenti) ? A.movimenti : [])
+    .filter(m => ['OF', 'OL'].includes(String(m.tipo_doc || '').trim().toUpperCase()) && Number(m.qta) > 0 && m.numero_doc && m.anno_doc)
+    .map(m => ({ tipo: 'carico', codice: m.codice, qta: Number(m.qta), data: m.data,
+      ordine_rif: String(m.tipo_doc).trim().toUpperCase() + ' ' + Number(m.numero_doc) + '/' + Number(m.anno_doc) }));
+  return (state.movimenti || []).concat(daAlnus);
+}
+// Gli OF aperti (da ordinatoApertoOf) nella forma di ofAlnusAperti, per il motore dello specchio.
+function ofApertiComeAlnus(aperti, filtro, oggi) {
+  const per = new Map();
+  aperti.forEach((v, cod) => v.ordini.forEach(x => {
+    if (!filtro(x) || !(x.aperto > 0)) return;
+    const scaduta = !!(x.consegna && x.consegna < oggi);
+    if (!per.has(cod)) per.set(cod, { aperto: 0, scaduto: 0, righe: [] });
+    const p = per.get(cod);
+    p.aperto = +(p.aperto + x.aperto).toFixed(6);
+    if (scaduta) p.scaduto = +(p.scaduto + x.aperto).toFixed(6);
+    p.righe.push({ anno: x.anno, numero: x.numero, sezionale: x.serie, aperto: x.aperto, consegna: x.consegna, scaduta,
+      fornitore: x.fornitore_id ? nomeAziendaDi(x.fornitore_id) : null });
+  }));
+  return per;
+}
 const FONTE_FABB_CHIAVE = 'cablotec.fonteFabbisogno';
 function fonteFabbisogno() {
   try { return localStorage.getItem(FONTE_FABB_CHIAVE) === 'gestionale' ? 'gestionale' : 'alnus'; } catch (e) { return 'alnus'; }
@@ -6584,20 +6675,22 @@ function righeFabbisognoGestionale() {
   (state.mancantiAlnus || []).forEach(m => { const c = String(m.codice || '').trim(); if (c && !tipi.has(c) && m.tipo_parte) tipi.set(c, m.tipo_parte); });
   A.giacApertura.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); if (!um.has(r.codice) && r.um) um.set(r.codice, r.um); });
   A.ofRighe.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); });
-  // I nostri OF d'acquisto aperti, riga per riga con la sua consegna.
+  // Gli OF aperti: quelli di Alnus (sincronizzati nel gestionale, o dalla
+  // fotografia se non ancora) e i nostri OFS, ciascuno con la sua consegna.
+  const oggi = toLocalISO(new Date());
+  const apertiTutti = ordinatoApertoOf(state.ordiniFornitore || [], movimentiPerOf(), null);
   const ofNostri = [];
-  ordinatoApertoOf(state.ordiniFornitore || [], state.movimenti, null).forEach((v, cod) => v.ordini.forEach(x => {
-    if (!(x.aperto > 0)) return;
-    const of = (state.ordiniFornitore || []).find(z => z.id === x.id);
-    const riga = of ? (of.righe || []).find(r => String(r.codice || '').trim().toUpperCase() === cod) : null;
-    ofNostri.push({ codice: riga ? String(riga.codice).trim() : cod, aperto: x.aperto, consegna: of ? consegnaRigaOf(of, riga) : null,
-      ordine: 'OFS ' + x.numero + '/' + x.anno, fornitore: of ? nomeAziendaDi(of.fornitore_id) : null });
+  apertiTutti.forEach((v, cod) => v.ordini.forEach(x => {
+    if (!(x.aperto > 0) || x.origine === 'alnus') return;
+    ofNostri.push({ codice: cod, aperto: x.aperto, consegna: x.consegna, ordine: x.serie + ' ' + x.numero + '/' + x.anno,
+      fornitore: x.fornitore_id ? nomeAziendaDi(x.fornitore_id) : null });
   }));
   const magazzini = [...alnusMagazziniContati([...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
     .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean))];
   return righeFabbisognoSpecchio({ fabbisogno: fabbisognoDaListe(base.viveConLista), tipi, descr, um,
     giacenza: giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il), magazzini: new Set(magazzini),
-    ofAlnus: ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, toLocalISO(new Date())),
+    ofAlnus: ofAlnusSincronizzati() ? ofApertiComeAlnus(apertiTutti, x => x.origine === 'alnus', oggi)
+      : ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, oggi),
     ofNostri, contaScaduti: alnusContaScaduti });
 }
 // La pillola in alto: chi ha acceso il gestionale come fonte non deve dimenticarlo.
@@ -6649,10 +6742,14 @@ function confrontoAlnus(opz) {
   if (alnusTipi) alnusTipi.forEach((t, c) => { if (!tipi.has(c)) tipi.set(c, t); });
   A.giacApertura.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); });
   const giacenza = giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il);
-  const ofAlnus = ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, toLocalISO(new Date()));
-  const ofN = ordinatoApertoOf(state.ordiniFornitore || [], state.movimenti, null);
+  const oggi = toLocalISO(new Date());
+  const ofN = ordinatoApertoOf(state.ordiniFornitore || [], movimentiPerOf(), null);
+  const ofAlnus = ofAlnusSincronizzati() ? ofApertiComeAlnus(ofN, x => x.origine === 'alnus', oggi)
+    : ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, oggi);
   const ofNostri = new Map();
-  [...fabbisogno.keys(), ...daOrdAlnus.keys()].forEach(c => { const v = ofN.get(c.toUpperCase()); if (v && v.aperto > 0) ofNostri.set(c, v.aperto); });
+  [...fabbisogno.keys(), ...daOrdAlnus.keys()].forEach(c => { const v = ofN.get(c.toUpperCase());
+    const ap = v ? v.ordini.filter(x => x.origine !== 'alnus').reduce((s, x) => s + x.aperto, 0) : 0;
+    if (ap > 0) ofNostri.set(c, ap); });
   const righe = confrontoDaOrdinare({ fabbisogno, tipi, giacenza, ofAlnus, ofNostri, daOrdinareAlnus: daOrdAlnus,
     magazzini: opz.magazzini, contaScaduti: opz.contaScaduti });
   righe.forEach(r => { r.descrizione = descr.get(r.codice) || ''; r.of = ofAlnus.get(r.codice) || null; });
@@ -8085,7 +8182,14 @@ const RUOLI_CONTATTO = ['Amministrazione', 'Acquisti', 'Logistica'];
 function aziendaPerNome(nome) {
   const k = importOrdiniChiaveNome(nome);
   if (!k) return null;
-  return (state.aziende || []).find(a => importOrdiniChiaveNome(a.nome) === k) || null;
+  const esatta = (state.aziende || []).find(a => importOrdiniChiaveNome(a.nome) === k);
+  if (esatta) return esatta;
+  // Alnus TRONCA il nome a 20 caratteri (20 nov: «TECNOCAB SNC» = «TECNOCAB SNC DI
+  // GALASSI GIOVANNA &C», «TEKNINA DI ANJEZA LI» = «Teknina di Anjeza Lika»).
+  // Vale l'inizio del nome, ma solo se e' abbastanza lungo e porta a UNA scheda sola.
+  if (k.length < 8) return null;
+  const inizio = (state.aziende || []).filter(a => importOrdiniChiaveNome(a.nome).startsWith(k));
+  return inizio.length === 1 ? inizio[0] : null;
 }
 
 // { ok:false } se la colonna non c'e' (migrazione non eseguita): chi chiama

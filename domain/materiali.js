@@ -696,35 +696,53 @@ function applicaDistinteProdotti(figliDi, articoli) {
 // ⚠ Regge solo se gli OF d'acquisto si fanno QUI e non anche in Alnus.
 // `movimenti` null (non letti) = nessun arrivo contato: si toglie l'ordine intero,
 // meglio una proposta corta che un ordine doppio.
+// SERIE (20 nov, OF di Alnus nel gestionale): «OFS» = nostri, «OF» e «OL» =
+// ordini di Alnus caricati col loro numero. Il testo sul documento dice la serie:
+// «OF 772/2026» e' di Alnus, «OFS 3/2026» e' nostro. La chiave e' 'SERIE anno/numero'.
+// Un ordine sincronizzato da Alnus (`sincronizzato_il`) ha gia' scalato quanto era
+// arrivato prima: contano solo i carichi DOPO quell'ora. Righe con `qta_residua`
+// (Alnus): conta il residuo, non l'ordinato.
 function chiaveOfDaRif(rif) {
-  const m = /\bOFS?\s*(?:n\.?\s*)?(\d+)\s*\/\s*(\d{4})\b/i.exec(String(rif || ''));
-  return m ? Number(m[2]) + '/' + Number(m[1]) : null;
+  const m = /\b(OFS|OF|OL)\s*(?:n\.?\s*)?(\d+)\s*\/\s*(\d{4})\b/i.exec(String(rif || ''));
+  return m ? m[1].toUpperCase() + ' ' + Number(m[3]) + '/' + Number(m[2]) : null;
 }
+function chiaveOf(of) { return String((of && of.serie) || 'OFS').toUpperCase() + ' ' + Number(of.anno) + '/' + Number(of.numero); }
 function ordinatoApertoOf(ordini, movimenti, escludiId) {
-  const arrivato = new Map();   // 'anno/numero|CODICE' -> qta arrivata
+  const arrivi = new Map();     // 'SERIE anno/numero|CODICE' -> [{ qta, t }]
   (movimenti || []).forEach(m => {
     if (!m || m.tipo !== 'carico' || !(Number(m.qta) > 0)) return;
     const k = chiaveOfDaRif(m.ordine_rif);
     if (!k) return;
     const c = String(m.codice || '').trim().toUpperCase();
-    arrivato.set(k + '|' + c, (arrivato.get(k + '|' + c) || 0) + Number(m.qta));
+    if (!arrivi.has(k + '|' + c)) arrivi.set(k + '|' + c, []);
+    arrivi.get(k + '|' + c).push({ qta: Number(m.qta), t: Date.parse(m.data) });
   });
-  const per = new Map();        // CODICE -> { aperto, ordini:[{ id, anno, numero, ordinato, arrivato, aperto }] }
+  const per = new Map();        // CODICE -> { aperto, ordini:[{ id, serie, anno, numero, ordinato, arrivato, aperto, consegna }] }
   (ordini || []).forEach(of => {
     if (!of || of.tipo !== 'acquisto' || of.stato !== 'emesso' || of.id === escludiId) return;
-    const somma = new Map();
+    const dopo = of.sincronizzato_il ? Date.parse(of.sincronizzato_il) : null;
+    const somma = new Map();    // CODICE -> { q, consegna }
     (of.righe || []).forEach(r => {
       const c = String((r && r.codice) || '').trim().toUpperCase();
-      const q = Number(r && r.qta) || 0;
-      if (c && q > 0) somma.set(c, (somma.get(c) || 0) + q);
+      const q = Number(r && r.qta_residua != null ? r.qta_residua : r && r.qta) || 0;
+      if (!c || !(q > 0)) return;
+      const v = somma.get(c) || { q: 0, consegna: null };
+      v.q += q;
+      const d = (r && r.consegna) || of.consegna || null;
+      if (d && (!v.consegna || String(d) < v.consegna)) v.consegna = String(d).slice(0, 10);
+      somma.set(c, v);
     });
-    somma.forEach((q, c) => {
-      const arr = arrivato.get(of.anno + '/' + of.numero + '|' + c) || 0;
-      const ap = Math.max(0, +(q - arr).toFixed(6));
+    const k = chiaveOf(of);
+    somma.forEach((v, c) => {
+      const arr = (arrivi.get(k + '|' + c) || []).filter(a => dopo == null || isNaN(dopo) || (a.t > dopo))
+        .reduce((s2, a) => s2 + a.qta, 0);
+      const ap = Math.max(0, +(v.q - arr).toFixed(6));
       if (!per.has(c)) per.set(c, { aperto: 0, ordini: [] });
-      const v = per.get(c);
-      v.aperto = +(v.aperto + ap).toFixed(6);
-      v.ordini.push({ id: of.id, anno: of.anno, numero: of.numero, ordinato: q, arrivato: arr, aperto: ap });
+      const x = per.get(c);
+      x.aperto = +(x.aperto + ap).toFixed(6);
+      x.ordini.push({ id: of.id, serie: String(of.serie || 'OFS').toUpperCase(), anno: of.anno, numero: of.numero,
+        ordinato: v.q, arrivato: arr, aperto: ap, consegna: v.consegna, fornitore_id: of.fornitore_id || null,
+        origine: of.origine || 'gestionale' });
     });
   });
   return per;
@@ -736,5 +754,5 @@ if (typeof module !== 'undefined' && module.exports) {
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
     ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne, assegnaPerServizio, terzistiDellaCommessa,
-    chiaveOfDaRif, ordinatoApertoOf };
+    chiaveOfDaRif, chiaveOf, ordinatoApertoOf };
 }
