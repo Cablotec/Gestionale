@@ -1626,6 +1626,9 @@ const TAB_STRUCTURE = {
       // ORDINI FORNITORE (18 nov, Nico): tutti gli OF fac simile, d'acquisto
       // e ai terzisti. Admin: ci sono i prezzi d'acquisto.
       { id: 'ordini_fornitore', label: 'Ordini fornitore', adminOnly: true },
+      // SPECCHIO ALNUS (20 nov, Nico): giacenze, OF aperti e movimenti di Alnus,
+      // e il da ordinare calcolato dal gestionale accanto al suo. Admin: prezzi.
+      { id: 'alnus',          label: 'Specchio Alnus', adminOnly: true },
       // DOCUMENTI (19 nov, Nico): registro dei documenti in entrata e in uscita,
       // ricavato (DDT ricevuti, rientri, DDT fac simile, OF). Per tutti; gli OF
       // dentro si vedono solo da admin.
@@ -1833,6 +1836,7 @@ function renderTab(name) {
     else if (name === 'prelievi') renderPrelievi(root);
     else if (name === 'movimenti') renderMovimenti(root);
     else if (name === 'ordini_fornitore') renderOrdiniFornitore(root);
+    else if (name === 'alnus') renderAlnus(root);
     else if (name === 'documenti') renderDocumenti(root);
     else if (name === 'riunioni') renderRiunioni(root);
     else if (name === 'storico') renderStorico(root);
@@ -6353,6 +6357,324 @@ function renderOrdiniFornitore(root) {
   });
   tbl.append(tb);
   root.append(el('div', { style:'overflow-x:auto;' }, tbl));
+}
+
+// ── SPECCHIO ALNUS (20 nov, Nico: "un passo in piu' verso l'indipendenza
+// da Alnus") ─────────────────────────────────────────────────────────────
+// Scheda Produzione → «Specchio Alnus» (admin). Tre stampe di Alnus:
+//   giacenze (la prima e' l'APERTURA, le altre CONTROLLI), OF aperti
+//   (fotografia: la nuova sostituisce), movimenti (si accumulano, la stessa
+//   riga non entra due volte).
+// Tabelle a se' (`alnus_*`, strumenti/migrazione-alnus-specchio.sql),
+// SEPARATE da `movimenti_magazzino`: li' ci sono gia' DDT scansionati e
+// lotti Enviro, e gli stessi fatti presi da Alnus conterebbero doppio.
+// I conti stanno in domain/alnus.js. Il risultato e' il «da ordinare»
+// calcolato dal gestionale accanto a quello di Alnus: finche' non coincidono,
+// Alnus non si spegne. WIP = reparto (Nico, 20 nov): conta come disponibile.
+// `state.alnus` null = tabelle assenti o illeggibili; undefined = non lette.
+async function caricaAlnus() {
+  try {
+    const { data: foto, error } = await sb.from('alnus_fotografie').select('*').order('preso_il', { ascending: false });
+    if (error) { state.alnus = null; return; }
+    const apertura = (foto || []).find(f => f.tipo === 'giacenze' && f.apertura) || null;
+    const controllo = apertura ? (foto || []).find(f => f.tipo === 'giacenze' && !f.apertura
+      && Date.parse(f.preso_il) > Date.parse(apertura.preso_il)) || null : null;
+    const fotoOf = (foto || []).find(f => f.tipo === 'of') || null;
+    const righeDi = (id, tab) => id ? fetchTutte(() => sb.from(tab).select('*').eq('fotografia_id', id).order('id')) : Promise.resolve({ data: [] });
+    const [gA, gC, o, m] = await Promise.all([
+      righeDi(apertura && apertura.id, 'alnus_giacenze'), righeDi(controllo && controllo.id, 'alnus_giacenze'),
+      righeDi(fotoOf && fotoOf.id, 'alnus_of_righe'),
+      apertura ? fetchTutte(() => sb.from('alnus_movimenti').select('*').gt('data', apertura.preso_il).order('data').order('id'))
+        : Promise.resolve({ data: [] })]);
+    const { count } = await sb.from('alnus_movimenti').select('id', { count: 'exact', head: true });
+    const err = [gA, gC, o, m].find(x => x && x.error);
+    if (err) { state.alnus = null; return; }
+    state.alnus = { fotografie: foto || [], apertura, controllo, fotoOf,
+      giacApertura: gA.data || [], giacControllo: gC.data || [], ofRighe: o.data || [], movimenti: m.data || [],
+      movimentiTotali: count == null ? null : count };
+  } catch (e) { state.alnus = null; }
+}
+let alnusTipi = null;   // Map codice -> tipo_parte dall'anagrafica materiali
+async function caricaTipiMateriali() {
+  try {
+    const { data, error } = await fetchTutte(() => sb.from('materiali').select('codice,tipo_parte').not('tipo_parte', 'is', null).order('codice'));
+    alnusTipi = new Map();
+    if (!error) (data || []).forEach(r => alnusTipi.set(String(r.codice).trim(), r.tipo_parte));
+  } catch (e) { alnusTipi = new Map(); }
+}
+const locISO = (s) => { const d = new Date(s); return isNaN(d) ? null : d.toISOString(); };
+function fmtQuando(s) {
+  const d = new Date(s); if (isNaN(d)) return '—';
+  const p2 = (x) => String(x).padStart(2, '0');
+  return p2(d.getDate()) + '/' + p2(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+}
+async function inserisciATranche(tabella, righe) {
+  for (let i = 0; i < righe.length; i += 500) {
+    const { error } = await sb.from(tabella).insert(righe.slice(i, i + 500));
+    if (error) throw new Error(error.message);
+  }
+}
+const plAlnus = (n, uno, tanti) => nfIT(n) + ' ' + (n === 1 ? uno : tanti);
+const testoAlnus = async (f) => new TextDecoder('windows-1252').decode(await f.arrayBuffer());
+
+async function importaGiacenzeAlnus(f, poi) {
+  const g = leggiGiacenzeAlnus(await testoAlnus(f));
+  if (g.errore) return toast(g.errore, 'err', 9000);
+  if (!g.preso_il) return toast('Non trovo data e ora della stampa nella prima riga: senza, la giacenza non si lega ai movimenti.', 'err', 9000);
+  const A = state.alnus || {};
+  const codici = new Set(g.righe.map(r => r.codice)).size;
+  const base = plAlnus(g.righe.length, 'riga', 'righe') + ', ' + plAlnus(codici, 'codice', 'codici') + ', stampata il ' + fmtQuando(g.preso_il) + '.'
+    + (g.scartate.length ? '\n' + g.scartate.length + ' righe illeggibili saltate: ' + g.scartate.join(', ') + '.' : '');
+  let apertura = true;
+  if (A.apertura) {
+    const sc = await chiediConferma({ titolo: 'Giacenze di Alnus', testo: base
+      + '\n\nC’è già l’apertura del ' + fmtQuando(A.apertura.preso_il) + '. Come controllo, il gestionale confronta questa stampa con la giacenza calcolata (apertura + movimenti fino a quell’ora). '
+      + 'Come nuova apertura, si riparte da qui e i movimenti prima di quest’ora non contano più.',
+      bottoni: [{ id: 'controllo', etichetta: 'Usala come controllo', tipo: 'primario' }, { id: 'apertura', etichetta: 'Nuova apertura' }, { id: 'annulla', etichetta: 'Annulla' }] });
+    if (sc === 'annulla') return;
+    apertura = sc === 'apertura';
+  } else {
+    const sc = await chiediConferma({ titolo: 'Fotografia d’apertura', testo: base
+      + '\n\nDiventa il punto di partenza: da qui la giacenza è questa più i movimenti stampati dopo le ' + fmtQuando(g.preso_il) + '.',
+      conferma: 'Usala come apertura', annulla: 'Annulla' });
+    if (sc !== 'conferma') return;
+  }
+  let foto = null;
+  try {
+    const { data, error } = await sb.from('alnus_fotografie').insert({ tipo: 'giacenze', preso_il: locISO(g.preso_il), apertura,
+      righe: g.righe.length, file: f.name }).select().single();
+    if (error) throw new Error(error.message);
+    foto = data;
+    await inserisciATranche('alnus_giacenze', g.righe.map(r => Object.assign({ fotografia_id: foto.id }, r)));
+    toast((apertura ? 'Apertura' : 'Controllo') + ' del ' + fmtQuando(g.preso_il) + ' salvato: ' + plAlnus(g.righe.length, 'riga', 'righe'), 'ok');
+  } catch (e) {
+    if (foto) await sb.from('alnus_fotografie').delete().eq('id', foto.id);
+    toast('Giacenze non salvate: ' + (e.message || e), 'err', 9000);
+  }
+  await caricaAlnus(); if (typeof poi === 'function') poi();
+}
+async function importaOfAlnus(f, poi) {
+  let o;
+  try {
+    const X = window.XLSX || await caricaXLSX();
+    const wb = X.read(await f.arrayBuffer(), { cellDates: true });
+    o = leggiOfAlnus(X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true }));
+  } catch (e) { return toast('File non letto: ' + (e.message || e), 'err', 9000); }
+  if (o.errore) return toast(o.errore, 'err', 9000);
+  const oggi = toLocalISO(new Date());
+  const nOf = new Set(o.righe.map(r => r.anno + '/' + r.numero)).size;
+  const scad = o.righe.filter(r => r.consegna && r.consegna < oggi).length;
+  // L'estrazione non ha l'ora: vale l'ora del file (salvato da Alnus).
+  const presoIl = new Date(f.lastModified || Date.now()).toISOString();
+  const sc = await chiediConferma({ titolo: 'OF aperti di Alnus', testo: plAlnus(o.righe.length, 'riga', 'righe') + ' di ' + nOf + ' OF, '
+    + plAlnus(new Set(o.righe.map(r => r.fornitore)).size, 'fornitore', 'fornitori') + '. ' + plAlnus(scad, 'riga', 'righe') + ' con la consegna già passata: si vedono come «scadute».'
+    + (o.scartate.length ? '\n' + o.scartate.length + ' righe illeggibili saltate.' : '')
+    + '\n\nFotografia del ' + fmtQuando(presoIl) + ' (ora del file): i carichi da OF stampati dopo quest’ora la scalano. Sostituisce la fotografia OF precedente.',
+    conferma: 'Importa', annulla: 'Annulla' });
+  if (sc !== 'conferma') return;
+  let foto = null;
+  try {
+    const { data, error } = await sb.from('alnus_fotografie').insert({ tipo: 'of', preso_il: presoIl, righe: o.righe.length, file: f.name }).select().single();
+    if (error) throw new Error(error.message);
+    foto = data;
+    await inserisciATranche('alnus_of_righe', o.righe.map(r => Object.assign({ fotografia_id: foto.id }, r)));
+    const vecchie = ((state.alnus && state.alnus.fotografie) || []).filter(x => x.tipo === 'of' && x.id !== foto.id).map(x => x.id);
+    if (vecchie.length) await sb.from('alnus_fotografie').delete().in('id', vecchie);
+    toast('OF aperti importati: ' + plAlnus(o.righe.length, 'riga', 'righe') + ' di ' + plAlnus(nOf, 'ordine', 'ordini'), 'ok');
+  } catch (e) {
+    if (foto) await sb.from('alnus_fotografie').delete().eq('id', foto.id);
+    toast('OF non salvati: ' + (e.message || e), 'err', 9000);
+  }
+  await caricaAlnus(); if (typeof poi === 'function') poi();
+}
+async function importaMovimentiAlnus(f, poi) {
+  const m = leggiMovimentiAlnus(await testoAlnus(f));
+  if (m.errore) return toast(m.errore, 'err', 9000);
+  if (!m.righe.length) return toast('Nessun movimento nella stampa.', 'err');
+  const ap = state.alnus && state.alnus.apertura;
+  const tAp = ap ? Date.parse(ap.preso_il) : null;
+  const prima = tAp == null ? 0 : m.righe.filter(r => Date.parse(r.data) <= tAp).length;
+  const date = m.righe.map(r => r.data).sort();
+  try {
+    const payload = m.righe.map(r => Object.assign({}, r, { data: locISO(r.data) }));
+    let nuove = 0;
+    for (let i = 0; i < payload.length; i += 500) {
+      const { data, error } = await sb.from('alnus_movimenti').upsert(payload.slice(i, i + 500),
+        { onConflict: 'eser,numero,causale', ignoreDuplicates: true }).select('id');
+      if (error) throw new Error(error.message);
+      nuove += (data || []).length;
+    }
+    toast('Movimenti dal ' + fmtQuando(date[0]) + ' al ' + fmtQuando(date[date.length - 1]) + ': ' + plAlnus(nuove, 'nuovo', 'nuovi')
+      + (m.righe.length - nuove ? ', ' + (m.righe.length - nuove) + ' già importati' : '')
+      + (prima ? ', ' + prima + ' prima dell’apertura (già nella fotografia, non contano)' : '')
+      + (!ap ? '. Manca ancora la fotografia d’apertura: i movimenti contano solo da lì.' : '')
+      + (m.scartate.length ? ', ' + m.scartate.length + ' illeggibili' : ''), 'ok', 12000);
+  } catch (e) { toast('Movimenti non salvati: ' + (e.message || e), 'err', 9000); }
+  await caricaAlnus(); if (typeof poi === 'function') poi();
+}
+
+// Il confronto: fabbisogno delle liste (commesse vive, a residuo), giacenza
+// dello specchio, OF di Alnus e nostri, contro il «da ordinare» di Alnus.
+function confrontoAlnus(opz) {
+  const A = state.alnus;
+  const base = materialiBase(state.mancanti || []);
+  const fabbisogno = new Map(), tipi = new Map(), descr = new Map();
+  base.viveConLista.forEach(c => (c.materiali || []).forEach(r => {
+    const cod = String((r && r.codice) || '').trim();
+    if (!cod) return;
+    if (r.tipo && !tipi.has(cod)) tipi.set(cod, r.tipo);
+    if (r.descrizione && !descr.has(cod)) descr.set(cod, r.descrizione);
+  }));
+  fabbisognoDaListe(base.viveConLista).forEach((righe, cod) =>
+    fabbisogno.set(cod, +righe.reduce((s, x) => s + x.qta, 0).toFixed(6)));
+  const daOrdAlnus = new Map();
+  (state.mancanti || []).forEach(m => {
+    const c = String(m.codice || '').trim();
+    if (!tipi.has(c) && m.tipo_parte) tipi.set(c, m.tipo_parte);
+    if (!descr.has(c) && m.descrizione) descr.set(c, m.descrizione);
+    if (mancanteCategoria(m) !== 'da_ordinare') return;
+    const q = Number(m.qta_da_ordinare) || 0;
+    if (q > (daOrdAlnus.get(c) || 0)) daOrdAlnus.set(c, q);
+  });
+  if (alnusTipi) alnusTipi.forEach((t, c) => { if (!tipi.has(c)) tipi.set(c, t); });
+  A.giacApertura.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); });
+  const giacenza = giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il);
+  const ofAlnus = ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, toLocalISO(new Date()));
+  const ofN = ordinatoApertoOf(state.ordiniFornitore || [], state.movimenti, null);
+  const ofNostri = new Map();
+  [...fabbisogno.keys(), ...daOrdAlnus.keys()].forEach(c => { const v = ofN.get(c.toUpperCase()); if (v && v.aperto > 0) ofNostri.set(c, v.aperto); });
+  const righe = confrontoDaOrdinare({ fabbisogno, tipi, giacenza, ofAlnus, ofNostri, daOrdinareAlnus: daOrdAlnus,
+    magazzini: opz.magazzini, contaScaduti: opz.contaScaduti });
+  righe.forEach(r => { r.descrizione = descr.get(r.codice) || ''; r.of = ofAlnus.get(r.codice) || null; });
+  return righe;
+}
+
+let alnusCerca = '', alnusSoloDiversi = true, alnusContaScaduti = true, alnusTutte = false, alnusMagEsclusi = null;
+function renderAlnus(root) {
+  root.innerHTML = '';
+  const ridisegna = () => renderAlnus(root);
+  const ricarica = el('button', { class: 'btnsm', title: 'Rileggi lo specchio dal database',
+    onclick: async () => { ricarica.disabled = true; await caricaAlnus(); ridisegna(); } }, '⟳ Aggiorna');
+  root.append(el('div', { class: 'toolbar' }, el('h2', {}, 'Specchio Alnus'), ricarica));
+  if (state.alnus === undefined) {
+    root.append(el('div', { class: 'empty' }, 'Lettura dello specchio…'));
+    Promise.all([caricaAlnus(), alnusTipi ? null : caricaTipiMateriali()]).then(ridisegna);
+    return;
+  }
+  if (state.alnus === null) {
+    root.append(el('div', { class: 'empty' }, 'Lo specchio di Alnus non si è potuto leggere. Se le tabelle non ci sono ancora, va eseguito '
+      + 'strumenti/migrazione-alnus-specchio.sql dal pannello Supabase; poi ⟳ Aggiorna.'));
+    return;
+  }
+  const A = state.alnus;
+  root.append(el('div', { class: 'sub', style: 'font-size:12px;line-height:1.6;margin:-4px 0 12px;max-width:980px;' },
+    'Una copia del magazzino di Alnus, tenuta a parte dai nostri movimenti: giacenza = fotografia d’apertura + movimenti stampati dopo. '
+    + 'Con questa il gestionale calcola il suo «da ordinare» (fabbisogno delle commesse − giacenza − OF in arrivo) accanto a quello di Alnus. '
+    + 'Quando coincidono, Alnus si può spegnere.'));
+  // I tre caricamenti.
+  const scegli = (accept, fn) => {
+    const inp = el('input', { type: 'file', accept, style: 'display:none;' });
+    inp.onchange = () => { const f = inp.files && inp.files[0]; inp.value = ''; if (f) fn(f, ridisegna); };
+    return inp;
+  };
+  const card = (titolo, righe, etichetta, accept, fn) => {
+    const inp = scegli(accept, fn);
+    return el('div', { class: 'card', style: 'padding:12px 14px;display:flex;flex-direction:column;gap:4px;' },
+      el('div', { style: 'font-weight:700;' }, titolo),
+      ...righe.map(t => el('div', { class: 'sub', style: 'font-size:12px;' }, t)),
+      el('div', { style: 'margin-top:auto;padding-top:8px;' }, inp,
+        el('button', { class: 'btnsm', onclick: () => inp.click() }, '↑ ' + etichetta)));
+  };
+  const nCod = new Set(A.giacApertura.map(r => r.codice)).size;
+  const oggi = toLocalISO(new Date());
+  const scadute = A.ofRighe.filter(r => r.consegna && String(r.consegna) < oggi).length;
+  const dopo = A.movimenti.length;
+  const ultimo = dopo ? A.movimenti[A.movimenti.length - 1].data : null;
+  root.append(el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:14px;' },
+    card('1 · Giacenze', A.apertura
+      ? ['Apertura: ' + fmtQuando(A.apertura.preso_il) + ' · ' + plAlnus(A.giacApertura.length, 'riga', 'righe') + ', ' + plAlnus(nCod, 'codice', 'codici'),
+        A.controllo ? 'Ultimo controllo: ' + fmtQuando(A.controllo.preso_il) : 'Nessun controllo dopo l’apertura']
+      : ['Manca la fotografia d’apertura: è il punto di partenza di tutto.'],
+      'Importa «Stampa Giacenze» (.xls)', '.xls,.txt,.tsv', importaGiacenzeAlnus),
+    card('2 · OF aperti', A.fotoOf
+      ? ['Fotografia del ' + fmtQuando(A.fotoOf.preso_il) + ' · ' + plAlnus(A.ofRighe.length, 'riga', 'righe') + ' di '
+        + new Set(A.ofRighe.map(r => r.anno + '/' + r.numero)).size + ' OF', plAlnus(scadute, 'riga', 'righe') + ' con la consegna passata (scadute)']
+      : ['Nessuna fotografia degli OF aperti: senza, il «in arrivo» di Alnus è zero.'],
+      'Importa OF aperti (.xlsx)', '.xlsx,.xls', importaOfAlnus),
+    card('3 · Movimenti', [A.movimentiTotali == null ? '' : A.movimentiTotali + ' movimenti importati in tutto',
+      A.apertura ? dopo + ' dopo l’apertura' + (ultimo ? ' · ultimo ' + fmtQuando(ultimo) : '') : 'Contano solo dopo l’apertura'].filter(Boolean),
+      'Importa «Stampa movimenti» (.xls)', '.xls,.txt,.tsv', importaMovimentiAlnus)));
+  if (!A.apertura) return;
+  // Controllo: la stampa di controllo contro apertura + movimenti fino a quell'ora.
+  if (A.controllo) {
+    const calc = giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il, A.controllo.preso_il);
+    const diversi = controlloGiacenze(calc, A.giacControllo);
+    const lista = el('div', { style: 'display:none;margin-top:6px;' }, ...diversi.slice(0, 200).map(d => el('div', { class: 'mono', style: 'font-size:12px;padding:1px 0;' },
+      d.codice + ' · calcolata ' + nfIT(d.calcolata) + ' · stampata ' + nfIT(d.stampata) + ' · ' + (d.differenza > 0 ? '+' : '') + nfIT(d.differenza))));
+    const apri = el('button', { class: 'btnsm', onclick: () => { lista.style.display = lista.style.display === 'none' ? '' : 'none'; } }, 'Vedi i codici');
+    root.append(el('div', { style: 'margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid ' + (diversi.length ? 'var(--or)' : 'var(--grn)') + ';' },
+      el('span', { style: 'font-size:13px;' }, diversi.length
+        ? '⚠ Controllo del ' + fmtQuando(A.controllo.preso_il) + ': ' + diversi.length + (diversi.length === 1 ? ' codice non torna' : ' codici non tornano')
+          + ' fra la giacenza calcolata e quella stampata. Di solito manca un periodo di movimenti. '
+        : '✓ Controllo del ' + fmtQuando(A.controllo.preso_il) + ': la giacenza calcolata torna su tutti i codici.'),
+      diversi.length ? apri : '', lista));
+  }
+  // Il confronto del da ordinare.
+  const magazzini = [...new Set(A.giacApertura.map(r => r.magazzino).concat(A.movimenti.map(m => m.magazzino)))].sort();
+  if (alnusMagEsclusi == null) alnusMagEsclusi = new Set();
+  const contati = new Set(magazzini.filter(m => !alnusMagEsclusi.has(m)));
+  const righe = confrontoAlnus({ magazzini: contati, contaScaduti: alnusContaScaduti });
+  const uguali = righe.filter(r => Math.abs(r.differenza) < 0.0005).length;
+  const piuNoi = righe.filter(r => r.differenza >= 0.0005).length, piuAlnus = righe.length - uguali - piuNoi;
+  const chip = (m) => el('label', { style: 'display:inline-flex;gap:4px;align-items:center;font-size:12px;margin-right:10px;cursor:pointer;' },
+    el('input', { type: 'checkbox', checked: contati.has(m) ? true : null,
+      onchange: (e) => { if (e.target.checked) alnusMagEsclusi.delete(m); else alnusMagEsclusi.add(m); ridisegna(); } }),
+    m === 'WIP' ? 'WIP (reparto)' : m);
+  const spunta = (testo, val, fn) => el('label', { style: 'display:inline-flex;gap:4px;align-items:center;font-size:12px;margin-right:14px;cursor:pointer;' },
+    el('input', { type: 'checkbox', checked: val ? true : null, onchange: (e) => { fn(e.target.checked); ridisegna(); } }), testo);
+  const cerca = el('input', { type: 'text', class: 'search', id: 'alnus-cerca', value: alnusCerca, placeholder: 'Cerca codice o descrizione…',
+    oninput: (e) => { alnusCerca = e.target.value; ridisegnaDopoRicerca('alnus'); } });
+  root.append(el('h3', { style: 'margin:6px 0 6px;' }, 'Da ordinare: gestionale contro Alnus'),
+    el('div', { class: 'sub', style: 'font-size:12px;margin-bottom:6px;' },
+      plAlnus(righe.length, 'codice', 'codici') + ' (ACQ e senza tipo; C/L e MAC non si comprano) · ' + plAlnus(uguali, 'uguale', 'uguali') + ' · '
+      + piuNoi + ' il gestionale ne ordinerebbe di più · ' + piuAlnus + ' Alnus ne ordinerebbe di più'
+      + (state.mancanti && state.mancanti.length ? '' : ' · ⚠ Fabbisogno di Alnus non importato: la colonna Alnus è vuota')),
+    el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px 0;align-items:center;margin-bottom:10px;' },
+      el('span', { class: 'sub', style: 'font-size:12px;margin-right:8px;' }, 'Magazzini che contano:'), ...magazzini.map(chip),
+      el('span', { style: 'width:16px;' }),
+      spunta('Conta gli OF scaduti come in arrivo', alnusContaScaduti, v => { alnusContaScaduti = v; }),
+      spunta('Solo i codici che non tornano', alnusSoloDiversi, v => { alnusSoloDiversi = v; }), cerca));
+  const q = alnusCerca.trim().toLowerCase();
+  const vis = righe.filter(r => (!alnusSoloDiversi || Math.abs(r.differenza) >= 0.0005)
+    && (!q || r.codice.toLowerCase().includes(q) || String(r.descrizione).toLowerCase().includes(q)));
+  if (!vis.length) { root.append(el('div', { class: 'empty' }, righe.length ? 'Nessun codice con questi filtri.' : 'Nessun codice da confrontare.')); return; }
+  const n = (x) => x ? nfIT(x) : '—';
+  const tbl = el('table', { class: 'rt' });
+  tbl.append(el('thead', {}, el('tr', {}, ...['Codice', 'Descrizione', 'Serve', 'Giacenza', 'OF Alnus', 'OF nostri', 'Da ordinare: gestionale', 'Alnus', 'Differenza']
+    .map((t, i) => el('th', { style: i >= 2 ? 'text-align:right;' : '' }, t)))));
+  const tb = el('tbody');
+  (alnusTutte ? vis : vis.slice(0, 200)).forEach(r => {
+    const perMag = Object.entries(r.perMag).map(([m, v]) => m + ' ' + nfIT(v)).join(' · ');
+    const ofTit = r.of ? r.of.righe.filter(x => x.aperto > 0).map(x => 'OF ' + x.numero + '/' + x.anno + ' · ' + (x.fornitore || '') + ' · '
+      + nfIT(x.aperto) + (x.consegna ? ' · ' + fmtIT(String(x.consegna).slice(0, 10)) : '') + (x.scaduta ? ' (scaduta)' : '')).join('\n') : '';
+    const dif = r.differenza;
+    tb.append(el('tr', { style: 'cursor:pointer;', title: 'Apri la scheda del codice', onclick: () => apriSchedaCodice(r.codice) },
+      el('td', { class: 'mono', style: 'font-weight:700;white-space:nowrap;' }, r.codice),
+      el('td', { style: 'max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;', title: r.descrizione }, r.descrizione),
+      el('td', { class: 'mono', style: 'text-align:right;' }, n(r.fabbisogno)),
+      el('td', { class: 'mono', style: 'text-align:right;', title: perMag }, n(r.giacenza)),
+      el('td', { class: 'mono', style: 'text-align:right;', title: ofTit }, n(r.inArrivoAlnus),
+        r.scaduto > 0 ? el('div', { style: 'font-size:10.5px;color:var(--or);' }, 'scaduti ' + nfIT(r.scaduto)) : ''),
+      el('td', { class: 'mono', style: 'text-align:right;' }, n(r.inArrivoNostri)),
+      el('td', { class: 'mono', style: 'text-align:right;font-weight:700;' }, n(r.nostro)),
+      el('td', { class: 'mono', style: 'text-align:right;' }, n(r.alnus)),
+      el('td', { class: 'mono', style: 'text-align:right;font-weight:700;color:' + (Math.abs(dif) < 0.0005 ? 'var(--grn)' : dif > 0 ? 'var(--or)' : 'var(--blu)') + ';' },
+        Math.abs(dif) < 0.0005 ? '=' : (dif > 0 ? '+' : '') + nfIT(dif))));
+  });
+  tbl.append(tb);
+  root.append(el('div', { style: 'overflow-x:auto;' }, tbl));
+  if (!alnusTutte && vis.length > 200) root.append(el('button', { class: 'btnsm', style: 'margin-top:8px;',
+    onclick: () => { alnusTutte = true; ridisegna(); } }, 'Mostra tutti i ' + vis.length));
 }
 
 function stampaOrdineFornitore(of, finestra) {
