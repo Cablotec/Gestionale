@@ -130,6 +130,22 @@ sez('Controllo delle giacenze');
   t('B sparito dalla stampa e C nuovo', d.length === 2 && d.some(x => x.codice === 'B' && x.differenza === 5) && d.some(x => x.codice === 'C' && x.differenza === -1));
 }
 
+sez('I magazzini (Nico, 20 nov): 02 dentro lo 01, 05 eliminato, SPK a parte');
+{
+  t('02 diventa 01', A.magazzinoAlnus('02') === '01' && A.magazzinoAlnus(' 01 ') === '01');
+  t('05 non esiste', A.magazzinoAlnus('05') === null);
+  t('SPK e WIP restano', A.magazzinoAlnus('SPK') === 'SPK' && A.magazzinoAlnus('wip') === 'WIP');
+  t('di serie contano 01 e WIP', A.MAGAZZINI_CONTATI_DI_SERIE.join() === '01,WIP');
+  const g = A.giacenzaAlnus([{ codice: 'X', magazzino: '01', qta: 10 }, { codice: 'X', magazzino: '02', qta: 5 },
+    { codice: 'X', magazzino: '05', qta: 150 }, { codice: 'X', magazzino: 'SPK', qta: 16 }, { codice: 'X', magazzino: 'WIP', qta: 2 }],
+    [{ data: '2026-11-21T08:00:00', codice: 'X', magazzino: '02', qta: 1 }, { data: '2026-11-21T08:00:00', codice: 'X', magazzino: '05', qta: -3 }], '2026-11-20T10:00:00');
+  const x = g.get('X');
+  t('01 = 10 + 5 dello 02 + 1 movimento', x.perMag['01'] === 16 && !('02' in x.perMag) && !('05' in x.perMag));
+  t('contata 01 + WIP = 18, SPK fuori', A.giacenzaContata(x, new Set(A.MAGAZZINI_CONTATI_DI_SERIE)) === 18);
+  const d = A.controlloGiacenze(g, [{ codice: 'X', magazzino: '01', qta: 16 }, { codice: 'X', magazzino: '05', qta: 999 }, { codice: 'X', magazzino: 'SPK', qta: 16 }, { codice: 'X', magazzino: 'WIP', qta: 2 }]);
+  t('il controllo ignora lo 05', d.length === 0);
+}
+
 sez('Il fabbisogno fatto dal gestionale (stessa forma di mancanti)');
 {
   const c1 = { id: 'c1', numero_op: '2026/OP/01917' }, c2 = { id: 'c2', numero_op: '2026/OP/01918' };

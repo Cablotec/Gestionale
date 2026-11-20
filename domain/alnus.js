@@ -148,6 +148,22 @@ function leggiOfAlnus(matrice) {
 
 const alnusMs = (d) => { const t = Date.parse(d); return isNaN(t) ? null : t; };
 
+// I MAGAZZINI DI ALNUS (20 nov, Nico):
+//   01  principale                          -> conta
+//   WIP reparto (materiale gia' prelevato)  -> conta
+//   SPK magazzino di Sacmi per il loro C/L  -> a parte: non e' disponibile per tutti
+//   02  magazzino di JMA per il loro C/L    -> «inglobalo nello 01 ed eliminalo»: diventa 01
+//   05  da eliminare                        -> non si conta da nessuna parte
+// Alnus stesso, nel Fabbisogno, conta 01 + WIP (238 codici su 239 il 20 nov).
+// Un magazzino nuovo che non e' qui resta col suo nome e si vede: si decide allora.
+const MAGAZZINI_ALIAS = { '02': '01' };
+const MAGAZZINI_ELIMINATI = new Set(['05']);
+const MAGAZZINI_CONTATI_DI_SERIE = ['01', 'WIP'];
+function magazzinoAlnus(m) {
+  const k = String(m == null ? '' : m).trim().toUpperCase();
+  if (!k || MAGAZZINI_ELIMINATI.has(k)) return null;
+  return MAGAZZINI_ALIAS[k] || k;
+}
 // Giacenza per codice e magazzino: apertura + movimenti dopo `da` e fino a `a` (compreso).
 function giacenzaAlnus(apertura, movimenti, da, a) {
   const tDa = alnusMs(da), tA = a == null ? null : alnusMs(a);
@@ -158,11 +174,12 @@ function giacenzaAlnus(apertura, movimenti, da, a) {
     g.perMag[mag] = +((g.perMag[mag] || 0) + q).toFixed(6);
     g.totale = +(g.totale + q).toFixed(6);
   };
-  (apertura || []).forEach(r => somma(String(r.codice).trim(), String(r.magazzino).trim(), Number(r.qta) || 0));
+  (apertura || []).forEach(r => { const mag = magazzinoAlnus(r.magazzino); if (mag) somma(String(r.codice).trim(), mag, Number(r.qta) || 0); });
   (movimenti || []).forEach(m => {
     const t = alnusMs(m.data);
     if (t == null || (tDa != null && t <= tDa) || (tA != null && t > tA)) return;
-    somma(String(m.codice).trim(), String(m.magazzino).trim(), Number(m.qta) || 0);
+    const mag = magazzinoAlnus(m.magazzino);
+    if (mag) somma(String(m.codice).trim(), mag, Number(m.qta) || 0);
   });
   return per;
 }
@@ -248,7 +265,7 @@ function confrontoDaOrdinare(o) {
 function controlloGiacenze(calcolata, stampata, tolleranza) {
   const tol = tolleranza == null ? 0.0005 : tolleranza;
   const st = new Map();
-  (stampata || []).forEach(r => { const c = String(r.codice).trim(); st.set(c, +((st.get(c) || 0) + (Number(r.qta) || 0)).toFixed(6)); });
+  (stampata || []).forEach(r => { if (!magazzinoAlnus(r.magazzino)) return; const c = String(r.codice).trim(); st.set(c, +((st.get(c) || 0) + (Number(r.qta) || 0)).toFixed(6)); });
   const codici = new Set([...st.keys(), ...(calcolata ? calcolata.keys() : [])]);
   const diversi = [];
   codici.forEach(c => {
@@ -313,5 +330,5 @@ function righeFabbisognoSpecchio(o) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { numAlnus, dataAlnus, leggiGiacenzeAlnus, leggiMovimentiAlnus, leggiOfAlnus, dataCella,
-    giacenzaAlnus, giacenzaContata, ofAlnusAperti, confrontoDaOrdinare, controlloGiacenze, righeFabbisognoSpecchio };
+    magazzinoAlnus, MAGAZZINI_CONTATI_DI_SERIE, giacenzaAlnus, giacenzaContata, ofAlnusAperti, confrontoDaOrdinare, controlloGiacenze, righeFabbisognoSpecchio };
 }

@@ -6593,8 +6593,8 @@ function righeFabbisognoGestionale() {
     ofNostri.push({ codice: riga ? String(riga.codice).trim() : cod, aperto: x.aperto, consegna: of ? consegnaRigaOf(of, riga) : null,
       ordine: 'OFS ' + x.numero + '/' + x.anno, fornitore: of ? nomeAziendaDi(of.fornitore_id) : null });
   }));
-  const magazzini = [...new Set(A.giacApertura.map(r => r.magazzino).concat(A.movimenti.map(m => m.magazzino)))]
-    .filter(m => !(alnusMagEsclusi && alnusMagEsclusi.has(m)));
+  const magazzini = [...alnusMagazziniContati([...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
+    .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean))];
   return righeFabbisognoSpecchio({ fabbisogno: fabbisognoDaListe(base.viveConLista), tipi, descr, um,
     giacenza: giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il), magazzini: new Set(magazzini),
     ofAlnus: ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, toLocalISO(new Date())),
@@ -6660,6 +6660,11 @@ function confrontoAlnus(opz) {
 }
 
 let alnusCerca = '', alnusSoloDiversi = true, alnusContaScaduti = true, alnusTutte = false, alnusMagEsclusi = null;
+// Magazzini che contano come disponibili: di serie 01 + WIP (MAGAZZINI_CONTATI_DI_SERIE,
+// domain/alnus.js); SPK (C/L di Sacmi) e un magazzino nuovo si accendono a mano.
+function alnusMagazziniContati(tutti) {
+  return new Set(tutti.filter(m => alnusMagEsclusi ? !alnusMagEsclusi.has(m) : MAGAZZINI_CONTATI_DI_SERIE.includes(m)));
+}
 function renderAlnus(root) {
   root.innerHTML = '';
   const ridisegna = () => renderAlnus(root);
@@ -6743,9 +6748,10 @@ function renderAlnus(root) {
       + (gest && fonteFabbProblema ? ' ⚠ Non applicata: ' + fonteFabbProblema + '.' : '')
       + (gest && !fonteFabbProblema ? ' Righe calcolate: ' + (state.mancanti || []).length + '. Si ricalcolano a ogni caricamento e import; dopo una modifica alle commesse, ⟳ Aggiorna.' : ''))));
   // Il confronto del da ordinare.
-  const magazzini = [...new Set(A.giacApertura.map(r => r.magazzino).concat(A.movimenti.map(m => m.magazzino)))].sort();
-  if (alnusMagEsclusi == null) alnusMagEsclusi = new Set();
-  const contati = new Set(magazzini.filter(m => !alnusMagEsclusi.has(m)));
+  const magazzini = [...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
+    .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean).sort();
+  const contati = alnusMagazziniContati(magazzini);
+  if (alnusMagEsclusi == null) alnusMagEsclusi = new Set(magazzini.filter(m => !contati.has(m)));
   const righe = confrontoAlnus({ magazzini: contati, contaScaduti: alnusContaScaduti });
   const uguali = righe.filter(r => Math.abs(r.differenza) < 0.0005).length;
   const piuNoi = righe.filter(r => r.differenza >= 0.0005).length, piuAlnus = righe.length - uguali - piuNoi;
@@ -6753,7 +6759,7 @@ function renderAlnus(root) {
     el('input', { type: 'checkbox', checked: contati.has(m) ? true : null,
       onchange: async (e) => { if (e.target.checked) alnusMagEsclusi.delete(m); else alnusMagEsclusi.add(m);
         if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno(); ridisegna(); } }),
-    m === 'WIP' ? 'WIP (reparto)' : m);
+    m === 'WIP' ? 'WIP (reparto)' : m === '01' ? '01 (principale, con 02 di JMA)' : m === 'SPK' ? 'SPK (C/L Sacmi)' : m);
   const spunta = (testo, val, fn) => el('label', { style: 'display:inline-flex;gap:4px;align-items:center;font-size:12px;margin-right:14px;cursor:pointer;' },
     el('input', { type: 'checkbox', checked: val ? true : null, onchange: async (e) => { fn(e.target.checked);
       if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno(); ridisegna(); } }), testo);
