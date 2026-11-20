@@ -3409,6 +3409,11 @@ function openClienteModal(c) {
   // spento finche' la colonna `aziende.sito` non esiste (stesso patto della tariffa).
   const sitoDisponibile = (state.aziende || []).some(a => a && ('sito' in a));
   const inSito = el('input', { type:'text', name:'sito', value:c.sito||'', placeholder:'es. it.farnell.com' });
+  // NOMI IN ALNUS (20 nov): i nomignoli con cui Alnus chiama questa azienda, separati da virgola.
+  const nomiAlnusDisponibili = (state.aziende || []).some(a => a && ('nomi_alnus' in a));
+  const inNomiAlnus = el('input', { type:'text', name:'nomi_alnus', value: (c.nomi_alnus || []).join(', '),
+    placeholder:'es. MM MALPA E LUCA (separati da virgola)' });
+  if (!nomiAlnusDisponibili) { inNomiAlnus.disabled = true; inNomiAlnus.placeholder = 'richiede la colonna aziende.nomi_alnus (migrazione)'; }
   if (!sitoDisponibile) { inSito.disabled = true; inSito.placeholder = 'richiede la colonna aziende.sito (migrazione)'; }
   // CONTATTI PER RUOLO (9 nov, Nico: "piu' mail per diversi contatti", "la mail
   // principale puo' non esistere se faccio piu' ruoli"). Lista in
@@ -3579,7 +3584,7 @@ function openClienteModal(c) {
   chkCliente.addEventListener('change', aggiornaRuoli);
 
   if (readonly) {
-    [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inSito, inNote, selAttivo,
+    [inNome, inVia, inCitta, inCap, inProvincia, inPIva, inSito, inNomiAlnus, inNote, selAttivo,
      chkCliente, chkFornitore, inTariffa, inTariffaCli]
       .forEach(i => i.disabled = true);
   }
@@ -3614,6 +3619,7 @@ function openClienteModal(c) {
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
     ),
     el('div', { class:'field' }, el('label', {}, 'Sito web (ordini online)'), inSito),
+    el('div', { class:'field' }, el('label', {}, 'Nomi in Alnus (nomignoli)'), inNomiAlnus),
     el('div', { class:'field' }, el('label', {}, 'Contatti per ruolo'), boxContatti),
     el('div', { class:'field' }, el('label', {}, 'Note'), inNote),
   );
@@ -3641,6 +3647,7 @@ function openClienteModal(c) {
         provincia: (fd.get('provincia')||'').trim().toUpperCase() || null,
         p_iva: (fd.get('p_iva')||'').trim() || null,
         ...(sitoDisponibile ? { sito: normalizzaSito(fd.get('sito')) } : {}),
+        ...(nomiAlnusDisponibili ? { nomi_alnus: [...new Set(String(fd.get('nomi_alnus') || '').split(',').map(x => x.trim().replace(/\s+/g, ' ')).filter(Boolean))] } : {}),
         note: (fd.get('note')||'').trim() || null,
         attivo: fd.get('attivo') === 'true',
         is_cliente: isCliente,
@@ -6520,11 +6527,14 @@ async function importaOfAlnus(f, poi) {
   if (o.errore) return toast(o.errore, 'err', 9000);
   const oggi = toLocalISO(new Date());
   const nOf = new Set(o.righe.map(r => r.anno + '/' + r.numero)).size;
-  const scad = o.righe.filter(r => r.consegna && r.consegna < oggi).length;
+  const scad = o.righe.filter(r => Number(r.qta_residua) > 0 && r.consegna && r.consegna < oggi).length;
+  const evase = o.righe.filter(r => !(Number(r.qta_residua) > 0)).length;
   // L'estrazione non ha l'ora: vale l'ora del file (salvato da Alnus).
   const presoIl = new Date(f.lastModified || Date.now()).toISOString();
   const sc = await chiediConferma({ titolo: 'OF aperti di Alnus', testo: plAlnus(o.righe.length, 'riga', 'righe') + ' di ' + nOf + ' OF, '
-    + plAlnus(new Set(o.righe.map(r => r.fornitore)).size, 'fornitore', 'fornitori') + '. ' + plAlnus(scad, 'riga', 'righe') + ' con la consegna già passata: si vedono come «scadute».'
+    + plAlnus(new Set(o.righe.map(r => r.fornitore)).size, 'fornitore', 'fornitori') + '. '
+    + (evase ? plAlnus(evase, 'riga già evasa', 'righe già evase') + ' (residuo zero). ' : '')
+    + plAlnus(scad, 'riga aperta', 'righe aperte') + ' con la consegna già passata: si vedono come «scadute».'
     + (o.scartate.length ? '\n' + o.scartate.length + ' righe illeggibili saltate.' : '')
     + '\n\nFotografia del ' + fmtQuando(presoIl) + ' (ora del file): i carichi da OF stampati dopo quest’ora la scalano. Sostituisce la fotografia OF precedente.'
     + '\n\nGli OF diventano anche ORDINI del gestionale, col loro numero (OF n/anno): nuovi entrano, quelli già caricati si aggiornano, quelli non più aperti diventano «chiuso».',
@@ -6555,24 +6565,62 @@ async function importaOfAlnus(f, poi) {
 // migrazione-of-alnus.sql): nuovi entrano, esistenti si aggiornano, quelli spariti
 // dall'estrazione diventano «chiuso». Fornitore = scheda in Aziende col nome di Alnus;
 // chi non ce l'ha si crea (con conferma) o i suoi ordini restano fuori.
+// Per ogni nomignolo di Alnus senza scheda: «è questa scheda» (si salva in
+// `aziende.nomi_alnus`, e dalla volta dopo si riconosce da solo), «crea scheda
+// nuova» o «salta». Ritorna false se si annulla.
+function abbinaNomiAlnus(senza) {
+  return new Promise((risolvi) => {
+    const conAlias = (state.aziende || []).some(a => a && ('nomi_alnus' in a));
+    const fornitori = (state.aziende || []).filter(a => a.attivo !== false && a.is_fornitore)
+      .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
+    const v = veloTerzista('Fornitori di Alnus da abbinare', 760);
+    const scelte = senza.map(nome => {
+      const sel = el('select', { style: 'width:100%;' },
+        el('option', { value: '+' }, '＋ Crea una scheda nuova «' + nome + '»'),
+        el('option', { value: '' }, '— Salta i suoi ordini —'),
+        conAlias ? el('optgroup', { label: 'È questa scheda' }, ...fornitori.map(a => el('option', { value: a.id }, a.nome))) : null);
+      // Suggerimento: una scheda che inizia con la stessa prima parola.
+      const p = importOrdiniChiaveNome(String(nome).split(/\s+/)[0]);
+      const simili = p.length >= 2 ? fornitori.filter(a => importOrdiniChiaveNome(a.nome).startsWith(p)) : [];
+      if (conAlias && simili.length === 1) sel.value = simili[0].id;
+      return { nome, sel };
+    });
+    v.corpo.append(el('div', { class: 'sub', style: 'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Alnus chiama i fornitori con un nomignolo, spesso troncato. Per ognuno scegli la scheda giusta in Aziende: la scelta resta salvata sulla scheda («nomi in Alnus») e dalla prossima volta si riconosce da solo.'
+      + (conAlias ? '' : ' ⚠ Manca la colonna aziende.nomi_alnus (SQL migrazione-of-alnus-interi.sql): per ora si può solo creare o saltare.')),
+      ...scelte.map(x => el('div', { style: 'display:grid;grid-template-columns:220px 1fr;gap:10px;align-items:center;padding:4px 0;border-bottom:1px solid var(--brd);font-size:12px;' },
+        el('span', { class: 'mono', style: 'font-weight:700;' }, x.nome), x.sel)));
+    const ok = el('button', { class: 'btnp' }, 'Continua');
+    ok.onclick = async () => {
+      ok.disabled = true;
+      for (const x of scelte) {
+        const val = x.sel.value;
+        if (!val) continue;
+        if (val === '+') {
+          const { data, error } = await sb.from('aziende').insert({ nome: x.nome, attivo: true, is_cliente: false, is_fornitore: true }).select().single();
+          if (error) { toast('Scheda «' + x.nome + '» non creata: ' + error.message, 'err', 9000); continue; }
+          state.aziende.push(data);
+        } else {
+          const az = state.aziende.find(a => a.id === val);
+          const nuovi = [...new Set([...(az.nomi_alnus || []), x.nome])];
+          const { data, error } = await sb.from('aziende').update({ nomi_alnus: nuovi }).eq('id', val).select().single();
+          if (error) { toast('«' + x.nome + '» non abbinato a ' + az.nome + ': ' + error.message, 'err', 9000); continue; }
+          state.aziende = state.aziende.map(a => a.id === val ? data : a);
+        }
+      }
+      v.chiudi(); risolvi(true);
+    };
+    const annulla = el('button', { class: 'btng', onclick: () => { v.chiudi(); risolvi(false); } }, 'Annulla');
+    v.piede.append(annulla, ok);
+  });
+}
+
 async function sincronizzaOfAlnus(righe, presoIl) {
   if (state.ordiniFornitore == null) await caricaOrdiniFornitore();
   if (state.ordiniFornitore == null) return toast('Ordini fornitore non leggibili: gli OF di Alnus non si caricano come ordini.', 'err', 9000);
   const nomi = [...new Set(righe.map(r => r.fornitore).filter(Boolean))];
   const senza = nomi.filter(n => !aziendaPerNome(n)).sort((a, b) => a.localeCompare(b, 'it'));
-  if (senza.length) {
-    const sc = await chiediConferma({ titolo: 'Fornitori senza scheda',
-      testo: plAlnus(senza.length, 'fornitore degli OF di Alnus non ha', 'fornitori degli OF di Alnus non hanno') + ' una scheda in Aziende:\n'
-        + senza.join(' · ') + '\n\nLe creo come fornitori? Senza, i loro ordini non si caricano come ordini del gestionale.',
-      conferma: 'Crea le schede', annulla: 'Salta i loro ordini' });
-    if (sc === 'conferma') {
-      for (const nome of senza) {
-        const { data, error } = await sb.from('aziende').insert({ nome, attivo: true, is_cliente: false, is_fornitore: true }).select().single();
-        if (error) { toast('Scheda «' + nome + '» non creata: ' + error.message, 'err', 9000); continue; }
-        state.aziende.push(data);
-      }
-    }
-  }
+  if (senza.length && !(await abbinaNomiAlnus(senza))) return toast('Import degli ordini annullato: la fotografia degli OF resta nello specchio.', 'err', 9000);
   const gruppi = new Map(), fuori = new Set();
   righe.forEach(r => {
     const az = r.fornitore ? aziendaPerNome(r.fornitore) : null;
@@ -6589,6 +6637,8 @@ async function sincronizzaOfAlnus(righe, presoIl) {
       codice_fornitore: r.codice_fornitore || null, odl: r.odl || null });
   });
   const ordini = [...gruppi.values()];
+  // OF INTERI (20 nov): con anche le righe evase, un ordine con tutto il residuo a zero e' chiuso.
+  ordini.forEach(g => { g.stato = g.righe.some(r => Number(r.qta_residua) > 0) ? 'emesso' : 'chiuso'; });
   if (!ordini.length) return toast('Nessun OF di Alnus caricabile come ordine (fornitori senza scheda).', 'err', 9000);
   const { data, error } = await sb.rpc('sincronizza_of_alnus', { p_ordini: ordini, p_preso_il: presoIl });
   if (error) {
@@ -6598,7 +6648,8 @@ async function sincronizzaOfAlnus(righe, presoIl) {
   }
   await caricaOrdiniFornitore();
   const e = data || {};
-  toast('OF di Alnus nel gestionale: ' + plAlnus(e.nuovi || 0, 'nuovo', 'nuovi') + ', ' + plAlnus(e.aggiornati || 0, 'aggiornato', 'aggiornati')
+  const nAperti = ordini.filter(g => g.stato === 'emesso').length;
+  toast('OF di Alnus nel gestionale (' + plAlnus(ordini.length, 'ordine', 'ordini') + ', ' + nAperti + ' aperti): ' + plAlnus(e.nuovi || 0, 'nuovo', 'nuovi') + ', ' + plAlnus(e.aggiornati || 0, 'aggiornato', 'aggiornati')
     + ', ' + plAlnus(e.chiusi || 0, 'chiuso', 'chiusi')
     + (Array.isArray(e.conflitti) && e.conflitti.length ? ' · ⚠ stesso numero di un ordine fatto nel gestionale, non toccati: ' + e.conflitti.join(', ') : '') + (fuori.size ? ' · ' + plAlnus(fuori.size, 'ordine saltato', 'ordini saltati') + ' (fornitore senza scheda)' : ''), 'ok', 12000);
 }
@@ -8216,6 +8267,10 @@ function aziendaPerNome(nome) {
   if (!k) return null;
   const esatta = (state.aziende || []).find(a => importOrdiniChiaveNome(a.nome) === k);
   if (esatta) return esatta;
+  // I NOMI ALNUS della scheda (20 nov, `aziende.nomi_alnus`): Alnus usa spesso un
+  // nomignolo («MM MALPA E LUCA» = «MM TECHNOLOGY di Malpezzi Michele e…»).
+  const alias = (state.aziende || []).find(a => Array.isArray(a.nomi_alnus) && a.nomi_alnus.some(n => importOrdiniChiaveNome(n) === k));
+  if (alias) return alias;
   // Alnus TRONCA il nome a 20 caratteri (20 nov: «TECNOCAB SNC» = «TECNOCAB SNC DI
   // GALASSI GIOVANNA &C», «TEKNINA DI ANJEZA LI» = «Teknina di Anjeza Lika»).
   // Vale l'inizio del nome, ma solo se e' abbastanza lungo e porta a UNA scheda sola.
