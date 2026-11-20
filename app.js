@@ -15474,6 +15474,29 @@ function openOperazioneModal(o, opts) {
   const cardProd = el('div', { class:'ciclo-produzione', style: stileCard }, titoloProd);
   const cardSped = el('div', { class:'ciclo-spedizione', style: stileCard }, titoloSped);
   const prodWrap = el('div', { class:'prod-sped', style:'margin-top:10px;' }, cardProd, cardSped);
+  // RIEPILOGO IN UNA RIGA (20 nov, Nico: "ripuliamo, mi sembra che ci sia troppo
+  // superfluo"): numero grande, barra, una nota a destra. Tolti i quattro box
+  // Ordinata/Prodotta/Da produrre/Avanzamento e le ore (stanno nel Consuntivo).
+  const rigaRiepilogo = (fatti, ordinati, parola, nota, colNota) => {
+    const perc = ordinati > 0 ? Math.min(100, Math.round(fatti / ordinati * 100)) : 0;
+    const tutto = ordinati > 0 && fatti >= ordinati;
+    return el('div', { style:'display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 10px;' },
+      el('span', { style:'font-size:15px;font-weight:700;' + (tutto ? 'color:var(--grn);' : '') },
+        (tutto ? '✓ ' : '') + nfIT(fatti) + ' / ' + nfIT(ordinati) + ' pz ' + parola),
+      el('div', { style:'flex:1;min-width:80px;max-width:220px;height:6px;border-radius:3px;background:var(--sur2);overflow:hidden;' },
+        el('div', { style:'height:100%;width:' + perc + '%;background:' + (tutto ? 'var(--grn)' : 'var(--blu)') + ';' })),
+      nota ? el('span', { class:'sub', style:'font-size:12px;' + (colNota ? 'color:' + colNota + ';font-weight:600;' : '') }, nota) : '');
+  };
+  const rigaElenco = (data, qta, testo, extra, titolo) => el('div', {
+    style:'display:grid;grid-template-columns:86px 80px minmax(0,1fr) auto;gap:10px;align-items:center;padding:5px 2px;'
+      + 'border-bottom:1px solid var(--brd);font-size:12px;', title: titolo || '' },
+    el('span', { class:'mono', style:'font-size:11px;' }, fmtIT(data)),
+    qta,
+    el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: testo || '' }, testo || ''),
+    extra || el('span'));
+  const btnVia = (titolo, fn) => el('button', { type:'button', class:'btnsm', style:'padding:0 6px;font-size:11px;', title: titolo, onclick: fn }, '✕');
+  const campoP = (etichetta, input) => el('div', { class:'field', style:'margin:0;' }, el('label', { style:'font-size:11px;' }, etichetta), input);
+
   let rifaiProduzione = null;   // la assegna la sezione lotti/spedizioni, piu' sotto
   let rifaiConsegne = null;     // la sezione lotti sta in un altro blocco: si passa da qui
   const agganciaProduzione = () => {
@@ -16487,63 +16510,23 @@ function openOperazioneModal(o, opts) {
       const qtaOrd = Number(o.quantita || 0);
       const residuo = qtaOrd - tot;
       const completo = qtaOrd > 0 && tot >= qtaOrd;
-      const perc = qtaOrd > 0 ? Math.round((tot / qtaOrd) * 100) : 0;
 
-      // Riepilogo (stesso stile delle sessioni di lavoro)
-      const oreOrd = opCalcOre(o);
-      const oreRes = opCalcOreResidue(o);
-      consegneBox.append(el('div', {
-        style: 'background:var(--sur2);border:1px solid '+(completo?'var(--grn)':'var(--brd)')+';border-radius:4px;padding:10px 12px;font-family:monospace;font-size:12px;margin-bottom:10px;',
-      },
-        // Riga 1: quantità (pezzi)
-        el('div', { style:'display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;' },
-          el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Ordinata: '),
-            el('span', { style:'color:var(--txt);font-weight:600;' }, qtaOrd + ' pz')),
-          el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Prodotta: '),
-            el('span', { style:'color:'+(completo?'var(--grn)':'var(--txt)')+';font-weight:600;' }, tot + ' pz')),
-          el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Da produrre: '),
-            el('span', { style:'color:'+(residuo<=0?'var(--grn)':'var(--txt)')+';font-weight:600;' }, Math.max(0, residuo) + ' pz')),
-          el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Avanzamento: '),
-            el('span', { style:'color:'+(completo?'var(--grn)':'var(--txt)')+';font-weight:700;' }, perc + '%')),
-        ),
-        // Riga 2: ore preventivate / residue (l'effetto sul capacity planning)
-        // Mostrate sempre, anche se uguali (es. 0 consegne) — è informazione di
-        // contesto, aiuta a interpretare le date di inizio calcolate.
-        el('div', {
-          style:'display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:6px;padding-top:6px;border-top:1px dashed var(--brd);font-size:11px;',
-        },
-          el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Ore preventivate: '),
-            el('span', { style:'color:var(--txt);font-weight:600;' }, oreOrd.toFixed(2) + 'h')),
-          el('div', {},
-            el('span', { style:'color:var(--mut)' }, 'Ore residue: '),
-            el('span', { style:'color:'+(completo?'var(--grn)':(tot>0?'var(--yel)':'var(--txt)'))+';font-weight:600;' }, oreRes.toFixed(2) + 'h')),
-        ),
-      ));
+      // Quanto si puo' ancora registrare in base ai rientri dal terzista (19 nov).
+      const limiteR = (typeof rientriInsufficienti === 'function') ? rientriInsufficienti(o, Infinity) : [];
+      const rientratiMin = limiteR.length ? Math.min(...limiteR.map(x => x.rientrati)) : null;
+      const producibili = rientratiMin == null ? residuo : Math.max(0, Math.min(residuo, rientratiMin - tot));
+      consegneBox.append(rigaRiepilogo(tot, qtaOrd, 'prodotti',
+        completo ? '' : 'mancano ' + nfIT(Math.max(0, residuo))
+          + (rientratiMin != null ? ' · rientrati dal terzista ' + nfIT(rientratiMin) : ''),
+        null));
 
-      // Lista consegne registrate
-      if (cons.length === 0) {
-        consegneBox.append(el('div', { style:'color:var(--mut);font-size:11px;padding:6px 0 10px;' },
-          'Nessun lotto prodotto.'));
-      } else {
-        const consList = el('div', { style:'max-height:180px;overflow-y:auto;font-family:monospace;font-size:11px;margin-bottom:10px;' });
+      if (cons.length) {
+        const consList = el('div', { style:'max-height:180px;overflow-y:auto;margin-bottom:10px;' });
         cons.forEach(c => {
-          const row = el('div', {
-            style: 'display:grid;grid-template-columns:90px 70px 1fr 1fr auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--brd);',
-          },
-            el('div', { style:'color:var(--txt);' }, fmtIT(c.data)),
-            el('div', { style:'color:var(--txt);font-weight:600;text-align:right;' }, c.quantita + ' pz'),
-            el('div', { style:'color:var(--mut);' }, c.ddt ? ('Lotto ' + c.ddt) : '—'),
-            el('div', { style:'color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: c.nota || '' }, c.nota || '—'),
-            isAdmin ? el('button', {
-              type:'button',
-              style:'background:transparent;border:1px solid var(--brd);color:var(--mut);padding:2px 8px;font-size:11px;cursor:pointer;border-radius:3px;',
-              title:'Elimina questo lotto',
-              onclick: async () => {
+          const row = rigaElenco(c.data,
+            el('span', { class:'mono', style:'font-weight:700;text-align:right;' }, nfIT(c.quantita) + ' pz'),
+            [c.ddt, c.nota].filter(Boolean).join(' · '),
+            isAdmin ? btnVia('Elimina questo lotto', async () => {
                 if (!confirm(`Eliminare il lotto del ${fmtIT(c.data)} (${c.quantita} pz)?`)) return;
                 const totPrima = quantitaConsegnata(o.id);
                 const { error } = await sb.from('consegne_commessa').delete().eq('id', c.id);
@@ -16576,9 +16559,7 @@ function openOperazioneModal(o, opts) {
                   }
                 }
                 renderConsegne();
-              },
-            }, '✕') : el('span'),
-          );
+              }) : null);
           consList.append(row);
         });
         consegneBox.append(consList);
@@ -16586,34 +16567,17 @@ function openOperazioneModal(o, opts) {
 
       // Form di registrazione nuova consegna (solo admin, solo se c'è ancora residuo)
       if (isAdmin && residuo > 0) {
-        const dataInput = el('input', {
-          type:'date',
-          value: toLocalISO(new Date()),
-          style:'width:100%;',
-        });
-        const qtaInput = el('input', {
-          type:'number',
-          min:'1',
-          max: String(residuo),
-          step:'1',
-          value: String(residuo),
-          style:'width:100%;',
-        });
-        const ddtInput = el('input', {
-          type:'text',
-          placeholder:'opzionale',
-          style:'width:100%;',
-        });
-        const notaInput = el('input', {
-          type:'text',
-          placeholder:'opzionale',
-          style:'width:100%;',
-        });
-        const btnAdd = el('button', {
-          type:'button',
-          class:'btnp',
-          style:'white-space:nowrap;',
-        }, '+ Registra produzione');
+        if (producibili <= 0) {
+          // Col terzista gestito qui non si produce oltre i rientri (19 nov): niente form.
+          consegneBox.append(el('div', { class:'sub', style:'font-size:12px;color:var(--or);' },
+            'Si potrà registrare produzione quando rientrano i pezzi dal terzista («↩ Registra rientro» nella sua scheda).'));
+          return;
+        }
+        const dataInput = el('input', { type:'date', value: toLocalISO(new Date()) });
+        const qtaInput = el('input', { type:'number', min:'1', max: String(producibili), step:'1', value: String(producibili) });
+        const ddtInput = { value: '' };
+        const notaInput = el('input', { type:'text', placeholder:'nota o riferimento (facoltativa)' });
+        const btnAdd = el('button', { type:'button', class:'btnp', style:'white-space:nowrap;' }, '+ Registra produzione');
 
         btnAdd.onclick = async () => {
           const data = dataInput.value;
@@ -16661,20 +16625,8 @@ function openOperazioneModal(o, opts) {
           renderConsegne();
         };
 
-        const formCons = el('div', {
-          style:'background:var(--sur);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;display:grid;grid-template-columns:130px 100px 1fr 1fr auto;gap:8px;align-items:end;',
-        },
-          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Data'), dataInput),
-          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Quantità'), qtaInput),
-          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Lotto/Rif.'), ddtInput),
-          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Nota'), notaInput),
-          btnAdd,
-        );
-        consegneBox.append(formCons);
-      } else if (isAdmin && residuo <= 0) {
-        consegneBox.append(el('div', {
-          style:'color:var(--grn);font-size:11px;padding:6px 0;font-weight:600;',
-        }, '✓ Tutto il materiale è stato prodotto.'));
+        consegneBox.append(el('div', { style:'display:grid;grid-template-columns:140px 90px minmax(0,1fr) auto;gap:8px;align-items:end;' },
+          campoP('Data', dataInput), campoP('Pezzi', qtaInput), campoP('Nota', notaInput), btnAdd));
       }
     };
 
@@ -16743,29 +16695,12 @@ function openOperazioneModal(o, opts) {
       const completo = qtaOrd > 0 && totSped >= qtaOrd;
 
       // KPI riga
-      spedBox.append(el('div', {
-        style:'display:flex;gap:14px;flex-wrap:wrap;padding:8px 12px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;font-family:monospace;font-size:11px;margin-bottom:10px;',
-      },
-        el('div', {},
-          el('span', { style:'color:var(--mut)' }, 'Ordinata: '),
-          el('span', { style:'color:var(--txt);font-weight:600;' }, qtaOrd + ' pz')),
-        el('div', {},
-          el('span', { style:'color:var(--mut)' }, 'Spedita: '),
-          el('span', { style:'color:'+(completo?'var(--grn)':'var(--txt)')+';font-weight:600;' }, totSped + ' pz')),
-        el('div', {},
-          el('span', { style:'color:var(--mut)' }, 'Pronti per spedire: '),
-          el('span', { style:'color:'+(pronti>0?'var(--blu)':'var(--mut)')+';font-weight:600;' }, pronti + ' pz')),
-        el('div', {},
-          el('span', { style:'color:var(--mut)' }, 'Da spedire: '),
-          el('span', { style:'color:'+(daSpedire<=0?'var(--grn)':'var(--txt)')+';font-weight:600;' }, daSpedire + ' pz')),
-      ));
+      spedBox.append(rigaRiepilogo(totSped, qtaOrd, 'spediti',
+        completo ? '' : (pronti > 0 ? 'pronti da spedire ' + nfIT(pronti) : 'niente di pronto: prima la produzione'),
+        completo ? null : (pronti > 0 ? 'var(--blu)' : null)));
 
-      // Lista spedizioni esistenti
       const lista = spedizioniDiOperazione(o.id);
-      if (lista.length === 0) {
-        spedBox.append(el('div', { style:'color:var(--mut);font-size:11px;font-style:italic;padding:6px 0;' },
-          'Nessuna spedizione registrata.'));
-      } else {
+      if (lista.length) {
         const listWrap = el('div', { style:'display:flex;flex-direction:column;gap:4px;margin-bottom:10px;' });
         const oggiSped = toLocalISO(new Date());
         lista.forEach(s => {
@@ -16776,23 +16711,11 @@ function openOperazioneModal(o, opts) {
           // Una preparata la cui data e passata e una dimenticata: e il solo
           // modo in cui questa funzione puo fare danno, quindi si dichiara.
           const scaduta = prep && s.data && String(s.data) < oggiSped;
-          const row = el('div', {
-            style:'display:grid;grid-template-columns:90px 70px 1fr 1fr auto;gap:10px;align-items:center;'
-              + 'padding:6px 8px;background:var(--sur);border-radius:3px;font-family:monospace;font-size:11px;'
-              + 'border:1px solid ' + (prep ? 'var(--ylw)' : 'var(--brd)') + ';',
-            title: scaduta ? 'Preparata il ' + fmtIT(s.data) + ' e mai confermata.' : '',
-          },
-            el('div', {}, fmtIT(s.data)),
-            el('div', { style:'text-align:right;font-weight:600;'
-              + (prep ? 'color:var(--ylw);' : '') },
-              prep ? 'preparata' : (s.quantita + ' pz')),
-            el('div', { style:'color:' + (prep ? 'var(--ylw)' : 'var(--mut)') + ';' },
-              s.ddt ? ('DDT ' + s.ddt) : '—'),
-            el('div', { style:'color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: (s.destinatario||'') + (s.note?(' · '+s.note):'') },
-              (s.destinatario || '') + (s.note?(' · '+s.note):'') || '—'),
-            isAdmin ? el('button', {
-              class:'btnsm', type:'button',
-              style:'padding:2px 6px;font-size:11px;background:transparent;border:1px solid var(--red);color:var(--red);',
+          const row = rigaElenco(s.data,
+            el('span', { class:'mono', style:'font-weight:700;text-align:right;' + (prep ? 'color:var(--ylw);' : '') },
+              prep ? 'preparata' : nfIT(s.quantita) + ' pz'),
+            [s.ddt ? 'DDT ' + s.ddt : '', s.destinatario, s.note].filter(Boolean).join(' · '),
+            isAdmin ? el('button', { type:'button', class:'btnsm', style:'padding:0 6px;font-size:11px;',
               title:'Elimina questa spedizione',
               onclick: async () => {
                 if (!confirm(prep
@@ -16819,7 +16742,7 @@ function openOperazioneModal(o, opts) {
                 renderSpedizioni();
               },
             }, '✕') : null,
-          );
+            scaduta ? 'Preparata il ' + fmtIT(s.data) + ' e mai confermata.' : '');
           listWrap.append(row);
 
           // CONFERMA: la merce parte, si scrive quanta. Da qui in poi la riga
@@ -16865,17 +16788,13 @@ function openOperazioneModal(o, opts) {
       // Form per aggiungere nuova spedizione (solo admin, se c'è qualcosa da spedire)
       if (isAdmin && daSpedire > 0) {
         const dataInputS = el('input', { type:'date', value: toLocalISO(new Date()) });
-        // ⚠ QUANTITA FACOLTATIVA. Vuota = spedizione PREPARATA: si riporta il
-        // numero di DDT che Alnus ha gia assegnato, prima che la merce parta
-        // (8 set). Quando non c'e niente di pronto la casella nasce vuota,
-        // perche preparare e l'unica cosa che si puo fare.
         const qtaInputS = el('input', { type:'number', min:'1',
           max: pronti > 0 ? String(pronti) : '',
           value: pronti > 0 ? String(pronti) : '',
-          placeholder: 'vuota = solo DDT' });
-        const ddtInputS = el('input', { type:'text', placeholder:'numero DDT al cliente (opzionale)' });
-        const destInputS = el('input', { type:'text', placeholder:'destinatario / luogo (opzionale)' });
-        const noteInputS = el('input', { type:'text', placeholder:'note (opzionale)' });
+          placeholder: 'vuota = prepara DDT' });
+        const ddtInputS = el('input', { type:'text', placeholder:'n. DDT (facoltativo)' });
+        const destInputS = { value: '' };
+        const noteInputS = el('input', { type:'text', placeholder:'destinatario, note (facoltative)' });
 
         const btnAddS = el('button', {
           type:'button', class:'btnp',
@@ -16954,31 +16873,8 @@ function openOperazioneModal(o, opts) {
           renderSpedizioni();
         };
 
-        const formSped = el('div', {
-          style:'background:var(--sur);border:1px solid var(--brd);border-radius:4px;padding:10px 12px;display:grid;grid-template-columns:130px 90px 1fr 1fr 1fr auto;gap:8px;align-items:end;',
-        },
-          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Data'), dataInputS),
-          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Quantità'), qtaInputS),
-          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'DDT'), ddtInputS),
-          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Destinatario'), destInputS),
-          el('div', { class:'field' }, el('label', { style:'font-size:11px;' }, 'Note'), noteInputS),
-          btnAddS,
-        );
-        spedBox.append(formSped);
-
-        // Avviso se in magazzino ci sono meno pezzi del massimo selezionabile
-        if (pronti < daSpedire) {
-          spedBox.append(el('div', { style:'color:var(--yel);font-size:11px;padding:6px 0 0;' },
-            `Solo ${pronti} pz pronti in magazzino (${daSpedire - pronti} ancora da produrre).`));
-        }
-      } else if (isAdmin && daSpedire <= 0) {
-        spedBox.append(el('div', {
-          style:'color:var(--grn);font-size:11px;padding:6px 0;font-weight:600;',
-        }, '✓ Tutto il materiale è stato spedito.'));
-      } else if (isAdmin && pronti === 0 && daSpedire > 0) {
-        spedBox.append(el('div', {
-          style:'color:var(--mut);font-size:11px;padding:6px 0;font-style:italic;',
-        }, 'Nulla in magazzino da spedire. Registra prima la produzione.'));
+        spedBox.append(el('div', { style:'display:grid;grid-template-columns:140px 90px 150px minmax(0,1fr) auto;gap:8px;align-items:end;' },
+          campoP('Data', dataInputS), campoP('Pezzi', qtaInputS), campoP('DDT', ddtInputS), campoP('Note', noteInputS), btnAddS));
       }
     };
 
