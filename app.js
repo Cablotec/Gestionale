@@ -1142,7 +1142,12 @@ function opCampiMancanti(op) {
       const tipo = (state.tipiLav || []).find(t => t.id === f.tipo_lavorazione_id);
       const nome = tipo?.nome || 'lavorazione';
       const ass = faseAssegnatari(op, f.id);
-      if (ass.addetti.length === 0 && ass.fornitori.length === 0) {
+      // I fornitori si contano qui, non da faseAssegnatari: dal 18 nov quella
+      // risponde sempre fornitori:[] (non pianificano), e l'avviso diceva
+      // «nessun addetto/fornitore» sul Cablaggio dato al tomaificio (20 nov,
+      // Elcotec 00496/0030-0040). Vale la lavorazione o tutta la commessa.
+      const forn = (state.opFornitori || []).some(r => r.operazione_id === op.id && (r.fase_id === f.id || r.fase_id == null));
+      if (ass.addetti.length === 0 && !forn) {
         mancanti.push('Lavorazione «' + nome + '»: nessun addetto/fornitore');
       }
     });
@@ -6712,15 +6717,6 @@ function lavorazioniInterne(o) {
   const fuori = new Set((state.opFornitori || []).filter(r => r.operazione_id === o.id && r.fase_id).map(r => r.fase_id));
   return opFasiOf(o).filter(f => !fuori.has(f.id));
 }
-// Le lavorazioni affidate a un fornitore su questa commessa (nomi, nell'ordine del ciclo).
-// 20 nov (mail di Massimo su 00496/0030-0040): il Cablaggio dato al tomaificio
-// spariva dal ciclo, perche' il terzista si vedeva solo col nome dell'azienda.
-function lavorazioniDelFornitore(o, aziendaId) {
-  if (!o || !o.id || !aziendaId || typeof opFasiOf !== 'function') return [];
-  const sue = new Set((state.opFornitori || [])
-    .filter(r => r.operazione_id === o.id && r.azienda_id === aziendaId && r.fase_id).map(r => r.fase_id));
-  return opFasiOf(o).filter(f => sue.has(f.id)).map(f => nomeTipoLav(f.tipo_lavorazione_id));
-}
 function lavoroInCasa(o) {
   if (!o || !o.id) return false;
   return lavorazioniInterne(o).length > 0 || getOperazioneAddetti(o.id).length > 0
@@ -7096,9 +7092,7 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
     tappa('1 · Materiali', 'fatto', '✓'));
   fasi.forEach(({ f, passi }, i) => {
     const s = statoFase(passi);
-    const lav = eReparto(f.id) ? [] : lavorazioniDelFornitore(o, f.id);
-    strada.append(freccia(), tappa((i + 2) + ' · ' + (eReparto(f.id) ? 'Reparto' : nomeAziendaDi(f.id))
-      + (lav.length ? ' · ' + lav.join(', ') : ''), s,
+    strada.append(freccia(), tappa((i + 2) + ' · ' + (eReparto(f.id) ? 'Reparto' : nomeAziendaDi(f.id)), s,
       s === 'fatto' ? '✓' : (s === 'avviso' ? '⚠' : '')));
   });
   const prodotti = quantitaConsegnata(o.id);
@@ -7120,8 +7114,6 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
     const nMat = f.voci.length;
     card.append(el('div', { style:'display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px;' },
       el('span', { style:'font-weight:700;font-size:13px;' }, (i + 2) + ' · ' + (rep ? 'Reparto' : nomeAziendaDi(f.id))),
-      (!rep && lavorazioniDelFornitore(o, f.id).length)
-        ? el('span', { class:'badge bvio', style:'font-size:11px;' }, lavorazioniDelFornitore(o, f.id).join(', ')) : '',
       el('span', { class:'sub', style:'font-size:11px;' }, (rep ? 'in casa' : 'terzista')
         + (nMat ? ' · ' + nMat + (nMat === 1 ? ' materiale' : ' materiali') : (rep ? '' : ' · nessun materiale da mandare'))),
       (!rep && opts.azioniFornitore) ? (opts.azioniFornitore(f) || '') : ''));
