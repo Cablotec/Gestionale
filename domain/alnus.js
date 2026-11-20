@@ -194,6 +194,24 @@ function giacenzaContata(g, magazzini) {
   return Math.max(0, +t.toFixed(6));
 }
 
+// GIACENZA UNICA di un codice (20 nov, Nico): specchio Alnus (magazzini contati)
+// + saldo dei movimenti del gestionale in conto. Oggi i due conti riguardano
+// codici diversi (i TS- di Tema in Alnus non ci sono, i carichi dei fornitori
+// partono fuori giacenza), quindi si sommano. Se un codice li ha TUTTI E DUE
+// non si somma in silenzio: `doppia` lo dichiara.
+//   gAlnus     = voce di giacenzaAlnus per quel codice (o null)
+//   alnusLetto = lo specchio c'e' (apertura letta): senza, `alnus` e' null
+//   movCodice  = movimenti del gestionale di quel codice (null = non letti)
+function giacenzaUnica(gAlnus, magazzini, alnusLetto, movCodice) {
+  const alnus = alnusLetto ? giacenzaContata(gAlnus, magazzini) : null;
+  const inConto = Array.isArray(movCodice) ? movCodice.filter(m => m && !m.fuori_giacenza) : null;
+  const gestionale = inConto ? +inConto.reduce((s, m) => s + (Number(m.qta) || 0), 0).toFixed(6) : null;
+  const haAlnus = !!(alnusLetto && gAlnus && Object.keys(gAlnus.perMag || {}).length);
+  const haGest = !!(inConto && inConto.length);
+  return { alnus, gestionale, totale: +((alnus || 0) + (gestionale || 0)).toFixed(6),
+    doppia: haAlnus && haGest, completa: alnus != null && gestionale != null };
+}
+
 // OF di Alnus ancora da arrivare: residua della fotografia meno i carichi
 // (tipo documento OF, stesso anno, numero e codice) arrivati DOPO la
 // fotografia, che consumano le righe in ordine di consegna.
@@ -334,5 +352,5 @@ function righeFabbisognoSpecchio(o) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { numAlnus, dataAlnus, leggiGiacenzeAlnus, leggiMovimentiAlnus, leggiOfAlnus, dataCella,
-    magazzinoAlnus, MAGAZZINI_CONTATI_DI_SERIE, giacenzaAlnus, giacenzaContata, ofAlnusAperti, confrontoDaOrdinare, controlloGiacenze, righeFabbisognoSpecchio };
+    magazzinoAlnus, MAGAZZINI_CONTATI_DI_SERIE, giacenzaAlnus, giacenzaContata, giacenzaUnica, ofAlnusAperti, confrontoDaOrdinare, controlloGiacenze, righeFabbisognoSpecchio };
 }

@@ -6795,6 +6795,48 @@ function righeFabbisognoGestionale() {
       : ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, oggi),
     ofNostri, contaScaduti: alnusContaScaduti });
 }
+// GIACENZA UNICA di un codice (20 nov): specchio Alnus + movimenti del gestionale
+// (`giacenzaUnica` in domain/alnus.js). Legge lo specchio se non e' ancora in
+// memoria; per chi non e' admin la RLS lo da' vuoto e resta il solo gestionale.
+let alnusGiacCache = null;   // { chiave, mappa } per non rifare il conto a ogni scheda
+async function giacenzaUnicaOra(codice) {
+  const cod = chiaveCodice(codice);
+  if (state.alnus === undefined) { try { await caricaAlnus(); } catch (e) {} }
+  const A = state.alnus, letto = !!(A && A.apertura);
+  let gA = null, magazzini = null;
+  if (letto) {
+    const chiave = A.apertura.id + '|' + A.movimenti.length + '|' + A.giacApertura.length;
+    if (!alnusGiacCache || alnusGiacCache.chiave !== chiave) {
+      const m = new Map();
+      giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il).forEach((v, c) => m.set(chiaveCodice(c), v));
+      alnusGiacCache = { chiave, mappa: m };
+    }
+    gA = alnusGiacCache.mappa.get(cod) || null;
+    magazzini = alnusMagazziniContati([...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
+      .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean));
+  }
+  const mov = Array.isArray(state.movimenti) ? state.movimenti.filter(x => chiaveCodice(x.codice) === cod) : null;
+  return Object.assign(giacenzaUnica(gA, magazzini, letto, mov), { perMag: gA ? gA.perMag : null,
+    aperturaIl: letto ? A.apertura.preso_il : null });
+}
+// La riga che la dice, uguale nella scheda del codice e in Movimenti.
+function rigaGiacenzaUnica(u, um) {
+  const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  const u_ = um ? ' ' + um : '';
+  const pezzi = [];
+  if (u.alnus != null) pezzi.push('Alnus ' + nf(u.alnus) + (u.perMag ? ' (' + Object.entries(u.perMag).map(([m, q]) => m + ' ' + nf(q)).join(', ') + ')' : ''));
+  else pezzi.push('specchio Alnus non letto');
+  if (u.gestionale != null) pezzi.push('gestionale ' + nf(u.gestionale));
+  else pezzi.push('movimenti non letti');
+  return el('div', { style:'font-size:12px;' },
+    el('span', { style:'font-weight:700;font-size:14px;' + (u.doppia ? 'color:var(--or);' : '') }, 'Giacenza ' + nf(u.totale) + u_),
+    el('span', { class:'sub' }, ' · ' + pezzi.join(' + ')
+      + (u.aperturaIl ? ' · specchio dall’apertura del ' + fmtQuando(u.aperturaIl) : '')),
+    u.doppia ? el('div', { style:'color:var(--or);font-size:11px;margin-top:3px;' },
+      '⚠ Questo codice ha giacenza sia in Alnus sia nei movimenti del gestionale: è sommata, controlla che non sia lo stesso materiale entrato due volte.') : '',
+    !u.completa ? el('div', { class:'sub', style:'font-size:11px;margin-top:3px;' }, 'Giacenza parziale: una delle due fonti non si è potuta leggere.') : '');
+}
+
 // La pillola in alto: chi ha acceso il gestionale come fonte non deve dimenticarlo.
 function segnaFonteFabbisogno() {
   const ruolo = document.getElementById('role-pill');
@@ -8668,6 +8710,12 @@ async function apriSchedaCodice(codice) {
   };
   disegna();
   v.corpo.append(lista);
+
+  // ── GIACENZA UNICA (20 nov): specchio Alnus + movimenti del gestionale ──
+  const giacBox = el('div', { class:'sub', style:'font-size:12px;' }, 'Leggo la giacenza…');
+  v.corpo.append(titoloSez('Giacenza'), giacBox);
+  giacenzaUnicaOra(cod).then(u => giacBox.replaceChildren(rigaGiacenzaUnica(u, (m && m.um) || (movD && movD.um) || '')))
+    .catch(e => { giacBox.textContent = 'Giacenza non calcolabile: ' + (e.message || e); });
 
   // ── ULTIMI MOVIMENTI (19 nov, Nico) ──
   v.corpo.append(titoloSez('Ultimi movimenti'));
@@ -10744,6 +10792,11 @@ function renderMovimenti(root) {
           title:'Aggiusta la giacenza di questo codice',
           onclick: () => apriRettificaMagazzino([...codici][0], (cod) => { movCerca = cod; movQuante = 400; renderMovimenti(root); }) },
           '± Rettifica') : ''));
+      // Sotto, la giacenza UNICA: Alnus + gestionale (il totale qui sopra e' solo dei movimenti).
+      const giacBox = el('div', { class:'sub', style:'margin:-2px 0 10px;font-size:12px;' }, 'Leggo la giacenza…');
+      tabWrap.append(giacBox);
+      giacenzaUnicaOra([...codici][0]).then(u => giacBox.replaceChildren(rigaGiacenzaUnica(u, righe[0].um || '')))
+        .catch(e => { giacBox.textContent = 'Giacenza non calcolabile: ' + (e.message || e); });
     }
 
     const col = colonne.find(c => c.k === movSortKey) || colonne[0];
