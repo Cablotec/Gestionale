@@ -6702,6 +6702,65 @@ function richiesteDiCommessa(o) {
 // altrimenti quelli a database). Dal 18 nov ogni fornitore della commessa e'
 // una fase, anche senza materiali da mandare (Nico: "un terzista potrebbe
 // benissimo avere solo prezzo senza materiali").
+// ── IL REPARTO E' IL LAVORO IN CASA (20 nov, Nico: "sistemiamo il reparto nel ciclo",
+// scelta «Lavoro in casa»). Prima il Reparto c'era solo sulle commesse «Materiali da
+// DDT» e parlava solo di materiale; ora c'e' ogni volta che la commessa ha lavoro
+// nostro: lavorazioni non date a un terzista, addetti assegnati o ore timbrate.
+// Le lavorazioni interne: quelle della linguetta Lavorazione non affidate a un fornitore.
+function lavorazioniInterne(o) {
+  if (!o || !o.id || typeof opFasiOf !== 'function') return [];
+  const fuori = new Set((state.opFornitori || []).filter(r => r.operazione_id === o.id && r.fase_id).map(r => r.fase_id));
+  return opFasiOf(o).filter(f => !fuori.has(f.id));
+}
+function lavoroInCasa(o) {
+  if (!o || !o.id) return false;
+  return lavorazioniInterne(o).length > 0 || getOperazioneAddetti(o.id).length > 0
+    || (state.sessioni || []).some(x => x.operazione_id === o.id)
+    // ore interne previste (minuti/pz non tutti a un terzista): il lavoro e' nostro anche prima di assegnarlo
+    || (typeof opCalcOreInterne === 'function' && opCalcOreInterne(o) > 0);
+}
+// Ore di un timbro (aperto: fino ad ora).
+function oreTimbro(x) {
+  return x.fine ? (Number(x.durata_secondi) || 0) / 3600
+    : Math.max(0, (Date.now() - new Date(x.inizio).getTime()) / 3600000);
+}
+// Le righe del lavoro in casa: una per lavorazione interna, piu' «senza lavorazione»
+// per addetti e timbri che non ne indicano una. [{ nome, addetti:[{nome, finita}], ore, finita }]
+function righeLavoroInCasa(o) {
+  const fasi = lavorazioniInterne(o);
+  const add = (state.opAddetti || []).filter(r => r.operazione_id === o.id);
+  const tim = (state.sessioni || []).filter(x => x.operazione_id === o.id);
+  const nomeU = (id) => ((state.utentiById || {})[id] || {}).nome || 'operatore';
+  const riga = (nome, righeAdd, timbri) => {
+    const per = new Map();
+    righeAdd.forEach(r => { if (!per.has(r.utente_id)) per.set(r.utente_id, { nome: nomeU(r.utente_id), finita: !!r.completata_il }); });
+    return { nome, addetti: [...per.values()], ore: timbri.reduce((a, x) => a + oreTimbro(x), 0),
+      finita: righeAdd.length > 0 && righeAdd.every(r => r.completata_il) };
+  };
+  const out = fasi.map(f => riga(nomeTipoLav(f.tipo_lavorazione_id), add.filter(r => r.fase_id === f.id), tim.filter(x => x.fase_id === f.id)));
+  const ids = new Set(fasi.map(f => f.id));
+  const addLibere = add.filter(r => !r.fase_id || !ids.has(r.fase_id));
+  const timLiberi = tim.filter(x => !x.fase_id || !ids.has(x.fase_id));
+  if (addLibere.length || timLiberi.length) out.push(riga(fasi.length ? 'senza lavorazione' : 'lavoro sulla commessa', addLibere, timLiberi));
+  return out;
+}
+// I passi del lavoro in casa: «Lavorazioni» (finite su tutte) e «Ore» (timbrate su previste).
+function passiLavoroInCasa(o) {
+  const righe = righeLavoroInCasa(o);
+  const conAddetti = righe.filter(r => r.addetti.length);
+  const finite = conAddetti.filter(r => r.finita).length;
+  const ore = righe.reduce((a, r) => a + r.ore, 0);
+  const prev = typeof opCalcOreInterne === 'function' ? opCalcOreInterne(o) : 0;
+  const tutte = conAddetti.length > 0 && finite === conAddetti.length;
+  const h = (n) => n.toFixed(1).replace('.', ',') + ' h';
+  return [
+    { nome:'Lavorazioni', stato: tutte ? 'fatto' : (ore > 0 || finite > 0 ? 'ora' : 'poi'),
+      dett: conAddetti.length ? finite + ' di ' + conAddetti.length + ' finite' : (righe.length ? 'nessun addetto assegnato' : '') },
+    { nome:'Ore', stato: tutte ? 'fatto' : (ore > 0 ? 'ora' : 'poi'),
+      dett: h(ore) + (prev > 0 ? ' su ' + h(prev) + ' previste' : ' timbrate') + (prev > 0 && ore > prev * 1.1 ? ' · oltre di ' + h(ore - prev) : '') },
+  ];
+}
+
 function sequenzaFasiCommessa(o, art, fornIds) {
   const rep = repartoId();
   const fasi = fasiCommessa(o);
@@ -6709,7 +6768,8 @@ function sequenzaFasiCommessa(o, art, fornIds) {
   const fuori = fuoriSedeCommessa(o);
   const forn = new Set(Array.isArray(fornIds) ? fornIds
     : (state.opFornitori || []).filter(r => r.operazione_id === o.id).map(r => r.azienda_id));
-  const usata = (id) => fasi.has(id) || forn.has(id) || mie.some(x => x.terzista_id === id) || fuori.some(g => g.presso_id === id);
+  const usata = (id) => fasi.has(id) || forn.has(id) || mie.some(x => x.terzista_id === id) || fuori.some(g => g.presso_id === id)
+    || (id === rep && lavoroInCasa(o));
   const ids = [];
   const metti = (id) => { if (id && !ids.includes(id) && usata(id)) ids.push(id); };
   (Array.isArray(art && art.fasi_esterne) ? art.fasi_esterne : [])
@@ -6740,6 +6800,10 @@ function passiFase(o, f, poi) {
   const primaInv = inviate.slice().sort((a, b) => String(a.inviato_il || '').localeCompare(String(b.inviato_il || '')))[0];
   const prepara = () => apriRichiestaTerzista(o, poi, { terzista: f.id });
   const passi = [];
+
+  // REPARTO SENZA MATERIALE (20 nov): commessa senza «Materiali da DDT», niente
+  // lista ne' materiale in reparto: restano solo lavorazioni e ore.
+  if (rep && !f.voci.length && !f.richieste.length && !f.fuori.length) return passiLavoroInCasa(o);
 
   // 0. L'ORDINE FORNITORE (19 nov, Nico): viene prima di tutto. Senza, la lista
   // e la spedizione non partono (vedi `mancaOfTerzista`).
@@ -6812,11 +6876,9 @@ function passiFase(o, f, poi) {
 
   // 3. LA LAVORAZIONE
   if (rep) {
-    const fatti = quantitaConsegnata(o.id);
-    const tot = Number(o.quantita) || 0;
-    const partita = fatti > 0 || (state.sessioni || []).some(s => s.operazione_id === o.id);
-    passi.push({ nome:'Produzione', stato: (tot > 0 && fatti >= tot) ? 'fatto' : (partita ? 'ora' : 'poi'),
-      dett: nfIT(fatti) + ' di ' + nfIT(tot) + ' pz' });
+    // Il passo «Produzione» (pezzi prodotti) e' TOLTO dal reparto (20 nov): i pezzi
+    // stanno nel riquadro Produzione, dopo. Qui il lavoro in casa.
+    passi.push(...passiLavoroInCasa(o));
   } else if (primaInv && totPz > 0 && rientrati >= totPz) {
     passi.push({ nome:'Dal terzista', stato:'fatto', dett:'lavorazione finita' });
   } else if (primaInv) {
@@ -7062,6 +7124,23 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
       p.dett ? el('div', { class:'sub', style:'font-size:11px;' }, p.dett) : '',
       p.azione || '')));
     card.append(griglia);
+    // LAVORO IN CASA (20 nov): una riga per lavorazione interna, con chi la fa
+    // (✓ chi l'ha dichiarata finita) e le ore timbrate.
+    if (rep) {
+      const righeL = righeLavoroInCasa(o);
+      if (righeL.length) {
+        const CL = 'display:grid;grid-template-columns:minmax(140px,1fr) minmax(160px,2fr) 70px;gap:8px;align-items:baseline;';
+        const etL = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+        const boxL = el('div', { style:'margin-top:10px;' },
+          el('div', { style: CL + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' }, etL('Lavorazione'), etL('Chi'), etL('Ore', 1)));
+        righeL.forEach(r => boxL.append(el('div', { style: CL + 'padding:4px 0;border-bottom:1px solid var(--brd);font-size:12px;' },
+          el('span', { style: r.finita ? 'color:var(--grn);font-weight:700;' : 'font-weight:600;' }, (r.finita ? '✓ ' : '') + r.nome),
+          el('span', { class:'sub', style:'font-size:11px;' }, r.addetti.length
+            ? r.addetti.map(a => (a.finita ? '✓ ' : '') + a.nome).join(', ') : 'nessuno assegnato'),
+          el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, r.ore > 0 ? r.ore.toFixed(1).replace('.', ',') + ' h' : '—'))));
+        card.append(boxL);
+      }
+    }
     // Promemoria: i mancanti di prima adesso ci sono.
     const pm = mancanti.find(m => m.terzista === f.id);
     if (pm) {
