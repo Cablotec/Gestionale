@@ -687,10 +687,54 @@ function applicaDistinteProdotti(figliDi, articoli) {
   return locali;
 }
 
+// ── OF D'ACQUISTO ANCORA APERTI (20 nov, Nico: OF massivi) ─────────────
+// Il «da ordinare» viene da Alnus, che non sa niente degli OF fatti qui: senza
+// toglierli, lo stesso codice si riproporrebbe a ogni ordine. Aperto = quanto
+// e' negli OF d'acquisto EMESSI meno quanto e' gia' arrivato con DDT che citano
+// quell'ordine (`ordine_rif` «OFS 3/2026», anche «OF 3/2026» o «3/2026» dopo OF).
+// Quello che e' arrivato non si toglie piu': e' gia' nella giacenza di Alnus.
+// ⚠ Regge solo se gli OF d'acquisto si fanno QUI e non anche in Alnus.
+// `movimenti` null (non letti) = nessun arrivo contato: si toglie l'ordine intero,
+// meglio una proposta corta che un ordine doppio.
+function chiaveOfDaRif(rif) {
+  const m = /\bOFS?\s*(?:n\.?\s*)?(\d+)\s*\/\s*(\d{4})\b/i.exec(String(rif || ''));
+  return m ? Number(m[2]) + '/' + Number(m[1]) : null;
+}
+function ordinatoApertoOf(ordini, movimenti, escludiId) {
+  const arrivato = new Map();   // 'anno/numero|CODICE' -> qta arrivata
+  (movimenti || []).forEach(m => {
+    if (!m || m.tipo !== 'carico' || !(Number(m.qta) > 0)) return;
+    const k = chiaveOfDaRif(m.ordine_rif);
+    if (!k) return;
+    const c = String(m.codice || '').trim().toUpperCase();
+    arrivato.set(k + '|' + c, (arrivato.get(k + '|' + c) || 0) + Number(m.qta));
+  });
+  const per = new Map();        // CODICE -> { aperto, ordini:[{ id, anno, numero, ordinato, arrivato, aperto }] }
+  (ordini || []).forEach(of => {
+    if (!of || of.tipo !== 'acquisto' || of.stato !== 'emesso' || of.id === escludiId) return;
+    const somma = new Map();
+    (of.righe || []).forEach(r => {
+      const c = String((r && r.codice) || '').trim().toUpperCase();
+      const q = Number(r && r.qta) || 0;
+      if (c && q > 0) somma.set(c, (somma.get(c) || 0) + q);
+    });
+    somma.forEach((q, c) => {
+      const arr = arrivato.get(of.anno + '/' + of.numero + '|' + c) || 0;
+      const ap = Math.max(0, +(q - arr).toFixed(6));
+      if (!per.has(c)) per.set(c, { aperto: 0, ordini: [] });
+      const v = per.get(c);
+      v.aperto = +(v.aperto + ap).toFixed(6);
+      v.ordini.push({ id: of.id, anno: of.anno, numero: of.numero, ordinato: q, arrivato: arr, aperto: ap });
+    });
+  });
+  return per;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
-    ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne, assegnaPerServizio, terzistiDellaCommessa };
+    ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne, assegnaPerServizio, terzistiDellaCommessa,
+    chiaveOfDaRif, ordinatoApertoOf };
 }

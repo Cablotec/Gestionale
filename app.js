@@ -5922,8 +5922,13 @@ async function annullaOrdineFornitore(of, poi) {
 
 // Codici «da ordinare» (rossi di Materiali) raggruppati per fornitore
 // abituale con una scheda in Aziende. Quantita' = quella che il magazzino
-// dice di comprare (`qta_da_ordinare`), una volta per codice.
-function daOrdinarePerFornitore() {
+// dice di comprare (`qta_da_ordinare`), una volta per codice, MENO quanto e'
+// gia' negli OF d'acquisto emessi qui e non ancora arrivato (20 nov,
+// `ordinatoApertoOf`): senza, ogni OF riproporrebbe gli stessi codici finche'
+// Alnus non si aggiorna. `coperti` = codici tutti gia' in un OF aperto.
+// `escludiId`: l'ordine che si sta modificando, che non toglie se stesso.
+function daOrdinarePerFornitore(escludiId) {
+  const aperti = ordinatoApertoOf(state.ordiniFornitore || [], state.movimenti, escludiId);
   const perCodice = new Map();
   (state.mancanti || []).forEach(m => {
     if (typeof mancanteCategoria !== 'function' || mancanteCategoria(m) !== 'da_ordinare') return;
@@ -5931,10 +5936,15 @@ function daOrdinarePerFornitore() {
     const q = Number(m.qta_da_ordinare) || 0;
     if (!c || !(q > 0)) return;
     const v = perCodice.get(c);
-    if (!v || q > v.qta) perCodice.set(c, { codice: c, descrizione: m.descrizione || '', um: m.um || '', qta: q });
+    if (!v || q > v.daOrdinare) perCodice.set(c, { codice: c, descrizione: m.descrizione || '', um: m.um || '', daOrdinare: q });
   });
-  const per = new Map(), senza = [];
+  const per = new Map(), senza = [], coperti = [];
   perCodice.forEach(r => {
+    const ap = aperti.get(r.codice.toUpperCase());
+    r.inOf = ap && ap.aperto > 0 ? ap.aperto : 0;
+    r.ofAperti = ap ? ap.ordini.filter(x => x.aperto > 0).map(x => 'OFS ' + x.numero + '/' + x.anno) : [];
+    r.qta = Math.max(0, +(r.daOrdinare - r.inOf).toFixed(6));
+    if (!(r.qta > 0)) { coperti.push(r); return; }
     const nome = matAbitualeDi(r.codice);
     const az = nome ? aziendaPerNome(nome) : null;
     if (!az) { senza.push(r); return; }
@@ -5942,7 +5952,11 @@ function daOrdinarePerFornitore() {
     per.get(az.id).push(r);
   });
   per.forEach(l => l.sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true })));
-  return { per, senza };
+  return { per, senza, coperti };
+}
+// La nota sotto una riga proposta: «da ordinare 100 · già in OFS 3/2026: 40».
+function notaDaOrdinare(r) {
+  return 'da ordinare ' + nfIT(r.daOrdinare) + (r.inOf > 0 ? ' · già in ' + r.ofAperti.join(', ') + ': ' + nfIT(r.inOf) : '');
 }
 // L'ultimo prezzo pagato a un fornitore per un codice: { prezzo, data, numero } o null.
 // `escludiId`: l'ordine che si sta modificando, che non e' «l'ultimo prezzo» di se stesso.
@@ -5990,9 +6004,9 @@ function numeroDaTesto(s) {
 async function apriOrdineAcquisto(poi, of) {
   if (state.ordiniFornitore == null) return toast('Gli ordini fornitore non sono attivi: manca la tabella.', 'err', 9000);
   if (!matAbituali) await caricaFornitoriAbituali();
-  const { per, senza } = daOrdinarePerFornitore();
-  const v = veloTerzista(of ? 'Modifica ' + numeroOrdineFornitore(of) + ' · ' + nomeAziendaDi(of.fornitore_id) : 'Nuovo ordine d’acquisto', 1110);
   const escludi = of ? of.id : null;
+  const { per, senza, coperti } = daOrdinarePerFornitore(escludi);
+  const v = veloTerzista(of ? 'Modifica ' + numeroOrdineFornitore(of) + ' · ' + nomeAziendaDi(of.fornitore_id) : 'Nuovo ordine d’acquisto', 1110);
   // Fornitori: prima chi ha codici da ordinare (i piu' carichi in alto), poi gli altri.
   const fornitori = (state.aziende || []).filter(a => a.attivo !== false && a.is_fornitore);
   const conDaOrd = fornitori.filter(a => per.has(a.id)).sort((a, b) => per.get(b.id).length - per.get(a.id).length);
@@ -6058,8 +6072,8 @@ async function apriOrdineAcquisto(poi, of) {
       const via = el('button', { type:'button', class:'btnsm', style:'padding:0 6px;', title:'Togli la riga',
         onclick: () => { righe.splice(i, 1); disegna(); } }, '✕');
       corpoRighe.append(el('div', { style: C + 'padding:3px 0;' }, inCod, inDesc, inUm, inQ, inD, inP, totRiga, via));
-      if (r.ultimo || r.daOrdinare) corpoRighe.append(el('div', { class:'sub', style:'font-size:10.5px;margin:-2px 0 3px 156px;' },
-        [r.daOrdinare ? 'da ordinare ' + nfIT(r.daOrdinare) : '',
+      if (r.ultimo || r.nota) corpoRighe.append(el('div', { class:'sub', style:'font-size:10.5px;margin:-2px 0 3px 156px;' },
+        [r.nota || '',
           r.ultimo ? 'ultimo prezzo ' + cartaEuro(r.ultimo.prezzo, 5) + ' (' + r.ultimo.numero + ' del ' + fmtIT(String(r.ultimo.data).slice(0, 10)) + ')' : ''].filter(Boolean).join(' · ')));
       segnaTot();
     });
@@ -6069,7 +6083,7 @@ async function apriOrdineAcquisto(poi, of) {
     const fid = selForn.value;
     righe = (fid && per.has(fid) ? per.get(fid) : []).map(x => {
       const ul = ultimoPrezzoAcquisto(fid, x.codice, escludi);
-      return { codice: x.codice, descrizione: x.descrizione, um: x.um, qta: x.qta, daOrdinare: x.qta, consegna: inCons.value || null, prezzo: ul ? ul.prezzo : null, ultimo: ul };
+      return { codice: x.codice, descrizione: x.descrizione, um: x.um, qta: x.qta, nota: notaDaOrdinare(x), consegna: inCons.value || null, prezzo: ul ? ul.prezzo : null, ultimo: ul };
     });
     disegna();
   };
@@ -6085,8 +6099,10 @@ async function apriOrdineAcquisto(poi, of) {
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' }, of
       ? 'Correggi, togli o aggiungi righe, consegna e note. Il numero resta ' + numeroOrdineFornitore(of)
         + ', la stampa porta la revisione ' + ((of.revisione || 0) + 1) + '.'
-      : 'Ordine di prova: esce con la scritta FAC SIMILE e non cambia i mancanti (l’«in arrivo» resta quello di Alnus). '
-      + 'Scegliendo il fornitore compaiono i codici «da ordinare» di Materiali che hanno lui come fornitore abituale, col prezzo dell’ultimo ordine.'
+      : 'Ordine di prova: esce con la scritta FAC SIMILE. '
+      + 'Scegliendo il fornitore compaiono i codici «da ordinare» di Materiali che hanno lui come fornitore abituale, col prezzo dell’ultimo ordine, '
+      + 'meno quanto è già negli OF emessi qui e non ancora arrivato.'
+      + (coperti.length ? ' ' + coperti.length + (coperti.length === 1 ? ' codice da ordinare è' : ' codici da ordinare sono') + ' già tutti in un OF aperto.' : '')
       + (senza.length ? ' ' + senza.length + (senza.length === 1 ? ' codice da ordinare non ha' : ' codici da ordinare non hanno')
         + ' un fornitore abituale con la scheda in Aziende: si aggiungono a mano.' : '')),
     campo('Fornitore', selForn),
@@ -6125,6 +6141,142 @@ async function apriOrdineAcquisto(poi, of) {
   v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
 }
 
+// ── OF MASSIVI (20 nov, Nico: "avendo diversi ordini clienti con richieste di
+// materiali come faccio OF massivi in base alle richieste?") ──────────────
+// Una finestra sola: una BOZZA per ogni fornitore abituale coi suoi codici da
+// ordinare (`daOrdinarePerFornitore`, gia' al netto degli OF aperti), prezzo
+// dall'ultimo ordine, tutto correggibile; si tolgono righe o fornitori interi
+// e si emettono insieme. Ogni OF passa dalla stessa porta degli altri
+// (`salvaOrdineFornitore`): numero dal database, uno alla volta. Niente stampa
+// automatica (il browser bloccherebbe N finestre): alla fine un elenco con 🖨.
+// I codici senza fornitore abituale si elencano: vanno ordinati a mano o
+// gli si da' l'abituale dalla scheda del codice.
+async function apriOfMassivi(poi) {
+  if (state.ordiniFornitore == null) return toast('Gli ordini fornitore non sono attivi: manca la tabella.', 'err', 9000);
+  if (!matAbituali) await caricaFornitoriAbituali();
+  const { per, senza, coperti } = daOrdinarePerFornitore(null);
+  const v = veloTerzista('Genera OF da ordinare', 1150);
+  const C = 'display:grid;grid-template-columns:22px 150px minmax(170px,1fr) 46px 80px 128px 92px 92px;gap:6px;align-items:center;';
+  const et = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const valido = (r) => r.scelta && r.qta > 0;
+  const prezzoOk = (r) => r.prezzo != null && !isNaN(r.prezzo);
+  // bozze: { az, scelta, righe:[{ codice, descrizione, um, qta, consegna, prezzo, ultimo, nota, scelta }], totEl }
+  const bozze = [...per.entries()]
+    .map(([id, l]) => ({ az: (state.aziende || []).find(a => a.id === id) || { id, nome: nomeAziendaDi(id) }, scelta: true,
+      righe: l.map(x => { const ul = ultimoPrezzoAcquisto(id, x.codice, null);
+        return { codice: x.codice, descrizione: x.descrizione, um: x.um, qta: x.qta, consegna: null,
+          prezzo: ul ? ul.prezzo : null, ultimo: ul, nota: notaDaOrdinare(x), scelta: true }; }) }))
+    .sort((a, b) => b.righe.length - a.righe.length || String(a.az.nome).localeCompare(String(b.az.nome), 'it'));
+  const totGenEl = el('span', { style:'font-weight:700;' });
+  const aggiornaTotali = () => {
+    let nOf = 0, nRighe = 0, euro = 0;
+    bozze.forEach(b => {
+      const val = b.righe.filter(valido);
+      const e = val.filter(prezzoOk).reduce((s, r) => s + r.qta * r.prezzo, 0);
+      const sp = val.length - val.filter(prezzoOk).length;
+      if (b.totEl) b.totEl.textContent = val.length + (val.length === 1 ? ' riga' : ' righe') + ' · ' + cartaEuro(e) + (sp ? ' · ' + sp + ' senza prezzo' : '');
+      if (b.scelta && val.length) { nOf++; nRighe += val.length; euro += e; }
+    });
+    totGenEl.textContent = nOf + (nOf === 1 ? ' ordine' : ' ordini') + ' · ' + nRighe + (nRighe === 1 ? ' riga' : ' righe') + ' · totale ' + cartaEuro(euro);
+    ok.textContent = nOf ? '🖨 Emetti ' + nOf + (nOf === 1 ? ' OF' : ' OF') : 'Emetti';
+    ok.disabled = !nOf;
+  };
+  const dateRighe = [];   // { r, inp }: «stessa consegna» le riscrive
+  const blocco = (b) => {
+    const corpo = el('div', { style:'padding:4px 0 0 0;' });
+    b.totEl = el('span', { class:'sub', style:'font-size:12px;margin-left:auto;' });
+    const cbF = el('input', { type:'checkbox' });
+    cbF.checked = b.scelta;
+    cbF.onchange = () => { b.scelta = cbF.checked; corpo.style.display = b.scelta ? '' : 'none'; aggiornaTotali(); };
+    corpo.append(el('div', { style: C + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
+      el('span'), et('Codice'), et('Descrizione'), et('UM'), et('Q.tà', 1), et('Consegna'), et('€/unità', 1), et('Totale', 1)));
+    b.righe.forEach(r => {
+      const totR = el('span', { class:'mono', style:'text-align:right;font-weight:700;font-size:12px;' });
+      const segna = () => { totR.textContent = (r.qta > 0 && prezzoOk(r)) ? cartaEuro(r.qta * r.prezzo) : '—'; aggiornaTotali(); };
+      const cb = el('input', { type:'checkbox' });
+      cb.checked = r.scelta;
+      const riga = el('div', { style: C + 'padding:3px 0 0;font-size:12px;' });
+      const nota = el('div', { class:'sub', style:'font-size:10.5px;margin:0 0 3px 28px;border-bottom:1px solid var(--brd);padding-bottom:3px;' },
+        [r.nota, r.ultimo ? 'ultimo prezzo ' + cartaEuro(r.ultimo.prezzo, 5) + ' (' + r.ultimo.numero + ' del ' + fmtIT(String(r.ultimo.data).slice(0, 10)) + ')' : 'prezzo mai pagato: da scrivere'].join(' · '));
+      cb.onchange = () => { r.scelta = cb.checked; riga.style.opacity = nota.style.opacity = r.scelta ? '' : '.45'; aggiornaTotali(); };
+      const inQ = el('input', { type:'text', inputmode:'decimal', value: r.qta ? nfIT(r.qta) : '', class:'mono', style:'font-size:12px;text-align:right;' });
+      inQ.oninput = () => { const n = numeroDaTesto(inQ.value); r.qta = n == null || isNaN(n) ? 0 : n;
+        inQ.style.color = n != null && isNaN(n) ? 'var(--red)' : ''; segna(); };
+      const inD = el('input', { type:'date', style:'font-size:12px;' });
+      inD.onchange = () => { r.consegna = inD.value || null; };
+      dateRighe.push({ r, inp: inD });
+      const inP = el('input', { type:'text', inputmode:'decimal', class:'mono', style:'font-size:12px;text-align:right;', placeholder:'da scrivere',
+        value: prezzoOk(r) ? String(r.prezzo).replace('.', ',') : '' });
+      inP.oninput = () => { const n = numeroDaTesto(inP.value); r.prezzo = n; inP.style.color = n != null && isNaN(n) ? 'var(--red)' : ''; segna(); };
+      riga.append(cb, el('span', { class:'mono', style:'font-weight:700;' }, r.codice),
+        el('span', { style:'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: r.descrizione }, r.descrizione || '—'),
+        el('span', {}, r.um || ''), inQ, inD, inP, totR);
+      corpo.append(riga, nota);
+      segna();
+    });
+    return el('div', { class:'card', style:'padding:10px 12px;margin-bottom:10px;' },
+      el('label', { style:'display:flex;gap:8px;align-items:center;font-weight:700;cursor:pointer;' }, cbF, b.az.nome, b.totEl),
+      corpo);
+  };
+  const inCons = el('input', { type:'date' });
+  inCons.onchange = () => { if (!inCons.value) return; dateRighe.forEach(d => { d.r.consegna = inCons.value; d.inp.value = inCons.value; }); };
+  const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
+  const ok = el('button', { class:'btnp' }, 'Emetti');
+  const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
+  v.corpo.append(el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+    'Una bozza per ogni fornitore abituale, con i codici «da ordinare» di Materiali (di tutte le commesse) meno quanto è già negli OF emessi qui e non ancora arrivato. '
+    + 'Correggi quantità e prezzi, togli righe o fornitori interi: si emette un OF FAC SIMILE per ogni fornitore spuntato. '
+    + '⚠ Regge solo se gli OF d’acquisto si fanno qui e non anche in Alnus.'
+    + (state.movimenti == null ? ' I DDT non si sono potuti leggere: gli OF emessi si tolgono interi, anche la parte forse già arrivata.' : '')));
+  if (!bozze.length) v.corpo.append(el('div', { class:'empty' }, 'Nessun codice da ordinare con un fornitore abituale'
+    + (coperti.length ? ' (' + coperti.length + ' già tutti in un OF aperto).' : '.')));
+  else v.corpo.append(el('div', { class:'frow' }, campo('Stessa consegna per tutte le righe', inCons)), ...bozze.map(blocco));
+  if (senza.length) {
+    const lista = el('div', { style:'display:none;margin-top:6px;' }, ...senza.map(r => el('div', { style:'font-size:12px;padding:2px 0;' },
+      el('span', { class:'mono', style:'font-weight:700;' }, r.codice), ' ', r.descrizione || '', el('span', { class:'sub' }, ' · ' + notaDaOrdinare(r)))));
+    const apri = el('button', { type:'button', class:'btnsm', onclick: () => { const vis = lista.style.display === 'none';
+      lista.style.display = vis ? '' : 'none'; apri.textContent = (vis ? '▾ ' : '▸ ') + testoSenza; } });
+    const testoSenza = senza.length + (senza.length === 1 ? ' codice da ordinare senza' : ' codici da ordinare senza')
+      + ' fornitore abituale con la scheda in Aziende: dagli l’abituale dalla scheda del codice o ordinali a mano';
+    apri.textContent = '▸ ' + testoSenza;
+    v.corpo.append(el('div', { style:'margin-top:6px;padding:8px 10px;border:1px solid var(--or);border-radius:8px;' }, apri, lista));
+  }
+  if (coperti.length && bozze.length) v.corpo.append(el('div', { class:'sub', style:'font-size:12px;margin-top:8px;' },
+    coperti.length + (coperti.length === 1 ? ' codice da ordinare è' : ' codici da ordinare sono') + ' già tutti in un OF aperto: non proposti.'));
+  v.corpo.append(el('div', { style:'display:flex;justify-content:flex-end;margin-top:10px;font-size:13px;' }, totGenEl));
+  ok.onclick = async () => {
+    const da = bozze.filter(b => b.scelta && b.righe.some(valido));
+    const err = !da.length ? 'Spunta almeno un fornitore con una riga'
+      : da.some(b => b.righe.some(r => r.scelta && r.prezzo != null && (isNaN(r.prezzo) || r.prezzo < 0))) ? 'C’è un prezzo che non è un numero'
+      : null;
+    if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
+    ok.disabled = true;
+    const fatti = [], falliti = [];
+    for (const b of da) {
+      msg.style.color = ''; msg.textContent = 'Emissione ' + (fatti.length + falliti.length + 1) + ' di ' + da.length + ': ' + b.az.nome + '…';
+      const righe = b.righe.filter(valido).map(r => ({ codice: r.codice, descrizione: r.descrizione || '', um: r.um || '', qta: r.qta,
+        consegna: r.consegna || null, prezzo: r.prezzo == null ? null : r.prezzo, totale: r.prezzo == null ? null : Math.round(r.qta * r.prezzo * 100) / 100 }));
+      try {
+        fatti.push(await salvaOrdineFornitore(null, { tipo: 'acquisto', fornitore: b.az.id, consegna: primaConsegnaRighe(righe), note: null, righe }));
+      } catch (e) { falliti.push({ nome: b.az.nome, errore: e.message || String(e) }); }
+    }
+    // Il risultato al posto delle bozze: un 🖨 per ordine, gli errori in rosso.
+    v.corpo.innerHTML = ''; v.piede.innerHTML = '';
+    v.corpo.append(el('div', { style:'font-size:13px;margin-bottom:10px;' }, fatti.length
+      ? fatti.length + (fatti.length === 1 ? ' ordine emesso' : ' ordini emessi') + '. Stampali uno per uno:' : 'Nessun ordine emesso.'));
+    fatti.forEach(of => v.corpo.append(el('div', { style:'display:flex;gap:10px;align-items:center;padding:4px 0;border-bottom:1px solid var(--brd);font-size:12px;' },
+      el('span', { class:'mono', style:'font-weight:700;min-width:110px;' }, numeroOrdineFornitore(of)),
+      el('span', { style:'flex:1;' }, nomeAziendaDi(of.fornitore_id) + ' · ' + (of.righe || []).length + ((of.righe || []).length === 1 ? ' riga · ' : ' righe · ')
+        + cartaEuro((of.righe || []).reduce((s, r) => s + (Number(r.totale) || 0), 0))),
+      el('button', { type:'button', class:'btnsm', onclick: () => stampaOrdineFornitore(of) }, '🖨 Stampa'))));
+    falliti.forEach(f => v.corpo.append(el('div', { style:'color:var(--red);font-size:12px;padding:4px 0;' }, '✕ ' + f.nome + ': ' + f.errore + ' — non emesso, rifallo da «＋ Nuovo OF d’acquisto».')));
+    v.piede.append(el('button', { class:'btnp', onclick: () => { v.chiudi(); if (typeof poi === 'function') poi(); } }, 'Chiudi'));
+    if (fatti.length) toast(fatti.length + (fatti.length === 1 ? ' OF emesso' : ' OF emessi') + (falliti.length ? ', ' + falliti.length + ' non emessi' : ''), falliti.length ? 'err' : 'ok', 9000);
+  };
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+  aggiornaTotali();
+}
+
 // La scheda: tutti gli OF, d'acquisto e ai terzisti.
 let ofFiltroTipo = 'tutti', ofFiltroStato = 'emesso', ofCerca = '';
 function renderOrdiniFornitore(root) {
@@ -6133,7 +6285,10 @@ function renderOrdiniFornitore(root) {
   const ricarica = el('button', { class:'btnsm', title:'Rileggi gli ordini dal database',
     onclick: async () => { ricarica.disabled = true; await caricaOrdiniFornitore(); ridisegna(); } }, '⟳ Aggiorna');
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Ordini fornitore'), ricarica,
-    (eAdminOra() && state.ordiniFornitore != null) ? el('button', { class:'btnp', style:'margin-left:auto;',
+    (eAdminOra() && state.ordiniFornitore != null) ? el('button', { class:'btng', style:'margin-left:auto;',
+      title:'Una bozza per ogni fornitore abituale coi codici da ordinare di tutte le commesse, da rivedere ed emettere insieme',
+      onclick: () => apriOfMassivi(ridisegna) }, '⚡ Genera OF da ordinare') : '',
+    (eAdminOra() && state.ordiniFornitore != null) ? el('button', { class:'btnp',
       title:'Ordine d’acquisto a un fornitore: propone i codici da ordinare di cui è fornitore abituale',
       onclick: () => apriOrdineAcquisto(ridisegna) }, '＋ Nuovo OF d’acquisto') : ''));
   if (state.ordiniFornitore == null) {
