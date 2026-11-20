@@ -7360,13 +7360,12 @@ function documentiRegistro() {
 // tutti gli altri (ACQ di Fabbi, Comet…) li conta ancora Alnus e la riga
 // parte `fuori_giacenza`: resta nel registro ma non prende il posto della
 // riga Alnus (vedi «Un codice, una fonte» in CLAUDE.md).
-// Un CLIENTE (non anche fornitore) che manda il suo materiale in conto lavoro (Tema): tutto in
-// giacenza, come fa l'automazione delle scansioni per i clienti di config.json.
+// ⚠ Dal 20 nov (Nico: "togli regola da Tema") niente eccezioni per mittente: anche un
+// cliente in conto lavoro segue questa regola (i TS- di Tema hanno gia' movimenti in conto).
+// `mittenteId` resta nella firma per chi la chiama.
 function codiceInGiacenzaGestionale(codice, mittenteId) {
   const c = String(codice || '').trim().toUpperCase();
   if (!c) return false;
-  const az = mittenteId ? (state.aziende || []).find(a => a.id === mittenteId) : null;
-  if (az && az.is_cliente && !az.is_fornitore) return true;
   if (inConto(state.movimenti || []).some(m => String(m.codice || '').trim().toUpperCase() === c)) return true;
   return (state.operazioni || []).some(o => o.materiali_da_ddt && (o.stato === 'aperta' || o.stato === 'sospesa')
     && (o.materiali || []).some(x => String(x.codice || '').trim().toUpperCase() === c && eCL(x)));
