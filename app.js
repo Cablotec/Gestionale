@@ -6940,37 +6940,19 @@ function apriRientroTerzista(o, terzistaId, poi) {
   const inPz = el('input', { type:'text', inputmode:'decimal', value: resto > 0 ? String(resto) : '' });
   const inNota = el('input', { type:'text', placeholder:'Nota (facoltativa)' });
   const msg = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
-  // PRODUZIONE INSIEME AL RIENTRO (19 nov, Nico: "leghiamoli"): i pezzi tornati dal
-  // terzista sono pezzi prodotti. Si registra solo la parte NON ancora coperta da lotti:
-  // rientrati in tutto (con questo) − gia' prodotti, al massimo quanto resta da produrre.
-  // Cosi' una produzione registrata a mano prima del rientro (00385/0050: lotto 215 del
-  // 2 nov, rientro 215 dopo) non si conta due volte. Si toglie se dopo il terzista si
-  // lavora ancora in casa.
-  const prodotti = quantitaConsegnata(o.id);
-  const daProdurre = Math.max(0, tot - prodotti);
-  const lottoPer = (pz) => Math.max(0, Math.min(daProdurre, +(gia + pz - prodotti).toFixed(4)));
-  const chkLotto = el('input', { type:'checkbox', style:'width:15px;height:15px;margin:0;' });
-  const eti = el('span', {});
-  const rigaLotto = el('label', { style:'display:flex;gap:8px;align-items:center;font-size:12px;margin-top:8px;cursor:pointer;' }, chkLotto, eti);
-  const scriviEti = () => {
-    const pz = Number(String(inPz.value).replace(',', '.')) || 0;
-    const q = lottoPer(pz);
-    chkLotto.checked = q > 0; chkLotto.disabled = !(q > 0);
-    eti.textContent = q > 0
-      ? 'Registra anche la produzione: ' + nfIT(q) + ' pz (prodotti finora ' + nfIT(prodotti) + ' di ' + nfIT(tot) + ')'
-      : 'Produzione già registrata per questi pezzi (prodotti ' + nfIT(prodotti) + ' di ' + nfIT(tot)
-        + ', rientrati ' + nfIT(gia + pz) + '): nessun lotto in più';
-  };
-  inPz.addEventListener('input', scriviEti);
-  scriviEti();
+  // ⚠ NIENTE PRODUZIONE INSIEME AL RIENTRO (20 nov, Nico: "un terzista potrebbe
+  // consegnarmi una lavorazione, ma il pezzo potrebbe non essere completato se
+  // mancano fasi o il reparto"). La casella «Registra anche la produzione» del 19
+  // nov e' TOLTA: il rientro dice solo cosa e' tornato. Il legame resta dall'altra
+  // parte: non si registra produzione oltre i pezzi rientrati (`bloccoProduzioneDaRientri`).
   v.corpo.append(
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
       'Il semilavorato è tornato. Ordinati ' + nfIT(tot) + ' pz' + (gia > 0 ? ', già rientrati ' + nfIT(gia) : '')
       + '. La giacenza non si muove: il materiale lo scarica il lotto, gli avanzi tornano con «↩ Avanzi in sede».'),
     el('div', { class:'frow' }, campo('Data', inData), campo('DDT del terzista', inDdt), campo('Pezzi rientrati', inPz)),
     campo('Nota', inNota),
-    daProdurre > 0 ? rigaLotto
-      : el('div', { class:'sub', style:'font-size:12px;margin-top:8px;' }, 'La produzione è già tutta registrata (' + nfIT(tot) + ' pz).'));
+    el('div', { class:'sub', style:'font-size:12px;margin-top:8px;' },
+      'La produzione si registra a parte, nel riquadro Produzione, quando il pezzo è finito: fino a quanto è rientrato.'));
   const ok = el('button', { class:'btnp' }, 'Registra');
   ok.onclick = async () => {
     const pz = Number(String(inPz.value).replace(',', '.'));
@@ -6983,22 +6965,8 @@ function apriRientroTerzista(o, terzistaId, poi) {
       if (error) throw new Error(error.message);
       if (!data || !data.length) throw new Error('il database non l’ha registrato (non sei admin?)');
       (state.rientriTerzista = state.rientriTerzista || []).push(data[0]);
-      let dettLotto = '';
-      if (daProdurre > 0 && chkLotto.checked) {
-        const qLotto = lottoPer(pz);
-        if (qLotto > 0) {
-          try {
-            const r = await registraLottoProduzione(o, { data: inData.value, quantita: qLotto,
-              ddt: inDdt.value.trim() ? 'DDT ' + inDdt.value.trim() : null, nota: 'Rientro da ' + nomeAziendaDi(terzistaId) });
-            dettLotto = ' · produzione ' + nfIT(qLotto) + ' pz' + (r.completata ? ' · commessa completata' : '');
-            if (r.erroreStato) toast('Lotto salvato, ma lo stato non si è aggiornato: ' + r.erroreStato, 'err', 9000);
-          } catch (e2) {
-            toast('Rientro registrato, ma la produzione no: ' + (e2.message || e2), 'err', 10000);
-          }
-        }
-      }
       v.chiudi();
-      toast('Rientro da ' + nomeAziendaDi(terzistaId) + ' registrato: ' + nfIT(pz) + ' pz' + dettLotto, 'ok');
+      toast('Rientro da ' + nomeAziendaDi(terzistaId) + ' registrato: ' + nfIT(pz) + ' pz', 'ok');
       if (typeof poi === 'function') poi();
     } catch (e) {
       ok.disabled = false; ok.textContent = 'Registra';
