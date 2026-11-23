@@ -10501,6 +10501,7 @@ let movSortKey = 'data';
 let movSortDir = -1;                 // i piu' recenti in cima
 let movSortPrec = [];
 let movFiltroTipo = '';
+let movFonte = '';                    // '' tutti | 'gestionale' | 'alnus' (23 nov)
 let movFiltroMitt = '';
 let movFiltroOrd = '';
 let movFiltroDoc = '';               // chiave documento, dalla vista Documenti
@@ -11225,7 +11226,8 @@ function renderMovimenti(root) {
   const nf = (n) => (n == null || n === '' || !Number.isFinite(Number(n)))
     ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   const ricarica = el('button', { class:'btnsm', title:'Rileggi i movimenti dal database',
-    onclick: async () => { ricarica.disabled = true; await Promise.all([caricaMovimenti(), caricaRicevimenti()]); renderMovimenti(root); } }, '⟳ Aggiorna');
+    onclick: async () => { ricarica.disabled = true;
+      await Promise.all([caricaMovimenti(), caricaRicevimenti(), eAdminOra() ? caricaAlnus() : null]); renderMovimenti(root); } }, '⟳ Aggiorna');
   // ± RETTIFICA (17 nov): solo admin; la funzione a database lo ricontrolla.
   const dopoRettifica = (cod) => { if (cod) { movCerca = cod; movQuante = 400; } renderMovimenti(root); };
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Movimenti'), ricarica,
@@ -11250,15 +11252,33 @@ function renderMovimenti(root) {
       + 'la tabella `movimenti_magazzino` non è raggiungibile.'));
     return;
   }
-  const tutti = state.movimenti;
+  // I MOVIMENTI DI ALNUS (23 nov, Nico): quelli importati nello Specchio DOPO la
+  // foto d'apertura, cioe' quelli che contano nella giacenza. Solo da vedere:
+  // restano nella loro tabella (`alnus_movimenti`), non si copiano qui, e si
+  // correggono in Alnus. Lo specchio lo legge solo un admin (RLS).
+  if (eAdminOra() && state.alnus === undefined) {
+    caricaAlnus().then(() => { if (state.alnus) renderMovimenti(root); }).catch(() => {});
+  }
+  const A = state.alnus;
+  const daAlnus = (A && A.apertura ? (A.movimenti || []) : [])
+    .filter(m => Date.parse(m.data) > Date.parse(A.apertura.preso_il))
+    .map(m => ({ alnus: true, id: 'alnus-' + m.id, data: m.data, tipo: 'alnus', causale: m.causale,
+      codice: String(m.codice || '').trim(), descrizione: m.descrizione || null, qta: Number(m.qta) || 0, um: m.um || null,
+      magazzino: m.magazzino, mittente: m.soggetto || null,
+      documento_tipo: m.tipo_doc || null, documento_numero: m.numero_doc ? (m.anno_doc ? m.anno_doc + '/' : '') + m.numero_doc : null,
+      note: 'Alnus · ' + (m.causale || '') + (m.operatore ? ' · ' + m.operatore : '') }));
+  const tutti = state.movimenti.map(m => m).concat(daAlnus)
+    .filter(m => !movFonte || (movFonte === 'alnus') === !!m.alnus);
+  const nAlnus = daAlnus.length, nGest = state.movimenti.length;
   const ultimo = tutti.reduce((d, m) => (!d || String(m.data || '') > d) ? m.data : d, null);
   root.append(el('div', { class:'sub', style:'margin:-6px 0 16px;max-width:900px;line-height:1.7;' },
-    tutti.length
-      ? tutti.length.toLocaleString('it-IT') + ' movimenti'
+    (nGest + nAlnus)
+      ? nGest.toLocaleString('it-IT') + ' movimenti del gestionale'
+        + (A && A.apertura ? ' · ' + nAlnus.toLocaleString('it-IT') + ' di Alnus dopo la foto del ' + fmtQuando(A.apertura.preso_il) : '')
         + (ultimo ? ' · l\'ultimo del ' + fmtIT(ultimo) : '')
-        + '. Un errore non si corregge sulla riga: si registra una rettifica (± Rettifica, admin).'
+        + '. Un errore non si corregge sulla riga: si registra una rettifica (± Rettifica, admin); quelli di Alnus si correggono in Alnus.'
       : 'Nessun movimento ancora: compaiono qui quando l\'automazione legge il primo DDT.'));
-  if (!tutti.length) return;
+  if (!(nGest + nAlnus)) return;
 
   // La commessa di un ordine di riferimento: per aprirla dal numero d'ordine.
   // Un ordine del cliente ha piu' posizioni (10072710 = 00385 con 10 commesse):
@@ -11279,9 +11299,14 @@ function renderMovimenti(root) {
 
   const colonne = [
     { k:'data', t:'Data', ord: m => String(m.data || ''),
-      cella: m => el('span', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, m.data ? fmtIT(m.data) : '—') },
+      cella: m => el('span', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, m.data ? fmtIT(m.data)
+        // Alnus ha l'ora di ogni movimento: si mostra, e' quella che decide se conta.
+        + (m.alnus ? ' ' + new Date(m.data).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' }) : '') : '—') },
     { k:'tipo', t:'Tipo', ord: m => String(m.tipo || ''),
-      cella: m => { const e = MOV_TIPO_ETI[m.tipo] || { txt: m.tipo || '—', cls:'bgry' };
+      cella: m => { if (m.alnus) return el('span', { style:'display:inline-flex;gap:4px;align-items:center;white-space:nowrap;' },
+          el('span', { class:'badge bvio', title:'Movimento di Alnus importato nello Specchio: si corregge in Alnus' }, 'Alnus'),
+          el('span', { class:'mono', style:'font-size:11px;' }, m.causale || ''));
+        const e = MOV_TIPO_ETI[m.tipo] || { txt: m.tipo || '—', cls:'bgry' };
         const b = el('span', { class:'badge ' + e.cls }, e.txt);
         // ✎ solo sulle rettifiche fatte a mano, solo admin (17 nov).
         return (eAdminOra() && eRettificaManuale(m))
@@ -11304,6 +11329,7 @@ function renderMovimenti(root) {
     // DOVE (5 nov): sede, o il terzista a cui il materiale e' stato mandato.
     { k:'dove', t:'Dove', ord: m => m.presso_id ? nomeAziendaDi(m.presso_id).toUpperCase() : '',
       cella: m => {
+        if (m.alnus) return el('span', { class:'sub', style:'font-size:11px;white-space:nowrap;' }, 'mag. ' + (m.magazzino || '?'));
         const dove = m.presso_id
           ? el('span', { class:'badge bor', style:'white-space:nowrap;', title: eReparto(m.presso_id)
               ? 'In reparto: materiale riservato alla sua commessa, fuori dallo scaffale' : 'Presso il terzista: materiale nostro, fuori sede' },
@@ -11340,8 +11366,12 @@ function renderMovimenti(root) {
   const selVista = el('select', {}, el('option', { value:'righe' }, 'Righe'),
     el('option', { value:'documenti' }, 'Per documento'));
   selVista.value = movVista;
-  const selTipo = el('select', {}, ...opzioni(tutti.map(m => m.tipo), 'Tutti i tipi'));
+  const selTipo = el('select', {}, ...opzioni(tutti.filter(m => !m.alnus).map(m => m.tipo), 'Tutti i tipi'));
   selTipo.value = movFiltroTipo;
+  const selFonte = el('select', {}, el('option', { value:'' }, 'Gestionale e Alnus'),
+    el('option', { value:'gestionale' }, 'Solo gestionale'), el('option', { value:'alnus' }, 'Solo Alnus'));
+  selFonte.value = movFonte;
+  selFonte.onchange = () => { movFonte = selFonte.value; movQuante = 400; renderMovimenti(root); };
   const selMitt = el('select', { style:'max-width:220px;' }, ...opzioni(tutti.map(m => m.mittente), 'Tutti i mittenti'));
   selMitt.value = movFiltroMitt;
   const selOrd = el('select', {}, ...opzioni(tutti.map(m => m.ordine_rif), 'Tutti gli ordini'));
@@ -11413,15 +11443,17 @@ function renderMovimenti(root) {
     // vorrebbe dire niente, e non si scrive.
     const codici = new Set(righe.map(m => m.codice));
     if (codici.size === 1) {
-      const tot = righe.reduce((a, m) => a + (Number(m.qta) || 0), 0);
+      // Il totale e' dei soli movimenti del gestionale; quelli di Alnus stanno
+      // nella giacenza qui sotto (foto + Alnus).
+      const tot = righe.filter(m => !m.alnus).reduce((a, m) => a + (Number(m.qta) || 0), 0);
       // Il totale per POSTO (5 nov): quanto in sede e quanto da ogni terzista.
       const perPosto = new Map();
-      righe.filter(m => !m.fuori_giacenza)
+      righe.filter(m => !m.fuori_giacenza && !m.alnus)
         .forEach(m => perPosto.set(m.presso_id || '', (perPosto.get(m.presso_id || '') || 0) + (Number(m.qta) || 0)));
       const fuori = [...perPosto].filter(([k, q]) => k && Math.abs(q) > 1e-9);
       tabWrap.append(el('div', { style:'margin-bottom:8px;font-size:12px;' },
         el('span', { class:'mono', style:'font-weight:700;' }, [...codici][0]),
-        ' · totale dei movimenti in elenco: ',
+        ' · totale dei movimenti del gestionale: ',
         el('span', { class:'mono', style:'font-weight:700;' }, nf(tot) + (righe[0].um ? ' ' + righe[0].um : '')),
         fuori.length
           ? el('span', { class:'sub' }, ' · in sede ' + nf(perPosto.get('') || 0) + ' · '
@@ -11494,9 +11526,9 @@ function renderMovimenti(root) {
   inCerca.oninput   = () => { movCerca = inCerca.value;      movQuante = 400; disegna(); };
   root.append(el('div', { style:'display:flex;gap:8px;align-items:center;margin:0 0 8px;flex-wrap:wrap;' },
     el('span', { class:'sub' }, 'Vista:'), selVista,
-    el('span', { class:'sub', style:'margin-left:8px;' }, 'Filtra:'), selTipo, selMitt, selOrd, inCerca,
+    el('span', { class:'sub', style:'margin-left:8px;' }, 'Filtra:'), (A && A.apertura) ? selFonte : '', selTipo, selMitt, selOrd, inCerca,
     el('button', { class:'btnsm', onclick: () => {
-      movFiltroTipo = ''; movFiltroMitt = ''; movFiltroOrd = ''; movFiltroDoc = ''; movCerca = ''; movQuante = 400;
+      movFiltroTipo = ''; movFonte = ''; movFiltroMitt = ''; movFiltroOrd = ''; movFiltroDoc = ''; movCerca = ''; movQuante = 400;
       renderMovimenti(root);
     } }, 'Azzera')));
   root.append(tabWrap);
