@@ -7841,15 +7841,39 @@ function riquadroRicevimenti(ridisegna) {
   });
   return box;
 }
+// DA PREPARARE PER I TERZISTI (5 nov): le richieste aperte di tutte le
+// commesse. E' la lista di lavoro del magazzino: si stampa da qui.
+// + NUOVA RICHIESTA (6 nov): si sceglie il terzista e compaiono tutte le
+// sue commesse gia' spuntate: il giro della settimana, senza partire da una.
+// Stava in cima a Movimenti; dal 23 nov in cima a Documenti (Nico).
+function riquadroDaPreparare(ridisegna) {
+  const box = el('div');
+  if (!Array.isArray(state.inviiTerzista)) return box;
+  const aperte = state.inviiTerzista.filter(x => x.stato === 'da_preparare');
+  const puoCreare = eAdminOra() && richiesteTerzistaPossibili();
+  if (!aperte.length && !puoCreare) return box;
+  box.style.cssText = 'margin:0 0 18px;padding:10px 14px;border:1px solid var(--or);border-radius:6px;max-width:1100px;';
+  box.append(el('div', { style:'display:flex;align-items:center;gap:10px;margin-bottom:4px;' },
+    el('span', { style:'font-weight:700;color:var(--or);' },
+      '↗ Da preparare per terzisti e reparto: ' + (aperte.length ? aperte.length + (aperte.length === 1 ? ' richiesta' : ' richieste') : 'niente')),
+    puoCreare ? el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
+      title:'Una lista per un terzista (con tutte le sue commesse aperte) o per il reparto',
+      onclick: () => apriRichiestaTerzista(null, ridisegna, { tutte: true }) }, '+ Nuova richiesta') : ''));
+  aperte.forEach(x => box.append(rigaRichiestaTerzista(x, ridisegna, true)));
+  return box;
+}
 function renderDocumenti(root) {
   root.innerHTML = '';
   const ridisegna = () => renderDocumenti(root);
-  const ricarica = el('button', { class:'btnsm', title:'Rileggi movimenti e DDT dal database',
-    onclick: async () => { ricarica.disabled = true; await caricaMovimenti(); ridisegna(); } }, '⟳ Aggiorna');
+  const ricarica = el('button', { class:'btnsm', title:'Rileggi movimenti, DDT e richieste dal database',
+    onclick: async () => { ricarica.disabled = true;
+      await Promise.all([caricaMovimenti(), caricaRicevimenti(), caricaInviiTerzista()]); ridisegna(); } }, '⟳ Aggiorna');
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Documenti'), ricarica,
     (eAdminOra() && Array.isArray(state.movimenti)) ? el('button', { class:'btnp', style:'margin-left:auto;',
       title:'Registra a mano un DDT ricevuto: le sue righe diventano carichi di magazzino',
       onclick: () => apriDdtEntrataDaOrdini(ridisegna) }, '＋ DDT in entrata') : ''));
+  // In cima il lavoro da fare: DDT da confermare e liste da preparare (23 nov).
+  root.append(riquadroRicevimenti(ridisegna), riquadroDaPreparare(ridisegna));
   const { lista: tutti, nonLetti } = documentiRegistro();
   const selVerso = el('select', { onchange: (e) => { docVerso = e.target.value; ridisegna(); } },
     ...[['tutti', 'Entrata e uscita'], ['entrata', '↓ In entrata'], ['uscita', '↑ In uscita']].map(([v, t]) => el('option', { value: v }, t)));
@@ -11095,28 +11119,9 @@ function renderMovimenti(root) {
       onclick: () => apriDdtEntrataDaOrdini(() => renderMovimenti(root)) }, '＋ DDT in entrata') : ''));
 
   // CODICI NON RICONOSCIUTI NEI DDT (20 nov): in cima, finche' ce ne sono.
-  root.append(riquadroRicevimenti(() => renderMovimenti(root)));
+  // «DDT da confermare» e «Da preparare per terzisti e reparto» stanno in
+  // Documenti dal 23 nov (Nico: "Movimenti lo lascerei pulito").
   root.append(avvisoCodiciSconosciuti(() => renderMovimenti(root)));
-
-  // DA PREPARARE PER I TERZISTI (5 nov): le richieste aperte di tutte le
-  // commesse, in cima. E' la lista di lavoro del magazzino: si stampa da qui.
-  // + NUOVA RICHIESTA (6 nov): si sceglie il terzista e compaiono tutte le
-  // sue commesse gia' spuntate: il giro della settimana, senza partire da una.
-  if (Array.isArray(state.inviiTerzista)) {
-    const aperte = state.inviiTerzista.filter(x => x.stato === 'da_preparare');
-    const puoCreare = eAdminOra() && richiesteTerzistaPossibili();
-    if (aperte.length || puoCreare) {
-      const box = el('div', { style:'margin:0 0 18px;padding:10px 14px;border:1px solid var(--or);border-radius:6px;max-width:1100px;' },
-        el('div', { style:'display:flex;align-items:center;gap:10px;margin-bottom:4px;' },
-          el('span', { style:'font-weight:700;color:var(--or);' },
-            '↗ Da preparare per terzisti e reparto: ' + (aperte.length ? aperte.length + (aperte.length === 1 ? ' richiesta' : ' richieste') : 'niente')),
-          puoCreare ? el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
-            title:'Una lista per un terzista (con tutte le sue commesse aperte) o per il reparto',
-            onclick: () => apriRichiestaTerzista(null, () => renderMovimenti(root), { tutte: true }) }, '+ Nuova richiesta') : ''));
-      aperte.forEach(x => box.append(rigaRichiestaTerzista(x, () => renderMovimenti(root), true)));
-      root.append(box);
-    }
-  }
 
   // ⚠ null = non letta (tabella assente, rete, permessi): si dice, non si
   // mostra una lista vuota che sembrerebbe "non e' arrivato niente".
