@@ -4825,8 +4825,8 @@ function materialiBase(righeMancanti) {
     // giacenza Alnus. Lasciarle dentro vorrebbe dire contare due volte lo
     // stesso pezzo appena il magazzino carica il DDT anche in Alnus — e
     // togliere giacenza ad altre commesse per un materiale che ha gia' il suo.
-    .map(x => x.materiali_da_ddt
-      ? Object.assign({}, x, { materiali: x.materiali.filter(r => !eCL(r)) }) : x)
+    .map(x => x.materiali.some(clNostro)
+      ? Object.assign({}, x, { materiali: x.materiali.filter(r => !clNostro(r)) }) : x)
     .filter(x => x.materiali.length);
   // ⚠ SOLO LE RIGHE SOTTO SCORTA (15 set). `materialiCommessa` in domain ha un
   // patto scritto: *un codice che qui NON c'e' non manca*. Da quando
@@ -4846,9 +4846,9 @@ function materialiBase(righeMancanti) {
 // ⚠ UN SOLO POSTO per questo conto: lo usano la scheda Materiali, il badge
 // in Ordini cliente e il numero sulla linguetta. Tre copie direbbero tre cose.
 function arriviDaDdtCommessa(op) {
-  if (!op || !op.materiali_da_ddt || !Array.isArray(state.movimenti)
+  if (!haClNostri(op) || !Array.isArray(state.movimenti)
       || typeof arriviDaDdt !== 'function') return new Map();
-  return arriviDaDdt(commessaSuResiduo(op), commesseConDdtVive(), state.movimenti);
+  return arriviDaDdt(vistaClNostri(commessaSuResiduo(op)), commesseConDdtVive(), state.movimenti);
 }
 
 // ── RICHIESTE AL MAGAZZINO PER I TERZISTI (5 nov, pilota Enviro) ─────────
@@ -4919,7 +4919,7 @@ function nomeFase(id) { return eReparto(id) ? 'il reparto' : nomeAziendaDi(id); 
 function fasiCommessa(o) {
   const per = fasiEsterneCommessa(o);
   const rep = repartoId();
-  if (!rep || !o || !o.materiali_da_ddt || !Array.isArray(o.materiali)) return per;
+  if (!rep || !o || !Array.isArray(o.materiali)) return per;
   const pezzi = Number(o.quantita) || 0;
   const voci = [];
   o.materiali.forEach(r => {
@@ -4951,7 +4951,7 @@ function fuoriSedeCommessa(o) {
 // questa commessa non c'e' nessuna richiesta per il reparto. Si ricalcola.
 function repartoDaPreparare(o) {
   const rep = repartoId();
-  if (!rep || !o || !o.materiali_da_ddt || (o.stato !== 'aperta' && o.stato !== 'sospesa')) return false;
+  if (!rep || !haClNostri(o) || (o.stato !== 'aperta' && o.stato !== 'sospesa')) return false;
   if (!fasiCommessa(o).has(rep) || !(daFareTerzista(o) > 0)) return false;
   const partita = (state.sessioni || []).some(s => s.operazione_id === o.id)
     || ((typeof quantitaConsegnata === 'function') && quantitaConsegnata(o.id) > 0);
@@ -5093,9 +5093,10 @@ function serveTerzista(x, qta_pz, gia) {
   const tutto = q * (Number(x.quantita) || 0) - (Number(gia) || 0);
   return Math.max(0, +Math.min(tutto, q * daFareTerzista(x)).toFixed(4));
 }
-// Un C/L di una commessa col flag ha giacenza nel gestionale; il resto no.
+// Un C/L che Alnus non conosce ha giacenza nel gestionale; il resto no (24 nov:
+// decide il codice, non piu' la spunta della commessa).
 function contaTerzista(x, r) {
-  return !!(x && x.materiali_da_ddt) && String((r && r.tipo) || '').trim().toUpperCase() === 'C/L';
+  return clNostro(r);
 }
 // DISPONIBILE per una nuova richiesta: la sede meno quanto e' gia' promesso
 // alle richieste ancora da preparare (di qualsiasi commessa). Ritorna una
@@ -5165,7 +5166,7 @@ function liberoTerzista() {
 // di libero. Nessuno lo scrive: si ricalcola, e sparisce da solo quando la
 // richiesta nuova lo copre. Ritorna [{ terzista, righe:[{ codice, serve, libero }] }].
 function mancantiTerzistaInSede(o) {
-  if (!o || !o.materiali_da_ddt || !Array.isArray(o.materiali) || !richiesteTerzistaPossibili()) return [];
+  if (!haClNostri(o) || !richiesteTerzistaPossibili()) return [];
   if (o.stato !== 'aperta' && o.stato !== 'sospesa') return [];
   const fasi = fasiCommessa(o);
   if (!fasi.size) return [];
@@ -6961,7 +6962,9 @@ async function giacenzeGestionaleOra() {
   if (!A || !A.apertura) return { letto: false, motivo: !A ? 'lo specchio Alnus non si legge' : 'manca la foto d’apertura di Alnus' };
   const magazzini = alnusMagazziniContati([...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
     .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean));
-  const commesse = new Map((state.operazioni || []).map(o => [o.id, o]));
+  // I C/L che Alnus non conosce li scarica gia' il trigger del lotto: fuori dal conto dei consumi.
+  const commesse = new Map((state.operazioni || []).map(o => [o.id, haClNostri(o)
+    ? Object.assign({}, o, { materiali: o.materiali.filter(r => !clNostro(r)) }) : o]));
   const r = giacenzaGestionale({ apertura: A.giacApertura, aperturaIl: A.apertura.preso_il, magazzini,
     movimenti: Array.isArray(state.movimenti) ? state.movimenti : [], lotti: state.consegneCommessa || [], commesse });
   const alnus = giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il);
@@ -7646,12 +7649,12 @@ function documentiRegistro() {
 function codiceInGiacenzaGestionale(codice, mittenteId) {
   const c = String(codice || '').trim().toUpperCase();
   if (!c) return false;
-  const clConSpunta = (state.operazioni || []).some(o => o.materiali_da_ddt && (o.stato === 'aperta' || o.stato === 'sospesa')
-    && (o.materiali || []).some(x => String(x.codice || '').trim().toUpperCase() === c && eCL(x)));
-  if (clConSpunta) return true;
   // Una giacenza sola (23 nov): un codice di Alnus lo conta Alnus, i nostri
   // carichi restano registro (fuori giacenza).
   if (codiceDiAlnus(c)) return false;
+  // Un C/L di una commessa viva che Alnus non conosce (24 nov, era la spunta).
+  if ((state.operazioni || []).some(o => (o.stato === 'aperta' || o.stato === 'sospesa')
+    && (o.materiali || []).some(x => String(x.codice || '').trim().toUpperCase() === c && eCL(x)))) return true;
   return inConto(state.movimenti || []).some(m => String(m.codice || '').trim().toUpperCase() === c);
 }
 // ── DDT IN ENTRATA e RICEVIMENTO (23 nov) ──────────────────────────────────
@@ -8187,7 +8190,7 @@ function apriConfermaInvioTerzista(x, poi) {
   const rep = eReparto(x.terzista_id);
   const v = veloTerzista(rep ? 'Conferma: materiale portato in reparto' : 'Conferma spedizione a ' + nomeAziendaDi(x.terzista_id), multi ? 920 : 820);
   const sede = saldoInSede(state.movimenti);
-  const conta = (r) => !!opDi(r).materiali_da_ddt && String(r.tipo || '').trim().toUpperCase() === 'C/L';
+  const conta = (r) => clNostro(r);   // la stessa regola di mov_conferma_invio_terzista
   const num = (t) => { const n = Number(String(t == null ? '' : t).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
   const COL = 'display:grid;grid-template-columns:minmax(130px,1fr) ' + (multi ? '110px ' : '')
     + 'minmax(130px,1.4fr) 46px 80px 80px 90px;gap:8px;align-items:center;';
@@ -8648,7 +8651,7 @@ async function registraLottoProduzione(o, campi, opts) {
   state.consegneCommessa = state.consegneCommessa || [];
   if (!state.consegneCommessa.find(x => x.id === nuova.id)) state.consegneCommessa.push(nuova);
   // Il database ha appena scritto gli scarichi (trigger del 14 ott): si rileggono.
-  if (o.materiali_da_ddt) caricaMovimenti();
+  if (haClNostri(o)) caricaMovimenti();
   let completata = false, erroreStato = null;
   const statoForm = opts.statoForm || o.stato;
   if (qtaOrd > 0 && quantitaConsegnata(o.id) >= qtaOrd && (o.stato === 'aperta' || o.stato === 'sospesa')
@@ -9009,42 +9012,69 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
   return box;
 }
 
-// Le commesse vive con "Materiali da DDT", gia' a residuo: chi chiede i C/L
-// contati dal registro movimenti.
+// Le commesse vive che hanno C/L contati dal gestionale (codici che Alnus non
+// conosce), gia' a residuo e ridotte a quei C/L: chi chiede i C/L contati dal
+// registro movimenti. Dal 24 nov non c'e' piu' la spunta: decide il codice.
 function commesseConDdtVive() {
-  return (state.operazioni || []).filter(x => x.materiali_da_ddt
-    && (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali))
-    .map(commessaSuResiduo);
+  return (state.operazioni || []).filter(x => (x.stato === 'aperta' || x.stato === 'sospesa') && haClNostri(x))
+    .map(x => vistaClNostri(commessaSuResiduo(x)));
 }
 
 // Le righe della scheda Materiali per i codici che il gestionale conta da se'
 // (vedi `righeGiacenzaGestionale` in domain). [] se i movimenti non si sono
 // letti: allora quei codici restano coi numeri di Alnus, e la scheda lo dice.
-// ⚠ Un codice che Alnus conta (nel Fabbisogno o nella foto dello specchio)
-// resta una riga di Alnus, salvo i C/L delle commesse con la spunta: una
-// rettifica a mano o un carico su un ACQ (23 nov, 20 080 2455 +11) ne
-// facevano una riga «Gestionale» col solo saldo dei movimenti (11 invece di
-// 39 + 11) e senza impegni. Quei movimenti contano nella giacenza parallela
-// (scheda del codice, Specchio Alnus), non qui.
+// ⚠ Un codice che Alnus conta resta una riga di Alnus: una rettifica a mano o
+// un carico su un ACQ (23 nov, 20 080 2455 +11) ne facevano una riga
+// «Gestionale» col solo saldo dei movimenti (11 invece di 39 + 11).
 function righeGestionaleOra() {
   if (!Array.isArray(state.movimenti) || typeof righeGiacenzaGestionale !== 'function') return [];
   return righeGiacenzaGestionale(state.movimenti, commesseConDdtVive())
-    .filter(r => !(codiceDiAlnus(r.codice) && !(Number(r.impegno) > 0)));
+    .filter(r => !codiceDiAlnus(r.codice));
 }
 // ⚠⚠ UNA GIACENZA SOLA (23 nov, Nico: "il testing fra Alnus e il gestionale sta
 // diventando infernale"): finche' si lavora in Alnus, un codice che Alnus
-// conosce (Fabbisogno, foto o movimenti importati nello Specchio) ha la
-// giacenza di Alnus = foto + movimenti di Alnus importati. Nel gestionale non
-// si rettifica in sede e i nostri DDT non lo mettono in giacenza: si fa in Alnus.
-// Restano del gestionale i codici che Alnus non ha (TS- di Tema) e i C/L delle
-// commesse con la spunta.
+// conosce ha la giacenza di Alnus = apertura + movimenti di Alnus importati.
+// Nel gestionale non si rettifica in sede e i nostri DDT non lo mettono in
+// giacenza: si fa in Alnus. Restano del gestionale i codici che Alnus non ha
+// (TS- di Tema).
+// Alnus lo conosce se e' nel Fabbisogno, nella foto o nei movimenti dello
+// Specchio (solo admin), o ha una riga d'apertura o di Alnus fra i movimenti
+// (letti da tutti). La STESSA regola e' nel database: `codice_di_alnus`
+// (strumenti/migrazione-spunta-per-codice.sql).
+let _codiciAlnus = null;
+function codiciDiAlnus() {
+  const A = state.alnus, M = state.mancantiAlnus, MV = state.movimenti;
+  const chiave = [M, A, MV, (M || []).length, A ? (A.giacApertura || []).length : -1,
+    A ? (A.movimenti || []).length : -1, Array.isArray(MV) ? MV.length : -1];
+  if (_codiciAlnus && chiave.every((x, i) => x === _codiciAlnus.chiave[i])) return _codiciAlnus.set;
+  const set = new Set();
+  const metti = (c) => { const k = chiaveCodice(c); if (k) set.add(k); };
+  (M || []).forEach(m => metti(m.codice));
+  if (A) { (A.giacApertura || []).forEach(m => metti(m.codice)); (A.movimenti || []).forEach(m => metti(m.codice)); }
+  if (Array.isArray(MV)) MV.forEach(m => { if (m.documento_tipo === 'APERTURA' || m.documento_tipo === 'ALNUS') metti(m.codice); });
+  _codiciAlnus = { chiave, set };
+  return set;
+}
 function codiceDiAlnus(codice) {
   const c = chiaveCodice(codice);
-  if (!c) return false;
-  const A = state.alnus;
-  return (state.mancantiAlnus || []).some(m => chiaveCodice(m.codice) === c)
-    || !!(A && ((A.giacApertura || []).some(m => chiaveCodice(m.codice) === c)
-      || (A.movimenti || []).some(m => chiaveCodice(m.codice) === c)));
+  return !!c && codiciDiAlnus().has(c);
+}
+// ⚠⚠ LA REGOLA PER CODICE (24 nov, Nico: tolta la spunta «Giacenza nel
+// gestionale (C/L del cliente)»). Un C/L che Alnus non conosce ha la giacenza
+// nel gestionale: arriva coi DDT del cliente, si sposta a terzista e reparto,
+// lo scarica il lotto. Un C/L di Alnus segue Alnus. Lo decide il codice, non la
+// commessa: una commessa con codici dei due tipi li tratta ognuno a modo suo.
+function clNostro(r) {
+  return !!r && eCL(r) && !codiceDiAlnus(r.codice);
+}
+function haClNostri(o) {
+  return !!o && Array.isArray(o.materiali) && o.materiali.some(clNostro);
+}
+// La commessa vista dal conto dei DDT (`arriviDaDdt` e simili in domain): le
+// stesse righe meno i C/L di Alnus, col vecchio flag acceso.
+function vistaClNostri(o) {
+  return Object.assign({}, o, { materiali_da_ddt: true,
+    materiali: (o.materiali || []).filter(r => !eCL(r) || clNostro(r)) });
 }
 
 function materialiStatoCommessa(op, righeMancanti, base) {
@@ -9055,7 +9085,7 @@ function materialiStatoCommessa(op, righeMancanti, base) {
   // commesse vive col flag. `ddtNonLetto` se i movimenti non si sono potuti
   // leggere: allora si dice quello, non "mancano".
   let ddt = null, ddtNonLetto = false;
-  if (op && op.materiali_da_ddt) {
+  if (haClNostri(op)) {
     if (!Array.isArray(state.movimenti)) ddtNonLetto = true;
     else ddt = arriviDaDdtCommessa(op);
   }
@@ -17556,7 +17586,7 @@ function openOperazioneModal(o, opts) {
     // «+ Nuova richiesta». Non rimetterlo, ne' un «Altra richiesta» sul passo.
     if (!isNew && isAdmin && richiesteTerzistaPossibili()) {
       // REPARTO (16 nov): la stessa richiesta, per la quota che resta in casa.
-      if (repartoId() && o.materiali_da_ddt && !cicloHaReparto) {
+      if (repartoId() && Array.isArray(o.materiali) && o.materiali.length && !cicloHaReparto) {
         intestazione.append(el('button', { type:'button', class:'btnsm',
           title:'Prepara la lista del materiale che resta in casa e va in lavorazione. '
             + 'Alla conferma i C/L passano dalla sede al reparto, riservati a questa commessa.',
@@ -17588,29 +17618,9 @@ function openOperazioneModal(o, opts) {
       cardMat.append(togLista, listaBox);
     } else sezMateriali.append(listaBox);
 
-    // ── LA SPUNTA "Materiali da DDT" (13 ott, pilota Enviro) ─────────────
-    // I codici C/L di questa commessa si contano dai DDT letti in automatico
-    // (`movimenti_magazzino`), non dalla giacenza di Alnus. Vedi
-    // `arriviDaDdt` in domain/materiali.js per cosa conta e cosa no.
-    // ⚠ Inerte finche' la colonna non esiste, come `senza_distinta`: si
-    // riconosce dalla riga caricata.
-    if (isAdmin && Object.prototype.hasOwnProperty.call(o, 'materiali_da_ddt')) {
-      const chkDdt = el('input', { type:'checkbox',
-        style:'width:15px;height:15px;cursor:pointer;margin:0;' });
-      chkDdt.checked = ('materiali_da_ddt' in spunteInSospeso) ? spunteInSospeso.materiali_da_ddt : !!o.materiali_da_ddt;
-      chkDdt.onchange = () => { spunteInSospeso.materiali_da_ddt = chkDdt.checked; };
-      listaBox.append(el('label', {
-        style:'display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;cursor:pointer;'
-          + 'font-size:12px;max-width:620px;line-height:1.5;' },
-        chkDdt,
-        el('span', {},
-          // Testo riscritto il 23 nov (Nico: «Materiali da DDT» ingannava).
-          el('span', { style:'font-weight:700;' }, 'Giacenza nel gestionale (C/L del cliente)'),
-          el('span', { class:'sub', style:'display:block;font-size:11px;margin-top:2px;' },
-            'I C/L che manda il cliente si contano dai DDT caricati nel gestionale, non da Alnus: arrivati e mancanti, '
-            + 'disponibile nelle liste per terzisti e reparto (oltre la giacenza non si propone), scarico a ogni lotto. '
-            + 'ACQ resta su Alnus, MAC resta consumo. Senza spunta le liste propongono tutto, senza guardare la giacenza.'))));
-    }
+    // La spunta «Giacenza nel gestionale (C/L del cliente)» (13 ott - 23 nov) non c'e' piu':
+    // dal 24 nov decide il codice (clNostro). La colonna materiali_da_ddt resta a
+    // database e non la legge nessuno.
 
     const COL = 'display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(140px,1.4fr) '
       // ⚠ L'ultima colonna sta in `fr` e non in `auto`. Ogni riga e' una
@@ -18446,7 +18456,7 @@ function openOperazioneModal(o, opts) {
                 if (error) return toast('Errore eliminazione: '+error.message, 'err');
                 state.consegneCommessa = state.consegneCommessa.filter(x => x.id !== c.id);
                 toast('Lotto eliminato');
-                if (o.materiali_da_ddt) caricaMovimenti();   // la rettifica del trigger
+                if (haClNostri(o)) caricaMovimenti();   // la rettifica del trigger
                 // Rovescio dell'ultimo lotto che scrive `completata` (1 ott,
                 // Nico: "cancellando 20 pezzi prodotti non mi torna ad aperto").
                 // Si riapre SOLO se la completata era retta dai pezzi (prima
@@ -20265,7 +20275,7 @@ async function scriviFattiPerStato(op, fatti) {
         { label: 'lotto chiusura commessa' });
       if (error) throw error;
       if (!state.consegneCommessa.find(x => x.id === data.id)) state.consegneCommessa.push(data);
-      if (op.materiali_da_ddt) caricaMovimenti();   // gli scarichi del trigger
+      if (haClNostri(op)) caricaMovimenti();   // gli scarichi del trigger
     } else fatti.lotto = null;
   }
   if (fatti.spedizione) {
