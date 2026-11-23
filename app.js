@@ -7428,174 +7428,224 @@ function righeOrdineFornitore(aziendaId) {
     }));
   return out;
 }
+// La finestra del DDT in entrata (23 nov, rifatta su richiesta di Nico: "non e' pratico
+// cosi' abbinare le righe"). DUE PANNELLI: a sinistra le righe del DDT con lo stato, a
+// destra UNA riga alla volta con i CANDIDATI gia' in ordine (`candidatiRicevimento`:
+// codice fornitore, OF citato, stessa quantita', codice e descrizione simili) e una
+// ricerca nelle righe d'OF del fornitore e nell'anagrafica materiali. Clic o Invio =
+// abbinata, e si passa alla prossima da fare; frecce per scorrere i candidati.
+// Senza `ric` e' il DDT scritto a mano: «+ Riga» e si scrive a destra.
 async function apriDdtEntrataManuale(poi, ric) {
   if (state.codiciFornitore === undefined) await caricaCodiciFornitore();
   if (codiciAnagrafica === undefined) await caricaCodiciAnagrafica();
   const v = veloTerzista(ric ? 'DDT da confermare · ' + (ric.azienda_id ? nomeAziendaDi(ric.azienda_id) : ric.mittente) + ' n. ' + ric.ddt_numero
-    : 'DDT in entrata', 1400);
+    : 'DDT in entrata', 1320);
   const aziende = (state.aziende || []).filter(a => a.attivo !== false)
     .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
-  let righe = [];
+  let righe = [], sel = 0, evid = 0, cerca = '', anag = [], anagPer = '';
   const selMitt = el('select', { onchange: () => { righe.forEach(r => { r.toccata = false; proponi(r); }); disegna(); } }, el('option', { value:'' }, '— mittente —'),
     ...aziende.map(a => el('option', { value: a.id }, a.nome)));
   const inNum = el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' });
   const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
-  const inOrd = el('input', { type:'text', class:'mono', placeholder:'es. OF 763/2026' });
   if (ric) { selMitt.value = ric.azienda_id || ''; selMitt.disabled = true; inNum.value = ric.ddt_numero || ''; if (ric.ddt_data) inData.value = String(ric.ddt_data).slice(0, 10); }
+  const nfq = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   const noto = (c) => !!c && ((codiciAnagrafica ? codiciAnagrafica.has(c) : true) || codiceInGiacenzaGestionale(c, selMitt.value));
+  const abbinata = (r) => noto(chiaveCodice(r.codice));
   const ordiniDi = () => righeOrdineFornitore(selMitt.value);
-  // Proposta automatica: codice fornitore -> nostro (scheda del codice o righe degli OF),
-  // poi la riga d'ordine col nostro codice: quella citata, poi una ancora aperta, poi la piu' recente.
+  // L'ordine citato dalla riga: «OF 763/2026» o la nota della scansione «Vs. ordine OF/763 del …».
+  const citato = (r) => {
+    const m = /\b(OF|OL)\s*\/?\s*(\d{1,6})\b/i.exec(String(r.note || ''));
+    return chiaveOfDaRif(r.ordine_rif || '') || (m ? chiaveOfDaRif(m[1] + ' ' + m[2] + '/' + String(inData.value || '').slice(0, 4)) : null);
+  };
+  // Le voci fra cui cercare: righe d'OF del fornitore e codici della scheda del codice.
+  const vociDi = () => ordiniDi().map(o => ({ codice: o.codice, codice_fornitore: o.codice_fornitore, descrizione: o.descrizione, um: o.um,
+      ordine: o.ordine, aperto: o.aperto, stato: o.stato, k: o.k, fonte: 'of' }))
+    .concat((state.codiciFornitore || []).filter(z => z.azienda_id === selMitt.value)
+      .map(z => ({ codice: chiaveCodice(z.codice), codice_fornitore: z.codice_fornitore, descrizione: '', ordine: '', aperto: 0, fonte: 'scheda' })));
+  const candidati = (r) => candidatiRicevimento({ codice_mittente: r.codice_mittente || r.codice, descrizione: r.descrizione, qta: r.qta, ordine: citato(r) }, vociDi());
+  // Abbina la riga a una voce: nostro codice, ordine, codice fornitore nella forma del fornitore.
+  const abbina = (r, c) => {
+    r.codice = chiaveCodice(c.codice); r.ordine_rif = c.ordine || ''; r.ofK = c.k || '';
+    if (c.codice_fornitore && chiaviCodiceFornitore(c.codice_fornitore).some(k => chiaviCodiceFornitore(r.codice_mittente).includes(k))) r.codice_mittente = String(c.codice_fornitore).trim();
+    if (!r.descr_nostra) r.descr_nostra = c.descrizione || '';
+    if (!r.um && c.um) r.um = c.um;
+  };
+  // Proposta automatica all'apertura: solo quando e' sicura (codice fornitore conosciuto).
   function proponi(r) {
     if (r.toccata) return;
-    const ords = ordiniDi();
-    const suo = r.codice_mittente || r.codice;
-    let nostro = noto(chiaveCodice(r.codice)) ? chiaveCodice(r.codice) : null;
-    // Prima la scheda del codice, poi le righe degli OF: danno il nostro codice e il codice
-    // del fornitore nella SUA forma («SIE 5SY63027» anche se la scansione ha letto «5SY63027»).
-    const elenco = (state.codiciFornitore || []).concat(ords.map(o => ({ azienda_id: selMitt.value, codice_fornitore: o.codice_fornitore, codice: o.codice })));
-    const voce = suo ? voceCodiceFornitore(elenco, selMitt.value, suo, nostro) : null;
-    if (!nostro && voce) nostro = voce.codice;
-    if (nostro) r.codice = chiaveCodice(nostro);
-    if (voce && chiaveCodice(voce.codice) === chiaveCodice(r.codice)) r.codice_mittente = voce.codice_fornitore;
-    // L'ordine citato: sulla riga («OF 763/2026») o nella nota della scansione («Vs. ordine OF/763 del …»).
-    const anno = String(inData.value || '').slice(0, 4);
-    const mNota = /\b(OF|OL)\s*\/?\s*(\d{1,6})\b/i.exec(String(r.note || ''));
-    const cit = chiaveOfDaRif(r.ordine_rif || '') || (mNota ? chiaveOfDaRif(mNota[1] + ' ' + mNota[2] + '/' + anno) : null);
-    const mie = ords.filter(o => o.codice === chiaveCodice(r.codice));
-    const sc = mie.find(o => cit && chiaveOfDaRif(o.ordine) === cit) || mie.find(o => o.aperto > 0) || mie[0] || null;
-    r.ofK = sc ? sc.k : '';
-    if (sc) r.ordine_rif = sc.ordine;
+    if (abbinata(r)) {
+      const c = candidati(r).find(x => chiaveCodice(x.codice) === chiaveCodice(r.codice) && x.ordine);
+      if (c) abbina(r, c); else { const vv = voceCodiceFornitore(vociDi(), selMitt.value, r.codice_mittente, r.codice); if (vv) r.codice_mittente = vv.codice_fornitore; }
+      return;
+    }
+    const c = candidati(r)[0];
+    if (c && c.punteggio >= 100) abbina(r, c);
   }
   if (ric) {
     righe = (ric.righe || []).map(x => ({ pos: x.pos || '', codice: chiaveCodice(x.codice || x.codice_mittente), codice_mittente: x.codice_mittente || x.codice || '',
       descrizione: x.descrizione || '', um: x.um || '', qta: Number(x.qta) || 0, ordine_rif: x.ordine_rif || '', note: x.note || '', ofK: '' }));
     righe.forEach(proponi);
-  }
-  const corpo = el('div');
-  const C = 'display:grid;grid-template-columns:130px 170px minmax(150px,1fr) 46px 74px minmax(230px,1.3fr) minmax(100px,.7fr) 112px 26px;gap:6px;align-items:center;';
-  const et = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
-  const nfq = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
-  const completa = async (r) => {
-    const c = r.codice;
-    const mv = (state.movimenti || []).slice().reverse().find(m => String(m.codice || '').toUpperCase() === c && m.descrizione);
-    const mn = (state.mancanti || []).find(x => String(x.codice || '').trim().toUpperCase() === c);
-    const fonte = mv || mn;
-    if (fonte) { if (!r.descrizione) r.descrizione = fonte.descrizione || ''; if (!r.um) r.um = fonte.um || ''; }
-    else if (!r.descrizione) {
-      try {
-        const { data } = await sb.from('materiali').select('descrizione,um').eq('codice', c).limit(1);
-        if (data && data[0]) { r.descrizione = data[0].descrizione || ''; if (!r.um) r.um = data[0].um || ''; }
-      } catch (e) { /* si scrive a mano */ }
-    }
-    disegna();
+    const prima = righe.findIndex(r => !abbinata(r)); sel = prima >= 0 ? prima : 0;
+  } else righe = [{ pos:'', codice:'', codice_mittente:'', descrizione:'', um:'', qta:0, ordine_rif:'', note:'', ofK:'', toccata: true }];
+
+  const sinistra = el('div', { style:'border-right:1px solid var(--brd);padding-right:12px;overflow:auto;max-height:62vh;' });
+  const destra = el('div', { style:'padding-left:4px;min-width:0;' });
+  const riepilogo = el('div', { class:'sub', style:'font-size:12px;margin-top:8px;' });
+  const prossima = () => {
+    const n = righe.findIndex((r, i) => i > sel && !abbinata(r));
+    const m = n >= 0 ? n : righe.findIndex(r => !abbinata(r));
+    sel = m >= 0 ? m : sel; evid = 0; cerca = '';
   };
-  const riepilogo = el('div', { class:'sub', style:'font-size:12px;' });
-  function disegna() {
-    corpo.innerHTML = '';
-    const ords = ordiniDi();
-    corpo.append(el('div', { style: C + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
-      et('Codice fornitore'), et('Nostro codice'), et('Descrizione'), et('UM'), et('Q.tà', 1), et('Riga d’ordine che lo aspettava'), et('Nota'), et('Stato'), el('span')));
-    if (!righe.length) corpo.append(el('div', { class:'sub', style:'padding:10px 0;font-size:12px;' }, 'Nessuna riga: «+ Riga» per aggiungerne.'));
-    let daAbb = 0;
+  // Abbinata una riga, le altre righe di QUESTO DDT con lo stesso codice del fornitore
+  // (Fabbi: 050ASL 4 + 2, 40292 due volte) prendono lo stesso abbinamento.
+  const scegli = (r, c) => {
+    const suo = chiaviCodiceFornitore(r.codice_mittente)[0];
+    abbina(r, c); r.toccata = true;
+    if (suo) righe.forEach(x => { if (x !== r && !abbinata(x) && chiaviCodiceFornitore(x.codice_mittente)[0] === suo) { abbina(x, c); x.toccata = true; } });
+    prossima(); disegna(); };
+  // Ricerca nell'anagrafica materiali (dal server, per chi non ha OF: ordini a voce).
+  const cercaAnagrafica = async (q) => {
+    const t = q.trim().replace(/[%,()*]/g, ' ').trim();
+    if (t.length < 3) { anag = []; anagPer = ''; return; }
+    anagPer = t;
+    try {
+      const { data } = await sb.from('materiali').select('codice,descrizione,um').or('codice.ilike.%' + t + '%,descrizione.ilike.%' + t + '%').limit(15);
+      if (anagPer !== t) return;
+      anag = (data || []).map(m => ({ codice: chiaveCodice(m.codice), codice_fornitore: '', descrizione: m.descrizione || '', um: m.um || '', ordine: '', aperto: 0, fonte: 'anagrafica', punteggio: 0, perche: ['anagrafica'] }));
+    } catch (e) { anag = []; }
+    disegnaDestra();
+  };
+  let timerCerca = null;
+
+  function disegnaSinistra() {
+    sinistra.innerHTML = '';
     righe.forEach((r, i) => {
-      const inCod = el('input', { type:'text', value: r.codice, class:'mono', style:'font-size:12px;width:100%;', placeholder:'nostro o del fornitore' });
-      inCod.onchange = () => {
-        const scritto = inCod.value.trim().toUpperCase();
-        if (!r.codice_mittente) r.codice_mittente = scritto;
-        r.codice = scritto; r.toccata = false; r.ofK = '';
-        proponi(r); r.toccata = true;
-        if (r.codice) completa(r); else disegna(); };
-      // Il codice del FORNITORE accanto al nostro, correggibile (23 nov, Nico): una lettura
-      // sbagliata della scansione si corregge qui, e la proposta del nostro codice si rifa'.
-      const inSuo = el('input', { type:'text', value: r.codice_mittente || '', class:'mono', style:'font-size:12px;width:100%;',
-        placeholder:'come sul DDT', title:'Il codice scritto dal fornitore sul DDT: si salva come suo codice per il nostro' });
-      inSuo.onchange = () => {
-        r.codice_mittente = inSuo.value.trim().toUpperCase();
-        if (!noto(chiaveCodice(r.codice)) || !r.toccata) { r.codice = r.codice_mittente; r.toccata = false; r.ofK = ''; proponi(r); }
-        if (r.codice) completa(r); else disegna(); };
-      const inDesc = el('input', { type:'text', value: r.descrizione, style:'font-size:12px;' });
-      inDesc.oninput = () => { r.descrizione = inDesc.value; };
-      const inUm = el('input', { type:'text', value: r.um, style:'font-size:12px;' });
-      inUm.oninput = () => { r.um = inUm.value.trim(); };
-      const inQ = el('input', { type:'text', inputmode:'decimal', value: r.qta ? nfIT(r.qta) : '', class:'mono', style:'font-size:12px;text-align:right;' });
-      inQ.oninput = () => { const n = numeroDaTesto(inQ.value); r.qta = n == null || isNaN(n) ? 0 : n; inQ.style.color = n != null && isNaN(n) ? 'var(--red)' : ''; };
-      // Le righe d'ordine di QUEL fornitore: prima quelle col nostro codice, poi le aperte.
-      const sel = el('select', { style:'font-size:11px;width:100%;' });
-      sel.append(el('option', { value:'' }, r.ordine_rif && !r.ofK ? '— ' + r.ordine_rif + ' (senza OF) —' : '— nessun ordine —'));
-      const ordinati = ords.slice().sort((a, b) => ((b.codice === r.codice) - (a.codice === r.codice)) || ((b.aperto > 0) - (a.aperto > 0)));
-      ordinati.forEach(o => sel.append(el('option', { value: o.k },
-        o.ordine + ' · ' + o.codice + (o.codice_fornitore ? ' (' + o.codice_fornitore + ')' : '') + ' · '
-        + (o.aperto > 0 ? 'aspetta ' + nfq(o.aperto) : o.stato === 'chiuso' ? 'chiuso' : 'evasa'))));
-      sel.value = r.ofK || '';
-      sel.onchange = () => {
-        r.toccata = true; r.ofK = sel.value;
-        const o = ords.find(x => x.k === sel.value);
-        if (o) { r.codice = o.codice; r.ordine_rif = o.ordine; if (!r.descrizione) r.descrizione = o.descrizione; if (!r.um) r.um = o.um; }
-        else r.ordine_rif = '';
-        disegna(); };
-      const o = ords.find(x => x.k === r.ofK);
-      const oltre = o && o.aperto > 0 && r.qta > o.aperto;
-      const inN = el('input', { type:'text', value: r.note, style:'font-size:12px;', title: r.note || '' });
-      inN.oninput = () => { r.note = inN.value; };
-      const ok = noto(chiaveCodice(r.codice));
-      if (r.codice && !ok) daAbb++;
-      const gest = ok && codiceInGiacenzaGestionale(r.codice, selMitt.value);
-      const stato = !r.codice ? el('span')
-        : el('div', {}, el('span', { class:'badge ' + (ok ? 'bok' : 'byel'), style:'font-size:10px;white-space:nowrap;',
-            title: ok ? 'Codice nostro' : 'Codice che non è nell’anagrafica: scegli la riga d’ordine o scrivi il nostro codice' },
-            ok ? '✓ abbinata' : '⚠ da abbinare'),
-          oltre ? el('div', { style:'font-size:10px;color:var(--or);margin-top:2px;' }, 'più dell’ordinato (' + nfq(o.aperto) + ')') : '',
-          ok ? el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' }, gest ? 'in giacenza' : 'solo registro') : '');
-      const via = el('button', { type:'button', class:'btnsm', style:'padding:0 6px;', title:'Togli la riga', onclick: () => { righe.splice(i, 1); disegna(); } }, '✕');
-      corpo.append(el('div', { style: C + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
-        inSuo, inCod, inDesc, inUm, inQ, sel, inN, stato, via));
+      const ok = abbinata(r);
+      const riga = el('div', { style:'display:grid;grid-template-columns:18px minmax(0,1fr) 64px;gap:6px;align-items:center;padding:5px 6px;border-radius:5px;cursor:pointer;font-size:12px;'
+          + (i === sel ? 'background:var(--sur2);outline:1px solid var(--acc);' : ''),
+        onclick: () => { sel = i; evid = 0; cerca = ''; disegna(); } },
+        el('span', { style:'color:' + (ok ? 'var(--grn)' : r.codice || r.codice_mittente ? 'var(--or)' : 'var(--mut)') + ';font-weight:700;' }, ok ? '✓' : '⚠'),
+        el('div', { style:'min-width:0;' },
+          el('div', { class:'mono', style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;' }, r.codice_mittente || r.codice || '(nuova riga)'),
+          el('div', { class:'sub', style:'font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+            ok ? '→ ' + r.codice + (r.ordine_rif ? ' · ' + r.ordine_rif : '') : (r.descrizione || ''))),
+        el('span', { class:'mono', style:'text-align:right;' }, r.qta ? nfq(r.qta) : '—'));
+      sinistra.append(riga);
     });
-    riepilogo.textContent = righe.length ? righe.length + (righe.length === 1 ? ' riga' : ' righe') + ' · '
-      + (daAbb ? daAbb + ' da abbinare' : 'tutte abbinate') : '';
-    riepilogo.style.color = daAbb ? 'var(--or)' : '';
+    sinistra.append(el('button', { type:'button', class:'btnsm', style:'margin-top:8px;', onclick: () => {
+      righe.push({ pos:'', codice:'', codice_mittente:'', descrizione:'', um:'', qta:0, ordine_rif:'', note:'', ofK:'', toccata: true });
+      sel = righe.length - 1; evid = 0; cerca = ''; disegna(); const c = destra.querySelector('input'); if (c) c.focus(); } }, '+ Riga'));
+    const fatte = righe.filter(abbinata).length;
+    riepilogo.textContent = righe.length + (righe.length === 1 ? ' riga' : ' righe') + ' · ' + fatte + ' abbinate · ' + (righe.length - fatte) + ' da fare';
+    riepilogo.style.color = righe.length - fatte ? 'var(--or)' : 'var(--grn)';
   }
-  const nuovaRiga = () => ({ pos:'', codice:'', codice_mittente:'', descrizione:'', um:'', qta:0, ordine_rif: inOrd.value.trim(), note:'', ofK:'' });
-  inOrd.onchange = () => { righe.forEach(r => { r.ordine_rif = inOrd.value.trim(); r.toccata = false; r.ofK = ''; proponi(r); }); disegna(); };
-  const piu = el('button', { type:'button', class:'btnsm', onclick: () => {
-    righe.push(nuovaRiga()); disegna(); const c = corpo.querySelectorAll('input.mono'); if (c.length) c[c.length - 2].focus(); } }, '+ Riga');
-  const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
-  if (!ric) righe = [nuovaRiga()];
+
+  function disegnaDestra() {
+    destra.innerHTML = '';
+    const r = righe[sel];
+    if (!r) { destra.append(el('div', { class:'sub' }, 'Nessuna riga.')); return; }
+    const campo = (et, input, w) => el('div', { style:'display:flex;flex-direction:column;gap:2px;' + (w ? 'width:' + w + ';' : 'flex:1;min-width:0;') },
+      el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' }, et), input);
+    const inSuo = el('input', { type:'text', class:'mono', value: r.codice_mittente || '', placeholder:'come sul DDT', style:'font-size:13px;' });
+    inSuo.onchange = () => { r.codice_mittente = inSuo.value.trim().toUpperCase(); if (!abbinata(r) || !r.toccata) { r.codice = r.codice_mittente; r.ofK = ''; r.toccata = false; proponi(r); } evid = 0; disegna(); };
+    const inDesc = el('input', { type:'text', value: r.descrizione || '', placeholder:'descrizione del fornitore', style:'font-size:12px;' });
+    inDesc.oninput = () => { r.descrizione = inDesc.value; };
+    inDesc.onchange = () => disegnaDestra();
+    const inQ = el('input', { type:'text', inputmode:'decimal', class:'mono', value: r.qta ? nfIT(r.qta) : '', style:'font-size:13px;text-align:right;' });
+    inQ.oninput = () => { const n = numeroDaTesto(inQ.value); r.qta = n == null || isNaN(n) ? 0 : n; };
+    inQ.onchange = () => disegna();
+    const inUm = el('input', { type:'text', value: r.um || '', style:'font-size:12px;' });
+    inUm.oninput = () => { r.um = inUm.value.trim(); };
+    destra.append(el('div', { style:'display:flex;gap:8px;align-items:flex-end;margin-bottom:6px;' },
+      campo('Codice fornitore', inSuo, '190px'), campo('Descrizione sul DDT', inDesc), campo('Q.tà', inQ, '90px'), campo('UM', inUm, '52px'),
+      el('button', { type:'button', class:'btnsm', title:'Togli questa riga dal DDT', style:'margin-bottom:2px;',
+        onclick: () => { righe.splice(sel, 1); sel = Math.max(0, Math.min(sel, righe.length - 1)); disegna(); } }, '✕')));
+    if (r.note) destra.append(el('div', { class:'sub', style:'font-size:11px;margin-bottom:8px;' }, 'Nota: ' + r.note));
+    // L'abbinamento attuale.
+    const ok = abbinata(r);
+    destra.append(el('div', { style:'padding:8px 10px;border-radius:6px;margin-bottom:10px;border:1px solid ' + (ok ? 'var(--grn)' : 'var(--brd)') + ';' },
+      ok ? el('div', { style:'display:flex;gap:10px;align-items:center;font-size:12px;' },
+          el('span', { style:'color:var(--grn);font-weight:700;' }, '✓ Nostro codice'),
+          el('span', { class:'mono', style:'font-weight:700;' }, r.codice),
+          el('span', { class:'sub' }, (r.descr_nostra ? r.descr_nostra + ' · ' : '') + (r.ordine_rif ? r.ordine_rif : 'senza ordine')),
+          el('button', { type:'button', class:'btnsm', style:'margin-left:auto;', onclick: () => { r.codice = r.codice_mittente; r.ordine_rif = ''; r.ofK = ''; r.descr_nostra = ''; r.toccata = true; disegna(); } }, 'Cambia'))
+        : el('div', { class:'sub', style:'font-size:12px;' }, 'Da abbinare: scegli il nostro codice qui sotto (clic o Invio).')));
+    // I candidati + la ricerca.
+    const inCerca = el('input', { type:'text', class:'search', value: cerca, placeholder:'Cerca nostro codice, codice fornitore o descrizione…', style:'width:100%;font-size:12px;' });
+    let lista = [];
+    const disegnaLista = () => {
+      box.innerHTML = '';
+      const q = cerca.trim().toUpperCase();
+      const tutti = candidati(r);
+      lista = q ? tutti.filter(c => [c.codice, c.codice_fornitore, c.descrizione, c.ordine].some(s => String(s || '').toUpperCase().includes(q)))
+          .concat(anag.filter(a => !tutti.some(c => c.codice === a.codice)))
+        : tutti.slice(0, 8);
+      if (evid >= lista.length) evid = Math.max(0, lista.length - 1);
+      if (!lista.length) { box.append(el('div', { class:'sub', style:'font-size:12px;padding:8px 2px;' },
+        q ? (q.length < 3 ? 'Scrivi almeno 3 caratteri per cercare anche nell’anagrafica.' : 'Niente trovato.') : 'Nessun ordine di questo fornitore: cerca il codice nell’anagrafica.')); return; }
+      lista.forEach((c, i) => box.append(el('div', { style:'display:grid;grid-template-columns:22px 190px minmax(0,1fr) 150px;gap:8px;align-items:center;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:12px;'
+          + (i === evid ? 'background:var(--sur2);outline:1px solid var(--acc);' : ''),
+          onclick: () => scegli(r, c), onmouseenter: () => { evid = i; [...box.children].forEach((n, j) => { n.style.background = j === i ? 'var(--sur2)' : ''; n.style.outline = j === i ? '1px solid var(--acc)' : ''; }); } },
+        el('span', { style:'color:var(--acc);font-weight:700;' }, c.punteggio >= 100 ? '★' : i === 0 && !q ? '☆' : ''),
+        el('div', {}, el('div', { class:'mono', style:'font-weight:700;' }, c.codice),
+          el('div', { class:'sub mono', style:'font-size:10.5px;' }, c.codice_fornitore || (c.fonte === 'anagrafica' ? 'anagrafica' : ''))),
+        el('div', { style:'min-width:0;' }, el('div', { style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, c.descrizione || '—'),
+          el('div', { class:'sub', style:'font-size:10.5px;' }, (c.perche || []).join(' · '))),
+        el('div', { style:'text-align:right;font-size:11px;' }, c.ordine ? el('div', { class:'mono' }, c.ordine) : '',
+          el('div', { class:'sub', style:'font-size:10.5px;' }, c.ordine ? (c.aperto > 0 ? 'aspetta ' + nfq(c.aperto) : c.stato === 'chiuso' ? 'chiuso' : 'evasa') : '')))));
+    };
+    const box = el('div', { style:'margin-top:6px;max-height:40vh;overflow:auto;' });
+    inCerca.oninput = () => { cerca = inCerca.value; evid = 0; disegnaLista();
+      clearTimeout(timerCerca); timerCerca = setTimeout(() => cercaAnagrafica(cerca).then(() => {}), 300); };
+    inCerca.onkeydown = (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); evid = Math.min(lista.length - 1, evid + 1); disegnaLista(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); evid = Math.max(0, evid - 1); disegnaLista(); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (lista[evid]) { scegli(r, lista[evid]); } }
+    };
+    destra.append(el('div', { style:'font-weight:700;font-size:12px;margin-bottom:4px;' }, 'Candidati'), inCerca, box);
+    disegnaLista();
+    setTimeout(() => { if (document.body.contains(inCerca) && !(r.codice_mittente === '' && !ric)) inCerca.focus(); }, 0);
+  }
+  function disegna() { disegnaSinistra(); disegnaDestra(); }
+
+  const accettaTutte = el('button', { type:'button', class:'btnsm', title:'Abbina ogni riga da fare al suo primo candidato quando è sicuro (codice fornitore uguale, o ordine citato con la stessa quantità)',
+    onclick: () => {
+      let n = 0;
+      righe.forEach(r => { if (abbinata(r)) return; const c = candidati(r)[0]; if (c && c.punteggio >= 65) { abbina(r, c); r.toccata = true; n++; } });
+      toast(n ? n + (n === 1 ? ' riga abbinata' : ' righe abbinate') + ' dalle proposte sicure' : 'Nessuna proposta abbastanza sicura: restano da guardare una a una', n ? 'ok' : 'err');
+      prossima(); disegna(); } }, '✓ Accetta le proposte sicure');
   disegna();
+  const campoT = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
   v.corpo.append(
-    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' }, ric
-      ? 'Letto dalla scansione' + (ric.file ? ' (' + ric.file + ')' : '') + '. Controlla ogni riga: il nostro codice e la riga d’ordine che lo aspettava. '
-        + 'Le righe «da abbinare» hanno ancora il codice del fornitore: scegli la riga d’ordine o scrivi il nostro codice. '
-        + 'Alla conferma i carichi entrano in magazzino e gli abbinamenti nuovi si salvano nella scheda del codice: il prossimo DDT li riconosce da solo.'
-      : 'Le righe diventano carichi di magazzino. Il codice si può scrivere anche come lo scrive il fornitore: se è conosciuto diventa il nostro, '
-        + 'e la riga d’ordine si sceglie fra quelle di quel fornitore. Gli abbinamenti nuovi si salvano nella scheda del codice.'),
-    el('div', { class:'frow' }, campo('Mittente', selMitt), campo('Numero DDT', inNum), campo('Data DDT', inData), campo('Stesso ordine per tutte le righe', inOrd)),
-    corpo, el('div', { style:'display:flex;gap:12px;align-items:center;margin-top:6px;' }, piu, riepilogo));
+    el('div', { class:'frow' }, campoT('Mittente', selMitt), campoT('Numero DDT', inNum), campoT('Data DDT', inData),
+      el('div', { style:'display:flex;align-items:flex-end;padding-bottom:4px;' }, accettaTutte)),
+    el('div', { style:'display:grid;grid-template-columns:330px minmax(0,1fr);gap:14px;margin-top:6px;' },
+      el('div', {}, sinistra, riepilogo), destra));
   const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
   const ok = el('button', { class:'btnp' }, ric ? '✓ Conferma ricevimento' : '↓ Carica il DDT');
   const testoOk = ok.textContent;
   ok.onclick = async () => {
-    const valide = righe.filter(r => r.codice);
+    const valide = righe.filter(r => r.codice || r.codice_mittente);
+    valide.forEach(r => { if (!r.codice) r.codice = r.codice_mittente; });
     const err = !selMitt.value ? 'Scegli il mittente' : !inNum.value.trim() ? 'Scrivi il numero del DDT' : !inData.value ? 'Manca la data'
       : !valide.length ? 'Aggiungi almeno una riga' : valide.some(r => !(r.qta > 0)) ? 'Ogni riga vuole una quantità maggiore di zero' : null;
     if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
-    const daAbb = valide.filter(r => !noto(chiaveCodice(r.codice)));
-    if (daAbb.length && !confirm(daAbb.length + (daAbb.length === 1 ? ' riga ha' : ' righe hanno') + ' un codice che non è nell’anagrafica ('
-      + daAbb.slice(0, 5).map(r => r.codice).join(', ') + (daAbb.length > 5 ? '…' : '') + ').\nEntrano così, col codice del fornitore. Confermi?')) return;
+    const daFare = valide.filter(r => !abbinata(r));
+    if (daFare.length && !confirm(daFare.length + (daFare.length === 1 ? ' riga è ancora' : ' righe sono ancora') + ' da abbinare ('
+      + daFare.slice(0, 5).map(r => r.codice).join(', ') + (daFare.length > 5 ? '…' : '') + ').\nEntrano col codice del fornitore. Confermi lo stesso?')) return;
     ok.disabled = true; ok.textContent = 'Salvataggio…';
     const p_righe = valide.map(r => ({ pos: r.pos || '', codice: chiaveCodice(r.codice), codice_mittente: r.codice_mittente || '',
-      descrizione: r.descrizione || '', um: r.um || '', qta: r.qta, ordine_rif: r.ordine_rif || '', note: r.note || '',
+      descrizione: r.descrizione || r.descr_nostra || '', um: r.um || '', qta: r.qta, ordine_rif: r.ordine_rif || '', note: r.note || '',
       file: (ric && ric.file) || '', fuori_giacenza: !codiceInGiacenzaGestionale(r.codice, selMitt.value) }));
     const visti = new Set();
     const p_abbinamenti = valide.filter(r => r.codice_mittente && chiaveCodice(r.codice_mittente) !== chiaveCodice(r.codice)
-      && noto(chiaveCodice(r.codice)) && !codiceNostroDaFornitore(selMitt.value, r.codice_mittente))
+      && abbinata(r) && !codiceNostroDaFornitore(selMitt.value, r.codice_mittente))
       .map(r => ({ codice: chiaveCodice(r.codice), codice_fornitore: r.codice_mittente }))
       .filter(a => { const k = chiaveCodice(a.codice_fornitore); if (visti.has(k)) return false; visti.add(k); return true; });
     let { data, error } = await sb.rpc('conferma_ricevimento', { p_id: ric ? ric.id : null, p_azienda: selMitt.value,
       p_numero: inNum.value.trim(), p_data: inData.value, p_righe, p_abbinamenti });
     const manca = (e) => e && /(could not find|does not exist|schema cache)/i.test(e.message || '');
     if (error && manca(error) && !ric) {
-      // SQL del ricevimento non ancora eseguito: il DDT a mano funziona come prima.
       ({ data, error } = await sb.rpc('mov_carica_ddt', { p_azienda: selMitt.value, p_numero: inNum.value.trim(), p_data: inData.value, p_righe }));
     }
     if (error) {

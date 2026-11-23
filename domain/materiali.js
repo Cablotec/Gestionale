@@ -792,6 +792,54 @@ function voceCodiceFornitore(elenco, aziendaId, codiceFornitore, nostro) {
   return { codice: String(trovate[0].codice).trim(), codice_fornitore: String(trovate[0].codice_fornitore).trim() };
 }
 
+// I CANDIDATI per una riga di DDT da abbinare (23 nov, Nico: "non e' pratico cosi'
+// abbinare le righe"). `riga` = { codice_mittente, descrizione, qta, ordine (chiave OF
+// citata, 'OF anno/numero') }. `voci` = [{ codice, codice_fornitore, descrizione, ordine
+// (testo 'OF 763/2026' o ''), aperto, fonte }] (righe d'OF del fornitore, scheda del codice).
+// Punteggio, dal piu' forte: codice fornitore uguale (anche con la marca davanti), OF citato
+// sul DDT, stessa quantita' che l'ordine aspetta, codice simile (uno contiene l'altro, o
+// stesso inizio), parole della descrizione in comune, ordine ancora aperto. Ogni punto dice
+// il suo motivo. Una voce per nostro codice + ordine, ordinate per punteggio.
+function candidatiRicevimento(riga, voci) {
+  const N = s => String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const suoK = chiaviCodiceFornitore(riga && riga.codice_mittente);
+  const suo = suoK[suoK.length - 1] || '';
+  const parole = s => new Set(String(s || '').toUpperCase().split(/[^A-Z0-9]+/).filter(p => p.length >= 3 && !/^\d+$/.test(p)));
+  const pr = parole(riga && riga.descrizione);
+  const q = Number(riga && riga.qta) || 0;
+  const visti = new Map();
+  (voci || []).forEach(v => {
+    if (!v || !v.codice) return;
+    let p = 0; const perche = [];
+    const vk = chiaviCodiceFornitore(v.codice_fornitore);
+    if (suo && vk.length && vk.some(k => suoK.includes(k))) { p += 100; perche.push('stesso codice fornitore'); }
+    else if (suo.length >= 4) {
+      const cands = vk.concat([N(v.codice)]);
+      // Un carattere solo di differenza con un pezzo del codice (la scansione legge 050ASL,
+      // il nostro e' …050DSL): conta come quasi uguale.
+      const quasi = (k) => { if (!k || suo.length < 5 || k.length < suo.length) return false;
+        for (let i = 0; i + suo.length <= k.length; i++) { let d = 0; for (let j = 0; j < suo.length && d <= 1; j++) if (k[i + j] !== suo[j]) d++; if (d <= 1) return true; }
+        return false; };
+      if (cands.some(k => k && k.length >= 4 && (k.includes(suo) || suo.includes(k)))) { p += 35; perche.push('codice simile'); }
+      else if (cands.some(quasi)) { p += 25; perche.push('codice quasi uguale'); }
+      else if (cands.some(k => { let i = 0; while (i < k.length && i < suo.length && k[i] === suo[i]) i++; return i >= 5; })) { p += 15; perche.push('codice che inizia uguale'); }
+    }
+    const citato = riga && riga.ordine && v.ordine && chiaveOfDaRif(v.ordine) === riga.ordine;
+    if (citato) { p += 40; perche.push('ordine citato sul DDT'); }
+    const ap = Number(v.aperto) || 0;
+    if (q > 0 && ap > 0 && Math.abs(ap - q) < 1e-9) { p += 25; perche.push('aspetta proprio ' + q); }
+    else if (ap > 0) { p += 5; perche.push('ordine aperto'); }
+    if (pr.size) {
+      const comuni = [...parole(v.descrizione)].filter(x => pr.has(x)).length;
+      if (comuni) { p += Math.min(20, comuni * 6); perche.push(comuni + (comuni === 1 ? ' parola' : ' parole') + ' in comune'); }
+    }
+    const k = String(v.codice).trim().toUpperCase() + '|' + (v.ordine || '');
+    const x = visti.get(k);
+    if (!x || x.punteggio < p) visti.set(k, Object.assign({}, v, { punteggio: p, perche }));
+  });
+  return [...visti.values()].sort((a, b) => (b.punteggio - a.punteggio) || ((Number(b.aperto) || 0) - (Number(a.aperto) || 0)));
+}
+
 function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
   const K = c => String(c == null ? '' : c).trim().toUpperCase();
   const righeOf = [];   // { azienda_id, codice_fornitore, codice, ordine }
@@ -819,7 +867,7 @@ function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto, chiaviCodiceFornitore, trovaCodiceNostro, voceCodiceFornitore,
+  module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto, chiaviCodiceFornitore, trovaCodiceNostro, voceCodiceFornitore, candidatiRicevimento,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,

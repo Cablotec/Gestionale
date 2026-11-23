@@ -288,6 +288,21 @@ sez('Codici non riconosciuti nei DDT (20 nov)');
   const fab = [{ azienda_id: 'fab', codice: '2313CSIEM0005SY63027', codice_fornitore: 'SIE 5SY63027' }];
   t('voce: letto «5SY63027», forma del fornitore «SIE 5SY63027»', M.voceCodiceFornitore(fab, 'fab', '5SY63027').codice_fornitore === 'SIE 5SY63027');
   t('voce ristretta al nostro codice giusto e sbagliato', !!M.voceCodiceFornitore(fab, 'fab', '5SY63027', '2313csiem0005sy63027') && M.voceCodiceFornitore(fab, 'fab', '5SY63027', 'ALTRO') === null);
+  // Candidati del ricevimento (23 nov).
+  const voci = [
+    { codice: '24512SIEM00003NW7063', codice_fornitore: 'SIE 3NW7063', descrizione: 'PORTAFUSIBILE SIEMENS 10X38 3P', ordine: 'OF 763/2026', aperto: 88 },
+    { codice: '24512SIEM00003NW7023', codice_fornitore: 'SIE 3NW70232', descrizione: 'PORTAFUSIBILE SIEMENS 10X38 2P', ordine: 'OF 761/2026', aperto: 0 },
+    { codice: '26022WEID01651970000', codice_fornitore: 'WEI 1651970000', descrizione: 'MORSETTO DI DISTRIBUZIONE', ordine: 'OF 775/2026', aperto: 1000 } ];
+  const c1 = M.candidatiRicevimento({ codice_mittente: '3NW70632', descrizione: 'PORTAFUSIBILE 3P 10X38', qta: 88, ordine: 'OF 2026/763' }, voci);
+  t('candidati: OF citato + stessa quantita\' + codice simile in cima', c1[0].codice === '24512SIEM00003NW7063' && c1[0].perche.includes('ordine citato sul DDT') && c1[0].perche.includes('aspetta proprio 88'));
+  const c2 = M.candidatiRicevimento({ codice_mittente: '1651970000', qta: 923 }, voci);
+  t('candidati: codice fornitore uguale vale piu\' di tutto', c2[0].codice === '26022WEID01651970000' && c2[0].punteggio >= 100);
+  const c3 = M.candidatiRicevimento({ codice_mittente: '46928', descrizione: 'CAPICORDA', qta: 9000 }, voci);
+  t('candidati: niente in comune = punteggi bassi', c3.every(x => x.punteggio < 35));
+  const c4 = M.candidatiRicevimento({ codice_mittente: '050ASL', qta: 4, ordine: 'OF 2026/805' }, [
+    { codice: '24512MERS00000CUSCC2', codice_fornitore: 'XES CUSCC2', ordine: 'OF 805/2026' },
+    { codice: '2822GELFI00000050DSL', codice_fornitore: null, ordine: 'OF 805/2026' }]);
+  t('candidati: un carattere di differenza (050ASL / 050DSL) passa in cima', c4[0].codice === '2822GELFI00000050DSL' && c4[0].perche.includes('codice quasi uguale'));
   t('proposta nel riquadro con la marca', M.carichiCodiceSconosciuto([{ tipo: 'carico', fuori_giacenza: true, codice: 'RZKE65', azienda_id: 'fab', qta: 1 }], new Set(),
     [{ serie: 'OF', numero: 807, anno: 2026, fornitore_id: 'fab', righe: [{ codice: '242AA0DKC00000RZKE65', codice_fornitore: 'DKC RZKE65' }] }])[0].proposta.codice === '242AA0DKC00000RZKE65');
 }
