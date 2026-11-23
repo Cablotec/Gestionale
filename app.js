@@ -5813,45 +5813,6 @@ function ordineTerzistaDi(opId, terzistaId) {
     : { id: null, serie: k.serie, anno: k.anno, numero: k.numero, data: null, consegna: null, righe: [], origine: 'alnus',
         stato: 'emesso', fornitore_id: terzistaId, abbinato: true, nonImportato: true };
 }
-// OF POSSIBILI per abbinare la commessa al terzista (23 nov, Nico sugli ordini
-// JMA: "un menu con quelli possibili"). Gli ordini non annullati a quel
-// fornitore, i piu' probabili in cima: stesso OP (Nr. ODL di Alnus) +100,
-// una riga col codice del prodotto +60, stessa quantita' dei pezzi +20,
-// ancora aperto +10. Ogni punto ha il suo motivo. Dice anche a quali
-// ALTRE commesse e' gia' abbinato (un OF puo' coprirne piu' d'una).
-function ofPossibiliTerzista(o, terzistaId) {
-  if (!Array.isArray(state.ordiniFornitore) || !terzistaId) return [];
-  const art = o && (state.articoli || []).find(a => a.id === o.articolo_id);
-  const codArt = art ? String(art.codice || '').replace(/\s+/g, '').toUpperCase() : '';
-  const mOp = /^(\d{4})\/OP\/(\d+)$/.exec(String((o && o.numero_op) || '').trim().toUpperCase());
-  const pezzi = Number(o && o.quantita) || 0;
-  const usatoDa = new Map();
-  (state.opFornitori || []).forEach(r => {
-    if (r.azienda_id !== terzistaId || (o && r.operazione_id === o.id)) return;
-    const k = ofDaNumeroOrdine(r.numero_ordine);
-    if (!k) return;
-    const chiave = k.serie + ' ' + k.anno + '/' + k.numero;
-    const x = (state.operazioni || []).find(z => z.id === r.operazione_id);
-    if (!usatoDa.has(chiave)) usatoDa.set(chiave, []);
-    if (x) usatoDa.get(chiave).push(etiOpCortaTerzista(x));
-  });
-  return state.ordiniFornitore
-    .filter(of => of.fornitore_id === terzistaId && of.stato !== 'annullato')
-    .map(of => {
-      const serie = String(of.serie || 'OF').toUpperCase();
-      const righe = of.righe || [];
-      const motivi = []; let punti = 0;
-      if (mOp && righe.some(r => { const m = /^(\d{4})\/(\d+)$/.exec(String(r.odl || '').trim());
-        return m && m[1] === mOp[1] && Number(m[2]) === Number(mOp[2]); })) { punti += 100; motivi.push('stesso OP'); }
-      const rigaArt = codArt && righe.find(r => String(r.codice || '').replace(/\s+/g, '').toUpperCase().startsWith(codArt));
-      if (rigaArt) { punti += 60; motivi.push('riga ' + rigaArt.codice); }
-      if (pezzi && righe.some(r => Number(r.qta) === pezzi)) { punti += 20; motivi.push(nfIT(pezzi) + ' pz come la commessa'); }
-      if (of.stato === 'emesso') punti += 10;
-      return { of, serie, testo: of.anno + '/' + serie + '/' + String(of.numero).padStart(5, '0'),
-        punti, motivi, usatoDa: usatoDa.get(serie + ' ' + of.anno + '/' + of.numero) || [] };
-    })
-    .sort((a, b) => b.punti - a.punti || String(b.of.data || '').localeCompare(String(a.of.data || '')));
-}
 function ordineTerzistaFatto(opId, terzistaId) {
   return (state.ordiniFornitore || []).find(of => of.stato === 'emesso' && of.tipo === 'terzista'
     && of.fornitore_id === terzistaId && (of.righe || []).some(r => r.operazione_id === opId)) || null;
@@ -16737,46 +16698,6 @@ function openOperazioneModal(o, opts) {
       });
       if (!canEdit) inputNO.disabled = true;
       row.append(inputNO);
-      // ▾ GLI OF POSSIBILI (23 nov, Nico): un elenco nostro (non la tendina
-      // bianca del browser) con gli ordini a questo fornitore, i piu' probabili
-      // in cima. Il clic scrive il numero; vale col Salva, come a mano.
-      const possibili = canEdit ? ofPossibiliTerzista(o, sel.azienda_id) : [];
-      if (possibili.length) {
-        const pannello = el('div', { style:'display:none;flex:1 1 100%;max-height:240px;overflow-y:auto;'
-          + 'border:1px solid var(--brd);border-radius:4px;background:var(--sur);margin-top:2px;' });
-        const avviso = el('span', { class:'sub', style:'font-size:11px;color:var(--or);display:none;' }, 'premi Salva per abbinarlo');
-        const apri = el('button', { type:'button', class:'btnsm', style:'font-size:11px;padding:2px 8px;',
-          title:'Gli ordini a ' + a.nome + ' importati da Alnus o fatti qui, i più probabili in cima' },
-          '▾ OF possibili (' + possibili.length + ')');
-        apri.onclick = () => { pannello.style.display = pannello.style.display === 'none' ? '' : 'none'; };
-        possibili.forEach(p => {
-          const of = p.of;
-          const scelto = String(sel.numero_ordine || '').trim().toUpperCase() === p.testo;
-          const voce = el('button', { type:'button',
-            style:'display:block;width:100%;text-align:left;padding:6px 10px;border:0;border-bottom:1px solid var(--brd);'
-              + 'background:' + (scelto ? 'rgba(212,140,40,.12)' : 'transparent') + ';color:var(--txt);cursor:pointer;font-size:12px;' },
-            el('div', {},
-              el('b', { class:'mono' }, p.testo),
-              el('span', { class:'sub' }, (of.data ? ' · del ' + fmtIT(String(of.data).slice(0, 10)) : '')
-                + (of.stato === 'chiuso' ? ' · chiuso (evaso in Alnus)' : '')
-                + (of.origine === 'alnus' ? ' · Alnus' : '')),
-              p.motivi.length ? el('span', { style:'color:var(--grn);font-size:11px;margin-left:8px;' }, '✓ ' + p.motivi.join(' · ')) : ''),
-            el('div', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
-              (of.righe || []).slice(0, 3).map(r => (r.codice || '?') + (r.qta != null ? ' ' + nfIT(r.qta) + ' pz' : '')).join(' · ')
-                + ((of.righe || []).length > 3 ? ' · +' + ((of.righe || []).length - 3) + ' righe' : '')
-                + (p.usatoDa.length ? ' — già su ' + p.usatoDa.join(', ') : '')));
-          voce.onmouseenter = () => { voce.style.background = 'rgba(212,140,40,.08)'; };
-          voce.onmouseleave = () => { voce.style.background = scelto ? 'rgba(212,140,40,.12)' : 'transparent'; };
-          voce.onclick = () => {
-            inputNO.value = p.testo;
-            sel.numero_ordine = p.testo;
-            pannello.style.display = 'none';
-            avviso.style.display = '';
-          };
-          pannello.append(voce);
-        });
-        row.append(apri, avviso, pannello);
-      }
       if (importoForAttivo) {
         // Vuoto = vale il €/pz della scheda prodotto (se c'e'), mostrato in grigio.
         const pp = prezzoProdottoForn(sel.azienda_id);
