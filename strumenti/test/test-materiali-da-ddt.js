@@ -302,6 +302,9 @@ sez('Codici non riconosciuti nei DDT (20 nov)');
   const c4 = M.candidatiRicevimento({ codice_mittente: '050ASL', qta: 4, ordine: 'OF 2026/805' }, [
     { codice: '24512MERS00000CUSCC2', codice_fornitore: 'XES CUSCC2', ordine: 'OF 805/2026' },
     { codice: '2822GELFI00000050DSL', codice_fornitore: null, ordine: 'OF 805/2026' }]);
+  const c5 = M.candidatiRicevimento({ codice_mittente: 'X1', qta: 200, ordine: 'OF 2026/822' }, [
+    { codice: 'A', ordine: 'OF 822/2026', ordinato: 15, aperto: 0 }, { codice: 'B', ordine: 'OF 822/2026', ordinato: 200, aperto: 0 }]);
+  t('candidati: OF gia evaso, conta la quantita ordinata', c5[0].codice === 'B' && c5[0].perche.includes('ordinati proprio 200'));
   t('candidati: un carattere di differenza (050ASL / 050DSL) passa in cima', c4[0].codice === '2822GELFI00000050DSL' && c4[0].perche.includes('codice quasi uguale'));
   t('proposta nel riquadro con la marca', M.carichiCodiceSconosciuto([{ tipo: 'carico', fuori_giacenza: true, codice: 'RZKE65', azienda_id: 'fab', qta: 1 }], new Set(),
     [{ serie: 'OF', numero: 807, anno: 2026, fornitore_id: 'fab', righe: [{ codice: '242AA0DKC00000RZKE65', codice_fornitore: 'DKC RZKE65' }] }])[0].proposta.codice === '242AA0DKC00000RZKE65');

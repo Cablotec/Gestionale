@@ -7420,11 +7420,13 @@ function righeOrdineFornitore(aziendaId) {
       const serie = String(o.serie || 'OF').toUpperCase() === 'OL' ? 'OL' : 'OF';
       const ordine = serie + ' ' + o.numero + '/' + o.anno;
       const k = ordine + '|' + cod;
-      if (visti.has(k)) return; visti.add(k);
+      // Lo stesso codice due volte nello stesso OF: una voce sola, ordinato sommato.
+      if (visti.has(k)) { const g = out.find(z => z.k === k); if (g) g.ordinato = +(g.ordinato + (Number(r.qta) || 0)).toFixed(6); return; }
+      visti.add(k);
       const ap = aperti.get(cod);
       const x = ap ? ap.ordini.find(z => z.serie === serie && Number(z.numero) === Number(o.numero) && Number(z.anno) === Number(o.anno)) : null;
       out.push({ k, ordine, codice: cod, codice_fornitore: r.codice_fornitore || '', descrizione: r.descrizione || '', um: r.um || '',
-        aperto: x ? x.aperto : 0, consegna: (x && x.consegna) || r.consegna || o.consegna || null, stato: o.stato });
+        ordinato: Number(r.qta) || 0, aperto: x ? x.aperto : 0, consegna: (x && x.consegna) || r.consegna || o.consegna || null, stato: o.stato });
     }));
   return out;
 }
@@ -7459,7 +7461,7 @@ async function apriDdtEntrataManuale(poi, ric) {
   };
   // Le voci fra cui cercare: righe d'OF del fornitore e codici della scheda del codice.
   const vociDi = () => ordiniDi().map(o => ({ codice: o.codice, codice_fornitore: o.codice_fornitore, descrizione: o.descrizione, um: o.um,
-      ordine: o.ordine, aperto: o.aperto, stato: o.stato, k: o.k, fonte: 'of' }))
+      ordine: o.ordine, ordinato: o.ordinato, aperto: o.aperto, stato: o.stato, k: o.k, fonte: 'of' }))
     .concat((state.codiciFornitore || []).filter(z => z.azienda_id === selMitt.value)
       .map(z => ({ codice: chiaveCodice(z.codice), codice_fornitore: z.codice_fornitore, descrizione: '', ordine: '', aperto: 0, fonte: 'scheda' })));
   const candidati = (r) => candidatiRicevimento({ codice_mittente: r.codice_mittente || r.codice, descrizione: r.descrizione, qta: r.qta, ordine: citato(r) }, vociDi());
@@ -7583,7 +7585,7 @@ async function apriDdtEntrataManuale(poi, ric) {
       if (evid >= lista.length) evid = Math.max(0, lista.length - 1);
       if (!lista.length) { box.append(el('div', { class:'sub', style:'font-size:12px;padding:8px 2px;' },
         q ? (q.length < 3 ? 'Scrivi almeno 3 caratteri per cercare anche nell’anagrafica.' : 'Niente trovato.') : 'Nessun ordine di questo fornitore: cerca il codice nell’anagrafica.')); return; }
-      lista.forEach((c, i) => box.append(el('div', { style:'display:grid;grid-template-columns:22px 190px minmax(0,1fr) 150px;gap:8px;align-items:center;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:12px;'
+      lista.forEach((c, i) => box.append(el('div', { style:'display:grid;grid-template-columns:22px 190px minmax(0,1fr) 175px;gap:8px;align-items:center;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:12px;'
           + (i === evid ? 'background:var(--sur2);outline:1px solid var(--acc);' : ''),
           onclick: () => scegli(r, c), onmouseenter: () => { evid = i; [...box.children].forEach((n, j) => { n.style.background = j === i ? 'var(--sur2)' : ''; n.style.outline = j === i ? '1px solid var(--acc)' : ''; }); } },
         el('span', { style:'color:var(--acc);font-weight:700;' }, c.punteggio >= 100 ? '★' : i === 0 && !q ? '☆' : ''),
@@ -7592,7 +7594,13 @@ async function apriDdtEntrataManuale(poi, ric) {
         el('div', { style:'min-width:0;' }, el('div', { style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, c.descrizione || '—'),
           el('div', { class:'sub', style:'font-size:10.5px;' }, (c.perche || []).join(' · '))),
         el('div', { style:'text-align:right;font-size:11px;' }, c.ordine ? el('div', { class:'mono' }, c.ordine) : '',
-          el('div', { class:'sub', style:'font-size:10.5px;' }, c.ordine ? (c.aperto > 0 ? 'aspetta ' + nfq(c.aperto) : c.stato === 'chiuso' ? 'chiuso' : 'evasa') : '')))));
+          // Quantita' accanto all'ordine (23 nov, Nico): ordinati e ancora attesi, in verde se
+          // coincidono con quella del DDT.
+          c.ordine ? el('div', { style:'font-size:10.5px;' },
+            el('span', { class:'mono', style: Math.abs((Number(c.ordinato) || 0) - (Number(r.qta) || 0)) < 1e-9 && r.qta ? 'color:var(--grn);font-weight:700;' : 'color:var(--mut);' }, 'ord. ' + nfq(c.ordinato)),
+            el('span', { class:'sub' }, ' · '),
+            el('span', { class:'mono', style: c.aperto > 0 && Math.abs(c.aperto - (Number(r.qta) || 0)) < 1e-9 ? 'color:var(--grn);font-weight:700;' : 'color:var(--mut);' },
+              c.aperto > 0 ? 'aspetta ' + nfq(c.aperto) : c.stato === 'chiuso' ? 'chiuso' : 'evasa')) : ''))));
     };
     const box = el('div', { style:'margin-top:6px;max-height:40vh;overflow:auto;' });
     inCerca.oninput = () => { cerca = inCerca.value; evid = 0; disegnaLista();

@@ -827,7 +827,9 @@ function candidatiRicevimento(riga, voci) {
     const citato = riga && riga.ordine && v.ordine && chiaveOfDaRif(v.ordine) === riga.ordine;
     if (citato) { p += 40; perche.push('ordine citato sul DDT'); }
     const ap = Number(v.aperto) || 0;
+    const ord = Number(v.ordinato) || 0;
     if (q > 0 && ap > 0 && Math.abs(ap - q) < 1e-9) { p += 25; perche.push('aspetta proprio ' + q); }
+    else if (q > 0 && ord > 0 && Math.abs(ord - q) < 1e-9) { p += 20; perche.push('ordinati proprio ' + q); }
     else if (ap > 0) { p += 5; perche.push('ordine aperto'); }
     if (pr.size) {
       const comuni = [...parole(v.descrizione)].filter(x => pr.has(x)).length;
