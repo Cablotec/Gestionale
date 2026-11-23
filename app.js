@@ -4170,9 +4170,11 @@ async function caricaRientriTerzista() {
   } catch (e) { state.rientriTerzista = null; }
 }
 
+// Il nome con cui si vede il reparto (23 nov, Nico: "chiamalo Reparto - WIP").
+const NOME_REPARTO = 'Reparto - WIP';
 // Il nome di un terzista (o di qualunque azienda) dal suo id.
 function nomeAziendaDi(id) {
-  if (id && state.reparto && id === state.reparto.id) return 'Reparto';
+  if (id && state.reparto && id === state.reparto.id) return NOME_REPARTO;
   const a = id ? (state.aziende || []).find(x => x.id === id) : null;
   return a ? a.nome : '?';
 }
@@ -5239,7 +5241,7 @@ function apriRichiestaTerzistaOra(o, poi, opts) {
     return;
   }
   const selTer = el('select', { style:'min-width:260px;' },
-    ...terzisti.map(id => el('option', { value: id }, eReparto(id) ? 'Reparto (in casa)' : nomeAziendaDi(id)))
+    ...terzisti.map(id => el('option', { value: id }, eReparto(id) ? NOME_REPARTO : nomeAziendaDi(id)))
       // il reparto in fondo: i terzisti in ordine di nome, poi casa nostra
       .sort((a, b) => (eReparto(a.value) ? 1 : 0) - (eReparto(b.value) ? 1 : 0)
         || a.textContent.localeCompare(b.textContent, 'it')));
@@ -5551,7 +5553,7 @@ function stampaRichiestaTerzista(x) {
     + '<div><b>Prodotto</b>' + esc(arts.join(' · ')) + '</div>'
     + '<div><b>Rif. cliente</b>' + esc(rifs.join(' · ') || '—') + '</div>'
     + '<div class="pezzi"><b>Si prepara per</b>' + pezziHtml + '</div>'
-    + '<div><b>' + (rep ? 'Fase' : 'Terzista') + '</b>' + esc(rep ? 'Reparto (in casa)' : nomeAziendaDi(x.terzista_id)) + '</div>'
+    + '<div><b>' + (rep ? 'Fase' : 'Terzista') + '</b>' + esc(rep ? NOME_REPARTO : nomeAziendaDi(x.terzista_id)) + '</div>'
     + '<div><b>Richiesta del</b>' + esc(fmtIT(String(x.creato_il || '').slice(0, 10))) + '</div></div>'
     + (x.nota ? '<p><b>Nota:</b> ' + esc(x.nota) + '</p>' : '')
     + '<table><thead><tr><th></th><th>#</th><th>Codice</th><th>Descrizione</th><th>Tipo</th><th>UM</th><th>Da preparare</th>'
@@ -8358,7 +8360,7 @@ function rigaRichiestaTerzista(x, poi, conCommessa, opQui) {
   return el('div', { style:'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--brd);font-size:12px;flex-wrap:wrap;' },
     el('span', { class:'badge ' + e.cls }, e.txt),
     conCommessa ? el('span', { style:'display:flex;gap:6px;flex-wrap:wrap;' }, ...comm.map(linkOp)) : '',
-    el('span', { style:'font-weight:700;' }, rep ? 'Reparto' : nomeAziendaDi(x.terzista_id)),
+    el('span', { style:'font-weight:700;' }, rep ? NOME_REPARTO : nomeAziendaDi(x.terzista_id)),
     el('span', { class:'sub' }, (x.fase_id ? nomeTipoLav(x.fase_id) + ' · ' : '')
       + perCod.filter(r => r.qta > 0).length + ' materiali · ' + quando),
     !conCommessa && altre.length ? el('span', { class:'sub', style:'display:flex;gap:6px;align-items:center;' },
@@ -8785,7 +8787,7 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
     tappa('1 · Materiali', 'fatto', '✓'));
   fasi.forEach(({ f, passi }, i) => {
     const s = statoFase(passi);
-    strada.append(freccia(), tappa((i + 2) + ' · ' + (eReparto(f.id) ? 'Reparto' : nomeAziendaDi(f.id)), s,
+    strada.append(freccia(), tappa((i + 2) + ' · ' + (eReparto(f.id) ? NOME_REPARTO : nomeAziendaDi(f.id)), s,
       s === 'fatto' ? '✓' : (s === 'avviso' ? '⚠' : '')));
   });
   const prodotti = quantitaConsegnata(o.id);
@@ -8806,7 +8808,7 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
       + ';border-radius:8px;padding:10px 12px;margin-bottom:8px;' });
     const nMat = f.voci.length;
     card.append(el('div', { style:'display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px;' },
-      el('span', { style:'font-weight:700;font-size:13px;' }, (i + 2) + ' · ' + (rep ? 'Reparto' : nomeAziendaDi(f.id))),
+      el('span', { style:'font-weight:700;font-size:13px;' }, (i + 2) + ' · ' + (rep ? NOME_REPARTO : nomeAziendaDi(f.id))),
       el('span', { class:'sub', style:'font-size:11px;' }, (rep ? 'in casa' : 'terzista')
         + (nMat ? ' · ' + nMat + (nMat === 1 ? ' materiale' : ' materiali') : (rep ? '' : ' · nessun materiale da mandare'))),
       (!rep && opts.azioniFornitore) ? (opts.azioniFornitore(f) || '') : ''));
@@ -11224,7 +11226,7 @@ function apriRettificaMagazzino(codiceIniziale, poi) {
     selPosto.innerHTML = '';
     selPosto.append(el('option', { value:'' }, 'Sede'));
     const posti = [...new Set(movCod().map(m => m.presso_id).filter(Boolean))];
-    posti.forEach(id => selPosto.append(el('option', { value: id }, eReparto(id) ? 'Reparto' : nomeAziendaDi(id))));
+    posti.forEach(id => selPosto.append(el('option', { value: id }, eReparto(id) ? NOME_REPARTO : nomeAziendaDi(id))));
     selPosto.value = posti.includes(prima) ? prima : '';
     const ult = movCod().slice(-1)[0];
     descr.textContent = inCod.value.trim()
@@ -12652,7 +12654,7 @@ function openArticoloModal(a, opts) {
           ? (n ? n + (n === 1 ? ' materiale in casa' : ' materiali in casa') : 'niente in casa')
           : (n ? n + (n === 1 ? ' materiale da mandare' : ' materiali da mandare') : 'nessun materiale da mandare')));
       if (rep) {
-        testa.append(el('span', { style:'font-weight:700;color:var(--grn);' }, 'Reparto'),
+        testa.append(el('span', { style:'font-weight:700;color:var(--grn);' }, NOME_REPARTO),
           el('span', { class:'sub', style:'font-size:11px;' }, '(in casa, calcolato)'), mostra);
       } else {
         const usati = new Set(fasiEst.filter((_, i) => i !== fi).map(x => x.fornitore).filter(Boolean));
