@@ -6907,22 +6907,52 @@ async function giacenzeGestionaleOra() {
     confronto: confrontoGiacenze(r.per, alnus, magazzini), aperturaIl: A.apertura.preso_il,
     movimentiLetti: Array.isArray(state.movimenti) };
 }
+// UNA GIACENZA SOLA (23 nov): codice di Alnus = foto + movimenti di Alnus
+// importati (magazzini contati); altrimenti il saldo dei nostri movimenti.
 async function giacenzaUnicaOra(codice) {
   const cod = chiaveCodice(codice);
-  const G = await giacenzeGestionaleOra();
-  if (!G.letto) {
-    const mov = Array.isArray(state.movimenti) ? inConto(state.movimenti.filter(x => chiaveCodice(x.codice) === cod)) : null;
-    return { letto: false, motivo: G.motivo, saldo: mov ? +mov.reduce((s, x) => s + (Number(x.qta) || 0), 0).toFixed(6) : null };
+  if (state.alnus === undefined) { try { await caricaAlnus(); } catch (e) {} }
+  if (!state.movimentiLettiIl || Date.now() - state.movimentiLettiIl > 60000) { try { await caricaMovimenti(); } catch (e) {} }
+  const A = state.alnus;
+  const saldoNostro = () => { const mov = Array.isArray(state.movimenti) ? inConto(state.movimenti.filter(x => chiaveCodice(x.codice) === cod)) : null;
+    return mov ? +mov.reduce((s, x) => s + (Number(x.qta) || 0), 0).toFixed(6) : null; };
+  if (A && A.apertura && codiceDiAlnus(cod) && !(codiceInGiacenzaGestionale(cod))) {
+    const tutti = [...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino)).concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean);
+    const magazzini = alnusMagazziniContati(tutti);
+    const g = [...giacenzaAlnus(A.giacApertura.filter(r => chiaveCodice(r.codice) === cod),
+      A.movimenti.filter(m => chiaveCodice(m.codice) === cod), A.apertura.preso_il).values()][0] || null;
+    // Come la dice Alnus, anche sotto zero (giacenzaContata la porterebbe a 0).
+    const qta = g ? +Object.entries(g.perMag).reduce((s, [m, q]) => s + (magazzini.has(m) ? q : 0), 0).toFixed(6) : 0;
+    const foto = +A.giacApertura.filter(r => chiaveCodice(r.codice) === cod && magazzini.has(magazzinoAlnus(r.magazzino)))
+      .reduce((s, r) => s + (Number(r.qta) || 0), 0).toFixed(6);
+    return { letto: true, fonte: 'alnus', qta, foto, movAlnus: +(qta - foto).toFixed(6), perMag: g ? g.perMag : {},
+      magazzini: [...magazzini], aperturaIl: A.apertura.preso_il };
   }
-  const riga = G.confronto.find(x => chiaveCodice(x.codice) === cod)
-    || { codice: cod, gestionale: null, qGest: 0, qAlnus: 0, differenza: 0 };
-  return Object.assign({ letto: true, aperturaIl: G.aperturaIl, movimentiLetti: G.movimentiLetti }, riga);
+  if (!A || !A.apertura) {
+    if (codiceDiAlnus(cod)) return { letto: false, motivo: !A ? 'lo specchio Alnus non si legge' : 'manca la foto d’apertura di Alnus', saldo: null };
+  }
+  return { letto: true, fonte: 'gestionale', qta: saldoNostro(), movimentiLetti: Array.isArray(state.movimenti) };
 }
 // La riga che la dice, uguale nella scheda del codice e in Movimenti.
 function rigaGiacenzaUnica(u, um) {
   const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   const segno = (n) => (n > 0 ? '+' : '') + nf(n);
   const u_ = um ? ' ' + um : '';
+  if (u.letto && u.fonte === 'alnus') {
+    const mags = Object.entries(u.perMag || {}).filter(([, q]) => Math.abs(q) > 1e-9).map(([m, q]) => m + ' ' + nf(q)).join(' · ');
+    return el('div', { style:'font-size:12px;' },
+      el('span', { style:'font-weight:700;font-size:14px;' }, 'Giacenza ' + nf(u.qta) + u_),
+      el('span', { class:'sub' }, ' · foto Alnus ' + nf(u.foto) + (Math.abs(u.movAlnus) > 1e-9 ? ' · movimenti Alnus ' + segno(u.movAlnus) : '')),
+      el('div', { class:'sub', style:'font-size:11px;margin-top:3px;' },
+        'Da Alnus: foto del ' + fmtQuando(u.aperturaIl) + ' + movimenti importati nello Specchio (magazzini ' + u.magazzini.join(', ') + ')'
+        + (mags ? ' · per magazzino: ' + mags : '') + '. Si corregge in Alnus.'));
+  }
+  if (u.letto && u.fonte === 'gestionale') {
+    return el('div', { style:'font-size:12px;' },
+      el('span', { style:'font-weight:700;font-size:14px;' }, u.qta == null ? 'Giacenza non calcolabile' : 'Giacenza ' + nf(u.qta) + u_),
+      el('div', { class:'sub', style:'font-size:11px;margin-top:3px;' }, u.movimentiLetti
+        ? 'Codice che Alnus non conta: dai DDT e dai movimenti del gestionale.' : 'Movimenti non letti.'));
+  }
   if (!u.letto) return el('div', { style:'font-size:12px;' },
     el('span', { style:'font-weight:700;font-size:14px;' }, u.saldo == null ? 'Giacenza non calcolabile' : 'Saldo dei movimenti ' + nf(u.saldo) + u_),
     el('div', { class:'sub', style:'font-size:11px;margin-top:3px;' }, 'Senza foto d’apertura il gestionale non ha un punto di partenza (' + u.motivo + ').'));
@@ -7084,10 +7114,9 @@ function renderAlnus(root) {
         : '✓ Controllo del ' + fmtQuando(A.controllo.preso_il) + ': la giacenza calcolata torna su tutti i codici.'),
       diversi.length ? apri : '', lista));
   }
-  // Giacenza del gestionale contro Alnus (20 nov): stessa partenza, fatti diversi.
-  const giacSez = el('div', { style: 'margin-bottom:14px;' }, el('div', { class: 'sub' }, 'Calcolo la giacenza del gestionale…'));
-  root.append(giacSez);
-  giacenzeGestionaleOra().then(G => disegnaGiacenzaParallela(giacSez, G)).catch(e => { giacSez.textContent = 'Giacenza del gestionale non calcolabile: ' + (e.message || e); });
+  // «Giacenza: gestionale contro Alnus» (20 nov) TOLTA il 23 nov: una giacenza
+  // sola, quella di Alnus (vedi `codiceDiAlnus`). `disegnaGiacenzaParallela` e
+  // `giacenzeGestionaleOra` restano per il giorno del cambio.
   // L'interruttore della fonte (solo questo browser).
   const gest = fonteFabbisogno() === 'gestionale';
   const radio = (val, testo) => el('label', { style: 'display:inline-flex;gap:6px;align-items:center;margin-right:18px;cursor:pointer;font-size:13px;' },
@@ -7459,9 +7488,13 @@ function documentiRegistro() {
 function codiceInGiacenzaGestionale(codice, mittenteId) {
   const c = String(codice || '').trim().toUpperCase();
   if (!c) return false;
-  if (inConto(state.movimenti || []).some(m => String(m.codice || '').trim().toUpperCase() === c)) return true;
-  return (state.operazioni || []).some(o => o.materiali_da_ddt && (o.stato === 'aperta' || o.stato === 'sospesa')
+  const clConSpunta = (state.operazioni || []).some(o => o.materiali_da_ddt && (o.stato === 'aperta' || o.stato === 'sospesa')
     && (o.materiali || []).some(x => String(x.codice || '').trim().toUpperCase() === c && eCL(x)));
+  if (clConSpunta) return true;
+  // Una giacenza sola (23 nov): un codice di Alnus lo conta Alnus, i nostri
+  // carichi restano registro (fuori giacenza).
+  if (codiceDiAlnus(c)) return false;
+  return inConto(state.movimenti || []).some(m => String(m.codice || '').trim().toUpperCase() === c);
 }
 // ── DDT IN ENTRATA e RICEVIMENTO (23 nov) ──────────────────────────────────
 // Nico: "rendere agevole all'operatore l'inserimento e l'abbinamento dei codici in
@@ -8837,11 +8870,23 @@ function commesseConDdtVive() {
 // (scheda del codice, Specchio Alnus), non qui.
 function righeGestionaleOra() {
   if (!Array.isArray(state.movimenti) || typeof righeGiacenzaGestionale !== 'function') return [];
-  const diAlnus = new Set();
-  (state.mancantiAlnus || []).forEach(m => diAlnus.add(chiaveCodice(m.codice)));
-  ((state.alnus && state.alnus.giacApertura) || []).forEach(m => diAlnus.add(chiaveCodice(m.codice)));
   return righeGiacenzaGestionale(state.movimenti, commesseConDdtVive())
-    .filter(r => !(diAlnus.has(chiaveCodice(r.codice)) && !(Number(r.impegno) > 0)));
+    .filter(r => !(codiceDiAlnus(r.codice) && !(Number(r.impegno) > 0)));
+}
+// ⚠⚠ UNA GIACENZA SOLA (23 nov, Nico: "il testing fra Alnus e il gestionale sta
+// diventando infernale"): finche' si lavora in Alnus, un codice che Alnus
+// conosce (Fabbisogno, foto o movimenti importati nello Specchio) ha la
+// giacenza di Alnus = foto + movimenti di Alnus importati. Nel gestionale non
+// si rettifica in sede e i nostri DDT non lo mettono in giacenza: si fa in Alnus.
+// Restano del gestionale i codici che Alnus non ha (TS- di Tema) e i C/L delle
+// commesse con la spunta.
+function codiceDiAlnus(codice) {
+  const c = chiaveCodice(codice);
+  if (!c) return false;
+  const A = state.alnus;
+  return (state.mancantiAlnus || []).some(m => chiaveCodice(m.codice) === c)
+    || !!(A && ((A.giacApertura || []).some(m => chiaveCodice(m.codice) === c)
+      || (A.movimenti || []).some(m => chiaveCodice(m.codice) === c)));
 }
 
 function materialiStatoCommessa(op, righeMancanti, base) {
@@ -11052,7 +11097,10 @@ function apriRettificaMagazzino(codiceIniziale, poi) {
     const errore = !cod ? 'Manca il codice'
       : (d == null ? 'Scrivi la quantità'
       : (Math.abs(d) < 1e-9 ? 'Nessuna differenza da rettificare'
-      : (!inMotivo.value.trim() ? 'Scrivi il motivo' : '')));
+      : (!inMotivo.value.trim() ? 'Scrivi il motivo'
+      // Una giacenza sola (23 nov): i codici di Alnus in sede si rettificano in Alnus.
+      : (!selPosto.value && !codiceInGiacenzaGestionale(cod) && codiceDiAlnus(cod)
+        ? 'Questo codice lo conta Alnus: la rettifica va fatta in Alnus, poi si importano i suoi movimenti nello Specchio Alnus.' : ''))));
     if (errore) { msg.textContent = errore; msg.style.color = 'var(--red)'; return; }
     ok.disabled = true; ok.textContent = 'Registrazione…';
     try {
