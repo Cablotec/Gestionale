@@ -6671,6 +6671,20 @@ async function sincronizzaOfAlnus(righe, presoIl) {
   // OF INTERI (20 nov): con anche le righe evase, un ordine con tutto il residuo a zero e' chiuso.
   ordini.forEach(g => { g.stato = g.righe.some(r => Number(r.qta_residua) > 0) ? 'emesso' : 'chiuso'; });
   if (!ordini.length) return toast('Nessun OF di Alnus caricabile come ordine (fornitori senza scheda).', 'err', 9000);
+  // ⚠ GUARDIA (23 nov): un OF aperto che non e' nel file la funzione lo CHIUDE come evaso.
+  // Il 23 nov un file con le sole righe evase ha chiuso tutti i 93 OF aperti. Prima di
+  // mandare, si dice quanti OF aperti verrebbero chiusi e si chiede.
+  const anniFile = new Set(ordini.map(g => Number(g.anno)));
+  const chiaviFile = new Set(ordini.map(g => g.serie + ' ' + g.anno + '/' + g.numero).concat([...fuori]));
+  const daChiudere = (state.ordiniFornitore || []).filter(o => o.origine === 'alnus' && o.stato === 'emesso' && anniFile.has(Number(o.anno))
+    && !chiaviFile.has(String(o.serie || 'OF').toUpperCase() + ' ' + o.anno + '/' + o.numero));
+  const apertiFile = ordini.filter(g => g.stato === 'emesso').length;
+  if (daChiudere.length && !confirm((apertiFile ? '' : '⚠ Nel file non c’è NESSUNA riga ancora aperta (residuo): sembra un’estrazione dei soli evasi.\n\n')
+    + daChiudere.length + (daChiudere.length === 1 ? ' OF aperto nel gestionale non è' : ' OF aperti nel gestionale non sono') + ' nel file ('
+    + daChiudere.slice(0, 6).map(o => (o.serie || 'OF') + ' ' + o.numero + '/' + o.anno).join(', ') + (daChiudere.length > 6 ? '…' : '') + ').\n'
+    + 'Continuando verranno CHIUSI come evasi. Va bene solo se il file è l’estrazione completa (aperti + evasi).\n\nContinuare?')) {
+    return toast('Import degli ordini annullato: nessun OF chiuso. La fotografia degli OF resta nello specchio.', 'err', 9000);
+  }
   const { data, error } = await sb.rpc('sincronizza_of_alnus', { p_ordini: ordini, p_preso_il: presoIl });
   if (error) {
     const manca = /(could not find|does not exist|schema cache)/i.test(error.message || '');
