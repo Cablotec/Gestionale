@@ -6614,9 +6614,12 @@ async function importaGiacenzeAlnus(f, poi) {
     toast((apertura ? 'Apertura' : 'Controllo') + ' del ' + fmtQuando(g.preso_il) + ' salvato: ' + plAlnus(g.righe.length, 'riga', 'righe'), 'ok');
   } catch (e) {
     if (foto) await sb.from('alnus_fotografie').delete().eq('id', foto.id);
+    foto = null;
     toast('Giacenze non salvate: ' + (e.message || e), 'err', 9000);
   }
-  await caricaAlnus(); if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
+  await caricaAlnus();
+  if (foto && apertura) await allineaDopoImport();
+  if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
   if (typeof poi === 'function') poi();
 }
 async function importaOfAlnus(f, poi) {
@@ -6794,8 +6797,21 @@ async function importaMovimentiAlnus(f, poi) {
       + (!ap ? '. Manca ancora la fotografia d’apertura: i movimenti contano solo da lì.' : '')
       + (m.scartate.length ? ', ' + m.scartate.length + ' illeggibili' : ''), 'ok', 12000);
   } catch (e) { toast('Movimenti non salvati: ' + (e.message || e), 'err', 9000); }
-  await caricaAlnus(); if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
+  await caricaAlnus();
+  if (ap) await allineaDopoImport();
+  if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
   if (typeof poi === 'function') poi();
+}
+// Dopo un'apertura o un import di movimenti: li scrive come movimenti reali
+// (`mov_allinea_alnus`). Senza la funzione a database tace: si resta com'era.
+async function allineaDopoImport() {
+  try {
+    const r = await allineaMovimentiAlnus();
+    toast('Movimenti del gestionale allineati: ' + (r.aperture ? plAlnus(r.aperture, 'riga', 'righe') + ' d’apertura, ' : '')
+      + plAlnus(r.movimenti || 0, 'movimento', 'movimenti') + ' di Alnus scritti', 'ok', 9000);
+  } catch (e) {
+    if (!/manca la funzione/.test(e.message || '')) toast('Allineamento dei movimenti non riuscito: ' + (e.message || e), 'err', 9000);
+  }
 }
 
 // ── FONTE DEL FABBISOGNO: ALNUS O GESTIONALE (20 nov, Nico: "se vogliamo far
@@ -6879,8 +6895,12 @@ function righeFabbisognoGestionale() {
   }));
   const magazzini = [...alnusMagazziniContati([...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
     .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean))];
+  // MOVIMENTI REALI (23 nov): allineati, la giacenza e' il saldo in sede dei
+  // movimenti del gestionale (apertura + Alnus + nostri), non foto + specchio.
+  const reali = movimentiReali();
   return righeFabbisognoSpecchio({ fabbisogno: fabbisognoDaListe(base.viveConLista), tipi, descr, um,
-    giacenza: giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il), magazzini: new Set(magazzini),
+    giacenza: reali ? giacenzaDaMovimentiReali() : giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il),
+    magazzini: reali ? new Set(['01']) : new Set(magazzini),
     ofAlnus: ofAlnusSincronizzati() ? ofApertiComeAlnus(apertiTutti, x => x.origine === 'alnus', oggi)
       : ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, oggi),
     ofNostri, contaScaduti: alnusContaScaduti });
@@ -6907,12 +6927,62 @@ async function giacenzeGestionaleOra() {
     confronto: confrontoGiacenze(r.per, alnus, magazzini), aperturaIl: A.apertura.preso_il,
     movimentiLetti: Array.isArray(state.movimenti) };
 }
+// ── MOVIMENTI DI ALNUS REALI (23 nov, Nico: "li renderei reali, per vedere se
+// tutto gira bene") ── `mov_allinea_alnus()` (strumenti/migrazione-movimenti-
+// alnus-reali.sql) scrive in movimenti_magazzino l'apertura della foto
+// (documento_tipo APERTURA, documento_numero = id della foto) e i movimenti di
+// Alnus dopo la foto (ALNUS). Da li' la giacenza e' la SOMMA dei movimenti.
+// Allineato = c'e' l'apertura dell'ultima foto (se lo specchio e' leggibile;
+// per chi non lo legge basta che ci sia un'apertura).
+function movimentiReali() {
+  if (!Array.isArray(state.movimenti)) return false;
+  const aperture = state.movimenti.filter(m => m.documento_tipo === 'APERTURA');
+  if (!aperture.length) return false;
+  const A = state.alnus;
+  if (A && A.apertura) return aperture.some(m => m.documento_numero === String(A.apertura.id));
+  return true;
+}
+// La provenienza di un movimento: 'apertura' | 'alnus' | 'gestionale'.
+function fonteMovimento(m) {
+  return m && m.documento_tipo === 'APERTURA' ? 'apertura' : m && m.documento_tipo === 'ALNUS' ? 'alnus' : 'gestionale';
+}
+// Saldo in sede per codice, nella forma di `giacenzaAlnus` (per il fabbisogno).
+function giacenzaDaMovimentiReali() {
+  const per = new Map();
+  inConto(state.movimenti || []).filter(m => !m.presso_id).forEach(m => {
+    const c = String(m.codice || '').trim();
+    if (!c) return;
+    if (!per.has(c)) per.set(c, { perMag: { '01': 0 }, totale: 0 });
+    const g = per.get(c);
+    g.perMag['01'] = +(g.perMag['01'] + (Number(m.qta) || 0)).toFixed(6);
+    g.totale = g.perMag['01'];
+  });
+  return per;
+}
+// Lancia l'allineamento (admin) e rilegge i movimenti. Ritorna il riepilogo o lancia.
+async function allineaMovimentiAlnus() {
+  const { data, error } = await sb.rpc('mov_allinea_alnus');
+  if (error) throw new Error(/function|does not exist|42883/i.test(error.message || '')
+    ? 'manca la funzione mov_allinea_alnus: va eseguito strumenti/migrazione-movimenti-alnus-reali.sql' : error.message);
+  await caricaMovimenti();
+  return data || {};
+}
+
 // UNA GIACENZA SOLA (23 nov): codice di Alnus = foto + movimenti di Alnus
 // importati (magazzini contati); altrimenti il saldo dei nostri movimenti.
+// Con i movimenti REALI (vedi sopra): il saldo dei movimenti, per tutti.
 async function giacenzaUnicaOra(codice) {
   const cod = chiaveCodice(codice);
   if (state.alnus === undefined) { try { await caricaAlnus(); } catch (e) {} }
   if (!state.movimentiLettiIl || Date.now() - state.movimentiLettiIl > 60000) { try { await caricaMovimenti(); } catch (e) {} }
+  if (movimentiReali()) {
+    const mov = inConto(state.movimenti.filter(x => chiaveCodice(x.codice) === cod));
+    const somma = (f) => +mov.filter(f).reduce((s, x) => s + (Number(x.qta) || 0), 0).toFixed(6);
+    const ap = state.movimenti.filter(m => m.documento_tipo === 'APERTURA').sort((a, b) => String(b.creato_il).localeCompare(String(a.creato_il)))[0];
+    return { letto: true, fonte: 'reale', qta: somma(() => true), apertura: somma(m => fonteMovimento(m) === 'apertura'),
+      alnus: somma(m => fonteMovimento(m) === 'alnus'), nostri: somma(m => fonteMovimento(m) === 'gestionale'),
+      fuoriSede: somma(m => !!m.presso_id), aperturaIl: ap ? ap.creato_il : null };
+  }
   const A = state.alnus;
   const saldoNostro = () => { const mov = Array.isArray(state.movimenti) ? inConto(state.movimenti.filter(x => chiaveCodice(x.codice) === cod)) : null;
     return mov ? +mov.reduce((s, x) => s + (Number(x.qta) || 0), 0).toFixed(6) : null; };
@@ -6938,6 +7008,18 @@ function rigaGiacenzaUnica(u, um) {
   const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   const segno = (n) => (n > 0 ? '+' : '') + nf(n);
   const u_ = um ? ' ' + um : '';
+  if (u.letto && u.fonte === 'reale') {
+    const pezzi = [];
+    if (u.apertura) pezzi.push('apertura ' + segno(u.apertura));
+    if (u.alnus) pezzi.push('movimenti Alnus ' + segno(u.alnus));
+    if (u.nostri) pezzi.push('gestionale ' + segno(u.nostri));
+    return el('div', { style:'font-size:12px;' },
+      el('span', { style:'font-weight:700;font-size:14px;' }, 'Giacenza ' + nf(u.qta) + u_),
+      el('span', { class:'sub' }, pezzi.length ? ' · ' + pezzi.join(' · ') : ' · nessun movimento'),
+      el('div', { class:'sub', style:'font-size:11px;margin-top:3px;' },
+        'Somma dei movimenti del gestionale' + (u.aperturaIl ? ', dall’apertura del ' + fmtQuando(u.aperturaIl) : '')
+        + (Math.abs(u.fuoriSede) > 1e-9 ? ' · di cui fuori sede ' + nf(u.fuoriSede) : '') + '.'));
+  }
   if (u.letto && u.fonte === 'alnus') {
     const mags = Object.entries(u.perMag || {}).filter(([, q]) => Math.abs(q) > 1e-9).map(([m, q]) => m + ' ' + nf(q)).join(' · ');
     return el('div', { style:'font-size:12px;' },
@@ -7100,6 +7182,19 @@ function renderAlnus(root) {
       A.apertura ? dopo + ' dopo l’apertura' + (ultimo ? ' · ultimo ' + fmtQuando(ultimo) : '') : 'Contano solo dopo l’apertura'].filter(Boolean),
       'Importa «Stampa movimenti» (.xls)', '.xls,.txt,.tsv', importaMovimentiAlnus)));
   if (!A.apertura) return;
+  // MOVIMENTI REALI (23 nov): stato dell'allineamento e bottone per rifarlo
+  // (rilanciabile: non scrive due volte la stessa riga).
+  const reali = movimentiReali();
+  const bAllinea = el('button', { class: 'btnsm', title: 'Scrive l’apertura e i movimenti di Alnus dopo la foto come movimenti del gestionale',
+    onclick: async () => { bAllinea.disabled = true; bAllinea.textContent = 'Allineo…';
+      try { await allineaDopoImport(); } finally { if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno(); ridisegna(); } } },
+    reali ? '⟳ Riallinea' : '⇄ Allinea i movimenti del gestionale');
+  root.append(el('div', { style: 'margin:-4px 0 14px;padding:10px 12px;border-radius:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border:1px solid '
+      + (reali ? 'var(--grn)' : 'var(--or)') + ';' },
+    el('span', { style: 'font-size:13px;' }, reali
+      ? '✓ Movimenti reali: apertura del ' + fmtQuando(A.apertura.preso_il) + ' e movimenti di Alnus scritti nel gestionale. La giacenza è la somma dei movimenti.'
+      : '⚠ Movimenti di Alnus non ancora scritti nel gestionale: la giacenza è foto + Specchio.'),
+    eAdminOra() ? bAllinea : ''));
   // Controllo: la stampa di controllo contro apertura + movimenti fino a quell'ora.
   if (A.controllo) {
     const calc = giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il, A.controllo.preso_il);
@@ -7434,7 +7529,8 @@ function documentiRegistro() {
   // «Per documento» di Movimenti (stessa chiave, cosi' il clic ci arriva).
   if (Array.isArray(state.movimenti)) {
     const per = new Map();
-    state.movimenti.filter(m => m.tipo === 'carico' && m.documento_numero).forEach(m => {
+    // Le righe di Alnus e d'apertura non sono documenti ricevuti (23 nov).
+    state.movimenti.filter(m => m.tipo === 'carico' && m.documento_numero && fonteMovimento(m) === 'gestionale').forEach(m => {
       const k = movChiaveDoc(m);
       if (!per.has(k)) per.set(k, { k, m, righe: 0, ordini: new Set() });
       const d = per.get(k); d.righe++; if (m.ordine_rif) d.ordini.add(String(m.ordine_rif));
@@ -11260,25 +11356,33 @@ function renderMovimenti(root) {
     caricaAlnus().then(() => { if (state.alnus) renderMovimenti(root); }).catch(() => {});
   }
   const A = state.alnus;
-  const daAlnus = (A && A.apertura ? (A.movimenti || []) : [])
+  // Allineati i movimenti reali, quelli di Alnus sono GIA' in state.movimenti
+  // (documento_tipo ALNUS): niente piu' copia di sola lettura dallo specchio.
+  const reali = movimentiReali();
+  const daAlnus = (A && A.apertura && !reali ? (A.movimenti || []) : [])
     .filter(m => Date.parse(m.data) > Date.parse(A.apertura.preso_il))
     .map(m => ({ alnus: true, id: 'alnus-' + m.id, data: m.data, tipo: 'alnus', causale: m.causale,
       codice: String(m.codice || '').trim(), descrizione: m.descrizione || null, qta: Number(m.qta) || 0, um: m.um || null,
       magazzino: m.magazzino, mittente: m.soggetto || null,
       documento_tipo: m.tipo_doc || null, documento_numero: m.numero_doc ? (m.anno_doc ? m.anno_doc + '/' : '') + m.numero_doc : null,
       note: 'Alnus · ' + (m.causale || '') + (m.operatore ? ' · ' + m.operatore : '') }));
+  const fonteDi = (m) => m.alnus ? 'alnus' : fonteMovimento(m);
   const tutti = state.movimenti.map(m => m).concat(daAlnus)
-    .filter(m => !movFonte || (movFonte === 'alnus') === !!m.alnus);
-  const nAlnus = daAlnus.length, nGest = state.movimenti.length;
+    .filter(m => !movFonte || fonteDi(m) === movFonte);
+  const nAlnus = daAlnus.length + state.movimenti.filter(m => fonteMovimento(m) === 'alnus').length;
+  const nGest = state.movimenti.filter(m => fonteMovimento(m) === 'gestionale').length;
+  const nAper = state.movimenti.filter(m => fonteMovimento(m) === 'apertura').length;
   const ultimo = tutti.reduce((d, m) => (!d || String(m.data || '') > d) ? m.data : d, null);
   root.append(el('div', { class:'sub', style:'margin:-6px 0 16px;max-width:900px;line-height:1.7;' },
-    (nGest + nAlnus)
+    (nGest + nAlnus + nAper)
       ? nGest.toLocaleString('it-IT') + ' movimenti del gestionale'
-        + (A && A.apertura ? ' · ' + nAlnus.toLocaleString('it-IT') + ' di Alnus dopo la foto del ' + fmtQuando(A.apertura.preso_il) : '')
+        + (nAper ? ' · ' + nAper.toLocaleString('it-IT') + ' righe d’apertura' : '')
+        + (A && A.apertura ? ' · ' + nAlnus.toLocaleString('it-IT') + ' di Alnus dopo la foto del ' + fmtQuando(A.apertura.preso_il)
+          + (reali ? ' (reali)' : ' (solo da vedere)') : (nAlnus ? ' · ' + nAlnus.toLocaleString('it-IT') + ' di Alnus' : ''))
         + (ultimo ? ' · l\'ultimo del ' + fmtIT(ultimo) : '')
         + '. Un errore non si corregge sulla riga: si registra una rettifica (± Rettifica, admin); quelli di Alnus si correggono in Alnus.'
       : 'Nessun movimento ancora: compaiono qui quando l\'automazione legge il primo DDT.'));
-  if (!(nGest + nAlnus)) return;
+  if (!(nGest + nAlnus + nAper)) return;
 
   // La commessa di un ordine di riferimento: per aprirla dal numero d'ordine.
   // Un ordine del cliente ha piu' posizioni (10072710 = 00385 con 10 commesse):
@@ -11306,6 +11410,12 @@ function renderMovimenti(root) {
       cella: m => { if (m.alnus) return el('span', { style:'display:inline-flex;gap:4px;align-items:center;white-space:nowrap;' },
           el('span', { class:'badge bvio', title:'Movimento di Alnus importato nello Specchio: si corregge in Alnus' }, 'Alnus'),
           el('span', { class:'mono', style:'font-size:11px;' }, m.causale || ''));
+        // Movimenti reali di Alnus e righe d'apertura: badge viola col loro tipo.
+        const fm = fonteMovimento(m);
+        if (fm !== 'gestionale') return el('span', { style:'display:inline-flex;gap:4px;align-items:center;white-space:nowrap;' },
+          el('span', { class:'badge bvio', title: fm === 'apertura' ? 'Riga d’apertura dalla foto di Alnus' : 'Movimento di Alnus: si corregge in Alnus' },
+            fm === 'apertura' ? 'apertura' : 'Alnus'),
+          fm === 'alnus' ? el('span', { class:'mono', style:'font-size:11px;' }, String(m.documento_numero || '').split('/')[1] || '') : '');
         const e = MOV_TIPO_ETI[m.tipo] || { txt: m.tipo || '—', cls:'bgry' };
         const b = el('span', { class:'badge ' + e.cls }, e.txt);
         // ✎ solo sulle rettifiche fatte a mano, solo admin (17 nov).
@@ -11368,8 +11478,9 @@ function renderMovimenti(root) {
   selVista.value = movVista;
   const selTipo = el('select', {}, ...opzioni(tutti.filter(m => !m.alnus).map(m => m.tipo), 'Tutti i tipi'));
   selTipo.value = movFiltroTipo;
-  const selFonte = el('select', {}, el('option', { value:'' }, 'Gestionale e Alnus'),
-    el('option', { value:'gestionale' }, 'Solo gestionale'), el('option', { value:'alnus' }, 'Solo Alnus'));
+  const selFonte = el('select', {}, el('option', { value:'' }, 'Tutte le fonti'),
+    el('option', { value:'gestionale' }, 'Solo gestionale'), el('option', { value:'alnus' }, 'Solo Alnus'),
+    ...(nAper ? [el('option', { value:'apertura' }, 'Solo apertura')] : []));
   selFonte.value = movFonte;
   selFonte.onchange = () => { movFonte = selFonte.value; movQuante = 400; renderMovimenti(root); };
   const selMitt = el('select', { style:'max-width:220px;' }, ...opzioni(tutti.map(m => m.mittente), 'Tutti i mittenti'));
@@ -11445,7 +11556,7 @@ function renderMovimenti(root) {
     if (codici.size === 1) {
       // Il totale e' dei soli movimenti del gestionale; quelli di Alnus stanno
       // nella giacenza qui sotto (foto + Alnus).
-      const tot = righe.filter(m => !m.alnus).reduce((a, m) => a + (Number(m.qta) || 0), 0);
+      const tot = righe.filter(m => !m.alnus && !m.fuori_giacenza).reduce((a, m) => a + (Number(m.qta) || 0), 0);
       // Il totale per POSTO (5 nov): quanto in sede e quanto da ogni terzista.
       const perPosto = new Map();
       righe.filter(m => !m.fuori_giacenza && !m.alnus)
@@ -11453,7 +11564,7 @@ function renderMovimenti(root) {
       const fuori = [...perPosto].filter(([k, q]) => k && Math.abs(q) > 1e-9);
       tabWrap.append(el('div', { style:'margin-bottom:8px;font-size:12px;' },
         el('span', { class:'mono', style:'font-weight:700;' }, [...codici][0]),
-        ' · totale dei movimenti del gestionale: ',
+        reali ? ' · somma dei movimenti in elenco: ' : ' · totale dei movimenti del gestionale: ',
         el('span', { class:'mono', style:'font-weight:700;' }, nf(tot) + (righe[0].um ? ' ' + righe[0].um : '')),
         fuori.length
           ? el('span', { class:'sub' }, ' · in sede ' + nf(perPosto.get('') || 0) + ' · '
@@ -11526,7 +11637,7 @@ function renderMovimenti(root) {
   inCerca.oninput   = () => { movCerca = inCerca.value;      movQuante = 400; disegna(); };
   root.append(el('div', { style:'display:flex;gap:8px;align-items:center;margin:0 0 8px;flex-wrap:wrap;' },
     el('span', { class:'sub' }, 'Vista:'), selVista,
-    el('span', { class:'sub', style:'margin-left:8px;' }, 'Filtra:'), (A && A.apertura) ? selFonte : '', selTipo, selMitt, selOrd, inCerca,
+    el('span', { class:'sub', style:'margin-left:8px;' }, 'Filtra:'), ((A && A.apertura) || nAper || nAlnus) ? selFonte : '', selTipo, selMitt, selOrd, inCerca,
     el('button', { class:'btnsm', onclick: () => {
       movFiltroTipo = ''; movFonte = ''; movFiltroMitt = ''; movFiltroOrd = ''; movFiltroDoc = ''; movCerca = ''; movQuante = 400;
       renderMovimenti(root);
