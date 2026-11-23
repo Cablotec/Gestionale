@@ -5039,6 +5039,18 @@ function daFareTerzista(x) {
   const fatti = (typeof quantitaConsegnata === 'function') ? quantitaConsegnata(x.id) : 0;
   return Math.max(0, (Number(x.quantita) || 0) - (Number(fatti) || 0));
 }
+// QUANTO SERVE ANCORA di un codice per una fase. Il gia' chiesto si toglie dal
+// fabbisogno di TUTTA la commessa (pezzi ordinati), non dai pezzi ancora da
+// fare: i pezzi gia' prodotti sono fatti proprio con quel materiale, e
+// toglierli due volte azzerava la proposta (23 nov, 00385/0050: 250 pz, 215
+// dati a Botturi e 215 prodotti → serviva 35, proponeva 0). Mai piu' di
+// quanto chiedono i pezzi ancora da fare: una commessa nata prima delle
+// richieste, gia' prodotta in parte, non chiede il materiale dei fatti.
+function serveTerzista(x, qta_pz, gia) {
+  const q = Number(qta_pz) || 0;
+  const tutto = q * (Number(x.quantita) || 0) - (Number(gia) || 0);
+  return Math.max(0, +Math.min(tutto, q * daFareTerzista(x)).toFixed(4));
+}
 // Un C/L di una commessa col flag ha giacenza nel gestionale; il resto no.
 function contaTerzista(x, r) {
   return !!(x && x.materiali_da_ddt) && String((r && r.tipo) || '').trim().toUpperCase() === 'C/L';
@@ -5073,7 +5085,6 @@ function mancantiTerzistaInSede(o) {
   const fasi = fasiCommessa(o);
   if (!fasi.size) return [];
   const { libero } = liberoTerzista();
-  const daFare = daFareTerzista(o);
   const out = [];
   fasi.forEach((voci, ter) => {
     const segnati = new Set();
@@ -5086,7 +5097,7 @@ function mancantiTerzistaInSede(o) {
     voci.forEach(({ riga, qta_pz }) => {
       const cod = String(riga.codice || '').trim();
       if (!segnati.has(cod) || !contaTerzista(o, riga)) return;
-      const serve = Math.max(0, +(qta_pz * daFare - giaRichiestoTerzista(o.id, ter, cod)).toFixed(4));
+      const serve = serveTerzista(o, qta_pz, giaRichiestoTerzista(o.id, ter, cod));
       const lib = libero(cod);
       if (serve > 0 && lib > 0) righe.push({ codice: cod, serve, libero: lib });
     });
@@ -5264,7 +5275,7 @@ function apriRichiestaTerzista(o, poi, opts) {
       const g = per.get(cod);
       const gia = giaRichiestoTerzista(c.id, selTer.value, cod);
       g.gia = +(g.gia + gia).toFixed(4);
-      g.voci.push({ commessa: c, serve: Math.max(0, +(qta_pz * daFareDi(c) - gia).toFixed(4)), conta: conta(c, riga) });
+      g.voci.push({ commessa: c, serve: serveTerzista(c, qta_pz, gia), conta: conta(c, riga) });
       if (conta(c, riga)) g.conta = true;
     }));
     // in ordine di codice (con piu' commesse i codici della seconda finivano in fondo)
@@ -8244,12 +8255,21 @@ function passiFase(o, f, poi) {
   }
 
   // 1. LA LISTA (la richiesta al magazzino)
+  // Con una lista gia' fatta ma materiale ancora da chiedere (23 nov, 00385/0050:
+  // 35 pz ancora da dare a Botturi) il passo offre «↗ Prepara il resto»: prima
+  // non c'era piu' nessuna porta per la seconda lista.
+  const ancoraDaChiedere = viva && !senzaOf && f.voci.filter(v =>
+    serveTerzista(o, v.qta_pz, giaRichiestoTerzista(o.id, f.id, String(v.riga.codice || '').trim())) > 0).length;
+  const resto = ancoraDaChiedere ? btn('↗ Prepara il resto', prepara,
+    ancoraDaChiedere + (ancoraDaChiedere === 1 ? ' materiale' : ' materiali') + ' ancora da chiedere') : '';
+  const dettResto = ancoraDaChiedere ? ' · ' + ancoraDaChiedere + (ancoraDaChiedere === 1 ? ' materiale' : ' materiali') + ' ancora da chiedere' : '';
   if (daPrep.length) {
     const x = daPrep[daPrep.length - 1];
     // La stampa sta in «Documenti», sotto i passi: qui solo lo stato.
     passi.push({ nome:'Lista preparata', stato:'fatto', dett:'chiesta il ' + giorno(x.creato_il) });
   } else if (vive.length) {
-    passi.push({ nome:'Lista preparata', stato:'fatto', dett:'chiesta il ' + giorno(vive[vive.length - 1].creato_il) });
+    passi.push({ nome:'Lista preparata', stato: ancoraDaChiedere ? 'ora' : 'fatto',
+      dett:'chiesta il ' + giorno(vive[vive.length - 1].creato_il) + dettResto, azione: resto });
   } else if (senzaOf) {
     passi.push({ nome:'Lista da preparare', stato:'poi', dett: viva ? 'prima l’ordine fornitore' : 'commessa chiusa' });
   } else if (rep && repartoDaPreparare(o)) {
