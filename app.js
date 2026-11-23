@@ -8829,9 +8829,19 @@ function commesseConDdtVive() {
 // Le righe della scheda Materiali per i codici che il gestionale conta da se'
 // (vedi `righeGiacenzaGestionale` in domain). [] se i movimenti non si sono
 // letti: allora quei codici restano coi numeri di Alnus, e la scheda lo dice.
+// ⚠ Un codice che Alnus conta (nel Fabbisogno o nella foto dello specchio)
+// resta una riga di Alnus, salvo i C/L delle commesse con la spunta: una
+// rettifica a mano o un carico su un ACQ (23 nov, 20 080 2455 +11) ne
+// facevano una riga «Gestionale» col solo saldo dei movimenti (11 invece di
+// 39 + 11) e senza impegni. Quei movimenti contano nella giacenza parallela
+// (scheda del codice, Specchio Alnus), non qui.
 function righeGestionaleOra() {
   if (!Array.isArray(state.movimenti) || typeof righeGiacenzaGestionale !== 'function') return [];
-  return righeGiacenzaGestionale(state.movimenti, commesseConDdtVive());
+  const diAlnus = new Set();
+  (state.mancantiAlnus || []).forEach(m => diAlnus.add(chiaveCodice(m.codice)));
+  ((state.alnus && state.alnus.giacApertura) || []).forEach(m => diAlnus.add(chiaveCodice(m.codice)));
+  return righeGiacenzaGestionale(state.movimenti, commesseConDdtVive())
+    .filter(r => !(diAlnus.has(chiaveCodice(r.codice)) && !(Number(r.impegno) > 0)));
 }
 
 function materialiStatoCommessa(op, righeMancanti, base) {
