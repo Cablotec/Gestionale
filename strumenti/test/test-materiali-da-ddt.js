@@ -275,6 +275,18 @@ sez('Codici non riconosciuti nei DDT (20 nov)');
   t('stesso codice in maiuscole diverse: una voce, due DDT', r[0].qta === 60 && r[0].righe === 2 && r[0].documenti.length === 2);
   t('proposta dal suo OF', r[0].proposta && r[0].proposta.codice === '2900KLOVA00GX1691U25' && r[0].proposta.ordine === 'OF 762/2026');
   t('proposta solo dallo STESSO fornitore', r[1].proposta === null);
+  // 23 nov, DDT Fabbi: Alnus scrive la marca davanti al codice del fornitore.
+  const el = [{ azienda_id: 'fab', codice_fornitore: 'SIE 3VA99880BL33', codice: '2330ASIEMVA99880BL33' },
+    { azienda_id: 'fab', codice_fornitore: 'WEI 1651970000', codice: '26022WEID01651970000' },
+    { azienda_id: 'fab', codice_fornitore: '6SL32105BB125BV1', codice: '29800SIEM000BB125BV1' },
+    { azienda_id: 'fab', codice_fornitore: 'X 1', codice: 'A' }, { azienda_id: 'fab', codice_fornitore: 'X-1', codice: 'B' }];
+  t('marca davanti: 3VA99880BL33 trova SIE 3VA99880BL33', M.trovaCodiceNostro(el, 'fab', '3VA99880BL33') === '2330ASIEMVA99880BL33');
+  t('codice intero con la marca vale lo stesso', M.trovaCodiceNostro(el, 'fab', 'WEI 1651970000') === '26022WEID01651970000');
+  t('senza marca resta com\'e\'', M.trovaCodiceNostro(el, 'fab', '6SL3210-5BB12-5BV1') === '29800SIEM000BB125BV1');
+  t('altro fornitore: niente', M.trovaCodiceNostro(el, 'lov', '3VA99880BL33') === null);
+  t('chiave che porta a due codici: niente', M.trovaCodiceNostro(el, 'fab', 'X1') === null);
+  t('proposta nel riquadro con la marca', M.carichiCodiceSconosciuto([{ tipo: 'carico', fuori_giacenza: true, codice: 'RZKE65', azienda_id: 'fab', qta: 1 }], new Set(),
+    [{ serie: 'OF', numero: 807, anno: 2026, fornitore_id: 'fab', righe: [{ codice: '242AA0DKC00000RZKE65', codice_fornitore: 'DKC RZKE65' }] }])[0].proposta.codice === '242AA0DKC00000RZKE65');
 }
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');

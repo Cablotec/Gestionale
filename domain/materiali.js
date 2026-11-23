@@ -760,14 +760,38 @@ function ordinatoApertoOf(ordini, movimenti, escludiId) {
 // del gestionale. `codiciNoti` = Set dei codici dell'anagrafica (MAIUSCOLI).
 // `ordini` = ordini_fornitore: se una riga d'ordine dello stesso fornitore ha quel
 // codice fornitore, si propone il nostro. Ritorna una voce per codice + mittente.
+// CHIAVI DI UN CODICE FORNITORE (23 nov, DDT Fabbi 91469/S01): Alnus scrive il codice del
+// fornitore con la MARCA davanti («SIE 3VA99880BL33», «WEI 1651970000»), il DDT di Fabbi
+// solo «3VA99880BL33». Si confronta senza spazi ne' punteggiatura, col codice intero
+// oppure senza la prima parola di 2-4 lettere. Stessa regola in DDT_arrivi/invia-movimenti.js.
+function chiaviCodiceFornitore(cf) {
+  const t = String(cf == null ? '' : cf).trim().toUpperCase();
+  const N = s => s.replace(/[^A-Z0-9]/g, '');
+  const out = [N(t)];
+  const m = t.match(/^([A-Z]{2,4})\s+(.+)$/);
+  if (m) out.push(N(m[2]));
+  return out.filter(Boolean);
+}
+// Il nostro codice per (fornitore, suo codice) da un elenco di { azienda_id, codice_fornitore,
+// codice }. Una chiave che porta a due nostri codici diversi non risponde (null).
+function trovaCodiceNostro(elenco, aziendaId, codiceFornitore) {
+  const cerca = chiaviCodiceFornitore(codiceFornitore)[0];
+  if (!cerca || !aziendaId) return null;
+  const trovati = new Set();
+  (elenco || []).forEach(z => { if (z && z.azienda_id === aziendaId && z.codice && chiaviCodiceFornitore(z.codice_fornitore).includes(cerca)) trovati.add(String(z.codice).trim()); });
+  return trovati.size === 1 ? [...trovati][0] : null;
+}
+
 function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
   const K = c => String(c == null ? '' : c).trim().toUpperCase();
-  const proposte = new Map();   // azienda|codice fornitore -> { codice, ordine }
+  const righeOf = [];   // { azienda_id, codice_fornitore, codice, ordine }
   (ordini || []).forEach(o => (o.righe || []).forEach(r => {
     if (!r || !r.codice_fornitore || !r.codice) return;
-    const k = (o.fornitore_id || '') + '|' + K(r.codice_fornitore);
-    if (!proposte.has(k)) proposte.set(k, { codice: String(r.codice).trim(), ordine: (o.serie || 'OF') + ' ' + o.numero + '/' + o.anno });
+    righeOf.push({ azienda_id: o.fornitore_id || '', codice_fornitore: r.codice_fornitore, codice: String(r.codice).trim(),
+      ordine: (o.serie || 'OF') + ' ' + o.numero + '/' + o.anno });
   }));
+  const proposta = (az, cf) => { const c = trovaCodiceNostro(righeOf, az, cf);
+    return c ? { codice: c, ordine: righeOf.find(x => x.azienda_id === az && x.codice === c).ordine } : null; };
   const per = new Map();
   (movimenti || []).forEach(m => {
     if (!m || m.tipo !== 'carico' || !m.fuori_giacenza) return;
@@ -776,7 +800,7 @@ function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
     const k = cod + '|' + (m.azienda_id || m.mittente || '');
     if (!per.has(k)) per.set(k, { codice: String(m.codice).trim(), azienda_id: m.azienda_id || null, mittente: m.mittente || '',
       descrizione: m.descrizione || '', qta: 0, righe: 0, documenti: [],
-      proposta: proposte.get((m.azienda_id || '') + '|' + K(m.codice_mittente || m.codice)) || null });
+      proposta: proposta(m.azienda_id || '', m.codice_mittente || m.codice) });
     const v = per.get(k);
     v.qta = +(v.qta + (Number(m.qta) || 0)).toFixed(6); v.righe++;
     if (m.documento_numero && !v.documenti.includes(m.documento_numero)) v.documenti.push(m.documento_numero);
@@ -785,7 +809,7 @@ function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto,
+  module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto, chiaviCodiceFornitore, trovaCodiceNostro,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,

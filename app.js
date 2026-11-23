@@ -4153,10 +4153,10 @@ function codiciFornitoreDi(codice) {
   return (state.codiciFornitore || []).filter(x => chiaveCodice(x.codice) === c);
 }
 // Il nostro codice dato il codice di un fornitore (DDT, OF): null se non e' scritto in nessuna scheda.
+// Dal 23 nov con `trovaCodiceNostro` (domain/materiali.js): «3VA99880BL33» scritto sul DDT
+// trova «SIE 3VA99880BL33» salvato da Alnus, e un'ambiguita' non risponde.
 function codiceNostroDaFornitore(aziendaId, codiceFornitore) {
-  const c = chiaveCodice(codiceFornitore);
-  const x = c && aziendaId ? (state.codiciFornitore || []).find(z => z.azienda_id === aziendaId && chiaveCodice(z.codice_fornitore) === c) : null;
-  return x ? x.codice : null;
+  return trovaCodiceNostro(state.codiciFornitore || [], aziendaId, codiceFornitore);
 }
 // RIENTRI DAL TERZISTA (17 nov): `rientri_terzista`. null = tabella assente
 // (strumenti/migrazione-rientri-terzista.sql non eseguita): allora il passo
