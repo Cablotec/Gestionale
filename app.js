@@ -7675,6 +7675,142 @@ async function apriDdtEntrataManuale(poi, ric) {
   } }, 'Scarta') : '';
   v.piede.append(msg, scarta, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
 }
+// ── DDT IN ENTRATA DAGLI ORDINI APERTI (23 nov) ────────────────────────────
+// Nico: "lascerei perdere per ora la scansione automatica per tutti quelli che non siano
+// Tema. Metterei per ora solo manuale: quando scelgo il fornitore, mi propone tutto quello
+// ancora aperto secondo gli OF da poter caricare". Niente abbinamenti da fare: le righe
+// SONO le righe d'ordine (nostro codice, codice fornitore, OF), si scrive solo quanto e'
+// arrivato. Per cio' che non e' in un OF (ordini a voce) c'e' «+ Riga fuori ordine».
+// Scrive con `conferma_ricevimento` (o `mov_carica_ddt` se quello SQL manca): un carico per
+// riga, col suo OF in `ordine_rif`, cosi' il residuo dell'ordine scende da solo.
+let ddtOrdCerca = '';
+async function apriDdtEntrataDaOrdini(poi) {
+  if (codiciAnagrafica === undefined) await caricaCodiciAnagrafica();
+  if (state.ordiniFornitore == null && typeof caricaOrdiniFornitore === 'function') await caricaOrdiniFornitore();
+  const v = veloTerzista('DDT in entrata', 1180);
+  const conOf = new Set((state.ordiniFornitore || []).filter(o => o.stato === 'emesso').map(o => o.fornitore_id));
+  const aziende = (state.aziende || []).filter(a => a.attivo !== false)
+    .sort((a, b) => (conOf.has(b.id) - conOf.has(a.id)) || String(a.nome).localeCompare(String(b.nome), 'it'));
+  const selMitt = el('select', { onchange: () => { arrivi = new Map(); extra = []; disegna(); } }, el('option', { value:'' }, '— fornitore —'),
+    ...aziende.map(a => el('option', { value: a.id }, a.nome + (conOf.has(a.id) ? '  · OF aperti' : ''))));
+  const inNum = el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' });
+  const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
+  const nfq = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  let arrivi = new Map();   // k riga d'ordine -> quantita' arrivata
+  let extra = [];           // righe fuori ordine { codice, descrizione, um, qta }
+  const corpo = el('div', { style:'max-height:56vh;overflow:auto;margin-top:8px;' });
+  const riepilogo = el('div', { class:'sub', style:'font-size:12px;' });
+  const aperte = () => righeOrdineFornitore(selMitt.value).filter(o => o.stato === 'emesso' && o.aperto > 0);
+  const aggiornaRiepilogo = () => {
+    const n = [...arrivi.values()].filter(q => q > 0).length + extra.filter(r => r.codice && r.qta > 0).length;
+    riepilogo.textContent = n ? n + (n === 1 ? ' riga da caricare' : ' righe da caricare') : 'Scrivi quanto è arrivato sulle righe del DDT.';
+    riepilogo.style.color = n ? 'var(--grn)' : '';
+  };
+  const cerca = el('input', { type:'text', class:'search', value: ddtOrdCerca, placeholder:'Filtra per codice, codice fornitore, descrizione o OF…', style:'min-width:340px;' });
+  cerca.oninput = () => { ddtOrdCerca = cerca.value; disegnaRighe(); };
+  const tutto = el('button', { type:'button', class:'btnsm', title:'Mette «arrivato» = quanto aspetta su tutte le righe che vedi (filtro compreso)',
+    onclick: () => { visibili().forEach(o => arrivi.set(o.k, o.aperto)); disegnaRighe(); } }, '↓ Tutto quello che vedi è arrivato');
+  const svuota = el('button', { type:'button', class:'btnsm', onclick: () => { arrivi = new Map(); disegnaRighe(); } }, 'Svuota');
+  const visibili = () => {
+    const q = ddtOrdCerca.trim().toUpperCase();
+    return aperte().filter(o => !q || [o.codice, o.codice_fornitore, o.descrizione, o.ordine].some(s => String(s || '').toUpperCase().includes(q)));
+  };
+  const C = 'display:grid;grid-template-columns:200px minmax(200px,1fr) 90px 96px 84px 40px;gap:10px;align-items:center;';
+  function disegnaRighe() {
+    corpo.innerHTML = '';
+    if (!selMitt.value) { corpo.append(el('div', { class:'empty', style:'padding:18px;' }, 'Scegli il fornitore: compaiono le righe dei suoi OF ancora da ricevere.')); aggiornaRiepilogo(); return; }
+    const vis = visibili();
+    const tutte = aperte();
+    if (!tutte.length) corpo.append(el('div', { class:'sub', style:'padding:10px 0;font-size:12px;' },
+      'Nessun OF aperto di questo fornitore nel gestionale. Usa «+ Riga fuori ordine» per caricare a mano.'));
+    else if (!vis.length) corpo.append(el('div', { class:'sub', style:'padding:10px 0;font-size:12px;' }, 'Nessuna riga con questo filtro.'));
+    let ultimoOf = null;
+    vis.forEach(o => {
+      if (o.ordine !== ultimoOf) {
+        ultimoOf = o.ordine;
+        corpo.append(el('div', { style:'margin:10px 0 2px;font-weight:700;font-size:12px;display:flex;gap:10px;align-items:baseline;' },
+          el('span', { class:'mono' }, o.ordine),
+          o.consegna ? el('span', { class:'sub', style:'font-weight:400;' }, 'consegna ' + fmtIT(String(o.consegna).slice(0, 10))) : ''));
+      }
+      const q = arrivi.get(o.k) || 0;
+      const inQ = el('input', { type:'text', inputmode:'decimal', class:'mono', value: q ? nfIT(q) : '', placeholder: '0',
+        style:'font-size:12px;text-align:right;width:100%;min-width:0;box-sizing:border-box;' + (q > 0 ? 'border-color:var(--grn);' : '') });
+      inQ.oninput = () => { const n = numeroDaTesto(inQ.value); arrivi.set(o.k, n == null || isNaN(n) ? 0 : n);
+        inQ.style.borderColor = arrivi.get(o.k) > 0 ? 'var(--grn)' : ''; oltre.textContent = arrivi.get(o.k) > o.aperto ? 'più di quanto aspetta' : ''; aggiornaRiepilogo(); };
+      const oltre = el('div', { style:'font-size:10px;color:var(--or);' }, q > o.aperto ? 'più di quanto aspetta' : '');
+      corpo.append(el('div', { style: C + 'padding:4px 0;border-bottom:1px solid var(--brd);font-size:12px;' },
+        el('div', {}, el('div', { class:'mono', style:'font-weight:700;' }, o.codice),
+          el('div', { class:'sub mono', style:'font-size:10.5px;' }, o.codice_fornitore || '')),
+        el('div', { style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: o.descrizione }, o.descrizione || '—'),
+        el('div', { class:'mono', style:'text-align:right;' }, el('div', {}, 'aspetta ' + nfq(o.aperto)),
+          el('div', { class:'sub', style:'font-size:10px;' }, 'ord. ' + nfq(o.ordinato))),
+        el('div', {}, inQ, oltre),
+        el('button', { type:'button', class:'btnsm', title:'Arrivato tutto quello che aspetta', onclick: () => { arrivi.set(o.k, o.aperto); disegnaRighe(); } }, '= ' + nfq(o.aperto)),
+        el('span', { class:'sub', style:'font-size:10.5px;' }, o.um || '')));
+    });
+    // Righe fuori ordine.
+    corpo.append(el('div', { style:'margin:14px 0 4px;font-weight:700;font-size:12px;' }, 'Fuori ordine (ordini a voce, merce non in un OF)'));
+    extra.forEach((r, i) => {
+      const inC = el('input', { type:'text', class:'mono', value: r.codice, placeholder:'nostro codice', style:'font-size:12px;' });
+      inC.onchange = async () => { r.codice = chiaveCodice(inC.value);
+        if (r.codice && !r.descrizione) { try { const { data } = await sb.from('materiali').select('descrizione,um').eq('codice', r.codice).limit(1);
+          if (data && data[0]) { r.descrizione = data[0].descrizione || ''; r.um = r.um || data[0].um || ''; } } catch (e) {} }
+        disegnaRighe(); };
+      const inD = el('input', { type:'text', value: r.descrizione, placeholder:'descrizione', style:'font-size:12px;' });
+      inD.oninput = () => { r.descrizione = inD.value; };
+      const inQ = el('input', { type:'text', inputmode:'decimal', class:'mono', value: r.qta ? nfIT(r.qta) : '', placeholder:'0', style:'font-size:12px;text-align:right;' });
+      inQ.oninput = () => { const n = numeroDaTesto(inQ.value); r.qta = n == null || isNaN(n) ? 0 : n; aggiornaRiepilogo(); };
+      const inN = el('input', { type:'text', value: r.note, placeholder:'nota (es. ordine a voce di Massimo)', style:'font-size:12px;' });
+      inN.oninput = () => { r.note = inN.value; };
+      const sconosciuto = r.codice && codiciAnagrafica && !codiciAnagrafica.has(r.codice);
+      corpo.append(el('div', { style:'display:grid;grid-template-columns:200px minmax(160px,1fr) 90px minmax(140px,.8fr) 30px;gap:8px;align-items:center;padding:3px 0;' },
+        el('div', {}, inC, sconosciuto ? el('div', { style:'font-size:10px;color:var(--or);' }, 'non è nell’anagrafica') : ''),
+        inD, inQ, inN, el('button', { type:'button', class:'btnsm', style:'padding:0 6px;', onclick: () => { extra.splice(i, 1); disegnaRighe(); } }, '✕')));
+    });
+    corpo.append(el('button', { type:'button', class:'btnsm', style:'margin-top:4px;', onclick: () => {
+      extra.push({ codice:'', descrizione:'', um:'', qta:0, note:'' }); disegnaRighe(); } }, '+ Riga fuori ordine'));
+    aggiornaRiepilogo();
+  }
+  function disegna() { disegnaRighe(); }
+  disegna();
+  const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:8px;' },
+      'Scegli il fornitore: compaiono le righe dei suoi OF ancora da ricevere. Scrivi quanto è arrivato secondo il DDT (o «= tutto» sulla riga). '
+      + 'Le righe lasciate a zero non si caricano e restano in attesa.'),
+    el('div', { class:'frow' }, campo('Fornitore', selMitt), campo('Numero DDT', inNum), campo('Data DDT', inData)),
+    el('div', { style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, cerca, tutto, svuota),
+    corpo);
+  const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
+  const ok = el('button', { class:'btnp' }, '↓ Carica il DDT');
+  ok.onclick = async () => {
+    const tutte = aperte();
+    const daOf = tutte.filter(o => (arrivi.get(o.k) || 0) > 0).map(o => ({ codice: o.codice, codice_mittente: o.codice_fornitore || '',
+      descrizione: o.descrizione || '', um: o.um || '', qta: arrivi.get(o.k), ordine_rif: o.ordine, note: '' }));
+    const fuori = extra.filter(r => r.codice && r.qta > 0).map(r => ({ codice: r.codice, codice_mittente: '', descrizione: r.descrizione || '',
+      um: r.um || '', qta: r.qta, ordine_rif: '', note: r.note || 'fuori ordine' }));
+    const valide = daOf.concat(fuori);
+    const err = !selMitt.value ? 'Scegli il fornitore' : !inNum.value.trim() ? 'Scrivi il numero del DDT' : !inData.value ? 'Manca la data'
+      : !valide.length ? 'Nessuna riga con quantità arrivata' : extra.some(r => r.qta > 0 && !r.codice) ? 'Una riga fuori ordine non ha il codice' : null;
+    if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
+    const oltre = tutte.filter(o => (arrivi.get(o.k) || 0) > o.aperto);
+    if (oltre.length && !confirm(oltre.length + (oltre.length === 1 ? ' riga supera' : ' righe superano') + ' quanto l’ordine aspetta ('
+      + oltre.slice(0, 4).map(o => o.codice + ' ' + nfq(arrivi.get(o.k)) + '/' + nfq(o.aperto)).join(', ') + '). Carico lo stesso?')) return;
+    ok.disabled = true; ok.textContent = 'Caricamento…';
+    const p_righe = valide.map(r => Object.assign({}, r, { pos: '', file: '', fuori_giacenza: !codiceInGiacenzaGestionale(r.codice, selMitt.value) }));
+    let { data, error } = await sb.rpc('conferma_ricevimento', { p_id: null, p_azienda: selMitt.value, p_numero: inNum.value.trim(),
+      p_data: inData.value, p_righe, p_abbinamenti: [] });
+    const manca = (e) => e && /(could not find|does not exist|schema cache)/i.test(e.message || '');
+    if (error && manca(error)) ({ data, error } = await sb.rpc('mov_carica_ddt', { p_azienda: selMitt.value, p_numero: inNum.value.trim(), p_data: inData.value, p_righe }));
+    if (error) { ok.disabled = false; ok.textContent = '↓ Carica il DDT'; msg.textContent = error.message; msg.style.color = 'var(--red)'; return; }
+    v.chiudi();
+    toast('DDT ' + inNum.value.trim() + ' caricato: ' + (data || valide.length) + (valide.length === 1 ? ' riga' : ' righe')
+      + (daOf.length ? ' · ' + daOf.length + ' da OF' : '') + (fuori.length ? ' · ' + fuori.length + ' fuori ordine' : ''), 'ok', 8000);
+    await caricaMovimenti();
+    if (typeof poi === 'function') poi();
+  };
+  v.piede.append(msg, riepilogo, el('span', { style:'width:12px;' }), el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+}
 // Il riquadro in cima a Movimenti: i DDT letti dalle scansioni che aspettano la conferma.
 function riquadroRicevimenti(ridisegna) {
   const box = el('div');
@@ -7702,7 +7838,7 @@ function renderDocumenti(root) {
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Documenti'), ricarica,
     (eAdminOra() && Array.isArray(state.movimenti)) ? el('button', { class:'btnp', style:'margin-left:auto;',
       title:'Registra a mano un DDT ricevuto: le sue righe diventano carichi di magazzino',
-      onclick: () => apriDdtEntrataManuale(ridisegna) }, '＋ DDT in entrata') : ''));
+      onclick: () => apriDdtEntrataDaOrdini(ridisegna) }, '＋ DDT in entrata') : ''));
   const { lista: tutti, nonLetti } = documentiRegistro();
   const selVerso = el('select', { onchange: (e) => { docVerso = e.target.value; ridisegna(); } },
     ...[['tutti', 'Entrata e uscita'], ['entrata', '↓ In entrata'], ['uscita', '↑ In uscita']].map(([v, t]) => el('option', { value: v }, t)));
@@ -10933,7 +11069,10 @@ function renderMovimenti(root) {
     (eAdminOra() && Array.isArray(state.movimenti)) ? el('button', { class:'btnsm',
       title:'Aggiusta la giacenza di un codice: scrive un movimento di rettifica col motivo',
       onclick: () => apriRettificaMagazzino(movCerca && /^\S+$/.test(movCerca.trim()) ? movCerca.trim().toUpperCase() : '', dopoRettifica) },
-      '± Rettifica') : ''));
+      '± Rettifica') : '',
+    (eAdminOra() && Array.isArray(state.movimenti)) ? el('button', { class:'btnp', style:'margin-left:auto;',
+      title:'Carica un DDT di un fornitore partendo dalle righe ancora aperte dei suoi OF',
+      onclick: () => apriDdtEntrataDaOrdini(() => renderMovimenti(root)) }, '＋ DDT in entrata') : ''));
 
   // CODICI NON RICONOSCIUTI NEI DDT (20 nov): in cima, finche' ce ne sono.
   root.append(riquadroRicevimenti(() => renderMovimenti(root)));
