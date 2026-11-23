@@ -11473,7 +11473,8 @@ function renderMovimenti(root) {
         // Movimenti reali di Alnus e righe d'apertura: badge viola col loro tipo.
         const fm = fonteMovimento(m);
         if (fm !== 'gestionale') return el('span', { style:'display:inline-flex;gap:4px;align-items:center;white-space:nowrap;' },
-          el('span', { class:'badge bvio', title: fm === 'apertura' ? 'Riga d’apertura dalla foto di Alnus' : 'Movimento di Alnus: si corregge in Alnus' },
+          // Apertura grigia (il punto di partenza), Alnus viola (23 nov, Nico).
+          el('span', { class:'badge ' + (fm === 'apertura' ? 'bgry' : 'bvio'), title: fm === 'apertura' ? 'Riga d’apertura dalla foto di Alnus' : 'Movimento di Alnus: si corregge in Alnus' },
             fm === 'apertura' ? 'apertura' : 'Alnus'),
           fm === 'alnus' ? el('span', { class:'mono', style:'font-size:11px;' }, String(m.documento_numero || '').split('/')[1] || '') : '');
         const e = MOV_TIPO_ETI[m.tipo] || { txt: m.tipo || '—', cls:'bgry' };
