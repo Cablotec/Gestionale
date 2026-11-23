@@ -11137,8 +11137,21 @@ function renderMovimenti(root) {
   if (!tutti.length) return;
 
   // La commessa di un ordine di riferimento: per aprirla dal numero d'ordine.
-  const commessaDi = (rif) => rif
-    ? (state.operazioni || []).find(o => String(o.riferimento_cliente || '') === String(rif)) || null : null;
+  // Un ordine del cliente ha piu' posizioni (10072710 = 00385 con 10 commesse):
+  // prima la commessa del movimento (`operazione_id`), poi una che ha quel
+  // codice nella lista (aperta prima), poi una aperta, poi la prima. Prima
+  // apriva sempre la prima trovata (23 nov, Nico: il 20 080 2455 apriva la
+  // 00385/0080, un altro prodotto).
+  const commessaDi = (m) => {
+    const ops = state.operazioni || [];
+    if (m.operazione_id) { const o = ops.find(z => z.id === m.operazione_id); if (o) return o; }
+    if (!m.ordine_rif) return null;
+    const stesse = ops.filter(o => String(o.riferimento_cliente || '') === String(m.ordine_rif));
+    const viva = (o) => o.stato === 'aperta' || o.stato === 'sospesa';
+    const cod = chiaveCodice(m.codice);
+    const conCodice = stesse.filter(o => (o.materiali || []).some(r => chiaveCodice(r.codice) === cod));
+    return conCodice.find(viva) || conCodice[0] || stesse.find(viva) || stesse[0] || null;
+  };
 
   const colonne = [
     { k:'data', t:'Data', ord: m => String(m.data || ''),
@@ -11186,7 +11199,7 @@ function renderMovimenti(root) {
         m.documento_numero ? (m.documento_tipo || 'DOC') + ' ' + m.documento_numero
           + (m.documento_pos ? ' · ' + m.documento_pos : '') : '—') },
     { k:'ordine', t:'Ordine', ord: m => String(m.ordine_rif || ''),
-      cella: m => { const o = commessaDi(m.ordine_rif);
+      cella: m => { const o = commessaDi(m);
         if (!m.ordine_rif) return el('span', { style:'color:var(--mut);' }, '—');
         if (!o) return el('span', { class:'mono', style:'font-size:11px;' }, m.ordine_rif);
         return el('a', { href:'#', class:'mono', style:'font-size:11px;color:var(--blu);',
