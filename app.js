@@ -7057,7 +7057,7 @@ function renderAlnus(root) {
       + nfIT(x.aperto) + (x.consegna ? ' · ' + fmtIT(String(x.consegna).slice(0, 10)) : '') + (x.scaduta ? ' (scaduta)' : '')).join('\n') : '';
     const dif = r.differenza;
     tb.append(el('tr', { style: 'cursor:pointer;', title: 'Apri la scheda del codice', onclick: () => apriSchedaCodice(r.codice) },
-      el('td', { class: 'mono', style: 'font-weight:700;white-space:nowrap;' }, r.codice),
+      el('td', { class: 'mono', style: 'font-weight:700;white-space:nowrap;' }, testoCopiabile(r.codice, 'Codice copiato')),
       el('td', { style: 'max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;', title: r.descrizione }, r.descrizione),
       el('td', { class: 'mono', style: 'text-align:right;' }, n(r.fabbisogno)),
       el('td', { class: 'mono', style: 'text-align:right;', title: perMag }, n(r.giacenza)),
@@ -7114,7 +7114,7 @@ function disegnaGiacenzaParallela(box, G) {
     const g = r.gestionale || {};
     const dif = r.differenza;
     tb.append(el('tr', { style: 'cursor:pointer;', title: 'Apri la scheda del codice', onclick: () => apriSchedaCodice(r.codice) },
-      el('td', { class: 'mono', style: 'font-weight:700;white-space:nowrap;' }, r.codice),
+      el('td', { class: 'mono', style: 'font-weight:700;white-space:nowrap;' }, testoCopiabile(r.codice, 'Codice copiato')),
       el('td', { class: 'mono', style: 'text-align:right;', title: g.inFoto ? 'dalla foto di Alnus' : g.prima ? 'non nella foto: saldo dei movimenti di prima' : '' },
         g.inFoto ? nf(g.apertura) : g.prima ? nf(g.prima) + ' *' : '—'),
       el('td', { class: 'mono', style: 'text-align:right;' }, sg(g.carichi)),
