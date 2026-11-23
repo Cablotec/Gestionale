@@ -4774,10 +4774,50 @@ function commessaSuResiduo(o) {
     : [] });
 }
 
+// ⚠⚠ IL MATERIALE GIA' DATO NON SI CHIEDE DI NUOVO (23 nov, Nico su 00385/0050:
+// 250 pz, 215 prodotti, a Botturi gia' dato tutto tranne 35 dello 0725). Il
+// residuo da solo chiedeva allo scaffale 35 pz di OGNI componente, gia' da
+// Botturi, togliendoli alle 00492. Quanto una commessa chiede ancora allo
+// scaffale = min(lista intera − gia' dato a terzisti/reparto, lista × residuo),
+// la stessa regola di `serveTerzista`. Dato = `qta_inviata` delle richieste
+// «inviato» per QUESTA commessa, per codice.
+let _datoFuoriCache = null;
+function datoFuoriDi(opId) {
+  const inv = state.inviiTerzista;
+  if (!Array.isArray(inv)) return new Map();
+  if (!_datoFuoriCache || _datoFuoriCache.rif !== inv || _datoFuoriCache.n !== inv.length) {
+    const per = new Map();
+    inv.filter(x => x.stato === 'inviato').forEach(x => (x.righe || []).forEach(r => {
+      const op = opDiRigaTerzista(x, r);
+      const q = Number(r.qta_inviata != null ? r.qta_inviata : r.qta) || 0;
+      if (!op || !(q > 0)) return;
+      if (!per.has(op)) per.set(op, new Map());
+      const m = per.get(op), k = chiaveCodice(r.codice);
+      m.set(k, +((m.get(k) || 0) + q).toFixed(4));
+    }));
+    _datoFuoriCache = { rif: inv, n: inv.length, per };
+  }
+  return _datoFuoriCache.per.get(opId) || new Map();
+}
+function commessaDaServire(o) {
+  const res = commessaSuResiduo(o);
+  const dato = datoFuoriDi(o.id);
+  if (!dato.size) return res;
+  const resta = new Map(dato);   // un codice su piu' righe: il dato si consuma riga per riga
+  return Object.assign({}, res, { materiali: o.materiali.map((r, i) => {
+    const k = chiaveCodice(r.codice);
+    const intero = Number(r.qta) || 0;
+    const d = Math.min(intero, resta.get(k) || 0);
+    if (d > 0) resta.set(k, +((resta.get(k) || 0) - d).toFixed(4));
+    const suResiduo = res.materiali === o.materiali ? intero : Number((res.materiali[i] || {}).qta) || 0;
+    return Object.assign({}, r, { qta: +Math.max(0, Math.min(intero - d, suResiduo)).toFixed(4) });
+  }) });
+}
+
 function materialiBase(righeMancanti) {
   const viveConLista = (state.operazioni || []).filter(x =>
     (x.stato === 'aperta' || x.stato === 'sospesa') && Array.isArray(x.materiali) && x.materiali.length)
-    .map(commessaSuResiduo)
+    .map(commessaDaServire)
     // ⚠ "MATERIALI DA DDT" (13 ott): le righe C/L di quelle commesse si
     // contano dai DDT (`arriviDaDdt`) e NON entrano nella ripartizione della
     // giacenza Alnus. Lasciarle dentro vorrebbe dire contare due volte lo
@@ -17559,15 +17599,47 @@ function openOperazioneModal(o, opts) {
       + '70px 90px 44px minmax(160px,1.2fr);gap:10px;align-items:baseline;';
     const et = (t, alt) => el('span', { class:'sub',
       style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (alt || '') }, t);
-    listaBox.append(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);' },
+    // DATI E RESTANO (23 nov, Nico su 00385/0050): quanto e' gia' stato dato a
+    // terzisti/reparto per questa commessa e quanto la commessa chiede ancora
+    // allo scaffale (`commessaDaServire`, lo stesso conto del fabbisogno).
+    // Le colonne compaiono solo se c'e' qualcosa di dato o di gia' prodotto.
+    const datoQui = datoFuoriDi(o.id);
+    const servire = commessaDaServire(Object.assign({}, o, { materiali: righe }));
+    const conResto = datoQui.size > 0 || servire.materiali !== righe;
+    const restaRiga = new Map(), datoRiga = new Map();
+    {
+      const resta = new Map(datoQui);
+      righe.forEach((r, i) => {
+        const k = chiaveCodice(r.codice), intero = Number(r.qta) || 0;
+        const d = Math.min(intero, resta.get(k) || 0);
+        if (d > 0) resta.set(k, +((resta.get(k) || 0) - d).toFixed(4));
+        datoRiga.set(i, d);
+        restaRiga.set(i, Number((servire.materiali[i] || {}).qta) || 0);
+      });
+    }
+    // A chi e' stato dato, per codice (nomi dei terzisti / «reparto»).
+    const datoChi = new Map();
+    (state.inviiTerzista || []).filter(x => x.stato === 'inviato').forEach(x => (x.righe || []).forEach(r => {
+      if (opDiRigaTerzista(x, r) !== o.id || !(Number(r.qta_inviata != null ? r.qta_inviata : r.qta) > 0)) return;
+      const k = chiaveCodice(r.codice);
+      if (!datoChi.has(k)) datoChi.set(k, new Set());
+      datoChi.get(k).add(eReparto(x.terzista_id) ? 'reparto' : nomeAziendaDi(x.terzista_id));
+    }));
+    const COLR = conResto ? COL.replace('70px 90px 44px', '70px 80px 70px 70px 44px') : COL;
+    listaBox.append(el('div', { style: COLR + 'padding-bottom:4px;border-bottom:1px solid var(--brd);' },
       et('Codice'), et('Descrizione'), et('Per pz', 'text-align:right;'),
-      et('Necessari', 'text-align:right;'), et('UM'), et('Stato')));
+      et('Necessari', 'text-align:right;'),
+      ...(conResto ? [el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;text-align:right;',
+          title:'Già dato ai terzisti o portato in reparto per questa commessa' }, 'Dati'),
+        el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;text-align:right;',
+          title:'Quanto la commessa chiede ancora allo scaffale: necessari − dati, mai più di quanto chiedono i pezzi ancora da fare' }, 'Restano')] : []),
+      et('UM'), et('Stato')));
 
     const celleStato = new Map();
     // Il tipo sta sulla RIGA salvata, non sul codice: qui sotto si gira per
     // codice, quindi serve poterlo ritrovare.
     const tipoDi = new Map(righe.map(r => [r.codice, String(r.tipo || '').toUpperCase()]));
-    righe.forEach(r => {
+    righe.forEach((r, iRiga) => {
       const stato = el('span', { class:'sub', style:'font-size:11px;' }, '…');
       celleStato.set(r.codice, stato);
       // Sotto il codice, DA DOVE VIENE: senza, un materiale che nella
@@ -17587,14 +17659,18 @@ function openOperazioneModal(o, opts) {
           '◂ da ' + origini[0] + (origini.length > 1 ? '  +' + (origini.length - 1) : '')));
       }
       // Clic sulla riga = scheda del codice (19 nov, Nico: al posto del 📇).
-      listaBox.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);cursor:pointer;',
+      const dR = datoRiga.get(iRiga) || 0, rR = restaRiga.get(iRiga) || 0;
+      listaBox.append(el('div', { style: COLR + 'padding:4px 0;border-bottom:1px solid var(--brd);cursor:pointer;',
           title:'Clic: scheda del codice ' + r.codice, onclick: () => apriSchedaCodice(r.codice) },
         cellaCod,
         el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
           title: r.descrizione || '' }, r.descrizione || '—'),
         el('span', { class:'mono', style:'font-size:11px;text-align:right;color:var(--mut);' },
           r.qta_pz != null ? nf(r.qta_pz) : '—'),
-        el('span', { class:'mono', style:'font-size:11px;text-align:right;font-weight:700;' }, nf(r.qta)),
+        el('span', { class:'mono', style:'font-size:11px;text-align:right;' + (conResto ? 'color:var(--mut);' : 'font-weight:700;') }, nf(r.qta)),
+        ...(conResto ? [
+          el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (dR > 0 ? 'var(--or)' : 'var(--mut)') + ';' }, dR > 0 ? nf(dR) : '—'),
+          el('span', { class:'mono', style:'font-size:11px;text-align:right;font-weight:700;' + (rR > 0 ? '' : 'color:var(--mut);') }, rR > 0 ? nf(rR) : '0')] : []),
         el('span', { class:'sub', style:'font-size:11px;' }, r.um || ''),
         stato));
     });
@@ -17628,7 +17704,19 @@ function openOperazioneModal(o, opts) {
       // segnaposto e delle lavorazioni stanno tutte li'.
       const ctx = materialiStatoCommessa(o, state.mancanti);
       let nMancano = 0;
+      // Quanto resta da servire per codice (righe dello stesso codice sommate).
+      const restaCod = new Map();
+      righe.forEach((r, i) => restaCod.set(r.codice, (restaCod.get(r.codice) || 0) + (restaRiga.get(i) || 0)));
       celleStato.forEach((cella, codice) => {
+        // Niente piu' da prendere dallo scaffale: lo si dice, e non si cerca altro.
+        if (conResto && !(restaCod.get(codice) > 0)) {
+          const chi = datoChi.get(chiaveCodice(codice));
+          cella.textContent = chi && chi.size ? '✓ dato a ' + [...chi].join(', ') : '✓ niente da prendere';
+          cella.style.color = 'var(--mut)';
+          cella.title = chi && chi.size ? 'Già dato per questa commessa: dallo scaffale non serve più niente'
+            : 'I pezzi ancora da fare non chiedono altro materiale';
+          return;
+        }
         const r = materialeStatoRiga(codice, tipoDi.get(codice), ctx);
         if (r.manca > 0) nMancano++;
         cella.textContent = r.testo;
