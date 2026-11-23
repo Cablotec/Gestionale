@@ -5058,19 +5058,62 @@ function contaTerzista(x, r) {
 // DISPONIBILE per una nuova richiesta: la sede meno quanto e' gia' promesso
 // alle richieste ancora da preparare (di qualsiasi commessa). Ritorna una
 // funzione codice -> quantita', piu' sede e impegnato per i tooltip.
+// ── PROVA: ACQ CONTROLLATI SULLA GIACENZA DI ALNUS (23 nov, Nico) ──
+// Per le commesse dei clienti qui sotto, i codici ACQ della richiesta si
+// propongono fin dove arriva la giacenza di Alnus (magazzino 01, dallo
+// Specchio Alnus; senza specchio la giacenza del Fabbisogno), meno quanto e'
+// gia' in liste da preparare; il resto va in «Mancano». Niente si scrive in
+// giacenza: e' solo la proposta. Per allargare la prova: un nome qui.
+const CLIENTI_ACQ_SU_ALNUS = ['JMA'];
+function provaAcqSuAlnus(x) {
+  const cli = x && (state.aziende || []).find(a => a.id === x.cliente_id);
+  const nome = String((cli && cli.nome) || '').toUpperCase();
+  return !!nome && CLIENTI_ACQ_SU_ALNUS.some(n => nome.includes(n.toUpperCase()));
+}
+// Il tipo di un codice: dalla riga, poi dal Fabbisogno di Alnus, poi dall'anagrafica.
+function tipoMaterialeTerzista(r) {
+  const t = String((r && r.tipo) || '').trim().toUpperCase();
+  if (t) return t;
+  const cod = chiaveCodice(r && r.codice);
+  const m = (state.mancantiAlnus || state.mancanti || []).find(z => chiaveCodice(z.codice) === cod && z.tipo_parte);
+  if (m) return String(m.tipo_parte).trim().toUpperCase();
+  const a = alnusTipi && alnusTipi.get(String((r && r.codice) || '').trim());
+  return a ? String(a).trim().toUpperCase() : '';
+}
+function contaAlnusTerzista(x, r) {
+  return !contaTerzista(x, r) && provaAcqSuAlnus(x) && tipoMaterialeTerzista(r) === 'ACQ';
+}
+// Giacenza di Alnus di un codice sullo scaffale (01): null = non si sa.
+function giacenzaAlnusScaffale() {
+  const A = state.alnus;
+  if (A && A.apertura) {
+    const g = giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il);
+    return { fonte: 'Specchio Alnus, magazzino 01', di: (cod) => { const v = g.get(String(cod).trim());
+      return v ? Math.max(0, +((v.perMag['01'] || 0)).toFixed(4)) : 0; } };
+  }
+  const fab = state.mancantiAlnus || state.mancanti;
+  if (Array.isArray(fab) && fab.length) {
+    return { fonte: 'Fabbisogno di Alnus', di: (cod) => { const m = fab.find(z => chiaveCodice(z.codice) === chiaveCodice(cod) && z.giacenza != null);
+      return m ? Math.max(0, Number(m.giacenza) || 0) : null; } };
+  }
+  return null;
+}
 function liberoTerzista() {
   const sede = saldoInSede(state.movimenti);
-  const impegnato = new Map();
+  const impegnato = new Map(), impegnatoA = new Map();
   (state.inviiTerzista || []).filter(x => x.stato === 'da_preparare').forEach(x => {
     (x.righe || []).forEach(r => {
       const ox = (state.operazioni || []).find(z => z.id === opDiRigaTerzista(x, r));
-      if (!contaTerzista(ox, r)) return;
       const c = String(r.codice || '').trim();
-      impegnato.set(c, (impegnato.get(c) || 0) + (Number(r.qta) || 0));
+      if (contaTerzista(ox, r)) impegnato.set(c, (impegnato.get(c) || 0) + (Number(r.qta) || 0));
+      else if (contaAlnusTerzista(ox, r)) impegnatoA.set(c, (impegnatoA.get(c) || 0) + (Number(r.qta) || 0));
     });
   });
   const libero = (cod) => Math.max(0, +((sede.get(cod) || 0) - (impegnato.get(cod) || 0)).toFixed(4));
-  return { libero, sede, impegnato };
+  const ga = giacenzaAlnusScaffale();
+  const giacA = (cod) => ga ? ga.di(cod) : null;
+  const liberoA = (cod) => { const g = giacA(cod); return g == null ? null : Math.max(0, +(g - (impegnatoA.get(cod) || 0)).toFixed(4)); };
+  return { libero, sede, impegnato, liberoA, giacA, impegnatoA, fonteA: ga ? ga.fonte : null };
 }
 
 // PROMEMORIA (16 nov, Nico): i MANCANTI di una richiesta gia' fatta che
@@ -5125,7 +5168,16 @@ function veloTerzista(titolo, larghezza) {
 // `o`: la commessa da cui si parte (null = da Movimenti, nessuna).
 // `opts.tutte`: le altre commesse del terzista partono gia' spuntate.
 // Dalla commessa partono NON spuntate: unire e' una scelta (Nico, 6 nov).
-function apriRichiestaTerzista(o, poi, opts) {
+// Prima di aprire legge lo Specchio Alnus e i tipi dei materiali, se servono
+// alla prova degli ACQ e non sono ancora stati letti (una volta sola).
+async function apriRichiestaTerzista(o, poi, opts) {
+  const serve = (state.operazioni || []).some(x => (x.stato === 'aperta' || x.stato === 'sospesa') && provaAcqSuAlnus(x));
+  if (serve && eAdminOra()) {
+    try { await Promise.all([state.alnus === undefined ? caricaAlnus() : null, alnusTipi ? null : caricaTipiMateriali()]); } catch (e) {}
+  }
+  apriRichiestaTerzistaOra(o, poi, opts);
+}
+function apriRichiestaTerzistaOra(o, poi, opts) {
   opts = opts || {};
   const v = veloTerzista('Richiesta di preparazione' + (o ? ' · ' + etiOpTerzista(o) : ''), 1040);
   const annulla = el('button', { class:'btng', onclick: v.chiudi }, 'Annulla');
@@ -5158,8 +5210,8 @@ function apriRichiestaTerzista(o, poi, opts) {
   const conta = contaTerzista;
   // DISPONIBILE: la sede meno quanto e' gia' promesso alle richieste ancora
   // da preparare (di qualsiasi commessa), solo per quello che ha giacenza.
-  const { libero, sede, impegnato } = liberoTerzista();
-  const num = (x) => { const n = Number(String(x == null ? '' : x).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
+  const { libero, sede, impegnato, liberoA, giacA, impegnatoA, fonteA } = liberoTerzista();
+  const num =(x) => { const n = Number(String(x == null ? '' : x).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
   // La NOTA di un codice per questo terzista, dalla scheda prodotto di OGGI
   // (non serve rigenerare le liste). Prodotti diversi con note diverse: unite.
   const notaDi = (comm, cod) => [...new Set(comm.map(c => {
@@ -5271,19 +5323,23 @@ function apriRichiestaTerzista(o, poi, opts) {
     const per = new Map();
     comm.forEach(c => (fasiDi.get(c.id).get(selTer.value) || []).forEach(({ riga, qta_pz }) => {
       const cod = String(riga.codice || '').trim();
-      if (!per.has(cod)) per.set(cod, { cod, riga, voci: [], gia: 0, conta: false });
+      if (!per.has(cod)) per.set(cod, { cod, riga, voci: [], gia: 0, conta: false, contaA: false });
       const g = per.get(cod);
       const gia = giaRichiestoTerzista(c.id, selTer.value, cod);
       g.gia = +(g.gia + gia).toFixed(4);
-      g.voci.push({ commessa: c, serve: serveTerzista(c, qta_pz, gia), conta: conta(c, riga) });
+      const cA = contaAlnusTerzista(c, riga) && liberoA(cod) != null;
+      g.voci.push({ commessa: c, serve: serveTerzista(c, qta_pz, gia), conta: conta(c, riga) || cA });
       if (conta(c, riga)) g.conta = true;
+      else if (cA) g.contaA = true;
     }));
     // in ordine di codice (con piu' commesse i codici della seconda finivano in fondo)
     [...per.values()].sort((a, b) => a.cod.localeCompare(b.cod, 'it', { numeric: true })).forEach(g => {
       const { cod, riga } = g;
       const serve = +g.voci.reduce((a, x) => a + x.serve, 0).toFixed(4);
       const serveContato = +g.voci.filter(x => x.conta).reduce((a, x) => a + x.serve, 0).toFixed(4);
-      const disp = g.conta ? libero(cod) : null;
+      // Giacenza del gestionale (C/L con la spunta) o, per la prova, di Alnus (ACQ).
+      const suAlnus = !g.conta && g.contaA;
+      const disp = g.conta ? libero(cod) : suAlnus ? liberoA(cod) : null;
       const manca = disp != null && disp < serveContato;
       const proposta = +(serve - serveContato + (disp == null ? serveContato : Math.min(serveContato, disp))).toFixed(4);
       const chk = el('input', { type:'checkbox', style:'width:15px;height:15px;margin:0;cursor:pointer;' });
@@ -5294,8 +5350,8 @@ function apriRichiestaTerzista(o, poi, opts) {
       inp.disabled = !chk.checked;
       chk.onchange = () => { inp.disabled = !chk.checked; if (chk.checked) inp.focus(); aggiorna(); };
       inp.oninput = aggiorna;
-      const tipo = String(riga.tipo || '').trim().toUpperCase();
-      const mc = el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, '—');
+      const tipo = tipoMaterialeTerzista(riga);
+      const mc =el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, '—');
       const rip = el('div', { class:'sub', style:'font-size:10px;white-space:normal;margin-top:1px;' });
       const inNotaR = el('input', { type:'text', value: notaDi(comm, cod), placeholder:'nota per il magazzino',
         style:'width:100%;font-size:11px;padding:2px 6px;margin-top:3px;' });
@@ -5311,10 +5367,13 @@ function apriRichiestaTerzista(o, poi, opts) {
         el('span', { class:'mono', style:'font-size:11px;text-align:right;' }, nfIT(serve)),
         disp != null
           ? el('span', { class:'mono', style:'font-size:11px;text-align:right;' + (manca ? 'color:var(--red);font-weight:700;' : ''),
-              title: 'In sede ' + nfIT(sede.get(cod) || 0)
-                + ((impegnato.get(cod) || 0) > 0 ? ', di cui ' + nfIT(impegnato.get(cod)) + ' già in richieste da preparare' : '')
+              title: (suAlnus
+                  ? 'Giacenza di Alnus (' + fonteA + ') ' + nfIT(giacA(cod) || 0)
+                    + ((impegnatoA.get(cod) || 0) > 0 ? ', di cui ' + nfIT(impegnatoA.get(cod)) + ' già in richieste da preparare' : '')
+                  : 'In sede ' + nfIT(sede.get(cod) || 0)
+                    + ((impegnato.get(cod) || 0) > 0 ? ', di cui ' + nfIT(impegnato.get(cod)) + ' già in richieste da preparare' : ''))
                 + (manca ? '. Non basta: si propone quello che c’è, a chi scade prima.' : '') },
-              nfIT(disp))
+              nfIT(disp), suAlnus ? el('span', { class:'sub', style:'display:block;font-size:9px;font-weight:400;' }, 'Alnus') : '')
           : el('span', { class:'sub', style:'font-size:10px;text-align:right;', title:'Il gestionale non conta questo materiale: '
               + 'partirà e resterà registrato, ma fuori giacenza.' }, 'non contato'),
         inp, mc));
@@ -5331,7 +5390,9 @@ function apriRichiestaTerzista(o, poi, opts) {
       + 'Serve = pezzi ancora da fare × quota per pezzo, meno quanto già chiesto per questa fase. '
       + 'Il reparto prende quello che resta in casa (la quota dei terzisti esclusa). '
       + 'Si propone fin dove arriva la giacenza disponibile (in rosso quando non basta): con più commesse '
-      + 'va prima a chi scade prima. I materiali non contati (MAC) si propongono interi.'),
+      + 'va prima a chi scade prima. I materiali non contati (MAC) si propongono interi. '
+      + 'In prova, per ' + CLIENTI_ACQ_SU_ALNUS.join(', ') + ': gli ACQ si controllano sulla giacenza di Alnus'
+      + (fonteA ? ' (' + fonteA + ')' : ' (non letta: si propongono interi)') + '.'),
     el('div', { style:'display:flex;gap:14px;flex-wrap:wrap;' },
       el('div', { class:'field' }, el('label', {}, 'Fase'), selTer)),
     boxCommesse,
