@@ -801,6 +801,7 @@ async function loadAllData() {
   await caricaOreEsterne();
   await caricaMancanti();
   await caricaMovimenti();
+  await caricaRicevimenti();
 }
 
 // Realtime: ascolto le modifiche su tutte le tabelle e tengo gli array sincronizzati
@@ -7376,20 +7377,87 @@ function codiceInGiacenzaGestionale(codice, mittenteId) {
   return (state.operazioni || []).some(o => o.materiali_da_ddt && (o.stato === 'aperta' || o.stato === 'sospesa')
     && (o.materiali || []).some(x => String(x.codice || '').trim().toUpperCase() === c && eCL(x)));
 }
-async function apriDdtEntrataManuale(poi) {
+// ── DDT IN ENTRATA e RICEVIMENTO (23 nov) ──────────────────────────────────
+// Nico: "rendere agevole all'operatore l'inserimento e l'abbinamento dei codici in
+// entrata agli ordini fornitori che aspettano l'ingresso di quei codici". UNA finestra
+// per il DDT scritto a mano (`ric` assente) e per quello letto dalla scansione e
+// lasciato come bozza in `ddt_ricevimenti` (`ric`). Per ogni riga: il codice sul
+// DDT, il NOSTRO codice, la riga d'ordine che lo aspettava (OF di quel fornitore),
+// la quantita'. Alla conferma `conferma_ricevimento` scrive i carichi, impara gli
+// abbinamenti nuovi in `codici_fornitore` e chiude la bozza (tutto o niente).
+// I DDT dei clienti in conto lavoro (Tema) restano automatici e non passano di qui.
+async function caricaRicevimenti() {
+  try {
+    const { data, error } = await sb.from('ddt_ricevimenti').select('*').eq('stato', 'da_confermare').order('creato_il');
+    state.ricevimenti = error ? null : (data || []);
+  } catch (e) { state.ricevimenti = null; }
+}
+// Le righe d'ordine di un fornitore: OF emessi e chiusi, con quanto aspettano ancora
+// secondo i NOSTRI carichi (per un OF di Alnus contano quelli dopo l'import).
+function righeOrdineFornitore(aziendaId) {
+  if (!aziendaId || !Array.isArray(state.ordiniFornitore)) return [];
+  const aperti = ordinatoApertoOf(state.ordiniFornitore, state.movimenti || [], null);
+  const out = [], visti = new Set();
+  state.ordiniFornitore.filter(o => o.fornitore_id === aziendaId && o.stato !== 'annullato')
+    .sort((a, b) => (b.anno - a.anno) || (b.numero - a.numero))
+    .forEach(o => (o.righe || []).forEach(r => {
+      const cod = chiaveCodice(r && r.codice);
+      if (!cod) return;
+      const serie = String(o.serie || 'OF').toUpperCase() === 'OL' ? 'OL' : 'OF';
+      const ordine = serie + ' ' + o.numero + '/' + o.anno;
+      const k = ordine + '|' + cod;
+      if (visti.has(k)) return; visti.add(k);
+      const ap = aperti.get(cod);
+      const x = ap ? ap.ordini.find(z => z.serie === serie && Number(z.numero) === Number(o.numero) && Number(z.anno) === Number(o.anno)) : null;
+      out.push({ k, ordine, codice: cod, codice_fornitore: r.codice_fornitore || '', descrizione: r.descrizione || '', um: r.um || '',
+        aperto: x ? x.aperto : 0, consegna: (x && x.consegna) || r.consegna || o.consegna || null, stato: o.stato });
+    }));
+  return out;
+}
+async function apriDdtEntrataManuale(poi, ric) {
   if (state.codiciFornitore === undefined) await caricaCodiciFornitore();
-  const v = veloTerzista('DDT in entrata · inserimento a mano', 1060);
+  if (codiciAnagrafica === undefined) await caricaCodiciAnagrafica();
+  const v = veloTerzista(ric ? 'DDT da confermare · ' + (ric.azienda_id ? nomeAziendaDi(ric.azienda_id) : ric.mittente) + ' n. ' + ric.ddt_numero
+    : 'DDT in entrata', 1280);
   const aziende = (state.aziende || []).filter(a => a.attivo !== false)
     .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
-  const selMitt = el('select', { onchange: () => disegna() }, el('option', { value:'' }, '— mittente —'),
+  let righe = [];
+  const selMitt = el('select', { onchange: () => { righe.forEach(r => { r.toccata = false; proponi(r); }); disegna(); } }, el('option', { value:'' }, '— mittente —'),
     ...aziende.map(a => el('option', { value: a.id }, a.nome)));
   const inNum = el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' });
   const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
-  const inOrd = el('input', { type:'text', class:'mono', placeholder:'es. OFS 3/2026 o ordine cliente' });
-  let righe = [];   // { codice, descrizione, um, qta, ordine_rif, note }
+  const inOrd = el('input', { type:'text', class:'mono', placeholder:'es. OF 763/2026' });
+  if (ric) { selMitt.value = ric.azienda_id || ''; selMitt.disabled = true; inNum.value = ric.ddt_numero || ''; if (ric.ddt_data) inData.value = String(ric.ddt_data).slice(0, 10); }
+  const noto = (c) => !!c && ((codiciAnagrafica ? codiciAnagrafica.has(c) : true) || codiceInGiacenzaGestionale(c, selMitt.value));
+  const ordiniDi = () => righeOrdineFornitore(selMitt.value);
+  // Proposta automatica: codice fornitore -> nostro (scheda del codice o righe degli OF),
+  // poi la riga d'ordine col nostro codice: quella citata, poi una ancora aperta, poi la piu' recente.
+  function proponi(r) {
+    if (r.toccata) return;
+    const ords = ordiniDi();
+    const suo = r.codice_mittente || r.codice;
+    let nostro = noto(chiaveCodice(r.codice)) ? chiaveCodice(r.codice) : null;
+    if (!nostro && suo) nostro = codiceNostroDaFornitore(selMitt.value, suo)
+      || trovaCodiceNostro(ords.map(o => ({ azienda_id: selMitt.value, codice_fornitore: o.codice_fornitore, codice: o.codice })), selMitt.value, suo);
+    if (nostro) r.codice = chiaveCodice(nostro);
+    // L'ordine citato: sulla riga («OF 763/2026») o nella nota della scansione («Vs. ordine OF/763 del …»).
+    const anno = String(inData.value || '').slice(0, 4);
+    const mNota = /\b(OF|OL)\s*\/?\s*(\d{1,6})\b/i.exec(String(r.note || ''));
+    const cit = chiaveOfDaRif(r.ordine_rif || '') || (mNota ? chiaveOfDaRif(mNota[1] + ' ' + mNota[2] + '/' + anno) : null);
+    const mie = ords.filter(o => o.codice === chiaveCodice(r.codice));
+    const sc = mie.find(o => cit && chiaveOfDaRif(o.ordine) === cit) || mie.find(o => o.aperto > 0) || mie[0] || null;
+    r.ofK = sc ? sc.k : '';
+    if (sc) r.ordine_rif = sc.ordine;
+  }
+  if (ric) {
+    righe = (ric.righe || []).map(x => ({ pos: x.pos || '', codice: chiaveCodice(x.codice || x.codice_mittente), codice_mittente: x.codice_mittente || x.codice || '',
+      descrizione: x.descrizione || '', um: x.um || '', qta: Number(x.qta) || 0, ordine_rif: x.ordine_rif || '', note: x.note || '', ofK: '' }));
+    righe.forEach(proponi);
+  }
   const corpo = el('div');
-  const C = 'display:grid;grid-template-columns:150px minmax(170px,1fr) 52px 80px 130px minmax(110px,.8fr) 120px 28px;gap:6px;align-items:center;';
+  const C = 'display:grid;grid-template-columns:170px minmax(150px,1fr) 46px 74px minmax(230px,1.3fr) minmax(100px,.7fr) 112px 26px;gap:6px;align-items:center;';
   const et = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const nfq = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   const completa = async (r) => {
     const c = r.codice;
     const mv = (state.movimenti || []).slice().reverse().find(m => String(m.codice || '').toUpperCase() === c && m.descrizione);
@@ -7404,78 +7472,145 @@ async function apriDdtEntrataManuale(poi) {
     }
     disegna();
   };
-  const disegna = () => {
+  const riepilogo = el('div', { class:'sub', style:'font-size:12px;' });
+  function disegna() {
     corpo.innerHTML = '';
+    const ords = ordiniDi();
     corpo.append(el('div', { style: C + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
-      et('Codice'), et('Descrizione'), et('UM'), et('Q.tà', 1), et('Ordine'), et('Nota'), et('Giacenza'), el('span')));
+      et('Nostro codice'), et('Descrizione'), et('UM'), et('Q.tà', 1), et('Riga d’ordine che lo aspettava'), et('Nota'), et('Stato'), el('span')));
     if (!righe.length) corpo.append(el('div', { class:'sub', style:'padding:10px 0;font-size:12px;' }, 'Nessuna riga: «+ Riga» per aggiungerne.'));
+    let daAbb = 0;
     righe.forEach((r, i) => {
-      const inCod = el('input', { type:'text', value: r.codice, class:'mono', style:'font-size:12px;', placeholder:'nostro o del fornitore' });
+      const inCod = el('input', { type:'text', value: r.codice, class:'mono', style:'font-size:12px;width:100%;', placeholder:'nostro o del fornitore' });
       inCod.onchange = () => {
-        r.codice = inCod.value.trim().toUpperCase();
-        // Scritto il codice del FORNITORE: lo si traduce nel nostro dalla scheda del codice (19 nov).
-        const nostro = codiceNostroDaFornitore(selMitt.value, r.codice);
-        if (nostro && chiaveCodice(nostro) !== r.codice) {
-          r.note = [r.note, 'cod. fornitore ' + r.codice].filter(Boolean).join(' · ');
-          r.codice = chiaveCodice(nostro);
-        }
-        inCod.value = r.codice; if (r.codice) completa(r); else disegna(); };
+        const scritto = inCod.value.trim().toUpperCase();
+        if (!r.codice_mittente) r.codice_mittente = scritto;
+        r.codice = scritto; r.toccata = false; r.ofK = '';
+        proponi(r); r.toccata = true;
+        if (r.codice) completa(r); else disegna(); };
+      const sotto = r.codice_mittente && chiaveCodice(r.codice_mittente) !== chiaveCodice(r.codice)
+        ? el('div', { class:'sub mono', style:'font-size:10px;margin-top:1px;' }, 'sul DDT: ' + r.codice_mittente) : '';
       const inDesc = el('input', { type:'text', value: r.descrizione, style:'font-size:12px;' });
       inDesc.oninput = () => { r.descrizione = inDesc.value; };
       const inUm = el('input', { type:'text', value: r.um, style:'font-size:12px;' });
       inUm.oninput = () => { r.um = inUm.value.trim(); };
       const inQ = el('input', { type:'text', inputmode:'decimal', value: r.qta ? nfIT(r.qta) : '', class:'mono', style:'font-size:12px;text-align:right;' });
       inQ.oninput = () => { const n = numeroDaTesto(inQ.value); r.qta = n == null || isNaN(n) ? 0 : n; inQ.style.color = n != null && isNaN(n) ? 'var(--red)' : ''; };
-      const inO = el('input', { type:'text', value: r.ordine_rif, class:'mono', style:'font-size:12px;' });
-      inO.oninput = () => { r.ordine_rif = inO.value.trim(); };
-      const inN = el('input', { type:'text', value: r.note, style:'font-size:12px;' });
+      // Le righe d'ordine di QUEL fornitore: prima quelle col nostro codice, poi le aperte.
+      const sel = el('select', { style:'font-size:11px;width:100%;' });
+      sel.append(el('option', { value:'' }, r.ordine_rif && !r.ofK ? '— ' + r.ordine_rif + ' (senza OF) —' : '— nessun ordine —'));
+      const ordinati = ords.slice().sort((a, b) => ((b.codice === r.codice) - (a.codice === r.codice)) || ((b.aperto > 0) - (a.aperto > 0)));
+      ordinati.forEach(o => sel.append(el('option', { value: o.k },
+        o.ordine + ' · ' + o.codice + (o.codice_fornitore ? ' (' + o.codice_fornitore + ')' : '') + ' · '
+        + (o.aperto > 0 ? 'aspetta ' + nfq(o.aperto) : o.stato === 'chiuso' ? 'chiuso' : 'evasa'))));
+      sel.value = r.ofK || '';
+      sel.onchange = () => {
+        r.toccata = true; r.ofK = sel.value;
+        const o = ords.find(x => x.k === sel.value);
+        if (o) { r.codice = o.codice; r.ordine_rif = o.ordine; if (!r.descrizione) r.descrizione = o.descrizione; if (!r.um) r.um = o.um; }
+        else r.ordine_rif = '';
+        disegna(); };
+      const o = ords.find(x => x.k === r.ofK);
+      const oltre = o && o.aperto > 0 && r.qta > o.aperto;
+      const inN = el('input', { type:'text', value: r.note, style:'font-size:12px;', title: r.note || '' });
       inN.oninput = () => { r.note = inN.value; };
-      const gest = r.codice ? codiceInGiacenzaGestionale(r.codice, selMitt.value) : null;
-      const giac = r.codice ? el('span', { class:'badge ' + (gest ? 'bok' : 'bgry'), style:'white-space:nowrap;font-size:10px;',
-        title: gest ? 'Materiale del cliente, o codice già contato dal gestionale: il carico entra nella sua giacenza'
-          : 'La giacenza di questo codice la tiene ancora Alnus: il carico resta nel registro, fuori giacenza' },
-        gest ? 'gestionale' : 'solo registro') : el('span');
+      const ok = noto(chiaveCodice(r.codice));
+      if (r.codice && !ok) daAbb++;
+      const gest = ok && codiceInGiacenzaGestionale(r.codice, selMitt.value);
+      const stato = !r.codice ? el('span')
+        : el('div', {}, el('span', { class:'badge ' + (ok ? 'bok' : 'byel'), style:'font-size:10px;white-space:nowrap;',
+            title: ok ? 'Codice nostro' : 'Codice che non è nell’anagrafica: scegli la riga d’ordine o scrivi il nostro codice' },
+            ok ? '✓ abbinata' : '⚠ da abbinare'),
+          oltre ? el('div', { style:'font-size:10px;color:var(--or);margin-top:2px;' }, 'più dell’ordinato (' + nfq(o.aperto) + ')') : '',
+          ok ? el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' }, gest ? 'in giacenza' : 'solo registro') : '');
       const via = el('button', { type:'button', class:'btnsm', style:'padding:0 6px;', title:'Togli la riga', onclick: () => { righe.splice(i, 1); disegna(); } }, '✕');
-      corpo.append(el('div', { style: C + 'padding:3px 0;' }, inCod, inDesc, inUm, inQ, inO, inN, giac, via));
+      corpo.append(el('div', { style: C + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
+        el('div', {}, inCod, sotto), inDesc, inUm, inQ, sel, inN, stato, via));
     });
-  };
-  const nuovaRiga = () => ({ codice:'', descrizione:'', um:'', qta:0, ordine_rif: inOrd.value.trim(), note:'' });
-  inOrd.onchange = () => { righe.forEach(r => { r.ordine_rif = inOrd.value.trim(); }); disegna(); };
-  const piu = el('button', { type:'button', class:'btnsm', style:'margin-top:6px;', onclick: () => {
-    righe.push(nuovaRiga()); disegna(); const c = corpo.querySelectorAll('input.mono'); if (c.length) c[c.length - 3].focus(); } }, '+ Riga');
+    riepilogo.textContent = righe.length ? righe.length + (righe.length === 1 ? ' riga' : ' righe') + ' · '
+      + (daAbb ? daAbb + ' da abbinare' : 'tutte abbinate') : '';
+    riepilogo.style.color = daAbb ? 'var(--or)' : '';
+  }
+  const nuovaRiga = () => ({ pos:'', codice:'', codice_mittente:'', descrizione:'', um:'', qta:0, ordine_rif: inOrd.value.trim(), note:'', ofK:'' });
+  inOrd.onchange = () => { righe.forEach(r => { r.ordine_rif = inOrd.value.trim(); r.toccata = false; r.ofK = ''; proponi(r); }); disegna(); };
+  const piu = el('button', { type:'button', class:'btnsm', onclick: () => {
+    righe.push(nuovaRiga()); disegna(); const c = corpo.querySelectorAll('input.mono'); if (c.length) c[c.length - 2].focus(); } }, '+ Riga');
   const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
-  righe = [nuovaRiga()];
+  if (!ric) righe = [nuovaRiga()];
   disegna();
   v.corpo.append(
-    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
-      'Per i DDT che l’automazione delle scansioni non legge. Le righe diventano carichi di magazzino, come quelle lette in automatico. '
-      + 'Il codice si può scrivere anche come lo scrive il fornitore: se è nella scheda del codice, diventa il nostro. '
-      + 'Un codice la cui giacenza la tiene ancora Alnus resta «solo registro». Un errore dopo il salvataggio si corregge con una rettifica in Movimenti.'),
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' }, ric
+      ? 'Letto dalla scansione' + (ric.file ? ' (' + ric.file + ')' : '') + '. Controlla ogni riga: il nostro codice e la riga d’ordine che lo aspettava. '
+        + 'Le righe «da abbinare» hanno ancora il codice del fornitore: scegli la riga d’ordine o scrivi il nostro codice. '
+        + 'Alla conferma i carichi entrano in magazzino e gli abbinamenti nuovi si salvano nella scheda del codice: il prossimo DDT li riconosce da solo.'
+      : 'Le righe diventano carichi di magazzino. Il codice si può scrivere anche come lo scrive il fornitore: se è conosciuto diventa il nostro, '
+        + 'e la riga d’ordine si sceglie fra quelle di quel fornitore. Gli abbinamenti nuovi si salvano nella scheda del codice.'),
     el('div', { class:'frow' }, campo('Mittente', selMitt), campo('Numero DDT', inNum), campo('Data DDT', inData), campo('Stesso ordine per tutte le righe', inOrd)),
-    corpo, piu);
+    corpo, el('div', { style:'display:flex;gap:12px;align-items:center;margin-top:6px;' }, piu, riepilogo));
   const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
-  const ok = el('button', { class:'btnp' }, '↓ Carica il DDT');
+  const ok = el('button', { class:'btnp' }, ric ? '✓ Conferma ricevimento' : '↓ Carica il DDT');
+  const testoOk = ok.textContent;
   ok.onclick = async () => {
     const valide = righe.filter(r => r.codice);
     const err = !selMitt.value ? 'Scegli il mittente' : !inNum.value.trim() ? 'Scrivi il numero del DDT' : !inData.value ? 'Manca la data'
       : !valide.length ? 'Aggiungi almeno una riga' : valide.some(r => !(r.qta > 0)) ? 'Ogni riga vuole una quantità maggiore di zero' : null;
     if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
-    ok.disabled = true; ok.textContent = 'Caricamento…';
-    const p_righe = valide.map(r => ({ codice: r.codice, descrizione: r.descrizione || '', um: r.um || '', qta: r.qta,
-      ordine_rif: r.ordine_rif || '', note: r.note || '', fuori_giacenza: !codiceInGiacenzaGestionale(r.codice, selMitt.value) }));
-    const { data, error } = await sb.rpc('mov_carica_ddt', { p_azienda: selMitt.value, p_numero: inNum.value.trim(), p_data: inData.value, p_righe });
+    const daAbb = valide.filter(r => !noto(chiaveCodice(r.codice)));
+    if (daAbb.length && !confirm(daAbb.length + (daAbb.length === 1 ? ' riga ha' : ' righe hanno') + ' un codice che non è nell’anagrafica ('
+      + daAbb.slice(0, 5).map(r => r.codice).join(', ') + (daAbb.length > 5 ? '…' : '') + ').\nEntrano così, col codice del fornitore. Confermi?')) return;
+    ok.disabled = true; ok.textContent = 'Salvataggio…';
+    const p_righe = valide.map(r => ({ pos: r.pos || '', codice: chiaveCodice(r.codice), codice_mittente: r.codice_mittente || '',
+      descrizione: r.descrizione || '', um: r.um || '', qta: r.qta, ordine_rif: r.ordine_rif || '', note: r.note || '',
+      file: (ric && ric.file) || '', fuori_giacenza: !codiceInGiacenzaGestionale(r.codice, selMitt.value) }));
+    const visti = new Set();
+    const p_abbinamenti = valide.filter(r => r.codice_mittente && chiaveCodice(r.codice_mittente) !== chiaveCodice(r.codice)
+      && noto(chiaveCodice(r.codice)) && !codiceNostroDaFornitore(selMitt.value, r.codice_mittente))
+      .map(r => ({ codice: chiaveCodice(r.codice), codice_fornitore: r.codice_mittente }))
+      .filter(a => { const k = chiaveCodice(a.codice_fornitore); if (visti.has(k)) return false; visti.add(k); return true; });
+    let { data, error } = await sb.rpc('conferma_ricevimento', { p_id: ric ? ric.id : null, p_azienda: selMitt.value,
+      p_numero: inNum.value.trim(), p_data: inData.value, p_righe, p_abbinamenti });
+    const manca = (e) => e && /(could not find|does not exist|schema cache)/i.test(e.message || '');
+    if (error && manca(error) && !ric) {
+      // SQL del ricevimento non ancora eseguito: il DDT a mano funziona come prima.
+      ({ data, error } = await sb.rpc('mov_carica_ddt', { p_azienda: selMitt.value, p_numero: inNum.value.trim(), p_data: inData.value, p_righe }));
+    }
     if (error) {
-      ok.disabled = false; ok.textContent = '↓ Carica il DDT';
-      const manca = /mov_carica_ddt/.test(error.message || '') && /(could not find|does not exist|schema cache)/i.test(error.message || '');
-      msg.textContent = manca ? 'Non ancora attivo: manca lo SQL migrazione-ddt-entrata-manuale.sql' : error.message;
+      ok.disabled = false; ok.textContent = testoOk;
+      msg.textContent = manca(error) ? 'Non ancora attivo: manca lo SQL migrazione-ricevimento-ddt.sql' : error.message;
       msg.style.color = 'var(--red)'; return;
     }
     v.chiudi();
-    toast('DDT ' + inNum.value.trim() + ' caricato: ' + (data || valide.length) + (valide.length === 1 ? ' riga' : ' righe'), 'ok');
-    await caricaMovimenti();
+    toast('DDT ' + inNum.value.trim() + ' ' + (ric ? 'confermato' : 'caricato') + ': ' + (data || valide.length) + (valide.length === 1 ? ' riga' : ' righe')
+      + (p_abbinamenti.length ? ' · ' + p_abbinamenti.length + (p_abbinamenti.length === 1 ? ' codice fornitore imparato' : ' codici fornitore imparati') : ''), 'ok', 8000);
+    await Promise.all([caricaMovimenti(), caricaRicevimenti(), caricaCodiciFornitore()]);
     if (typeof poi === 'function') poi();
   };
-  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+  const scarta = ric ? el('button', { class:'btng', title:'Il DDT non si carica (doppione, letto male…): sparisce dai DDT da confermare', onclick: async () => {
+    if (!confirm('Scartare il DDT ' + ric.ddt_numero + '? Non entra in magazzino e sparisce dai DDT da confermare.')) return;
+    const { data, error } = await sb.from('ddt_ricevimenti').update({ stato: 'scartato' }).eq('id', ric.id).select('id');
+    if (error || !data || !data.length) { msg.textContent = 'Non scartato: ' + ((error && error.message) || 'permesso negato'); msg.style.color = 'var(--red)'; return; }
+    v.chiudi(); toast('DDT ' + ric.ddt_numero + ' scartato', 'ok'); await caricaRicevimenti(); if (typeof poi === 'function') poi();
+  } }, 'Scarta') : '';
+  v.piede.append(msg, scarta, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+}
+// Il riquadro in cima a Movimenti: i DDT letti dalle scansioni che aspettano la conferma.
+function riquadroRicevimenti(ridisegna) {
+  const box = el('div');
+  if (!Array.isArray(state.ricevimenti) || !state.ricevimenti.length) return box;
+  box.style.cssText = 'margin:0 0 18px;padding:10px 14px;border:1px solid var(--blu);border-radius:6px;max-width:1100px;';
+  box.append(el('div', { style:'font-weight:700;color:var(--blu);margin-bottom:6px;' },
+    '📥 DDT da confermare: ' + state.ricevimenti.length));
+  state.ricevimenti.forEach(r => {
+    const n = (r.righe || []).length;
+    const daAbb = codiciAnagrafica ? (r.righe || []).filter(x => { const c = chiaveCodice(x.codice || x.codice_mittente);
+      return !codiciAnagrafica.has(c) && !codiceInGiacenzaGestionale(c, r.azienda_id); }).length : null;
+    box.append(el('div', { style:'display:flex;gap:12px;align-items:center;padding:4px 0;border-top:1px solid var(--brd);font-size:12px;' },
+      el('span', { style:'min-width:220px;font-weight:600;' }, r.azienda_id ? nomeAziendaDi(r.azienda_id) : r.mittente),
+      el('span', { class:'mono' }, 'DDT ' + r.ddt_numero), el('span', { class:'sub' }, r.ddt_data ? fmtIT(String(r.ddt_data).slice(0, 10)) : ''),
+      el('span', { class:'sub' }, n + (n === 1 ? ' riga' : ' righe') + (daAbb ? ' · ' + daAbb + ' da abbinare' : '')),
+      eAdminOra() ? el('button', { class:'btnp', style:'margin-left:auto;padding:2px 12px;', onclick: () => apriDdtEntrataManuale(ridisegna, r) }, 'Apri e conferma') : ''));
+  });
+  return box;
 }
 function renderDocumenti(root) {
   root.innerHTML = '';
@@ -10709,7 +10844,7 @@ function renderMovimenti(root) {
   const nf = (n) => (n == null || n === '' || !Number.isFinite(Number(n)))
     ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   const ricarica = el('button', { class:'btnsm', title:'Rileggi i movimenti dal database',
-    onclick: async () => { ricarica.disabled = true; await caricaMovimenti(); renderMovimenti(root); } }, '⟳ Aggiorna');
+    onclick: async () => { ricarica.disabled = true; await Promise.all([caricaMovimenti(), caricaRicevimenti()]); renderMovimenti(root); } }, '⟳ Aggiorna');
   // ± RETTIFICA (17 nov): solo admin; la funzione a database lo ricontrolla.
   const dopoRettifica = (cod) => { if (cod) { movCerca = cod; movQuante = 400; } renderMovimenti(root); };
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Movimenti'), ricarica,
@@ -10719,6 +10854,7 @@ function renderMovimenti(root) {
       '± Rettifica') : ''));
 
   // CODICI NON RICONOSCIUTI NEI DDT (20 nov): in cima, finche' ce ne sono.
+  root.append(riquadroRicevimenti(() => renderMovimenti(root)));
   root.append(avvisoCodiciSconosciuti(() => renderMovimenti(root)));
 
   // DA PREPARARE PER I TERZISTI (5 nov): le richieste aperte di tutte le
