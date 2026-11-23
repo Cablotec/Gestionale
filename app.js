@@ -17261,10 +17261,12 @@ function openOperazioneModal(o, opts) {
           + 'font-size:12px;max-width:620px;line-height:1.5;' },
         chkDdt,
         el('span', {},
-          el('span', { style:'font-weight:700;' }, 'Materiali da DDT'),
+          // Testo riscritto il 23 nov (Nico: «Materiali da DDT» ingannava).
+          el('span', { style:'font-weight:700;' }, 'Giacenza nel gestionale (C/L del cliente)'),
           el('span', { class:'sub', style:'display:block;font-size:11px;margin-top:2px;' },
-            'I codici C/L (li manda il cliente) si contano dai DDT letti in automatico, non da Alnus. '
-            + 'ACQ resta su Alnus, MAC resta consumo.'))));
+            'I C/L che manda il cliente si contano dai DDT caricati nel gestionale, non da Alnus: arrivati e mancanti, '
+            + 'disponibile nelle liste per terzisti e reparto (oltre la giacenza non si propone), scarico a ogni lotto. '
+            + 'ACQ resta su Alnus, MAC resta consumo. Senza spunta le liste propongono tutto, senza guardare la giacenza.'))));
     }
 
     const COL = 'display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(140px,1.4fr) '
