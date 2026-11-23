@@ -78,6 +78,17 @@ sez('Serie: un OF di Alnus col suo numero, sincronizzato');
   t('serie e origine riportate', di('a').serie === 'OF' && di('a').origine === 'alnus' && di('n').serie === 'OL');
   t('chiuso non conta', a.ordini.length === 2 && a.aperto === 126);
 }
+{
+  // UN ARRIVO SOLO (23 nov): stesso carico registrato col nostro DDT e importato da Alnus (EA1).
+  const ord = [{ id: 'c', tipo: 'acquisto', stato: 'emesso', serie: 'OF', anno: 2026, numero: 730, origine: 'alnus',
+    sincronizzato_il: '2026-11-23T11:04:29Z', righe: [{ codice: 'X', qta: 200, qta_residua: 200 }, { codice: 'X', qta: 200, qta_residua: 200 }] }];
+  const ea1 = { tipo: 'carico', codice: 'X', qta: 100, ordine_rif: 'OF 730/2026', data: '2026-11-23T12:44:30Z', alnus: true };
+  const ddt = { tipo: 'carico', codice: 'X', qta: 100, ordine_rif: 'OF 730/2026', data: '2026-11-24' };
+  t('OF di Alnus: EA1 + nostro DDT = scende una volta', M.ordinatoApertoOf(ord, [ea1, ddt]).get('X').aperto === 300);
+  t('OF di Alnus: solo il nostro DDT (EA1 non ancora importato) = scende', M.ordinatoApertoOf(ord, [ddt]).get('X').aperto === 300);
+  const nostro = [Object.assign({}, ord[0], { id: 'g', origine: 'gestionale', sincronizzato_il: null })];
+  t('OF del gestionale: contano anche i carichi di Alnus come prima', M.ordinatoApertoOf(nostro, [ea1, ddt]).get('X').aperto === 200);
+}
 
 console.log('\n' + ok + ' ok, ' + ko + ' KO');
 process.exit(ko ? 1 : 0);

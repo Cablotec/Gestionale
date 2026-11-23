@@ -718,7 +718,7 @@ function ordinatoApertoOf(ordini, movimenti, escludiId) {
     if (!k) return;
     const c = String(m.codice || '').trim().toUpperCase();
     if (!arrivi.has(k + '|' + c)) arrivi.set(k + '|' + c, []);
-    arrivi.get(k + '|' + c).push({ qta: Number(m.qta), t: Date.parse(m.data) });
+    arrivi.get(k + '|' + c).push({ qta: Number(m.qta), t: Date.parse(m.data), alnus: !!m.alnus });
   });
   const per = new Map();        // CODICE -> { aperto, ordini:[{ id, serie, anno, numero, ordinato, arrivato, aperto, consegna }] }
   (ordini || []).forEach(of => {
@@ -737,7 +737,13 @@ function ordinatoApertoOf(ordini, movimenti, escludiId) {
     });
     const k = chiaveOf(of);
     somma.forEach((v, c) => {
-      const arr = (arrivi.get(k + '|' + c) || []).filter(a => dopo == null || isNaN(dopo) || (a.t > dopo))
+      // ⚠ UN ARRIVO SOLO (23 nov, Nico: DDT Comet 7467 registrato nel gestionale e
+      // EA1 dello stesso carico importato da Alnus). Su un ordine di Alnus, se ci
+      // sono carichi di Alnus (`alnus`) contano solo loro: i nostri DDT restano
+      // registro. Senza carichi di Alnus vale tutto, come prima.
+      let lista = arrivi.get(k + '|' + c) || [];
+      if (of.origine === 'alnus' && lista.some(a => a.alnus)) lista = lista.filter(a => a.alnus);
+      const arr = lista.filter(a => dopo == null || isNaN(dopo) || (a.t > dopo))
         .reduce((s2, a) => s2 + a.qta, 0);
       const ap = Math.max(0, +(v.q - arr).toFixed(6));
       if (!per.has(c)) per.set(c, { aperto: 0, ordini: [] });

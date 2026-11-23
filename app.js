@@ -6869,7 +6869,7 @@ function movimentiPerOf() {
   const A = state.alnus;
   const daAlnus = (A && Array.isArray(A.movimenti) ? A.movimenti : [])
     .filter(m => ['OF', 'OL'].includes(String(m.tipo_doc || '').trim().toUpperCase()) && Number(m.qta) > 0 && m.numero_doc && m.anno_doc)
-    .map(m => ({ tipo: 'carico', codice: m.codice, qta: Number(m.qta), data: m.data,
+    .map(m => ({ tipo: 'carico', codice: m.codice, qta: Number(m.qta), data: m.data, alnus: true,
       ordine_rif: String(m.tipo_doc).trim().toUpperCase() + ' ' + Number(m.numero_doc) + '/' + Number(m.anno_doc) }));
   return (state.movimenti || []).concat(daAlnus);
 }
