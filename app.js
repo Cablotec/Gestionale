@@ -7418,7 +7418,7 @@ async function apriDdtEntrataManuale(poi, ric) {
   if (state.codiciFornitore === undefined) await caricaCodiciFornitore();
   if (codiciAnagrafica === undefined) await caricaCodiciAnagrafica();
   const v = veloTerzista(ric ? 'DDT da confermare · ' + (ric.azienda_id ? nomeAziendaDi(ric.azienda_id) : ric.mittente) + ' n. ' + ric.ddt_numero
-    : 'DDT in entrata', 1280);
+    : 'DDT in entrata', 1400);
   const aziende = (state.aziende || []).filter(a => a.attivo !== false)
     .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
   let righe = [];
@@ -7455,7 +7455,7 @@ async function apriDdtEntrataManuale(poi, ric) {
     righe.forEach(proponi);
   }
   const corpo = el('div');
-  const C = 'display:grid;grid-template-columns:170px minmax(150px,1fr) 46px 74px minmax(230px,1.3fr) minmax(100px,.7fr) 112px 26px;gap:6px;align-items:center;';
+  const C = 'display:grid;grid-template-columns:130px 170px minmax(150px,1fr) 46px 74px minmax(230px,1.3fr) minmax(100px,.7fr) 112px 26px;gap:6px;align-items:center;';
   const et = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
   const nfq = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   const completa = async (r) => {
@@ -7477,7 +7477,7 @@ async function apriDdtEntrataManuale(poi, ric) {
     corpo.innerHTML = '';
     const ords = ordiniDi();
     corpo.append(el('div', { style: C + 'padding-bottom:3px;border-bottom:1px solid var(--brd);' },
-      et('Nostro codice'), et('Descrizione'), et('UM'), et('Q.tà', 1), et('Riga d’ordine che lo aspettava'), et('Nota'), et('Stato'), el('span')));
+      et('Codice fornitore'), et('Nostro codice'), et('Descrizione'), et('UM'), et('Q.tà', 1), et('Riga d’ordine che lo aspettava'), et('Nota'), et('Stato'), el('span')));
     if (!righe.length) corpo.append(el('div', { class:'sub', style:'padding:10px 0;font-size:12px;' }, 'Nessuna riga: «+ Riga» per aggiungerne.'));
     let daAbb = 0;
     righe.forEach((r, i) => {
@@ -7488,8 +7488,14 @@ async function apriDdtEntrataManuale(poi, ric) {
         r.codice = scritto; r.toccata = false; r.ofK = '';
         proponi(r); r.toccata = true;
         if (r.codice) completa(r); else disegna(); };
-      const sotto = r.codice_mittente && chiaveCodice(r.codice_mittente) !== chiaveCodice(r.codice)
-        ? el('div', { class:'sub mono', style:'font-size:10px;margin-top:1px;' }, 'sul DDT: ' + r.codice_mittente) : '';
+      // Il codice del FORNITORE accanto al nostro, correggibile (23 nov, Nico): una lettura
+      // sbagliata della scansione si corregge qui, e la proposta del nostro codice si rifa'.
+      const inSuo = el('input', { type:'text', value: r.codice_mittente || '', class:'mono', style:'font-size:12px;width:100%;',
+        placeholder:'come sul DDT', title:'Il codice scritto dal fornitore sul DDT: si salva come suo codice per il nostro' });
+      inSuo.onchange = () => {
+        r.codice_mittente = inSuo.value.trim().toUpperCase();
+        if (!noto(chiaveCodice(r.codice)) || !r.toccata) { r.codice = r.codice_mittente; r.toccata = false; r.ofK = ''; proponi(r); }
+        if (r.codice) completa(r); else disegna(); };
       const inDesc = el('input', { type:'text', value: r.descrizione, style:'font-size:12px;' });
       inDesc.oninput = () => { r.descrizione = inDesc.value; };
       const inUm = el('input', { type:'text', value: r.um, style:'font-size:12px;' });
@@ -7525,7 +7531,7 @@ async function apriDdtEntrataManuale(poi, ric) {
           ok ? el('div', { class:'sub', style:'font-size:10px;margin-top:2px;' }, gest ? 'in giacenza' : 'solo registro') : '');
       const via = el('button', { type:'button', class:'btnsm', style:'padding:0 6px;', title:'Togli la riga', onclick: () => { righe.splice(i, 1); disegna(); } }, '✕');
       corpo.append(el('div', { style: C + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
-        el('div', {}, inCod, sotto), inDesc, inUm, inQ, sel, inN, stato, via));
+        inSuo, inCod, inDesc, inUm, inQ, sel, inN, stato, via));
     });
     riepilogo.textContent = righe.length ? righe.length + (righe.length === 1 ? ' riga' : ' righe') + ' · '
       + (daAbb ? daAbb + ' da abbinare' : 'tutte abbinate') : '';
