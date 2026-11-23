@@ -6999,6 +6999,26 @@ function giacenzaDaMovimentiReali() {
   });
   return per;
 }
+// La giacenza in sede di un codice, la stessa per tutte le schermate:
+// movimenti reali (allineati) > Specchio Alnus (foto + movimenti, magazzini
+// contati) > Fabbisogno di Alnus importato. Ritorna { fonte, di(codice) }.
+function giacenzaScaffaleFn() {
+  if (movimentiReali()) {
+    const m = giacenzaDaMovimentiReali();
+    return { fonte: 'movimenti del gestionale', di: (c) => { const g = m.get(String(c || '').trim()); return g ? g.totale : 0; } };
+  }
+  const A = state.alnus;
+  if (A && A.apertura) {
+    const tutti = [...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino)).concat(A.movimenti.map(x => magazzinoAlnus(x.magazzino))))].filter(Boolean);
+    const mags = alnusMagazziniContati(tutti);
+    const g = giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il);
+    return { fonte: 'Specchio Alnus', di: (c) => { const v = g.get(String(c || '').trim());
+      return v ? +Object.entries(v.perMag).reduce((s, [k, q]) => s + (mags.has(k) ? q : 0), 0).toFixed(6) : 0; } };
+  }
+  const fab = state.mancantiAlnus || state.mancanti || [];
+  return { fonte: 'Fabbisogno di Alnus', di: (c) => { const m = fab.find(x => chiaveCodice(x.codice) === chiaveCodice(c) && x.giacenza != null);
+    return m ? Number(m.giacenza) || 0 : null; } };
+}
 // Lancia l'allineamento (admin) e rilegge i movimenti. Ritorna il riepilogo o lancia.
 async function allineaMovimentiAlnus() {
   const { data, error } = await sb.rpc('mov_allinea_alnus');
@@ -17625,7 +17645,11 @@ function openOperazioneModal(o, opts) {
       if (!datoChi.has(k)) datoChi.set(k, new Set());
       datoChi.get(k).add(eReparto(x.terzista_id) ? 'reparto' : nomeAziendaDi(x.terzista_id));
     }));
-    const COLR = conResto ? COL.replace('70px 90px 44px', '70px 80px 70px 70px 44px') : COL;
+    // GIACENZA A COLPO D'OCCHIO (23 nov, Nico): la giacenza del codice in sede,
+    // dai movimenti reali se allineati, altrimenti da Alnus (Specchio o
+    // Fabbisogno). Sempre visibile; null = non la sappiamo.
+    const giacDi = giacenzaScaffaleFn();
+    const COLR = COL.replace('70px 90px 44px', conResto ? '70px 80px 70px 70px 80px 44px' : '70px 90px 80px 44px');
     listaBox.append(el('div', { style: COLR + 'padding-bottom:4px;border-bottom:1px solid var(--brd);' },
       et('Codice'), et('Descrizione'), et('Per pz', 'text-align:right;'),
       et('Necessari', 'text-align:right;'),
@@ -17633,6 +17657,8 @@ function openOperazioneModal(o, opts) {
           title:'Già dato ai terzisti o portato in reparto per questa commessa' }, 'Dati'),
         el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;text-align:right;',
           title:'Quanto la commessa chiede ancora allo scaffale: necessari − dati, mai più di quanto chiedono i pezzi ancora da fare' }, 'Restano')] : []),
+      el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;text-align:right;',
+        title:'Giacenza del codice in sede (' + giacDi.fonte + '), per tutte le commesse: lo stato dice quanta ne tocca a questa' }, 'Giacenza'),
       et('UM'), et('Stato')));
 
     const celleStato = new Map();
@@ -17671,6 +17697,9 @@ function openOperazioneModal(o, opts) {
         ...(conResto ? [
           el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (dR > 0 ? 'var(--or)' : 'var(--mut)') + ';' }, dR > 0 ? nf(dR) : '—'),
           el('span', { class:'mono', style:'font-size:11px;text-align:right;font-weight:700;' + (rR > 0 ? '' : 'color:var(--mut);') }, rR > 0 ? nf(rR) : '0')] : []),
+        (() => { const g = giacDi.di(r.codice);
+          return el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (g == null ? 'var(--mut)' : g <= 0 ? 'var(--red)' : 'var(--txt)') + ';' },
+            g == null ? '—' : nf(g)); })(),
         el('span', { class:'sub', style:'font-size:11px;' }, r.um || ''),
         stato));
     });
