@@ -775,11 +775,21 @@ function chiaviCodiceFornitore(cf) {
 // Il nostro codice per (fornitore, suo codice) da un elenco di { azienda_id, codice_fornitore,
 // codice }. Una chiave che porta a due nostri codici diversi non risponde (null).
 function trovaCodiceNostro(elenco, aziendaId, codiceFornitore) {
+  const v = voceCodiceFornitore(elenco, aziendaId, codiceFornitore);
+  return v ? v.codice : null;
+}
+// La VOCE intera: nostro codice e codice del fornitore COME LO SCRIVE LUI (23 nov, Nico:
+// "in Fabbi 5SY63027 va scritto coi primi 3 caratteri staccati: SIE 5SY63027"). La prima
+// voce dell'elenco che combacia da' la forma; `nostro` (facoltativo) restringe a quel codice.
+function voceCodiceFornitore(elenco, aziendaId, codiceFornitore, nostro) {
   const cerca = chiaviCodiceFornitore(codiceFornitore)[0];
   if (!cerca || !aziendaId) return null;
-  const trovati = new Set();
-  (elenco || []).forEach(z => { if (z && z.azienda_id === aziendaId && z.codice && chiaviCodiceFornitore(z.codice_fornitore).includes(cerca)) trovati.add(String(z.codice).trim()); });
-  return trovati.size === 1 ? [...trovati][0] : null;
+  const N = nostro ? String(nostro).trim().toUpperCase() : null;
+  const trovate = (elenco || []).filter(z => z && z.azienda_id === aziendaId && z.codice && z.codice_fornitore
+    && (!N || String(z.codice).trim().toUpperCase() === N) && chiaviCodiceFornitore(z.codice_fornitore).includes(cerca));
+  const codici = new Set(trovate.map(z => String(z.codice).trim().toUpperCase()));
+  if (codici.size !== 1) return null;
+  return { codice: String(trovate[0].codice).trim(), codice_fornitore: String(trovate[0].codice_fornitore).trim() };
 }
 
 function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
@@ -809,7 +819,7 @@ function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto, chiaviCodiceFornitore, trovaCodiceNostro,
+  module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto, chiaviCodiceFornitore, trovaCodiceNostro, voceCodiceFornitore,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,

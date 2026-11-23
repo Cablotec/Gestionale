@@ -285,6 +285,9 @@ sez('Codici non riconosciuti nei DDT (20 nov)');
   t('senza marca resta com\'e\'', M.trovaCodiceNostro(el, 'fab', '6SL3210-5BB12-5BV1') === '29800SIEM000BB125BV1');
   t('altro fornitore: niente', M.trovaCodiceNostro(el, 'lov', '3VA99880BL33') === null);
   t('chiave che porta a due codici: niente', M.trovaCodiceNostro(el, 'fab', 'X1') === null);
+  const fab = [{ azienda_id: 'fab', codice: '2313CSIEM0005SY63027', codice_fornitore: 'SIE 5SY63027' }];
+  t('voce: letto «5SY63027», forma del fornitore «SIE 5SY63027»', M.voceCodiceFornitore(fab, 'fab', '5SY63027').codice_fornitore === 'SIE 5SY63027');
+  t('voce ristretta al nostro codice giusto e sbagliato', !!M.voceCodiceFornitore(fab, 'fab', '5SY63027', '2313csiem0005sy63027') && M.voceCodiceFornitore(fab, 'fab', '5SY63027', 'ALTRO') === null);
   t('proposta nel riquadro con la marca', M.carichiCodiceSconosciuto([{ tipo: 'carico', fuori_giacenza: true, codice: 'RZKE65', azienda_id: 'fab', qta: 1 }], new Set(),
     [{ serie: 'OF', numero: 807, anno: 2026, fornitore_id: 'fab', righe: [{ codice: '242AA0DKC00000RZKE65', codice_fornitore: 'DKC RZKE65' }] }])[0].proposta.codice === '242AA0DKC00000RZKE65');
 }

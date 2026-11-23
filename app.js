@@ -7437,9 +7437,13 @@ async function apriDdtEntrataManuale(poi, ric) {
     const ords = ordiniDi();
     const suo = r.codice_mittente || r.codice;
     let nostro = noto(chiaveCodice(r.codice)) ? chiaveCodice(r.codice) : null;
-    if (!nostro && suo) nostro = codiceNostroDaFornitore(selMitt.value, suo)
-      || trovaCodiceNostro(ords.map(o => ({ azienda_id: selMitt.value, codice_fornitore: o.codice_fornitore, codice: o.codice })), selMitt.value, suo);
+    // Prima la scheda del codice, poi le righe degli OF: danno il nostro codice e il codice
+    // del fornitore nella SUA forma («SIE 5SY63027» anche se la scansione ha letto «5SY63027»).
+    const elenco = (state.codiciFornitore || []).concat(ords.map(o => ({ azienda_id: selMitt.value, codice_fornitore: o.codice_fornitore, codice: o.codice })));
+    const voce = suo ? voceCodiceFornitore(elenco, selMitt.value, suo, nostro) : null;
+    if (!nostro && voce) nostro = voce.codice;
     if (nostro) r.codice = chiaveCodice(nostro);
+    if (voce && chiaveCodice(voce.codice) === chiaveCodice(r.codice)) r.codice_mittente = voce.codice_fornitore;
     // L'ordine citato: sulla riga («OF 763/2026») o nella nota della scansione («Vs. ordine OF/763 del …»).
     const anno = String(inData.value || '').slice(0, 4);
     const mNota = /\b(OF|OL)\s*\/?\s*(\d{1,6})\b/i.exec(String(r.note || ''));
