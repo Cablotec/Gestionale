@@ -9033,7 +9033,7 @@ async function registraLottoProduzione(o, campi, opts) {
   state.consegneCommessa = state.consegneCommessa || [];
   if (!state.consegneCommessa.find(x => x.id === nuova.id)) state.consegneCommessa.push(nuova);
   // Il database ha appena scritto gli scarichi (trigger del 14 ott): si rileggono.
-  if (haClNostri(o)) caricaMovimenti();
+  if (scaricaAlLotto(o)) caricaMovimenti();
   let completata = false, erroreStato = null;
   const statoForm = opts.statoForm || o.stato;
   if (qtaOrd > 0 && quantitaConsegnata(o.id) >= qtaOrd && (o.stato === 'aperta' || o.stato === 'sospesa')
@@ -9456,6 +9456,13 @@ function clNostro(r) {
 }
 function haClNostri(o) {
   return !!o && Array.isArray(o.materiali) && o.materiali.some(clNostro);
+}
+// Il lotto scrive scarichi (trigger) su questa commessa? Dal passo 3 (24 nov)
+// su ogni commessa con una lista che non sia solo MAC o _K, non solo sui C/L di Tema:
+// dopo un lotto si rileggono i movimenti.
+function scaricaAlLotto(o) {
+  return !!o && Array.isArray(o.materiali) && o.materiali.some(r => r && String(r.tipo || '').toUpperCase() !== 'MAC'
+    && !(typeof eLavorazione === 'function' && eLavorazione(r.codice)));
 }
 // La commessa vista dal conto dei DDT (`arriviDaDdt` e simili in domain): le
 // stesse righe meno i C/L di Alnus, col vecchio flag acceso.
@@ -18878,7 +18885,7 @@ function openOperazioneModal(o, opts) {
                 if (error) return toast('Errore eliminazione: '+error.message, 'err');
                 state.consegneCommessa = state.consegneCommessa.filter(x => x.id !== c.id);
                 toast('Lotto eliminato');
-                if (haClNostri(o)) caricaMovimenti();   // la rettifica del trigger
+                if (scaricaAlLotto(o)) caricaMovimenti();   // la rettifica del trigger
                 // Rovescio dell'ultimo lotto che scrive `completata` (1 ott,
                 // Nico: "cancellando 20 pezzi prodotti non mi torna ad aperto").
                 // Si riapre SOLO se la completata era retta dai pezzi (prima
@@ -20697,7 +20704,7 @@ async function scriviFattiPerStato(op, fatti) {
         { label: 'lotto chiusura commessa' });
       if (error) throw error;
       if (!state.consegneCommessa.find(x => x.id === data.id)) state.consegneCommessa.push(data);
-      if (haClNostri(op)) caricaMovimenti();   // gli scarichi del trigger
+      if (scaricaAlLotto(op)) caricaMovimenti();   // gli scarichi del trigger
     } else fatti.lotto = null;
   }
   if (fatti.spedizione) {
