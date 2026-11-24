@@ -7133,10 +7133,10 @@ function rigaGiacenzaUnica(u, um) {
 //     ancora contato nei magazzini di Alnus finche' Alnus non lo consuma con
 //     l'UP1) e il lotto non li scarica: si mostra il dato fino a quanto la
 //     commessa chiede ancora (lista a residuo), non il dato per sempre.
-function doveSiTrovaCodice(codice) {
+function doveSiTrovaCodice(codice, movDelCodice) {
   const cod = chiaveCodice(codice);
   if (!Array.isArray(state.movimenti)) return { letto: false };
-  const tutti = state.movimenti.filter(m => chiaveCodice(m.codice) === cod);
+  const tutti = movDelCodice || state.movimenti.filter(m => chiaveCodice(m.codice) === cod);
   const diAlnus = codiceDiAlnus(cod);
   const r2 = (n) => +(+n).toFixed(6);
   const out = { letto: true, diAlnus, magazzini: null, posti: [] };
@@ -7171,13 +7171,56 @@ function doveSiTrovaCodice(codice) {
       const chiede = viva && Array.isArray(o.materiali)
         ? (commessaSuResiduo(o).materiali || []).filter(r => chiaveCodice(r.codice) === cod).reduce((s, r) => s + (Number(r.qta) || 0), 0) : 0;
       qta = r2(Math.max(0, Math.min(qta, chiede)));
+      // Consumato dai nostri lotti ma ancora dentro la giacenza di Alnus (manca
+      // l'UP1): non e' sullo scaffale, quindi non e' libero. Solo commesse vive:
+      // di una chiusa non sappiamo se l'UP1 e' gia' passato.
+      if (viva) out.inAttesa = r2((out.inAttesa || 0) + Math.max(0, p.qta - qta));
     }
     if (Math.abs(qta) < 1e-9) return;
     out.posti.push({ presso: p.presso, reparto: eReparto(p.presso), nome: nomeAziendaDi(p.presso), op: o,
       commessa: o ? (o.numero_ordine || '') + (o.pos ? '/' + o.pos : '') : '', qta, fuori: p.fuori, dato: p.qta, ultimo: p.ultimo });
   });
   out.posti.sort((a, b) => (b.reparto - a.reparto) || a.nome.localeCompare(b.nome, 'it') || a.commessa.localeCompare(b.commessa, 'it'));
+  // LIBERO · RISERVATO · TOTALE (24 nov, passo 1 del riservato, solo vista).
+  //   riservato = quanto sta nei posti (reparto, terzisti), per commessa;
+  //   totale    = sede in conto + posti IN conto (i posti fuori giacenza, sui
+  //               codici di Alnus, sono gia' dentro la giacenza di Alnus);
+  //   libero    = totale − riservato: quello che lo scaffale ha davvero per tutti.
+  // Nessun calcolo lo usa ancora: la ripartizione resta sulla sede (passo 2).
+  const sedeConto = r2(inConto(tutti).filter(m => !m.presso_id).reduce((s, m) => s + (Number(m.qta) || 0), 0));
+  const postiConto = r2(out.posti.filter(p => !p.fuori).reduce((s, p) => s + p.qta, 0));
+  out.riservato = r2(out.posti.reduce((s, p) => s + p.qta, 0));
+  out.totale = r2(sedeConto + postiConto);
+  out.inAttesa = out.inAttesa || 0;
+  out.libero = r2(out.totale - out.riservato - out.inAttesa);
   return out;
+}
+// Il riservato di TUTTI i codici che hanno movimenti nei posti, per le liste
+// (una passata sui movimenti, non una per riga). Cache sui dati che lo cambiano.
+let _riservatiCache = null;
+function riservatiPerCodice() {
+  const M = state.movimenti, O = state.operazioni, C = state.consegneCommessa;
+  if (!Array.isArray(M)) return new Map();
+  if (_riservatiCache && _riservatiCache.M === M && _riservatiCache.n === M.length && _riservatiCache.O === O && _riservatiCache.C === C
+      && _riservatiCache.nc === (C || []).length) return _riservatiCache.per;
+  const conPosti = new Set(M.filter(m => m.presso_id).map(m => chiaveCodice(m.codice)));
+  const gruppi = new Map();
+  M.forEach(m => { const k = chiaveCodice(m.codice); if (!conPosti.has(k)) return;
+    if (!gruppi.has(k)) gruppi.set(k, []); gruppi.get(k).push(m); });
+  const per = new Map();
+  gruppi.forEach((mov, k) => { const d = doveSiTrovaCodice(k, mov); if (d.riservato > 1e-9) per.set(k, d); });
+  _riservatiCache = { M, n: M.length, O, C, nc: (C || []).length, per };
+  return per;
+}
+// Sotto una giacenza in una lista: «di cui N riservati» (vuoto se niente).
+function notaRiservato(codice, um) {
+  const d = riservatiPerCodice().get(chiaveCodice(codice));
+  if (!d) return '';
+  const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  return el('span', { class:'sub', style:'display:block;font-size:10px;color:var(--or);white-space:nowrap;',
+    title:'Riservato ' + nf(d.riservato) + (um ? ' ' + um : '') + ': ' + d.posti.map(p => p.nome + (p.commessa ? ' per ' + p.commessa : '') + ' ' + nf(p.qta)).join(' · ')
+      + '\nLibero ' + nf(d.libero) + ' · totale ' + nf(d.totale) + '. Per ora la ripartizione usa ancora tutta la giacenza.' },
+    'di cui ' + nf(d.riservato) + ' riserv.');
 }
 function riquadroDoveSiTrova(codice, um) {
   const d = doveSiTrovaCodice(codice);
@@ -7207,7 +7250,17 @@ function riquadroDoveSiTrova(codice, um) {
     righe.push(riga(p.nome, p.qta, nota, p.reparto ? 'var(--grn)' : 'var(--or)'));
   });
   if (!righe.length) return el('div', { class:'sub', style:'font-size:12px;' }, 'Nessun movimento che dica dove si trova.');
-  return el('div', {}, ...righe);
+  const tre = el('div', { style:'display:flex;gap:18px;flex-wrap:wrap;margin:2px 0 8px;font-size:12px;' },
+    ...[['Libero', d.libero, d.libero <= 0 ? 'var(--red)' : 'var(--grn)', 'Sullo scaffale, a disposizione di tutte le commesse'],
+        ['Riservato', d.riservato, d.riservato > 0 ? 'var(--or)' : 'var(--mut)', 'Nel reparto o presso i terzisti, legato a una commessa'],
+        ['Totale', d.totale, 'var(--txt)', 'Libero + riservato + consumato in attesa di Alnus']].map(([t, q, c, tit]) =>
+      el('span', { title: tit }, el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-right:6px;' }, t),
+        el('span', { class:'mono', style:'font-weight:700;font-size:14px;color:' + c + ';' }, nf(q) + u_))));
+  if (d.inAttesa > 0) righe.push(riga('Consumato, in attesa di Alnus', d.inAttesa,
+    'già usato dai nostri lotti: la giacenza di Alnus lo conta finché non registra l’UP1', 'var(--mut)'));
+  const nota = d.riservato > 0 ? el('div', { class:'sub', style:'font-size:11px;margin-top:6px;' },
+    'Per ora la ripartizione fra le commesse usa ancora tutta la giacenza: il libero è quello che resterà sullo scaffale quando il riservato conterà davvero.') : '';
+  return el('div', {}, tre, ...righe, nota);
 }
 
 // La pillola in alto: chi ha acceso il gestionale come fonte non deve dimenticarlo.
@@ -10211,7 +10264,7 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
       cella: (m) => testo(m.tipo_parte) },
     { k:'um', t:'UM', ord: m => String(m.um || ''), cella: (m) => testo(m.um) },
     { k:'giacenza', t:'Giacenza', tr:true, num:true, giuInizio:true, ord: m => Number(m.giacenza),
-      cella: (m) => el('span', { class:'mono' }, nf(m.giacenza)) },
+      cella: (m) => el('span', { class:'mono' }, nf(m.giacenza), notaRiservato(m.codice, m.um)) },
     // DA DOVE VIENE LA GIACENZA (14 ott): durante il passaggio da Alnus al
     // gestionale un codice sta in una fonte sola, e chi legge il numero deve
     // sapere quale. "Gestionale" porta ai suoi movimenti.
@@ -17809,7 +17862,7 @@ function openOperazioneModal(o, opts) {
           el('span', { class:'mono', style:'font-size:11px;text-align:right;font-weight:700;' + (rR > 0 ? '' : 'color:var(--mut);') }, rR > 0 ? nf(rR) : '0')] : []),
         (() => { const g = giacDi.di(r.codice);
           return el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (g == null ? 'var(--mut)' : g <= 0 ? 'var(--red)' : 'var(--txt)') + ';' },
-            g == null ? '—' : nf(g)); })(),
+            g == null ? '—' : nf(g), g == null ? '' : notaRiservato(r.codice, r.um)); })(),
         el('span', { class:'sub', style:'font-size:11px;' }, r.um || ''),
         stato));
     });
