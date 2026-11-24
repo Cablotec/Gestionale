@@ -1055,6 +1055,9 @@ function applyChange(tabella, payload) {
     }
   }
 
+  // Il fabbisogno e' calcolato dalle liste delle commesse e dai lotti (24 nov):
+  // si rifa' quando cambiano, o triangolini e Materiali resterebbero indietro.
+  if ((tabella === 'operazioni' || tabella === 'consegne_commessa') && Array.isArray(state.movimenti)) ricalcolaFabbisogno();
   // Re-render solo la tab attiva
   if (state.loaded) renderTab(state.currentTab);
 }
@@ -4057,21 +4060,19 @@ function renderArticoli(root) {
 // inerte se la migrazione manca — la sezione mostra solo le ore timbrate e
 // dichiara che l'inserimento a mano non è attivo. Caricata una volta e tenuta
 // in state.oreEsterne, che è la fonte letta dal domain.
-// Materiale mancante dal fabbisogno importato. Tabella `mancanti`: inerte se
-// la migrazione manca (nessuna sezione, nessun badge, nessun errore).
+// La tabella `mancanti` (Fabbisogno di Alnus importato) e' FERMA dal 24 nov:
+// non si importa piu'. Si legge solo in `state.mancantiAlnus` per
+// `codiciDiAlnus` (un codice che Alnus impegnava resta «di Alnus», come per la
+// funzione SQL `codice_di_alnus`). `state.mancanti` e' il fabbisogno CALCOLATO.
 let mancantiTabellaOk = null;
 async function caricaMancanti() {
-  if (mancantiTabellaOk === false) return;
+  if (mancantiTabellaOk === false) { await applicaFonteFabbisogno(); return; }
   try {
     const { data, error } = await fetchTutte(() =>
-      sb.from('mancanti').select('*').order('numero_op').order('codice'));
-    if (error) { mancantiTabellaOk = false; state.mancanti = []; return; }
-    mancantiTabellaOk = true;
-    state.mancanti = data || [];
-  } catch (e) { mancantiTabellaOk = false; state.mancanti = []; }
-  // FONTE DEL FABBISOGNO (20 nov): l'import di Alnus resta sempre in
-  // `state.mancantiAlnus`; `state.mancanti` e' quello che leggono le schermate.
-  state.mancantiAlnus = state.mancanti;
+      sb.from('mancanti').select('codice').order('codice'));
+    if (error) { mancantiTabellaOk = false; state.mancantiAlnus = []; }
+    else { mancantiTabellaOk = true; state.mancantiAlnus = data || []; }
+  } catch (e) { mancantiTabellaOk = false; state.mancantiAlnus = []; }
   await applicaFonteFabbisogno();
 }
 
@@ -4223,162 +4224,6 @@ function caricaXLSX() {
   });
   return xlsxPromise;
 }
-
-// Colonne attese nell'estrazione. Cerco per NOME, non per posizione: se domani
-// il gestionale di magazzino sposta una colonna, l'import continua a funzionare.
-const FABB_COLONNE = {
-  codice:      ['Codice'],
-  descrizione: ['Descrizione Articolo', 'Descrizione'],
-  qtaDaOrd:    ['Qta da ord', 'Qta da ordinare'],
-  qtaRich:     ['Qta richiesta'],
-  giacenza:    ['Giacenza'],
-  impegno:     ['Impegno'],
-  odl:         ['OdL Prossimo Impegno'],
-  um:          ['Um Interna', 'UM'],
-  // Dal 27 ago: ACQ lo compriamo noi, C/L arriva dal cliente, MAC e
-  // materiale di consumo. Senza questa colonna tutto finiva nello stesso
-  // rosso "da ordinare" — 222 righe su 287 a sproposito.
-  tipoParte:   ['Tipo Parte', 'Tipo parte'],
-};
-// Le 5 previsioni di entrata: la prima ha nomi suoi, le altre sono numerate.
-// Sono la METÀ UTILE del file — le uniche righe con una data (31 lug: 47 righe
-// su 364, e sono tutte quelle già ordinate). Prima venivano scartate.
-const FABB_CONSEGNE = [
-  { qta:'Qta Prossima Previsione Entrata', data:'Data Prossima Previsione Entrata',
-    ordine:'Orf Prossima Previsione Entrata', fornitore:'Ragione Sociale' },
-  { qta:'Qta Previsione Entrata 2', data:'Data Previsione Entrata 2',
-    ordine:'Orf Previsione Entrata 2', fornitore:'Ragione Sociale 2' },
-  { qta:'Qta Previsione Entrata 3', data:'Data Previsione Entrata 3',
-    ordine:'Orf Previsione Entrata 3', fornitore:'Ragione Sociale 3' },
-  { qta:'Qta Previsione Entrata 4', data:'Data Previsione Entrata 4',
-    ordine:'Orf Previsione Entrata 4', fornitore:'Ragione Sociale 4' },
-  { qta:'Qta Previsione Entrata 5', data:'Data Previsione Entrata 5',
-    ordine:'Orf Previsione Entrata 5', fornitore:'Ragione Sociale 5' },
-];
-// Una data dal foglio: Date vero, seriale Excel, gg/mm/aaaa (CSV italiano) o
-// testo ISO. Il CSV esporta le date all'italiana, l'xlsx come seriale: qui si
-// accettano entrambi, così il formato del file non detta il codice.
-function fabbData(v) {
-  if (v instanceof Date) return toLocalISO(v);
-  const s = String(v == null ? '' : v).trim();
-  if (!s) return null;
-  const it = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
-  if (it) return it[3] + '-' + it[2].padStart(2, '0') + '-' + it[1].padStart(2, '0');
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const n = Number(s.replace(',', '.'));
-  // Seriale Excel (giorni dal 30/12/1899). Sotto 1000 è spazzatura, non una data.
-  if (Number.isFinite(n) && n > 1000) {
-    return new Date(Date.UTC(1899, 11, 30) + n * 86400000).toISOString().slice(0, 10);
-  }
-  return null;
-}
-// Un numero all'italiana: "20,00" → 20 ; "1.234,56" → 1234.56. Il punto si
-// toglie solo quando fa da separatore di migliaia, mai quando è il decimale
-// (l'xlsx dà "20.5", il CSV dà "20,5": vanno letti tutti e due).
-function fabbNumero(v) {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  let s = String(v == null ? '' : v).trim();
-  if (!s) return null;
-  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, '');
-  const n = parseFloat(s.replace(',', '.'));
-  return Number.isFinite(n) ? n : null;
-}
-// Testo di un file, indovinando la codifica: prima UTF-8; se compaiono
-// caratteri di sostituzione (le "à" rotte) si rilegge in Windows-1252, che è
-// quello che sputa fuori l'export in CSV. Così vanno bene entrambi.
-function fabbDecodifica(buf) {
-  const utf8 = new TextDecoder('utf-8').decode(buf);
-  if (!utf8.includes('�')) return utf8;
-  try { return new TextDecoder('windows-1252').decode(buf); } catch (e) { return utf8; }
-}
-// CSV → righe come oggetti {intestazione: valore}, la stessa forma che
-// produce il lettore xlsx: da lì in poi il codice è uno solo.
-// Separatore indovinato sull'intestazione (il nostro export usa ';').
-// Gestisce le virgolette e i campi che contengono il separatore.
-function fabbLeggiCsv(testo) {
-  const t = testo.replace(/^﻿/, '');
-  const primaRiga = (t.split(/\r?\n/)[0] || '');
-  const sep = [';', '\t', ','].reduce((best, s) =>
-    (primaRiga.split(s).length > primaRiga.split(best).length ? s : best), ';');
-  const righe = [];
-  let campo = '', riga = [], inVirg = false;
-  for (let i = 0; i < t.length; i++) {
-    const c = t[i];
-    if (inVirg) {
-      if (c === '"') { if (t[i + 1] === '"') { campo += '"'; i++; } else inVirg = false; }
-      else campo += c;
-    } else if (c === '"') inVirg = true;
-    else if (c === sep) { riga.push(campo); campo = ''; }
-    else if (c === '\n') { riga.push(campo); righe.push(riga); riga = []; campo = ''; }
-    else if (c !== '\r') campo += c;
-  }
-  if (campo !== '' || riga.length) { riga.push(campo); righe.push(riga); }
-  if (!righe.length) return [];
-  const intest = righe[0].map(x => String(x).trim());
-  return righe.slice(1)
-    .filter(r => r.some(x => String(x).trim() !== ''))
-    .map(r => { const o = {}; intest.forEach((k, i) => { o[k] = r[i] == null ? '' : r[i]; }); return o; });
-}
-// Da riga-foglio a riga d'archivio. Dal 15 set si tiene TUTTO il file, codici
-// a posto compresi: la scheda Materiali e' una lista di materiali, e la
-// giacenza di un pezzo che non manca e' proprio il dato che le serve.
-// Ritorna null solo per una riga senza codice.
-function fabbRigaNormalizza(r, mappa) {
-  const val = (k) => { const c = mappa[k]; return c == null ? '' : r[c]; };
-  const numDi = fabbNumero;
-  const num = (k) => numDi(val(k));
-  const codice = String(val('codice') || '').trim();
-  if (!codice) return null;
-  const daOrd = num('qtaDaOrd') || 0;
-  const giac = num('giacenza');
-  const imp = num('impegno');
-  // ⚠⚠ QUI C'ERA IL FILTRO, E DAL 15 SET NON C'E' PIU' (deciso con Nico).
-  // Scartava ogni riga sana — `Qta da ord <= 0` e `giacenza >= impegno` — e
-  // il risultato era che la tabella `mancanti` conteneva solo problemi.
-  // Andava bene finche' la scheda si chiamava "Mancanti"; da quando e' una
-  // LISTA MATERIALI con la giacenza accanto, buttare i codici a posto vuol
-  // dire buttare proprio il dato per cui la lista esiste: sapere quanto ce
-  // n'e' di un pezzo che NON ha ancora un problema.
-  // La regola non e' sparita, si e' spostata in lettura: `mancanteSottoScorta`
-  // in domain risponde alla stessa domanda sulla riga gia' salvata. Cosi' c'e'
-  // UN posto dove e' scritto cosa vuol dire "manca", invece di averlo meta'
-  // nell'import e meta' nella schermata.
-  // ⚠ Resta un solo scarto, piu' su: la riga senza codice, che non e' niente.
-  // Consegne previste: fino a 5, si tengono solo quelle con una data.
-  const consegne = [];
-  FABB_CONSEGNE.forEach(c => {
-    const col = (nome) => {
-      const k = Object.keys(r).find(i => String(i).trim().toLowerCase() === nome.toLowerCase());
-      return k ? r[k] : '';
-    };
-    const data = fabbData(col(c.data));
-    if (!data) return;
-    consegne.push({
-      data, qta: numDi(col(c.qta)),
-      ordine: String(col(c.ordine) || '').trim() || null,
-      fornitore: String(col(c.fornitore) || '').trim() || null,
-    });
-  });
-  consegne.sort((a, b) => a.data.localeCompare(b.data));
-  return {
-    numero_op: odlANumeroOp(val('odl')),
-    odlGrezzo: String(val('odl') || '').trim(),
-    codice,
-    descrizione: String(val('descrizione') || '').trim() || null,
-    qta_da_ordinare: daOrd,
-    qta_richiesta: num('qtaRich'),
-    giacenza: giac,
-    impegno: imp,
-    um: String(val('um') || '').trim() || null,
-    tipo_parte: String(val('tipoParte') || '').trim().toUpperCase() || null,
-    consegne,
-    prima_consegna: consegne.length ? consegne[0].data : null,
-    // Retro-compatibili con le colonne già esistenti
-    data_arrivo: consegne.length ? consegne[0].data : null,
-    fornitore: consegne.length ? consegne[0].fornitore : null,
-  };
-}
-
 
 // L'anagrafica dei materiali per i codici dati: descrizione, UM, tipo parte.
 // Sostituisce `fabbScaricaDistinta`, che scaricava la tabella `distinta` per
@@ -4561,7 +4406,7 @@ async function apriModificaListaCommessa(o, art, pezzi, poi, opts) {
     if (anag.has(k)) return anag.get(k);
     let m = null;
     try { m = (await fabbAnagraficaMateriali([k])).get(k) || null; } catch (e) {}
-    if (!m) { const x = (state.mancantiAlnus || state.mancanti || []).find(y => String(y.codice).trim().toUpperCase() === k);
+    if (!m) { const x = (state.mancanti || []).find(y => String(y.codice).trim().toUpperCase() === k);
       if (x) m = { descrizione: x.descrizione, um: x.um, tipo_parte: x.tipo_parte }; }
     anag.set(k, m); return m;
   };
@@ -5354,12 +5199,12 @@ function provaAcqSuAlnus(x) {
   const nome = String((cli && cli.nome) || '').toUpperCase();
   return !!nome && CLIENTI_ACQ_SU_ALNUS.some(n => nome.includes(n.toUpperCase()));
 }
-// Il tipo di un codice: dalla riga, poi dal Fabbisogno di Alnus, poi dall'anagrafica.
+// Il tipo di un codice: dalla riga, poi dal fabbisogno calcolato, poi dall'anagrafica.
 function tipoMaterialeTerzista(r) {
   const t = String((r && r.tipo) || '').trim().toUpperCase();
   if (t) return t;
   const cod = chiaveCodice(r && r.codice);
-  const m = (state.mancantiAlnus || state.mancanti || []).find(z => chiaveCodice(z.codice) === cod && z.tipo_parte);
+  const m = (state.mancanti || []).find(z => chiaveCodice(z.codice) === cod && z.tipo_parte);
   if (m) return String(m.tipo_parte).trim().toUpperCase();
   const a = alnusTipi && alnusTipi.get(String((r && r.codice) || '').trim());
   return a ? String(a).trim().toUpperCase() : '';
@@ -5374,11 +5219,6 @@ function giacenzaAlnusScaffale() {
     const g = giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il);
     return { fonte: 'Specchio Alnus, magazzino 01', di: (cod) => { const v = g.get(String(cod).trim());
       return v ? Math.max(0, +((v.perMag['01'] || 0)).toFixed(4)) : 0; } };
-  }
-  const fab = state.mancantiAlnus || state.mancanti;
-  if (Array.isArray(fab) && fab.length) {
-    return { fonte: 'Fabbisogno di Alnus', di: (cod) => { const m = fab.find(z => chiaveCodice(z.codice) === chiaveCodice(cod) && z.giacenza != null);
-      return m ? Math.max(0, Number(m.giacenza) || 0) : null; } };
   }
   return null;
 }
@@ -6105,7 +5945,7 @@ async function caricaOrdiniFornitore() {
       sb.from('ordini_fornitore').select('*').order('anno').order('numero'));
     state.ordiniFornitore = error ? null : (data || []);
   } catch (e) { state.ordiniFornitore = null; }
-  if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
+  await applicaFonteFabbisogno();
 }
 // ── OF DAL GESTIONALE: BLOCCATI FINO AL CAMBIO (20 nov, Nico: "fino al giorno del
 // cambio importeremo sempre da Alnus"; "non toglierei nulla ma bloccherei la pressione
@@ -6904,7 +6744,7 @@ async function importaGiacenzeAlnus(f, poi) {
   }
   await caricaAlnus();
   if (foto && apertura) await allineaDopoImport();
-  if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
+  await applicaFonteFabbisogno();
   if (typeof poi === 'function') poi();
 }
 async function importaOfAlnus(f, poi) {
@@ -6947,7 +6787,7 @@ async function importaOfAlnus(f, poi) {
     return;
   }
   await sincronizzaOfAlnus(o.righe, presoIl);
-  await caricaAlnus(); if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
+  await caricaAlnus(); await applicaFonteFabbisogno();
   if (typeof poi === 'function') poi();
 }
 // GLI OF APERTI DI ALNUS DIVENTANO ORDINI DEL GESTIONALE (20 nov, Nico: "potremmo
@@ -7084,7 +6924,7 @@ async function importaMovimentiAlnus(f, poi) {
   } catch (e) { toast('Movimenti non salvati: ' + (e.message || e), 'err', 9000); }
   await caricaAlnus();
   if (ap) await allineaDopoImport();
-  if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno();
+  await applicaFonteFabbisogno();
   if (typeof poi === 'function') poi();
 }
 // Dopo un'apertura o un import di movimenti: li scrive come movimenti reali
@@ -7099,14 +6939,17 @@ async function allineaDopoImport() {
   }
 }
 
-// ── FONTE DEL FABBISOGNO: ALNUS O GESTIONALE (20 nov, Nico: "se vogliamo far
-// girare il gestionale senza Alnus...") ────────────────────────────────────
-// Interruttore PER BROWSER (localStorage): chi lo accende vede Materiali,
-// triangolini, stato dei materiali, ripartizione e «Genera OF» calcolati dal
-// gestionale (`righeFabbisognoSpecchio`, domain/alnus.js: stessa forma delle
-// righe di `mancanti`); gli altri restano su Alnus. L'import del Fabbisogno
-// Massivo continua: resta in `state.mancantiAlnus` come termine di paragone.
-// Se lo specchio non c'e' (tabelle, apertura) si resta su Alnus e lo si dice.
+// ── IL FABBISOGNO LO CALCOLA IL GESTIONALE (24 nov, Nico: "il fabbisogno
+// vorrei eliminarlo completamente") ──────────────────────────────────────────
+// Dal 20 nov era una prova per browser; dal 24 nov e' l'UNICA fonte, per tutti
+// e al kiosk: Materiali, triangolini, stato dei materiali, ripartizione e
+// «Genera OF» leggono `state.mancanti` = `righeFabbisognoGestionale()` (liste
+// delle commesse vive a residuo, giacenza dai movimenti, OF aperti), nella
+// stessa forma delle vecchie righe importate. L'import del Fabbisogno Massivo
+// di Alnus e' TOLTO; la tabella `mancanti` resta nel database, ferma all'ultimo
+// import, e la legge solo `codiciDiAlnus` (come la funzione SQL `codice_di_alnus`).
+// Non calcolabile (movimenti non letti, niente apertura) = `state.mancanti`
+// null: si dice, non si mostra un fabbisogno vecchio.
 // Gli OF di Alnus sono gia' stati caricati come ordini del gestionale?
 function ofAlnusSincronizzati() { return (state.ordiniFornitore || []).some(o => o && o.origine === 'alnus'); }
 // I carichi che legano gli arrivi agli OF: i nostri (DDT) + i carichi da OF di Alnus nello specchio.
@@ -7133,23 +6976,25 @@ function ofApertiComeAlnus(aperti, filtro, oggi) {
   }));
   return per;
 }
-const FONTE_FABB_CHIAVE = 'cablotec.fonteFabbisogno';
-function fonteFabbisogno() {
-  try { return localStorage.getItem(FONTE_FABB_CHIAVE) === 'gestionale' ? 'gestionale' : 'alnus'; } catch (e) { return 'alnus'; }
-}
-let fonteFabbProblema = null;   // perche' la fonte gestionale non e' applicata, o null
+// Resta per i punti che chiedevano la fonte: ora e' sempre il gestionale.
+function fonteFabbisogno() { return 'gestionale'; }
+let fonteFabbProblema = null;   // perche' il fabbisogno non si e' potuto calcolare, o null
+// Legge quello che manca (tipi dall'anagrafica; lo Specchio solo se i movimenti
+// non sono allineati) e ricalcola.
 async function applicaFonteFabbisogno() {
+  if (!alnusTipi) { try { await caricaTipiMateriali(); } catch (e) {} }
+  if (!movimentiReali() && state.alnus === undefined) { try { await caricaAlnus(); } catch (e) {} }
+  ricalcolaFabbisogno();
+}
+// Sincrona: si rifa' dopo i caricamenti e a ogni cambio di commesse o lotti
+// (realtime del gestionale, ogni disegno del kiosk).
+function ricalcolaFabbisogno() {
   fonteFabbProblema = null;
-  const alnus = state.mancantiAlnus || state.mancanti || [];
-  if (fonteFabbisogno() !== 'gestionale') { state.mancanti = alnus; segnaFonteFabbisogno(); return; }
-  if (state.alnus === undefined) await caricaAlnus();
-  if (!alnusTipi) await caricaTipiMateriali();
-  if (!state.alnus || !state.alnus.apertura) {
-    fonteFabbProblema = !state.alnus ? 'lo specchio Alnus non si legge' : 'manca la fotografia d’apertura delle giacenze';
-    state.mancanti = alnus; segnaFonteFabbisogno(); return;
-  }
+  if (!Array.isArray(state.movimenti)) fonteFabbProblema = 'i movimenti di magazzino non si leggono';
+  else if (!movimentiReali() && !(state.alnus && state.alnus.apertura)) fonteFabbProblema = 'manca l’apertura delle giacenze (Specchio Alnus)';
+  if (fonteFabbProblema) { state.mancanti = null; segnaFonteFabbisogno(); return; }
   try { const oggi = toLocalISO(new Date()); state.mancanti = righeFabbisognoGestionale().map(r => Object.assign(r, { import_data: oggi })); }
-  catch (e) { fonteFabbProblema = 'errore nel calcolo: ' + (e.message || e); state.mancanti = alnus; }
+  catch (e) { fonteFabbProblema = 'errore nel calcolo: ' + (e.message || e); state.mancanti = null; }
   segnaFonteFabbisogno();
 }
 // Le righe: liste delle commesse vive a residuo, specchio, OF di Alnus e nostri.
@@ -7165,9 +7010,13 @@ function righeFabbisognoGestionale() {
     if (r.um && !um.has(cod)) um.set(cod, r.um);
   }));
   if (alnusTipi) alnusTipi.forEach((t, c) => { if (!tipi.has(c)) tipi.set(c, t); });
-  (state.mancantiAlnus || []).forEach(m => { const c = String(m.codice || '').trim(); if (c && !tipi.has(c) && m.tipo_parte) tipi.set(c, m.tipo_parte); });
-  A.giacApertura.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); if (!um.has(r.codice) && r.um) um.set(r.codice, r.um); });
-  A.ofRighe.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); });
+  // Lo Specchio (solo admin) aggiunge descrizioni: non serve, le liste e gli OF le hanno.
+  if (A && A.apertura) {
+    A.giacApertura.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); if (!um.has(r.codice) && r.um) um.set(r.codice, r.um); });
+    A.ofRighe.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); });
+  }
+  (state.ordiniFornitore || []).forEach(of => (of.righe || []).forEach(r => { const c = String((r && r.codice) || '').trim();
+    if (c && r.descrizione && !descr.has(c)) descr.set(c, r.descrizione); if (c && r.um && !um.has(c)) um.set(c, r.um); }));
   // Gli OF aperti: quelli di Alnus (sincronizzati nel gestionale, o dalla
   // fotografia se non ancora) e i nostri OFS, ciascuno con la sua consegna.
   const oggi = toLocalISO(new Date());
@@ -7178,16 +7027,17 @@ function righeFabbisognoGestionale() {
     ofNostri.push({ codice: cod, aperto: x.aperto, consegna: x.consegna, ordine: x.serie + ' ' + x.numero + '/' + x.anno,
       fornitore: x.fornitore_id ? nomeAziendaDi(x.fornitore_id) : null });
   }));
-  const magazzini = [...alnusMagazziniContati([...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
-    .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean))];
   // MOVIMENTI REALI (23 nov): allineati, la giacenza e' il saldo in sede dei
   // movimenti del gestionale (apertura + Alnus + nostri), non foto + specchio.
+  // Cosi' il conto non ha bisogno dello Specchio: lo fanno anche kiosk e non admin.
   const reali = movimentiReali();
+  const magazzini = reali ? new Set(['01']) : alnusMagazziniContati([...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
+    .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean));
   return righeFabbisognoSpecchio({ fabbisogno: fabbisognoDaListe(base.viveConLista), tipi, descr, um,
     giacenza: reali ? giacenzaDaMovimentiReali() : giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il),
-    magazzini: reali ? new Set(['01']) : new Set(magazzini),
+    magazzini: new Set(magazzini),
     ofAlnus: ofAlnusSincronizzati() ? ofApertiComeAlnus(apertiTutti, x => x.origine === 'alnus', oggi)
-      : ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, oggi),
+      : (A && A.apertura ? ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, oggi) : new Map()),
     ofNostri, contaScaduti: alnusContaScaduti });
 }
 // GIACENZA DEL GESTIONALE (20 nov): foto d'apertura di Alnus + i fatti del
@@ -7248,7 +7098,7 @@ function giacenzaDaMovimentiReali() {
 }
 // La giacenza in sede di un codice, la stessa per tutte le schermate:
 // movimenti reali (allineati) > Specchio Alnus (foto + movimenti, magazzini
-// contati) > Fabbisogno di Alnus importato. Ritorna { fonte, di(codice) }.
+// contati) > non si sa. Ritorna { fonte, di(codice) }.
 function giacenzaScaffaleFn() {
   if (movimentiReali()) {
     const m = giacenzaDaMovimentiReali();
@@ -7262,9 +7112,7 @@ function giacenzaScaffaleFn() {
     return { fonte: 'Specchio Alnus', di: (c) => { const v = g.get(String(c || '').trim());
       return v ? +Object.entries(v.perMag).reduce((s, [k, q]) => s + (mags.has(k) ? q : 0), 0).toFixed(6) : 0; } };
   }
-  const fab = state.mancantiAlnus || state.mancanti || [];
-  return { fonte: 'Fabbisogno di Alnus', di: (c) => { const m = fab.find(x => chiaveCodice(x.codice) === chiaveCodice(c) && x.giacenza != null);
-    return m ? Number(m.giacenza) || 0 : null; } };
+  return { fonte: 'non nota', di: () => null };
 }
 // Lancia l'allineamento (admin) e rilegge i movimenti. Ritorna il riepilogo o lancia.
 async function allineaMovimentiAlnus() {
@@ -7538,68 +7386,18 @@ function riquadroDoveSiTrova(codice, um) {
   return el('div', {}, tre, ...righe, nota);
 }
 
-// La pillola in alto: chi ha acceso il gestionale come fonte non deve dimenticarlo.
+// La pillola in alto: compare solo se il fabbisogno non si e' potuto calcolare.
 function segnaFonteFabbisogno() {
   const ruolo = document.getElementById('role-pill');
   if (!ruolo) return;
   let p = document.getElementById('fonte-pill');
   if (!p) { p = document.createElement('span'); p.id = 'fonte-pill'; p.style.marginLeft = '6px'; ruolo.after(p); }
   p.innerHTML = '';
-  if (fonteFabbisogno() !== 'gestionale') return;
-  p.append(el('span', { class: 'badge ' + (fonteFabbProblema ? 'berr' : 'bor'), style: 'cursor:pointer;',
-    title: fonteFabbProblema ? 'Fonte gestionale NON applicata: ' + fonteFabbProblema + '. Si vede Alnus.'
-      : 'Materiali, triangolini e «Genera OF» sono calcolati dal gestionale (prova, solo su questo browser). Clic: Specchio Alnus.',
-    onclick: () => selectTab('alnus') }, fonteFabbProblema ? '⚠ fabbisogno: Alnus' : 'fabbisogno: gestionale'));
-}
-async function cambiaFonteFabbisogno(fonte, poi) {
-  try { if (fonte === 'gestionale') localStorage.setItem(FONTE_FABB_CHIAVE, 'gestionale'); else localStorage.removeItem(FONTE_FABB_CHIAVE); }
-  catch (e) { return toast('Questo browser non salva la scelta: ' + (e.message || e), 'err'); }
-  await applicaFonteFabbisogno();
-  toast(fonteFabbisogno() === 'gestionale'
-    ? (fonteFabbProblema ? 'Fonte gestionale accesa ma non applicata: ' + fonteFabbProblema : 'Fabbisogno calcolato dal gestionale: ' + (state.mancanti || []).length + ' righe')
-    : 'Fabbisogno di nuovo da Alnus', fonteFabbProblema ? 'err' : 'ok', 8000);
-  if (typeof poi === 'function') poi();
+  if (!fonteFabbProblema) return;
+  p.append(el('span', { class: 'badge berr', title: 'Fabbisogno non calcolato: ' + fonteFabbProblema
+    + '. Materiali, triangolini e «Genera OF» non hanno dati.' }, '⚠ fabbisogno non calcolato'));
 }
 
-// Il confronto: fabbisogno delle liste (commesse vive, a residuo), giacenza
-// dello specchio, OF di Alnus e nostri, contro il «da ordinare» di Alnus.
-function confrontoAlnus(opz) {
-  const A = state.alnus;
-  const base = materialiBase([]);
-  const fabbisogno = new Map(), tipi = new Map(), descr = new Map();
-  base.viveConLista.forEach(c => (c.materiali || []).forEach(r => {
-    const cod = String((r && r.codice) || '').trim();
-    if (!cod) return;
-    if (r.tipo && !tipi.has(cod)) tipi.set(cod, r.tipo);
-    if (r.descrizione && !descr.has(cod)) descr.set(cod, r.descrizione);
-  }));
-  fabbisognoDaListe(base.viveConLista).forEach((righe, cod) =>
-    fabbisogno.set(cod, +righe.reduce((s, x) => s + x.qta, 0).toFixed(6)));
-  const daOrdAlnus = new Map();
-  (state.mancantiAlnus || state.mancanti || []).forEach(m => {
-    const c = String(m.codice || '').trim();
-    if (!tipi.has(c) && m.tipo_parte) tipi.set(c, m.tipo_parte);
-    if (!descr.has(c) && m.descrizione) descr.set(c, m.descrizione);
-    if (mancanteCategoria(m) !== 'da_ordinare') return;
-    const q = Number(m.qta_da_ordinare) || 0;
-    if (q > (daOrdAlnus.get(c) || 0)) daOrdAlnus.set(c, q);
-  });
-  if (alnusTipi) alnusTipi.forEach((t, c) => { if (!tipi.has(c)) tipi.set(c, t); });
-  A.giacApertura.forEach(r => { if (!descr.has(r.codice) && r.descrizione) descr.set(r.codice, r.descrizione); });
-  const giacenza = giacenzaAlnus(A.giacApertura, A.movimenti, A.apertura.preso_il);
-  const oggi = toLocalISO(new Date());
-  const ofN = ordinatoApertoOf(state.ordiniFornitore || [], movimentiPerOf(), null);
-  const ofAlnus = ofAlnusSincronizzati() ? ofApertiComeAlnus(ofN, x => x.origine === 'alnus', oggi)
-    : ofAlnusAperti(A.ofRighe, A.movimenti, A.fotoOf ? A.fotoOf.preso_il : null, oggi);
-  const ofNostri = new Map();
-  [...fabbisogno.keys(), ...daOrdAlnus.keys()].forEach(c => { const v = ofN.get(c.toUpperCase());
-    const ap = v ? v.ordini.filter(x => x.origine !== 'alnus').reduce((s, x) => s + x.aperto, 0) : 0;
-    if (ap > 0) ofNostri.set(c, ap); });
-  const righe = confrontoDaOrdinare({ fabbisogno, tipi, giacenza, ofAlnus, ofNostri, daOrdinareAlnus: daOrdAlnus,
-    magazzini: opz.magazzini, contaScaduti: opz.contaScaduti });
-  righe.forEach(r => { r.descrizione = descr.get(r.codice) || ''; r.of = ofAlnus.get(r.codice) || null; });
-  return righe;
-}
 
 let alnusCerca = '', alnusSoloDiversi = true, alnusContaScaduti = true, alnusTutte = false, alnusMagEsclusi = null;
 // Magazzini che contano come disponibili: di serie 01 + WIP (MAGAZZINI_CONTATI_DI_SERIE,
@@ -7626,8 +7424,8 @@ function renderAlnus(root) {
   const A = state.alnus;
   root.append(el('div', { class: 'sub', style: 'font-size:12px;line-height:1.6;margin:-4px 0 12px;max-width:980px;' },
     'Una copia del magazzino di Alnus, tenuta a parte dai nostri movimenti: giacenza = fotografia d’apertura + movimenti stampati dopo. '
-    + 'Con questa il gestionale calcola il suo «da ordinare» (fabbisogno delle commesse − giacenza − OF in arrivo) accanto a quello di Alnus. '
-    + 'Quando coincidono, Alnus si può spegnere.'));
+    + 'Da qui arrivano l’apertura e i movimenti di Alnus che il gestionale allinea nei suoi movimenti, e gli OF aperti. '
+    + 'Il fabbisogno lo calcola il gestionale (Produzione → Materiali).'));
   // I tre caricamenti.
   const scegli = (accept, fn) => {
     const inp = el('input', { type: 'file', accept, style: 'display:none;' });
@@ -7667,7 +7465,7 @@ function renderAlnus(root) {
   const reali = movimentiReali();
   const bAllinea = el('button', { class: 'btnsm', title: 'Scrive l’apertura e i movimenti di Alnus dopo la foto come movimenti del gestionale',
     onclick: async () => { bAllinea.disabled = true; bAllinea.textContent = 'Allineo…';
-      try { await allineaDopoImport(); } finally { if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno(); ridisegna(); } } },
+      try { await allineaDopoImport(); } finally { await applicaFonteFabbisogno(); ridisegna(); } } },
     reali ? '⟳ Riallinea' : '⇄ Allinea i movimenti del gestionale');
   root.append(el('div', { style: 'margin:-4px 0 14px;padding:10px 12px;border-radius:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border:1px solid '
       + (reali ? 'var(--grn)' : 'var(--or)') + ';' },
@@ -7692,78 +7490,9 @@ function renderAlnus(root) {
   // «Giacenza: gestionale contro Alnus» (20 nov) TOLTA il 23 nov: una giacenza
   // sola, quella di Alnus (vedi `codiceDiAlnus`). `disegnaGiacenzaParallela` e
   // `giacenzeGestionaleOra` restano per il giorno del cambio.
-  // L'interruttore della fonte (solo questo browser).
-  const gest = fonteFabbisogno() === 'gestionale';
-  const radio = (val, testo) => el('label', { style: 'display:inline-flex;gap:6px;align-items:center;margin-right:18px;cursor:pointer;font-size:13px;' },
-    el('input', { type: 'radio', name: 'fonte-fabb', checked: (gest ? 'gestionale' : 'alnus') === val ? true : null,
-      onchange: () => cambiaFonteFabbisogno(val, ridisegna) }), testo);
-  root.append(el('div', { style: 'margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid ' + (gest ? 'var(--or)' : 'var(--brd)') + ';' },
-    el('div', { style: 'font-weight:700;margin-bottom:6px;' }, 'Fonte del fabbisogno su questo browser'),
-    radio('alnus', 'Alnus (import del Fabbisogno Massivo)'), radio('gestionale', 'Gestionale (liste + specchio + OF)'),
-    el('div', { class: 'sub', style: 'font-size:12px;margin-top:6px;line-height:1.5;' },
-      'Con «Gestionale» Materiali, triangolini in Ordini cliente, stato dei materiali nella commessa e «Genera OF» usano i conti del gestionale. '
-      + 'Vale solo per questo browser: gli altri e il kiosk restano su Alnus. L’import del Fabbisogno continua e resta qui come colonna «Alnus».'
-      + (gest && fonteFabbProblema ? ' ⚠ Non applicata: ' + fonteFabbProblema + '.' : '')
-      + (gest && !fonteFabbProblema ? ' Righe calcolate: ' + (state.mancanti || []).length + '. Si ricalcolano a ogni caricamento e import; dopo una modifica alle commesse, ⟳ Aggiorna.' : ''))));
-  // Il confronto del da ordinare.
-  const magazzini = [...new Set(A.giacApertura.map(r => magazzinoAlnus(r.magazzino))
-    .concat(A.movimenti.map(m => magazzinoAlnus(m.magazzino))))].filter(Boolean).sort();
-  const contati = alnusMagazziniContati(magazzini);
-  if (alnusMagEsclusi == null) alnusMagEsclusi = new Set(magazzini.filter(m => !contati.has(m)));
-  const righe = confrontoAlnus({ magazzini: contati, contaScaduti: alnusContaScaduti });
-  const uguali = righe.filter(r => Math.abs(r.differenza) < 0.0005).length;
-  const piuNoi = righe.filter(r => r.differenza >= 0.0005).length, piuAlnus = righe.length - uguali - piuNoi;
-  const chip = (m) => el('label', { style: 'display:inline-flex;gap:4px;align-items:center;font-size:12px;margin-right:10px;cursor:pointer;' },
-    el('input', { type: 'checkbox', checked: contati.has(m) ? true : null,
-      onchange: async (e) => { if (e.target.checked) alnusMagEsclusi.delete(m); else alnusMagEsclusi.add(m);
-        if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno(); ridisegna(); } }),
-    m === 'WIP' ? 'WIP (reparto)' : m === '01' ? '01 (principale, con 02 di JMA)' : m === 'SPK' ? 'SPK (C/L Sacmi)' : m);
-  const spunta = (testo, val, fn) => el('label', { style: 'display:inline-flex;gap:4px;align-items:center;font-size:12px;margin-right:14px;cursor:pointer;' },
-    el('input', { type: 'checkbox', checked: val ? true : null, onchange: async (e) => { fn(e.target.checked);
-      if (fonteFabbisogno() === 'gestionale') await applicaFonteFabbisogno(); ridisegna(); } }), testo);
-  const cerca = el('input', { type: 'text', class: 'search', id: 'alnus-cerca', value: alnusCerca, placeholder: 'Cerca codice o descrizione…',
-    oninput: (e) => { alnusCerca = e.target.value; ridisegnaDopoRicerca('alnus'); } });
-  root.append(el('h3', { style: 'margin:6px 0 6px;' }, 'Da ordinare: gestionale contro Alnus'),
-    el('div', { class: 'sub', style: 'font-size:12px;margin-bottom:6px;' },
-      plAlnus(righe.length, 'codice', 'codici') + ' (ACQ e senza tipo; C/L e MAC non si comprano) · ' + plAlnus(uguali, 'uguale', 'uguali') + ' · '
-      + piuNoi + ' il gestionale ne ordinerebbe di più · ' + piuAlnus + ' Alnus ne ordinerebbe di più'
-      + ((state.mancantiAlnus || state.mancanti || []).length ? '' : ' · ⚠ Fabbisogno di Alnus non importato: la colonna Alnus è vuota')),
-    el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px 0;align-items:center;margin-bottom:10px;' },
-      el('span', { class: 'sub', style: 'font-size:12px;margin-right:8px;' }, 'Magazzini che contano:'), ...magazzini.map(chip),
-      el('span', { style: 'width:16px;' }),
-      spunta('Conta gli OF scaduti come in arrivo', alnusContaScaduti, v => { alnusContaScaduti = v; }),
-      spunta('Solo i codici che non tornano', alnusSoloDiversi, v => { alnusSoloDiversi = v; }), cerca));
-  const q = alnusCerca.trim().toLowerCase();
-  const vis = righe.filter(r => (!alnusSoloDiversi || Math.abs(r.differenza) >= 0.0005)
-    && (!q || r.codice.toLowerCase().includes(q) || String(r.descrizione).toLowerCase().includes(q)));
-  if (!vis.length) { root.append(el('div', { class: 'empty' }, righe.length ? 'Nessun codice con questi filtri.' : 'Nessun codice da confrontare.')); return; }
-  const n = (x) => x ? nfIT(x) : '—';
-  const tbl = el('table', { class: 'rt' });
-  tbl.append(el('thead', {}, el('tr', {}, ...['Codice', 'Descrizione', 'Serve', 'Giacenza', 'OF Alnus', 'OF nostri', 'Da ordinare: gestionale', 'Alnus', 'Differenza']
-    .map((t, i) => el('th', { style: i >= 2 ? 'text-align:right;' : '' }, t)))));
-  const tb = el('tbody');
-  (alnusTutte ? vis : vis.slice(0, 200)).forEach(r => {
-    const perMag = Object.entries(r.perMag).map(([m, v]) => m + ' ' + nfIT(v)).join(' · ');
-    const ofTit = r.of ? r.of.righe.filter(x => x.aperto > 0).map(x => 'OF ' + x.numero + '/' + x.anno + ' · ' + (x.fornitore || '') + ' · '
-      + nfIT(x.aperto) + (x.consegna ? ' · ' + fmtIT(String(x.consegna).slice(0, 10)) : '') + (x.scaduta ? ' (scaduta)' : '')).join('\n') : '';
-    const dif = r.differenza;
-    tb.append(el('tr', { style: 'cursor:pointer;', title: 'Apri la scheda del codice', onclick: () => apriSchedaCodice(r.codice) },
-      el('td', { class: 'mono', style: 'font-weight:700;white-space:nowrap;' }, testoCopiabile(r.codice, 'Codice copiato')),
-      el('td', { style: 'max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;', title: r.descrizione }, r.descrizione),
-      el('td', { class: 'mono', style: 'text-align:right;' }, n(r.fabbisogno)),
-      el('td', { class: 'mono', style: 'text-align:right;', title: perMag }, n(r.giacenza)),
-      el('td', { class: 'mono', style: 'text-align:right;', title: ofTit }, n(r.inArrivoAlnus),
-        r.scaduto > 0 ? el('div', { style: 'font-size:10.5px;color:var(--or);' }, 'scaduti ' + nfIT(r.scaduto)) : ''),
-      el('td', { class: 'mono', style: 'text-align:right;' }, n(r.inArrivoNostri)),
-      el('td', { class: 'mono', style: 'text-align:right;font-weight:700;' }, n(r.nostro)),
-      el('td', { class: 'mono', style: 'text-align:right;' }, n(r.alnus)),
-      el('td', { class: 'mono', style: 'text-align:right;font-weight:700;color:' + (Math.abs(dif) < 0.0005 ? 'var(--grn)' : dif > 0 ? 'var(--or)' : 'var(--blu)') + ';' },
-        Math.abs(dif) < 0.0005 ? '=' : (dif > 0 ? '+' : '') + nfIT(dif))));
-  });
-  tbl.append(tb);
-  root.append(el('div', { style: 'overflow-x:auto;' }, tbl));
-  if (!alnusTutte && vis.length > 200) root.append(el('button', { class: 'btnsm', style: 'margin-top:8px;',
-    onclick: () => { alnusTutte = true; ridisegna(); } }, 'Mostra tutti i ' + vis.length));
+  // Interruttore della fonte e confronto «Da ordinare: gestionale contro Alnus»
+  // TOLTI il 24 nov: il Fabbisogno di Alnus non si importa piu', il fabbisogno
+  // lo calcola il gestionale per tutti (vedi `ricalcolaFabbisogno`).
 }
 
 // La tabella «Giacenza: gestionale contro Alnus» dello Specchio. Di serie solo i
@@ -9690,26 +9419,6 @@ async function impostaFornitoreAbituale(codici, nome, soloVuoti) {
   return Number(data) || 0;
 }
 
-// All'import: per ogni codice il fornitore della consegna piu' vicina, a
-// gruppi per fornitore. Ritorna quanti codici hanno preso un abituale nuovo
-// (0 anche se la funzione non esiste ancora).
-async function seminaFornitoriAbituali(righe) {
-  const perForn = new Map();
-  (righe || []).forEach(m => {
-    const cons = (Array.isArray(m.consegne) ? m.consegne : []).filter(c => c && c.fornitore)
-      .sort((a, b) => String(a.data || '').localeCompare(String(b.data || '')));
-    const f = cons.length ? String(cons[0].fornitore).trim() : '';
-    const cod = String(m.codice || '').trim();
-    if (!f || !cod) return;
-    if (!perForn.has(f)) perForn.set(f, new Set());
-    perForn.get(f).add(cod);
-  });
-  let n = 0;
-  try {
-    for (const [f, cods] of perForn) n += await impostaFornitoreAbituale([...cods], f, true);
-  } catch (e) { console.warn('seme fornitore abituale non fatto:', e.message || e); }
-  return n;
-}
 
 // Una casella di testo in un secondo velo (come `chiediConferma`: non tocca
 // il modal sotto). Ritorna il testo, o null se si annulla.
@@ -10127,255 +9836,8 @@ function apriMenuMateriale(ancora, info) {
   window.__confermaChiudi = chiudi;
 }
 
-// ── IMPORT DELL'ESTRAZIONE ─────────────────────────────────────────────
-// Estratto dalla scheda il 15 set: era duecento righe in mezzo al render, e
-// la lista non riusciva a diventare il corpo della pagina finche' il
-// caricatore le stava davanti. E' un pezzo a se' — lo usa un admin una volta
-// al giorno, mentre la lista la legge tutto il reparto.
-// `root` serve solo per ridisegnare la scheda a import finito.
-function riquadroImportFabbisogno(root) {
-  const wrap = el('div');
-  const righeOra = state.mancanti || [];
-  const inFile = el('input', { type:'file', accept:'.csv,.xlsx,.xls,.txt', style:'max-width:340px;' });
-  // Il nome del file scelto va scritto DENTRO il quadrato: il selettore di
-  // sistema è nascosto, quindi non lo dice più nessun altro.
-  const nomeScelto = el('div', { class:'sub',
-    style:'font-size:11px;margin-top:6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' });
-  const stato = el('div', { class:'sub', style:'margin-top:10px;' });
-  const anteprima = el('div', { style:'margin-top:12px;' });
-  let daImportare = null;
-
-  // UNA sola strada per l'analisi: la chiamano sia il selettore sia il
-  // trascinamento. Se restassero due copie, i bug si correggerebbero una volta
-  // sola su due.
-  const analizzaFile = async (f) => {
-    anteprima.innerHTML = ''; daImportare = null;
-    if (!f) return;
-    nomeScelto.textContent = '📄 ' + f.name;
-    nomeScelto.title = f.name;
-    // Il trascinamento NON rispetta l'attributo accept del selettore: qui il
-    // formato va controllato a mano, o un .pdf finirebbe dentro il lettore xlsx
-    // e uscirebbe un errore che non dice niente.
-    if (!/\.(csv|txt|xlsx|xls)$/i.test(f.name)) {
-      stato.textContent = '';
-      anteprima.append(el('div', { class:'sub', style:'color:var(--red);' },
-        'Formato non gestito: ' + f.name + ' — serve un .csv o un .xlsx.'));
-      return;
-    }
-    stato.textContent = 'Leggo il file…';
-    try {
-      const buf = await f.arrayBuffer();
-      const isCsv = /\.(csv|txt)$/i.test(f.name);
-      // Il CSV si legge da sé: niente libreria da scaricare, niente attesa.
-      // L'xlsx la richiede, e solo in quel caso.
-      let fogli;
-      if (isCsv) {
-        fogli = [fabbLeggiCsv(fabbDecodifica(buf))];
-      } else {
-        const XLSX = await caricaXLSX();
-        const wb = XLSX.read(buf, { cellDates: true });
-        fogli = wb.SheetNames.map(n => XLSX.utils.sheet_to_json(wb.Sheets[n], { defval: '' }));
-      }
-      // Il foglio giusto è quello che contiene la colonna Codice: non mi fido
-      // del nome, che potrebbe cambiare.
-      let righe = null, mappa = null;
-      for (const js of fogli) {
-        if (!js.length) continue;
-        const intest = Object.keys(js[0]);
-        const m = {};
-        for (const k in FABB_COLONNE) {
-          const trovata = FABB_COLONNE[k].find(nomeCol =>
-            intest.some(i => String(i).trim().toLowerCase() === nomeCol.toLowerCase()));
-          if (trovata) m[k] = intest.find(i => String(i).trim().toLowerCase() === trovata.toLowerCase());
-        }
-        if (m.codice && m.qtaDaOrd) { righe = js; mappa = m; break; }
-      }
-      if (!righe) throw new Error('nessun foglio con le colonne "Codice" e "Qta da ord"');
-      const mancanti = righe.map(r => fabbRigaNormalizza(r, mappa)).filter(Boolean);
-      if (!mancanti.length) throw new Error('nessuna riga con un codice');
-      // Quante di queste hanno davvero un problema: dal 15 set entra tutto il
-      // file, e senza questo numero l'anteprima direbbe "3.400 codici" senza
-      // far capire che i sotto scorta sono duecento.
-      const nSotto = typeof mancanteSottoScorta === 'function'
-        ? mancanti.filter(mancanteSottoScorta).length : mancanti.length;
-      // Aggancio: quali OP esistono davvero fra le commesse
-      const opNote = new Set((state.operazioni || []).map(o => o.numero_op).filter(Boolean));
-      const agganciate = new Set(), orfane = new Set(), senzaOdl = [];
-      mancanti.forEach(m => {
-        if (!m.numero_op) { senzaOdl.push(m); return; }
-        (opNote.has(m.numero_op) ? agganciate : orfane).add(m.numero_op);
-      });
-      // La colonna `tipo_parte` esiste a database? Si riconosce dalle righe
-      // già caricate, come si fa per `aziende.tariffa_oraria`. Se manca, si
-      // importa lo stesso SENZA quel campo: un import che si rompe del tutto
-      // per una colonna nuova sarebbe molto peggio del non avere la
-      // distinzione ACQ / conto lavoro / consumo.
-      const tipoSalvabile = (state.mancanti || []).some(m => m && ('tipo_parte' in m));
-      const perTipo = {};
-      mancanti.forEach(m => {
-        const k = m.tipo_parte || '(nessuno)';
-        perTipo[k] = (perTipo[k] || 0) + 1;
-      });
-      const tipiNelFile = Object.keys(perTipo).filter(k => k !== '(nessuno)');
-      const NOTI = { 'ACQ':'da comprare', 'C/L':'dal cliente', 'MAC':'consumo' };
-      const sconosciuti = tipiNelFile.filter(k => !NOTI[k]);
-      daImportare = { mancanti, nomeFile: f.name, tipoSalvabile };
-      stato.textContent = '';
-      anteprima.append(
-        el('div', { style:'font-weight:700;margin-bottom:6px;' }, 'Anteprima di ' + f.name),
-        el('div', { class:'sub' },
-          mancanti.length + ' codici nel file · ' + nSotto + ' sotto scorta · '
-          + agganciate.size + (agganciate.size === 1 ? ' commessa agganciata' : ' commesse agganciate')
-          + (orfane.size ? ' · ' + orfane.size + ' OP senza commessa nel gestionale' : '')
-          + (senzaOdl.length ? ' · ' + senzaOdl.length + ' righe senza OdL (verranno scartate)' : '')),
-        ...(orfane.size
-          ? [el('div', { class:'sub', style:'margin-top:6px;color:var(--yel);font-size:11px;' },
-              '⚠ OP presenti nell\'estrazione ma non nel gestionale: ' + [...orfane].join(', ')
-              + ' — le righe si salvano lo stesso e si agganceranno da sole se quelle commesse verranno inserite.')]
-          : []),
-        // Cosa dice la colonna "Tipo Parte", e se si riesce a salvarla.
-        ...(tipiNelFile.length
-          ? [el('div', { class:'sub', style:'margin-top:6px;font-size:11px;' },
-              'Tipo parte: ' + tipiNelFile.sort()
-                .map(k => perTipo[k] + ' ' + k + (NOTI[k] ? ' (' + NOTI[k] + ')' : ''))
-                .join(' · ')
-              + (perTipo['(nessuno)'] ? ' · ' + perTipo['(nessuno)'] + ' senza tipo' : ''))]
-          : []),
-        ...(sconosciuti.length
-          ? [el('div', { class:'sub', style:'margin-top:4px;color:var(--yel);font-size:11px;' },
-              '⚠ Tipo parte mai visto prima: ' + sconosciuti.join(', ')
-              + ' — queste righe verranno trattate come "da ordinare". Se non è giusto, dimmelo.')]
-          : []),
-        ...(tipiNelFile.length && !tipoSalvabile
-          ? [el('div', { class:'sub', style:'margin-top:4px;color:var(--yel);font-size:11px;' },
-              '⚠ La colonna `mancanti.tipo_parte` non esiste ancora a database: l\'import '
-              + 'funziona lo stesso, ma la distinzione fra da comprare, conto lavoro e consumo '
-              + 'non viene salvata e tutto resta "da ordinare" come prima. '
-              + 'Serve la migrazione dal pannello Supabase.')]
-          : []),
-        el('div', { class:'sub', style:'margin-top:6px;color:var(--yel);font-size:11px;' },
-          '⚠ Confermando, i ' + righeOra.length + ' codici attualmente in archivio vengono sostituiti da questi.'),
-        el('button', { class:'btnp', style:'margin-top:10px;', onclick: async (e) => {
-          e.target.disabled = true; e.target.textContent = 'Importo…';
-          try {
-            const conTipo = daImportare.tipoSalvabile;
-            const payload = daImportare.mancanti.filter(m => m.numero_op).map(m => ({
-              numero_op: m.numero_op, codice: m.codice, descrizione: m.descrizione,
-              qta_da_ordinare: m.qta_da_ordinare, qta_richiesta: m.qta_richiesta,
-              giacenza: m.giacenza, impegno: m.impegno, um: m.um,
-              consegne: m.consegne, prima_consegna: m.prima_consegna,
-              data_arrivo: m.data_arrivo, fornitore: m.fornitore,
-              import_data: toLocalISO(new Date()),
-              // Solo se la colonna c'e': altrimenti PostgREST rifiuta
-              // l'intero blocco per un campo che non conosce.
-              ...(conTipo ? { tipo_parte: m.tipo_parte } : {}),
-            }));
-            // SOSTITUZIONE: prima si svuota, poi si inserisce. Se l'insert
-            // fallisse a metà lo si vede subito dal conteggio in archivio.
-            const { error: errDel } = await eseguiConRetry(
-              () => sb.from('mancanti').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
-              { label: 'pulizia fabbisogno' });
-            if (errDel) throw new Error(errDel.message);
-            for (let i = 0; i < payload.length; i += 500) {
-              const { error } = await eseguiConRetry(
-                () => sb.from('mancanti').insert(payload.slice(i, i + 500)),
-                { label: 'import fabbisogno' });
-              if (error) throw new Error(error.message);
-            }
-            await caricaMancanti();
-            // SEME del fornitore abituale (9 nov): il fornitore dell'OF va sul
-            // codice solo dove il campo e' vuoto. Best-effort: senza la
-            // migrazione la funzione non c'e' e l'import resta quello di prima.
-            const seminati = await seminaFornitoriAbituali(daImportare.mancanti);
-            matAbituali = null;   // riletti al prossimo disegno della lista
-            toast('Estrazione importata: ' + payload.length + ' codici'
-              + (seminati > 0 ? ' · ' + seminati + ' con fornitore abituale nuovo' : ''), 'ok');
-            renderFabbisogno(root);
-          } catch (err) {
-            toast('Errore import: ' + (err.message || err), 'err');
-            e.target.disabled = false; e.target.textContent = 'Conferma e sostituisci';
-          }
-        } }, 'Conferma e sostituisci'),
-      );
-    } catch (err) {
-      stato.textContent = '';
-      anteprima.append(el('div', { class:'sub', style:'color:var(--red);' },
-        'Non riesco a leggere il file: ' + (err.message || err)));
-    }
-  };
-  inFile.onchange = () => analizzaFile(inFile.files && inFile.files[0]);
-
-  // ── Riquadro di rilascio: un QUADRATO, non una riga ───────────────────
-  // Un bordo tratteggiato attorno a un campo file non si legge come "qui puoi
-  // trascinare": ci vuole un'area grande, vuota e riconoscibile.
-  // Senza preventDefault su dragover il browser APRE il file e la pagina se ne
-  // va: è il default, non un dettaglio.
-  const DZ_BASE = 'width:220px;height:220px;flex-shrink:0;box-sizing:border-box;'
-    + 'display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;'
-    + 'gap:6px;padding:16px;border-radius:10px;cursor:pointer;user-select:none;'
-    + 'transition:border-color .15s,background .15s;';
-  const DZ_OFF = DZ_BASE + 'border:2px dashed var(--brd);background:transparent;';
-  const DZ_ON  = DZ_BASE + 'border:2px dashed var(--acc);background:var(--sur2);';
-  const dz = el('div', { style: DZ_OFF, tabindex:'0', role:'button',
-    title:'Trascina qui il file dell\'estrazione, oppure fai clic per sceglierlo' });
-  // dragleave scatta anche solo passando da un figlio all'altro: senza contare
-  // la profondità l'evidenziazione lampeggerebbe.
-  let dzProf = 0;
-  const dzEvidenzia = (attiva) => { dz.style.cssText = attiva ? DZ_ON : DZ_OFF; };
-  dz.addEventListener('dragenter', (e) => { e.preventDefault(); dzProf++; dzEvidenzia(true); });
-  dz.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-  });
-  dz.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-    if (--dzProf <= 0) { dzProf = 0; dzEvidenzia(false); }
-  });
-  dz.addEventListener('drop', (e) => {
-    e.preventDefault(); dzProf = 0; dzEvidenzia(false);
-    const dt = e.dataTransfer;
-    const f = dt && dt.files && dt.files[0];
-    if (!f) return;
-    // Il file trascinato finisce anche dentro il selettore: è da lì che si
-    // rilegge se serve, ed è la stessa strada delle due.
-    try { inFile.files = dt.files; } catch (_) {}
-    analizzaFile(f);
-  });
-  // Il quadrato è anche il bottone per scegliere il file: il selettore di
-  // sistema resta nascosto dentro, così l'area è una sola cosa e non due.
-  inFile.style.display = 'none';
-  // Il click programmatico sull'input BOLLE fino al quadrato: senza questa
-  // guardia il gestore richiamerebbe se stesso all'infinito.
-  dz.addEventListener('click', (e) => { if (e.target !== inFile) inFile.click(); });
-  dz.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inFile.click(); }
-  });
-  dz.append(
-    el('div', { style:'font-size:34px;line-height:1;' }, '⬇'),
-    el('div', { style:'font-weight:700;' }, 'Trascina qui il file'),
-    el('div', { class:'sub', style:'font-size:11px;' }, '.csv o .xlsx'),
-    el('div', { class:'sub', style:'font-size:11px;margin-top:4px;text-decoration:underline dotted;' },
-      'oppure fai clic per sceglierlo'),
-    inFile, nomeScelto);
-  wrap.append(el('div', { class:'field', style:'display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;' },
-    dz,
-    el('div', { style:'flex:1;min-width:240px;' },
-      el('label', {}, 'Estrazione Fabbisogno Massivo'),
-      el('div', { class:'sub', style:'font-size:11px;' },
-        'Il CSV si legge subito; l\'xlsx richiede il download di una libreria alla prima apertura. '
-        + 'Separatore, virgole decimali, date gg/mm/aaaa e accenti Windows sono gestiti da soli.'),
-      stato)));
-  wrap.append(anteprima);
-  // Rete di sicurezza: se il file cade FUORI dal riquadro, il browser lo
-  // aprirebbe buttando via la pagina. Registrata una volta sola sul documento
-  // (la scheda viene ridisegnata a ogni import).
-  if (!window.__dropGuard) {
-    window.__dropGuard = true;
-    document.addEventListener('dragover', (e) => { e.preventDefault(); });
-    document.addEventListener('drop', (e) => { e.preventDefault(); });
-  }
-  return wrap;
-}
+// L'import del Fabbisogno Massivo di Alnus (`riquadroImportFabbisogno`) e'
+// stato TOLTO il 24 nov: il fabbisogno lo calcola il gestionale.
 
 
 // ═══════════════════════════════════════════════════════════════════
@@ -10575,19 +10037,6 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
       cella: (m) => { const g = treDi(m);
         return el('span', { class:'mono', style: g.totale == null ? 'color:var(--mut);' : 'font-weight:600;', title:'Libero + WIP' },
           g.totale == null ? '—' : nf(g.totale)); } },
-    // DA DOVE VIENE LA GIACENZA (14 ott): durante il passaggio da Alnus al
-    // gestionale un codice sta in una fonte sola, e chi legge il numero deve
-    // sapere quale. "Gestionale" porta ai suoi movimenti.
-    { k:'fonte', t:'Fonte', ord: m => m.fonte === 'gestionale' ? 'Gestionale' : 'Alnus',
-      cella: (m) => m.fonte === 'gestionale'
-        // Senza clic verso Movimenti (19 nov, Nico): gli ultimi movimenti stanno nella scheda del codice.
-        ? el('span', { class:'badge bblu',
-            title:'Giacenza = somma dei movimenti del gestionale (' + (m.n_movimenti || 0)
-              + ' movimenti)' + (m.presso_terzisti > 0
-                ? ', di cui ' + nf(m.presso_terzisti) + ' presso terzisti (nostro, fuori sede)' : '')
-              + '. I movimenti sono nella scheda del codice (clic sulla riga).' },
-            'Gestionale')
-        : el('span', { class:'sub', style:'font-size:11px;', title:"Dall'ultima estrazione del magazzino Alnus" }, 'Alnus') },
     { k:'impegno', t:'Impegno', tr:true, num:true, giuInizio:true, ord: m => Number(m.impegno),
       cella: (m) => el('span', { class:'mono', style:'color:var(--mut);' }, nf(m.impegno)) },
     { k:'qta_richiesta', t:'Richiesto', tr:true, num:true, giuInizio:true, ord: m => Number(m.qta_richiesta),
@@ -10739,6 +10188,8 @@ function matDettaglioUsi(m, usi, manPerCodice, nf) {
 
 function renderFabbisogno(root) {
   root.innerHTML = '';
+  // Il fabbisogno e' calcolato: si rifa' a ogni apertura della scheda.
+  if (Array.isArray(state.movimenti)) ricalcolaFabbisogno();
   const isAdmin = state.profile?.ruolo === 'admin';
   const nf = (n) => (n == null || n === '' || !Number.isFinite(Number(n)))
     ? '—' : Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
@@ -10752,8 +10203,6 @@ function renderFabbisogno(root) {
   const righeGest = righeGestionaleOra();
   const codGest = new Set(righeGest.map(r => r.codice));
   const righeOra = righeAlnus.filter(m => !codGest.has(String(m.codice || '').trim())).concat(righeGest);
-  const dataOra = righeAlnus.reduce((d, m) =>
-    (!d || String(m.import_data || '') > d) ? (m.import_data || d) : d, null);
   const sottoScorta = righeOra.filter(m => mancanteCategoria(m) !== 'coperto');
   // La domanda delle commesse vive per codice, prima di tutto: la usano la
   // colonna Manca e il banner Da ordinare (`matMancaDettaglio`).
@@ -10765,13 +10214,8 @@ function renderFabbisogno(root) {
   }
 
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Materiali')));
-  if (fonteFabbisogno() === 'gestionale') root.append(el('div', { style:'margin:-4px 0 10px;padding:8px 12px;border-radius:8px;font-size:12px;border:1px solid ' + (fonteFabbProblema ? 'var(--red)' : 'var(--or)') + ';' },
-    fonteFabbProblema ? '⚠ Fonte «gestionale» accesa su questo browser ma non applicata (' + fonteFabbProblema + '): qui sotto c’è Alnus.'
-      : 'Prova senza Alnus: il fabbisogno qui sotto è calcolato dal gestionale (liste delle commesse + specchio + OF), solo su questo browser. Si cambia in Produzione → Specchio Alnus.'));
-
-  if (mancantiTabellaOk === false) {
-    root.append(el('div', { class:'empty' },
-      'Manca la tabella `mancanti` (migrazione dal pannello Supabase). Import non attivo.'));
+  if (fonteFabbProblema) {
+    root.append(el('div', { class:'empty' }, '⚠ Fabbisogno non calcolato: ' + fonteFabbProblema + '.'));
     return;
   }
 
@@ -10781,12 +10225,10 @@ function renderFabbisogno(root) {
   // con quel numero ci si fa qualcosa invece di leggerlo e basta.
   root.append(el('div', { class:'sub', style:'margin:-6px 0 16px;max-width:900px;line-height:1.7;' },
     righeOra.length
-      ? righeOra.length.toLocaleString('it-IT') + ' codici dall\'ultima estrazione del magazzino'
-        + (dataOra ? ' del ' + fmtIT(String(dataOra).slice(0, 10)) : '')
-        + (righeGest.length ? ', ' + righeGest.length + ' dal registro movimenti del gestionale' : '')
+      ? righeOra.length.toLocaleString('it-IT') + ' codici chiesti dalle commesse aperte o in arrivo con un OF'
         + ' · ' + sottoScorta.length + ' sotto scorta.'
-        + ' Ogni import sostituisce il precedente: è una fotografia, non uno storico.'
-      : 'Nessuna estrazione importata.'));
+        + ' Calcolato dal gestionale: liste delle commesse (a residuo), giacenza dai movimenti, OF aperti.'
+      : 'Nessun codice: nessuna commessa aperta con la lista materiali.'));
 
   const avvisoListe = riquadroListeMaterialiMancanti();
   if (avvisoListe) root.append(avvisoListe);
@@ -10932,7 +10374,6 @@ function renderFabbisogno(root) {
   }
 
   // ── Import (solo admin) ────────────────────────────────────────────────
-  if (isAdmin) root.append(riquadroImportFabbisogno(root));
   else root.append(el('div', { class:'sub', style:'margin-bottom:14px;font-size:11px;' },
     'L\'elenco lo aggiorna un amministratore importando l\'estrazione del magazzino.'));
 
@@ -22050,14 +21491,11 @@ async function kioskInit() {
 
   // Carica dati iniziali
   await kioskLoadAll();
-  // L'archivio del fabbisogno: serve al conto dei materiali sulle card e
-  // nella schermata di dettaglio. A parte e non dentro `kioskLoadAll` perche'
-  // non deve poter far fallire l'avvio: se la tabella non c'e' o l'RLS la
-  // rifiuta, `state.mancanti` resta null e il kiosk semplicemente tace sui
-  // materiali, invece di restare alla schermata di errore.
-  await kioskCaricaMancanti();
-  // I carichi da DDT, per le commesse con "Materiali da DDT": stesso patto,
-  // fuori da `kioskLoadAll`, null se non si leggono.
+  // I movimenti (e a cascata richieste, OF e il fabbisogno CALCOLATO, 24 nov:
+  // la tabella `mancanti` non si legge piu'): fuori da `kioskLoadAll` perche'
+  // non devono poter far fallire l'avvio. Non letti = `state.mancanti` null e
+  // il kiosk tace sui materiali.
+  state.mancanti = null;
   await caricaMovimenti();
   kioskStartRealtime();
 
@@ -24000,29 +23438,10 @@ function kioskSelectOperazione(o) {
 // niente cache da invalidare. La schermata e' SINCRONA come tutto il resto
 // del kiosk.
 //
-// ⚠ Si prendono solo le colonne che servono. `id`, `numero_op`, `created_at`,
-// `import_data`, `prima_consegna`, `data_arrivo`, `fornitore` qui non li
-// legge nessuno: il kiosk non attribuisce le righe agli OdL (il conto lo fa
-// dalla lista congelata della commessa) e le consegne le tira dal jsonb.
-const KIOSK_MANCANTI_COLONNE = 'codice,descrizione,um,tipo_parte,'
-  + 'qta_da_ordinare,qta_richiesta,giacenza,impegno,consegne';
-
-// ⚠⚠ `null` NON E' `[]`, e qui la differenza e' tutta la scheda.
-//   null = l'archivio non si e' potuto leggere -> NON si dice niente sui
-//          materiali, perche' senza giacenze ogni riga sembrerebbe
-//          disponibile, ed e' la bugia piu' cara che questa schermata possa
-//          dire a un operatore.
-//   []   = archivio vuoto (nessuna estrazione importata) -> stessa cosa: non
-//          si sa, quindi non si parla.
-// Per questo il caricamento fallito lascia `null` e non `[]`.
-async function kioskCaricaMancanti() {
-  try {
-    const { data, error } = await fetchTutte(() =>
-      sb.from('mancanti').select(KIOSK_MANCANTI_COLONNE).order('codice'));
-    if (error) { state.mancanti = null; return; }
-    state.mancanti = data || [];
-  } catch (e) { state.mancanti = null; }
-}
+// ⚠⚠ `null` NON E' `[]`: null = fabbisogno non calcolato (movimenti non letti)
+// -> NON si dice niente sui materiali, perche' senza giacenze ogni riga
+// sembrerebbe disponibile. Dal 24 nov `state.mancanti` e' calcolato
+// (`ricalcolaFabbisogno`), non letto dalla tabella `mancanti`.
 
 // Il conto dei materiali per TUTTE le commesse vive, in un colpo solo.
 // ⚠ UNA volta per disegnata, non una per card: dentro `materialiCommessa` c'e'
@@ -24034,6 +23453,8 @@ async function kioskCaricaMancanti() {
 function kioskRicalcolaMateriali() {
   const out = new Map();
   kioskState.matPerOp = out;
+  // Il fabbisogno si rifa' qui: commesse e lotti cambiano in tempo reale.
+  if (Array.isArray(state.movimenti)) ricalcolaFabbisogno();
   if (!Array.isArray(state.mancanti) || !state.mancanti.length) return out;
   const base = materialiBase(state.mancanti);
   (state.operazioni || []).forEach(op => {

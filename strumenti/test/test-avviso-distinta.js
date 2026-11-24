@@ -252,8 +252,11 @@ sez('DUE SCHERMATE, UNA SOLA FONTE DELLE PAROLE');
   // `state.mancanti` resta null, e null NON e `[]`. Se qualcuno lo
   // inizializzasse a lista vuota, ogni riga direbbe "disponibile" e il kiosk
   // manderebbe l operatore a montare un pezzo che non c e.
-  t('il caricamento fallito lascia null, non una lista vuota',
-    /state\.mancanti = null/.test(bloccoKiosk));
+  // Dal 24 nov il fabbisogno e' CALCOLATO (`ricalcolaFabbisogno`), non letto:
+  // non calcolabile = null, mai lista vuota.
+  const ricalcola = src.slice(src.indexOf('function ricalcolaFabbisogno()'), src.indexOf('function righeFabbisognoGestionale()'));
+  t('il calcolo fallito lascia null, non una lista vuota',
+    /state\.mancanti = null/.test(ricalcola) && !/state\.mancanti = \[\]/.test(ricalcola));
   t('e il conto si rifiuta di parlare senza archivio',
     /!Array\.isArray\(state\.mancanti\)/.test(bloccoKiosk));
   // Il conto per tutte le commesse si fa UNA volta, fuori dal ciclo delle
