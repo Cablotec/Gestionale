@@ -5686,12 +5686,21 @@ function righeDdtTerzista(x) {
 function apriDdtTerzista(x) {
   const num = numeroDdtFacSimile(x);
   if (!num) return toast('Il DDT nasce dalla spedizione confermata a un terzista.', 'err');
-  const chiaveLoc = 'ddt-testata-' + x.id;
+  const righe = righeDdtTerzista(x);
+  finestraTestataDdt('DDT fac simile ' + num + ' · ' + nomeAziendaDi(x.terzista_id), 'ddt-testata-' + x.id,
+    { causale: 'Conto lavorazione', inizio: x.inviato_il, annotazioni: x.nota || '' },
+    righe.length + (righe.length === 1 ? ' riga' : ' righe') + ', con le quantità confermate alla spedizione.',
+    (t) => stampaDdtTerzista(x, num, INTESTAZIONE_CABLOTEC.join('\n'), t));
+}
+// La finestra della TESTATA di un DDT (causale, colli, pesi, resa, vettore,
+// inizio trasporto, annotazioni), comune a tutti i DDT che escono: si ricorda
+// nel browser per documento (`chiaveLoc`) e al clic chiama `stampa(t)`.
+function finestraTestataDdt(titolo, chiaveLoc, def, avviso, stampa) {
   let salvata = {};
   try { salvata = JSON.parse(localStorage.getItem(chiaveLoc) || '{}') || {}; } catch (e) { salvata = {}; }
-  const v = veloTerzista('DDT fac simile ' + num + ' · ' + nomeAziendaDi(x.terzista_id), 760);
+  const v = veloTerzista(titolo, 760);
   const campo = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
-  const inCaus = el('input', { type:'text', value: salvata.causale || 'Conto lavorazione' });
+  const inCaus = el('input', { type:'text', value: salvata.causale || def.causale || '' });
   const inAsp = el('input', { type:'text', value: salvata.aspetto || 'Sfuso' });
   const inColli = el('input', { type:'text', inputmode:'numeric', value: salvata.colli || '' });
   const inPesoN = el('input', { type:'text', inputmode:'decimal', value: salvata.pesoNetto || '' });
@@ -5700,17 +5709,15 @@ function apriDdtTerzista(x) {
   const selCura = el('select', {}, ...['Mittente', 'Destinatario', 'Vettore'].map(t => el('option', { value: t }, t)));
   selCura.value = salvata.cura || 'Mittente';
   const inVett = el('input', { type:'text', value: salvata.vettore || '', placeholder:'Solo se a cura del vettore' });
-  const d = new Date(x.inviato_il);
+  const d = def.inizio ? new Date(def.inizio) : new Date();
   const pad = (n) => String(n).padStart(2, '0');
-  const inizioDef = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  const inizioDef = isNaN(d) ? '' : d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   const inInizio = el('input', { type:'datetime-local', value: salvata.inizio || inizioDef });
   const inAnn = el('textarea', { rows:'2', style:'width:100%;font-size:12px;' });
-  inAnn.value = salvata.annotazioni != null ? salvata.annotazioni : (x.nota || '');
-  const righe = righeDdtTerzista(x);
+  inAnn.value = salvata.annotazioni != null ? salvata.annotazioni : (def.annotazioni || '');
   v.corpo.append(
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
-      'Documento di prova: esce con la scritta FAC SIMILE e non vale come DDT. '
-      + righe.length + (righe.length === 1 ? ' riga' : ' righe') + ', con le quantità confermate alla spedizione.'),
+      'Documento di prova: esce con la scritta FAC SIMILE e non vale come DDT. ' + (avviso || '')),
     el('div', { class:'frow' }, campo('Causale del trasporto', inCaus), campo('Aspetto dei beni', inAsp)),
     el('div', { class:'frow' }, campo('N. colli', inColli), campo('Peso netto kg', inPesoN), campo('Peso lordo kg', inPeso), campo('Resa (porto)', inPorto)),
     el('div', { class:'frow' }, campo('Trasporto a cura del', selCura), campo('Vettore', inVett), campo('Inizio trasporto', inInizio)),
@@ -5721,9 +5728,62 @@ function apriDdtTerzista(x) {
       pesoNetto: inPesoN.value.trim(), peso: inPeso.value.trim(), porto: inPorto.value.trim(), cura: selCura.value, vettore: inVett.value.trim(),
       inizio: inInizio.value, annotazioni: inAnn.value.trim() };
     try { localStorage.setItem(chiaveLoc, JSON.stringify(t)); } catch (e) { /* solo comodita' */ }
-    stampaDdtTerzista(x, num, INTESTAZIONE_CABLOTEC.join('\n'), t);
+    stampa(t);
   };
   v.piede.append(el('button', { class:'btng', onclick: v.chiudi }, 'Chiudi'), ok);
+}
+
+// DDT DI RESO AL CLIENTE (24 nov, Nico: "la stampa?"). Il documento e' quello
+// registrato con «↩ Reso al cliente»: numero e data del reso, il cliente come
+// destinatario, una riga per codice (le uscite da piu' posti si sommano).
+// `doc` = { k, numero, data, aziendaId, nome, nota, righe:[{codice, descrizione, um, qta}] }.
+function resoDaMovimenti(k) {
+  const mm = (state.movimenti || []).filter(m => m.documento_tipo === 'RESO' && movChiaveDoc(m) === k);
+  if (!mm.length) return null;
+  const per = new Map();
+  mm.forEach(m => { const c = String(m.codice || '').trim();
+    if (!per.has(c)) per.set(c, { codice: c, descrizione: m.descrizione || '', um: m.um || '', qta: 0 });
+    per.get(c).qta = +(per.get(c).qta + Math.abs(Number(m.qta) || 0)).toFixed(4); });
+  const m0 = mm[0];
+  return { k, numero: m0.documento_numero, data: String(m0.documento_data || m0.data || '').slice(0, 10),
+    aziendaId: m0.azienda_id, nome: m0.mittente || nomeAziendaDi(m0.azienda_id),
+    nota: String(m0.note || '').replace(/^Reso a [^·]*(· )?/, ''),
+    righe: [...per.values()].sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true })) };
+}
+function apriDdtReso(doc) {
+  if (!doc) return toast('Reso non trovato fra i movimenti: premi ⟳ Aggiorna.', 'err');
+  finestraTestataDdt('DDT di reso ' + doc.numero + ' · ' + doc.nome, 'ddt-reso-' + doc.k,
+    { causale: 'Reso', inizio: null, annotazioni: doc.nota || '' },
+    doc.righe.length + (doc.righe.length === 1 ? ' riga' : ' righe') + ' del reso registrato.',
+    (t) => stampaDdtReso(doc, t));
+}
+function stampaDdtReso(doc, t) {
+  const esc = cartaEsc;
+  const az = (state.aziende || []).find(a => a.id === doc.aziendaId) || {};
+  const nomeDest = az.nome || doc.nome || '—';
+  const ind = cartaIndirizzo(az);
+  const inizio = t.inizio ? new Date(t.inizio) : null;
+  const inizioTxt = inizio && !isNaN(inizio) ? inizio.toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+  const kg = (v) => v ? v + ' kg' : '';
+  const n = doc.righe.length;
+  return stampaCartaCablotec({
+    titolo: 'Documento di trasporto', sottotitolo: 'D.P.R. 472/1996', titoloFinestra: 'DDT di reso ' + doc.numero,
+    numero: doc.numero, data: fmtIT(doc.data),
+    schede: [{ lab: 'Destinatario', nome: nomeDest, righe: ind, nota: az.p_iva ? 'P.IVA ' + az.p_iva : '' },
+      { lab: 'Luogo di destinazione', nome: nomeDest, righe: ind }],
+    striscia: [['Causale', t.causale], ['Resa', t.porto], ['Trasporto a cura del', t.cura],
+      ['Operatore', state.profile && state.profile.nome ? state.profile.nome : '']],
+    colonne: [{ t: 'Codice', w: '24%' }, { t: 'Descrizione' }, { t: 'Quantità', w: '14%', cls: 'q' }, { t: 'U.M.', w: '8%' }],
+    righe: doc.righe.map(r => '<tr><td class="c">' + esc(r.codice) + '</td><td>' + esc(r.descrizione)
+      + '</td><td class="q">' + esc(nfIT(r.qta)) + '</td><td class="u">' + esc(r.um) + '</td></tr>').join(''),
+    piede: '<div class="tr">' + cartaCella('Aspetto dei beni', t.aspetto) + cartaCella('N. colli', t.colli)
+      + cartaCella('Peso netto', kg(t.pesoNetto)) + cartaCella('Peso lordo', kg(t.peso))
+      + cartaCella('Vettore', t.vettore, 's2') + cartaCella('Inizio trasporto', inizioTxt, 's2') + '</div>'
+      + '<div class="an">' + cartaCella('Annotazioni', t.annotazioni) + '</div>'
+      + '<div class="fi"><div><div class="lab">Firma conducente</div></div><div><div class="lab">Firma vettore</div></div>'
+      + '<div><div class="lab">Firma destinatario</div></div></div>',
+    conta: n + (n === 1 ? ' riga' : ' righe'),
+  });
 }
 
 // Intestazione FISSA del DDT (18 nov, Nico: "quelle info devono essere fisse
@@ -7770,7 +7830,8 @@ function documentiRegistro() {
       numero: 'DDT ' + d.m.documento_numero, azienda: d.m.mittente || nomeAziendaDi(d.m.azienda_id) || '—',
       rif: String(d.m.note || '').replace(/^Reso a [^·]*(· )?/, ''),
       contenuto: d.righe + (d.righe === 1 ? ' riga' : ' righe') + ' · ' + nfIT(d.pezzi) + ' pz',
-      azioni: [{ t: 'Righe', title: 'Apri le righe di questo reso in Movimenti', fn: () => {
+      azioni: [{ t: '🖨 DDT', title: 'Apri e stampa il DDT di reso (fac simile)', fn: () => apriDdtReso(resoDaMovimenti(d.k)) },
+        { t: 'Righe', title: 'Apri le righe di questo reso in Movimenti', fn: () => {
         movFiltroTipo = ''; movFiltroMitt = ''; movFiltroOrd = ''; movCerca = '';
         movFiltroDoc = d.k; movVista = 'righe'; movQuante = 400; selectTab('movimenti'); } }] }));
   }
@@ -8405,6 +8466,10 @@ function apriResoCliente(poi) {
       toast('Reso registrato: ' + payload.length + (payload.length === 1 ? ' riga' : ' righe') + ' · DDT ' + inNum.value.trim(), 'ok');
       await caricaMovimenti();
       if (typeof poi === 'function') poi();
+      // Il DDT di reso si apre da solo, come quello al terzista dopo «✓ Spedita».
+      const doc = (state.movimenti || []).find(m => m.documento_tipo === 'RESO' && m.documento_numero === inNum.value.trim()
+        && m.azienda_id === selCli.value);
+      if (doc) apriDdtReso(resoDaMovimenti(movChiaveDoc(doc)));
     } catch (e) {
       ok.disabled = false; ok.textContent = 'Registra reso';
       toast('Reso non registrato: ' + (e.message || e), 'err', 10000);
