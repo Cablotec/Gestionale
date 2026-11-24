@@ -5039,11 +5039,35 @@ function materialiBase(righeMancanti) {
   // patto in silenzio — ogni codice di ogni commessa entrerebbe nella
   // ripartizione della giacenza, anche quelli che nessuno contende.
   const manPerCodice = {};
-  (righeMancanti || []).forEach(m => {
+  // PASSO 2 DEL RISERVATO (24 nov): il materiale in reparto o dai terzisti che
+  // CONTA in giacenza e' riservato alla sua commessa. La giacenza di Alnus
+  // (Fabbisogno importato, o Specchio senza movimenti reali) lo comprende
+  // ancora: si toglie, cosi' non sembra libero per le altre. Le righe del
+  // gestionale (TS-) e quelle dai movimenti reali sono gia' la sola sede.
+  const ris = riservatoContatoPerCodice();
+  const reali = movimentiReali();
+  (righeMancanti || []).forEach(m0 => {
+    let m = m0;
     const k = String(m && m.codice || '').trim();
+    const dallaSede = m && (m.fonte === 'gestionale' || (m.fonte === 'specchio' && reali));
+    const r = k && !dallaSede ? ris.get(chiaveCodice(k)) : 0;
+    if (r > 0 && m.giacenza != null) m = Object.assign({}, m, { giacenza: +((Number(m.giacenza) || 0) - r).toFixed(4), riservato: r });
     if (k && mancanteSottoScorta(m)) manPerCodice[k] = m;
   });
   return { viveConLista, manPerCodice };
+}
+// Quanto, per codice, sta nei posti (reparto, terzisti) CONTANDO in giacenza.
+let _risContCache = null;
+function riservatoContatoPerCodice() {
+  const M = state.movimenti;
+  if (!Array.isArray(M)) return new Map();
+  if (_risContCache && _risContCache.M === M && _risContCache.n === M.length) return _risContCache.per;
+  const per = new Map();
+  inConto(M).filter(m => m.presso_id).forEach(m => { const k = chiaveCodice(m.codice);
+    per.set(k, +((per.get(k) || 0) + (Number(m.qta) || 0)).toFixed(4)); });
+  per.forEach((q, k) => { if (!(q > 1e-9)) per.delete(k); });
+  _risContCache = { M, n: M.length, per };
+  return per;
 }
 
 // I C/L di una commessa "Materiali da DDT", ripartiti fra le commesse vive
@@ -5300,8 +5324,14 @@ function serveTerzista(x, qta_pz, gia) {
 }
 // Un C/L che Alnus non conosce ha giacenza nel gestionale; il resto no (24 nov:
 // decide il codice, non piu' la spunta della commessa).
-function contaTerzista(x, r) {
-  return clNostro(r);
+// PASSO 2 DEL RISERVATO (24 nov, Nico: «ogni pezzo ha un posto e un padrone»):
+// verso il REPARTO conta tutto tranne i MAC (consumo), anche i codici di
+// Alnus: «Portato in reparto» sposta davvero dalla sede al reparto, come
+// UT1/ET1 da 01 a WIP. `ter` = il posto della richiesta. La stessa regola di
+// `mov_conferma_invio_terzista` (strumenti/migrazione-reparto-in-giacenza.sql).
+function contaTerzista(x, r, ter) {
+  if (clNostro(r)) return true;
+  return !!ter && eReparto(ter) && String((r && r.tipo) || '').trim().toUpperCase() !== 'MAC';
 }
 // DISPONIBILE per una nuova richiesta: la sede meno quanto e' gia' promesso
 // alle richieste ancora da preparare (di qualsiasi commessa). Ritorna una
@@ -5353,7 +5383,7 @@ function liberoTerzista() {
     (x.righe || []).forEach(r => {
       const ox = (state.operazioni || []).find(z => z.id === opDiRigaTerzista(x, r));
       const c = String(r.codice || '').trim();
-      if (contaTerzista(ox, r)) impegnato.set(c, (impegnato.get(c) || 0) + (Number(r.qta) || 0));
+      if (contaTerzista(ox, r, x.terzista_id)) impegnato.set(c, (impegnato.get(c) || 0) + (Number(r.qta) || 0));
       else if (contaAlnusTerzista(ox, r)) impegnatoA.set(c, (impegnatoA.get(c) || 0) + (Number(r.qta) || 0));
     });
   });
@@ -5371,7 +5401,8 @@ function liberoTerzista() {
 // di libero. Nessuno lo scrive: si ricalcola, e sparisce da solo quando la
 // richiesta nuova lo copre. Ritorna [{ terzista, righe:[{ codice, serve, libero }] }].
 function mancantiTerzistaInSede(o) {
-  if (!haClNostri(o) || !richiesteTerzistaPossibili()) return [];
+  // Dal passo 2 (24 nov) anche il reparto sui codici di Alnus ha giacenza.
+  if (!richiesteTerzistaPossibili() || (!haClNostri(o) && !repartoId())) return [];
   if (o.stato !== 'aperta' && o.stato !== 'sospesa') return [];
   const fasi = fasiCommessa(o);
   if (!fasi.size) return [];
@@ -5387,7 +5418,7 @@ function mancantiTerzistaInSede(o) {
     const righe = [];
     voci.forEach(({ riga, qta_pz }) => {
       const cod = String(riga.codice || '').trim();
-      if (!segnati.has(cod) || !contaTerzista(o, riga)) return;
+      if (!segnati.has(cod) || !contaTerzista(o, riga, ter)) return;
       const serve = serveTerzista(o, qta_pz, giaRichiestoTerzista(o.id, ter, cod));
       const lib = libero(cod);
       if (serve > 0 && lib > 0) righe.push({ codice: cod, serve, libero: lib });
@@ -5576,8 +5607,8 @@ function apriRichiestaTerzistaOra(o, poi, opts) {
       const gia = giaRichiestoTerzista(c.id, selTer.value, cod);
       g.gia = +(g.gia + gia).toFixed(4);
       const cA = contaAlnusTerzista(c, riga) && liberoA(cod) != null;
-      g.voci.push({ commessa: c, serve: serveTerzista(c, qta_pz, gia), conta: conta(c, riga) || cA });
-      if (conta(c, riga)) g.conta = true;
+      g.voci.push({ commessa: c, serve: serveTerzista(c, qta_pz, gia), conta: conta(c, riga, selTer.value) || cA });
+      if (conta(c, riga, selTer.value)) g.conta = true;
       else if (cA) g.contaA = true;
     }));
     // in ordine di codice (con piu' commesse i codici della seconda finivano in fondo)
@@ -8535,7 +8566,7 @@ function apriConfermaInvioTerzista(x, poi) {
   const rep = eReparto(x.terzista_id);
   const v = veloTerzista(rep ? 'Conferma: materiale portato in reparto' : 'Conferma spedizione a ' + nomeAziendaDi(x.terzista_id), multi ? 920 : 820);
   const sede = saldoInSede(state.movimenti);
-  const conta = (r) => clNostro(r);   // la stessa regola di mov_conferma_invio_terzista
+  const conta = (r) => contaTerzista(null, r, x.terzista_id);   // la stessa regola di mov_conferma_invio_terzista
   const num = (t) => { const n = Number(String(t == null ? '' : t).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
   const COL = 'display:grid;grid-template-columns:minmax(130px,1fr) ' + (multi ? '110px ' : '')
     + 'minmax(130px,1.4fr) 46px 80px 80px 90px;gap:8px;align-items:center;';
