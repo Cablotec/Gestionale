@@ -307,6 +307,13 @@ Chiesto da Nico, dal file *"Riunione 01-10-2026.xlsx"*: una sezione che vedono S
 - Test: `node strumenti/test/test-riunioni.js .` (20).
 
 ## ▶ Fili aperti (priorità)
+**⚡ RISERVATO / INDIPENDENZA DA ALNUS (aperti al 24 nov sera, piano dei 6 passi completo)**:
+- **Prova dal vivo del consumo unico**: al primo lotto o al primo UP1 importato della Teknox 00442/0020 (OP 2135) o della 00385/0050 (Botturi) rileggere i movimenti: il consumo deve passare UNA volta (in giacenza la parte di chi arriva primo, registro l'altra).
+- **Commesse preparate solo in Alnus** (es. 00526/0010-0020, OP 2492/2493, UT1/ET1 del 23 nov): per noi il loro WIP e' sede, quindi quel materiale sembra libero finche' non si registra il reparto nel gestionale. Decidere con Nico: preparare anche qui, o leggere gli UT1/ET1 come «portato in reparto».
+- **Tecnocab con OL 2026/OL/00023 sulla Teknox 00442/0020**: cosa fa e cosa gli mandiamo (il prodotto TKX-182113 non ha fasi).
+- **Kit TKX-182113_KF/_KC da Elcotec (OF 713/2026)**: quando arrivano, controllare che vadano al reparto della Teknox.
+- **Causali Alnus ancora da guardare «con ordine»**: UC1 (uscita a cliente), EL2 (C/L JMA nello 02), ER1/UR1 (rettifiche), il magazzino 05 da chiudere; i 3 OP Rittal 2351/2375/2398 senza commessa.
+- Errori «Maximum call stack size exceeded» visti una volta in console durante le prove del 24 nov, non riprodotti.
 **⚡ TESSERA QR (26 ott)**: Nico deve stampare la versione `.09` (DOCUMENTS in fondo, font Barlow) e leggerla con piu' telefoni — QR con 3 mm di margine sopra e sotto, sotto norma. Vedi la sezione "Tessera QR".
 **⚡ DA RIPRENDERE PER PRIMI (15 ott, fine sessione ingresso merci / magazzino):**
 - ⚠⚠ **ARCHIVIO ALNUS MONCO dal 12 ott**: l'import del 12 ott in Materiali ha caricato **103 righe tutte C/L** (prima 318: 191 C/L, 67 ACQ, 60 MAC — verificato sui backup notturni 07/10 → 12/10 sera). Ogni import sostituisce il precedente: in Materiali sono spariti ACQ/MAC, da ordinare, in arrivo, ritardi. **Non e' il codice** (nessuna modifica all'import fra 9 e 13 ott): il file esportato da Alnus era filtrato o parziale. **Da fare: Nico reimporta il Fabbisogno Massivo COMPLETO.** Proposta aperta: guardia all'import che chiede conferma se il file nuovo ha un solo tipo parte o molte meno righe dell'archivio ("103 righe tutte C/L contro 318 con ACQ e MAC: sostituire?").
