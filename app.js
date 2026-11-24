@@ -5329,9 +5329,15 @@ function serveTerzista(x, qta_pz, gia) {
 // Alnus: «Portato in reparto» sposta davvero dalla sede al reparto, come
 // UT1/ET1 da 01 a WIP. `ter` = il posto della richiesta. La stessa regola di
 // `mov_conferma_invio_terzista` (strumenti/migrazione-reparto-in-giacenza.sql).
+// PASSO 5 (24 nov): anche verso i TERZISTI. Il materiale dato a un terzista
+// esce dallo scaffale ed e' riservato alla sua commessa (in Alnus restava
+// nello 01). Fuori: MAC (consumo) e i codici lavorazione `_K` (articoli finti
+// dell'ordine al terzista, non materiale).
 function contaTerzista(x, r, ter) {
   if (clNostro(r)) return true;
-  return !!ter && eReparto(ter) && String((r && r.tipo) || '').trim().toUpperCase() !== 'MAC';
+  const cod = String((r && r.codice) || '');
+  return !!ter && String((r && r.tipo) || '').trim().toUpperCase() !== 'MAC'
+    && !(typeof eLavorazione === 'function' && eLavorazione(cod));
 }
 // DISPONIBILE per una nuova richiesta: la sede meno quanto e' gia' promesso
 // alle richieste ancora da preparare (di qualsiasi commessa). Ritorna una
