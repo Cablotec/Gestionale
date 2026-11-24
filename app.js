@@ -4833,21 +4833,35 @@ function commessaSuResiduo(o) {
 // scaffale = min(lista intera − gia' dato a terzisti/reparto, lista × residuo),
 // la stessa regola di `serveTerzista`. Dato = `qta_inviata` delle richieste
 // «inviato» per QUESTA commessa, per codice.
+// ⚠ DATO MENO QUELLO CHE E' TORNATO INDIETRO (24 nov, Nico sulla 00394/0010:
+// "il triangolino me lo segnala, ma quando entro non lo vedo mancante"). Il reso
+// DDT 895 aveva tolto a Bellini 28 pz di TS-536000587 della 00394, ma la lista
+// confermata diceva ancora «dati 31»: il triangolino (che conta i movimenti)
+// segnava 28 mancanti, la commessa no. Ora dal dato si tolgono le uscite DAI POSTI
+// per quella commessa che non sono consumi: rientri in sede (RIENTRO) e resi al
+// cliente (RESO). I consumi dei lotti no: quel materiale e' stato dato e usato.
 let _datoFuoriCache = null;
 function datoFuoriDi(opId) {
   const inv = state.inviiTerzista;
   if (!Array.isArray(inv)) return new Map();
-  if (!_datoFuoriCache || _datoFuoriCache.rif !== inv || _datoFuoriCache.n !== inv.length) {
+  const M = Array.isArray(state.movimenti) ? state.movimenti : null;
+  if (!_datoFuoriCache || _datoFuoriCache.rif !== inv || _datoFuoriCache.n !== inv.length
+      || _datoFuoriCache.M !== M || _datoFuoriCache.nm !== (M ? M.length : -1)) {
     const per = new Map();
+    const somma = (op, cod, q) => { if (!per.has(op)) per.set(op, new Map());
+      const m = per.get(op), k = chiaveCodice(cod); m.set(k, +((m.get(k) || 0) + q).toFixed(4)); };
     inv.filter(x => x.stato === 'inviato').forEach(x => (x.righe || []).forEach(r => {
       const op = opDiRigaTerzista(x, r);
       const q = Number(r.qta_inviata != null ? r.qta_inviata : r.qta) || 0;
-      if (!op || !(q > 0)) return;
-      if (!per.has(op)) per.set(op, new Map());
-      const m = per.get(op), k = chiaveCodice(r.codice);
-      m.set(k, +((m.get(k) || 0) + q).toFixed(4));
+      if (op && q > 0) somma(op, r.codice, q);
     }));
-    _datoFuoriCache = { rif: inv, n: inv.length, per };
+    (M || []).forEach(m => {
+      if (!m.presso_id || !m.operazione_id || !(Number(m.qta) < 0)) return;
+      if (m.documento_tipo !== 'RIENTRO' && m.documento_tipo !== 'RESO') return;
+      if (per.has(m.operazione_id) && per.get(m.operazione_id).has(chiaveCodice(m.codice))) somma(m.operazione_id, m.codice, Number(m.qta));
+    });
+    per.forEach(m => m.forEach((q, k) => { if (!(q > 1e-9)) m.delete(k); }));
+    _datoFuoriCache = { rif: inv, n: inv.length, M, nm: M ? M.length : -1, per };
   }
   return _datoFuoriCache.per.get(opId) || new Map();
 }
@@ -5143,11 +5157,18 @@ function righePerCodiceTerzista(x) {
 // quella commessa: la proposta nuova parte da li', o due richieste di fila
 // chiederebbero due volte la stessa cosa.
 function giaRichiestoTerzista(opId, terzistaId, codice) {
-  return (state.inviiTerzista || [])
+  const chiesto = (state.inviiTerzista || [])
     .filter(x => x.terzista_id === terzistaId && x.stato !== 'annullato')
     .reduce((a, x) => a + (x.righe || [])
       .filter(r => String(r.codice || '').trim() === codice && opDiRigaTerzista(x, r) === opId)
       .reduce((b, r) => b + (Number(x.stato === 'inviato' ? r.qta_inviata : r.qta) || 0), 0), 0);
+  // Quello che da quel posto e' tornato indietro (rientro in sede, reso al cliente)
+  // non e' piu' «gia' dato»: la prossima lista lo ripropone (24 nov, reso DDT 895).
+  const tornato = (Array.isArray(state.movimenti) ? state.movimenti : [])
+    .filter(m => m.presso_id === terzistaId && m.operazione_id === opId && String(m.codice || '').trim() === codice
+      && Number(m.qta) < 0 && (m.documento_tipo === 'RIENTRO' || m.documento_tipo === 'RESO'))
+    .reduce((a, m) => a - Number(m.qta), 0);
+  return Math.max(0, +(chiesto - tornato).toFixed(4));
 }
 
 // Pezzi ancora da fare di una commessa (ordinati − gia' prodotti).
