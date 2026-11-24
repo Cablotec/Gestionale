@@ -874,8 +874,87 @@ function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
   return [...per.values()].sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true }));
 }
 
+// ── VARIANTI DELLA LISTA DI UNA COMMESSA (24 nov, Nico: "spesso aggiungono,
+// modificano e tolgono dalle distinte i materiali", Teknox OP 2135) ──
+// La lista di una commessa = lista della DISTINTA del prodotto + VARIANTI
+// dell'ordine (`operazioni.materiali_varianti`). Le varianti si salvano per
+// pezzo, cosi' «⟳ Rigenera dalla distinta» le riapplica anche con pezzi o
+// distinta cambiati. La scheda prodotto non si tocca: tutto sull'ordine.
+// Una variante: { tipo: 'tolto'|'quantita'|'sostituito'|'aggiunto', codice,
+//   nuovo? (sostituito), qta_pz?, descrizione?, um?, tipo_parte?, motivo, il, chi }.
+const _kv = (c) => String(c == null ? '' : c).trim().toUpperCase();
+const _r4 = (n) => +(+n).toFixed(4);
+// Riapplica le varianti a una lista generata. Ritorna { righe, saltate }:
+// `saltate` = varianti che non trovano piu' il loro codice (la distinta e'
+// cambiata), da dire a chi rigenera.
+function applicaVarianti(base, varianti, pezzi) {
+  const P = Number(pezzi) || 0;
+  let righe = (base || []).map(r => Object.assign({}, r));
+  const trova = (c) => righe.findIndex(r => _kv(r.codice) === _kv(c));
+  const conPz = (r, qpz) => Object.assign(r, { qta_pz: _r4(qpz), qta: _r4(qpz * P) });
+  const saltate = [];
+  (varianti || []).forEach(v => {
+    if (!v || !v.tipo || !v.codice) return;
+    const i = trova(v.codice);
+    if (v.tipo === 'tolto') { if (i < 0) saltate.push(v); else righe.splice(i, 1); return; }
+    if (v.tipo === 'quantita') {
+      if (i < 0) { saltate.push(v); return; }
+      const r = righe[i];
+      if (r.qta_pz_distinta == null) r.qta_pz_distinta = r.qta_pz;
+      conPz(r, Number(v.qta_pz) || 0); r.variante = 'quantita'; return;
+    }
+    if (v.tipo === 'sostituito') {
+      if (i < 0 || !v.nuovo) { saltate.push(v); return; }
+      const r = righe[i];
+      const qpz = v.qta_pz != null ? Number(v.qta_pz) : Number(r.qta_pz) || 0;
+      righe[i] = conPz(Object.assign({}, r, { codice: String(v.nuovo).trim(), descrizione: v.descrizione || r.descrizione,
+        um: v.um || r.um, tipo: v.tipo_parte !== undefined ? v.tipo_parte : r.tipo, al_posto_di: r.codice, variante: 'sostituito' }), qpz);
+      return;
+    }
+    if (v.tipo === 'aggiunto') {
+      if (i >= 0) { const r = righe[i]; if (r.qta_pz_distinta == null) r.qta_pz_distinta = r.qta_pz;
+        conPz(r, Number(v.qta_pz) || 0); r.variante = 'quantita'; return; }
+      righe.push(conPz({ codice: String(v.codice).trim(), descrizione: v.descrizione || null, um: v.um || null,
+        tipo: v.tipo_parte || null, da: null, variante: 'aggiunto' }, Number(v.qta_pz) || 0));
+    }
+  });
+  return { righe, saltate };
+}
+// Le varianti che portano dalla lista della distinta (`base`) a quella voluta.
+// `sostituzioni`: [{ da, a }] dichiarate da chi modifica (altrimenti un cambio
+// di codice e' un tolto + un aggiunto). `vecchie`: le varianti di prima, per
+// tenere motivo, data e autore di quelle che non cambiano. `meta`: { motivo, il, chi }
+// delle nuove.
+function variantiDaConfronto(base, voluta, sostituzioni, vecchie, meta) {
+  const B = new Map(), V = new Map();
+  (base || []).forEach(r => { const k = _kv(r.codice); if (k) B.set(k, r); });
+  (voluta || []).forEach(r => { const k = _kv(r.codice); if (k) V.set(k, r); });
+  const uguali = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 1e-9;
+  const out = [];
+  const usatiB = new Set(), usatiV = new Set();
+  (sostituzioni || []).forEach(s => {
+    const da = _kv(s && s.da), a = _kv(s && s.a);
+    if (!da || !a || !B.has(da) || !V.has(a) || B.has(a) || usatiB.has(da)) return;
+    usatiB.add(da); usatiV.add(a);
+    const rb = B.get(da), rv = V.get(a);
+    out.push({ tipo: 'sostituito', codice: rb.codice, nuovo: rv.codice,
+      qta_pz: uguali(rv.qta_pz, rb.qta_pz) ? null : _r4(rv.qta_pz), descrizione: rv.descrizione || null, um: rv.um || null, tipo_parte: rv.tipo || null });
+  });
+  B.forEach((rb, k) => { if (!usatiB.has(k) && !V.has(k)) out.push({ tipo: 'tolto', codice: rb.codice }); });
+  B.forEach((rb, k) => { const rv = V.get(k); if (rv && !usatiB.has(k) && !uguali(rv.qta_pz, rb.qta_pz))
+    out.push({ tipo: 'quantita', codice: rb.codice, qta_pz: _r4(rv.qta_pz) }); });
+  V.forEach((rv, k) => { if (!usatiV.has(k) && !B.has(k))
+    out.push({ tipo: 'aggiunto', codice: rv.codice, qta_pz: _r4(rv.qta_pz), descrizione: rv.descrizione || null, um: rv.um || null, tipo_parte: rv.tipo || null }); });
+  const firma = (v) => [v.tipo, _kv(v.codice), _kv(v.nuovo), v.qta_pz == null ? '' : _r4(v.qta_pz)].join('|');
+  const prima = new Map((vecchie || []).map(v => [firma(v), v]));
+  const m = meta || {};
+  return out.map(v => { const p = prima.get(firma(v));
+    return Object.assign(v, p ? { motivo: p.motivo || null, il: p.il || null, chi: p.chi || null }
+      : { motivo: m.motivo || null, il: m.il || null, chi: m.chi || null }); });
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto, chiaviCodiceFornitore, trovaCodiceNostro, voceCodiceFornitore, candidatiRicevimento,
+  module.exports = { applicaVarianti, variantiDaConfronto, DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto, chiaviCodiceFornitore, trovaCodiceNostro, voceCodiceFornitore, candidatiRicevimento,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,

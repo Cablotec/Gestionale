@@ -4504,9 +4504,13 @@ async function generaMaterialiCommessa(codiceArticolo, pezzi) {
 }
 
 // Scrive la lista sulla commessa. Ritorna le righe scritte.
-async function salvaMaterialiCommessa(op, righe) {
+// `varianti` (24 nov): se passate si salvano accanto (null = nessuna); se
+// omesse la colonna non si tocca.
+async function salvaMaterialiCommessa(op, righe, varianti) {
+  const campi = { materiali: righe.length ? righe : null };
+  if (varianti !== undefined) campi.materiali_varianti = varianti && varianti.length ? varianti : null;
   const { data, error } = await eseguiConRetry(
-    () => sb.from('operazioni').update({ materiali: righe.length ? righe : null })
+    () => sb.from('operazioni').update(campi)
       .eq('id', op.id).select().single(),
     { label: 'materiali commessa' });
   if (error) throw error;
@@ -4514,6 +4518,156 @@ async function salvaMaterialiCommessa(op, righe) {
   const i = state.operazioni.findIndex(x => x.id === op.id);
   if (i >= 0) state.operazioni[i] = op;
   return righe;
+}
+
+// ── ✎ MODIFICA LISTA DELLA COMMESSA (24 nov, Nico: Claudio "aggiunge,
+// modifica e toglie dalle distinte i materiali", Teknox OP 2135) ──
+// Si modifica la lista VISTA (quello che si salva e' quello che si vede);
+// le varianti si ricavano confrontandola con la distinta di oggi
+// (`variantiDaConfronto`) e si salvano accanto, cosi' il rigenera le
+// riapplica. Sostituire = la riga tiene quantita' e terzisti, cambia codice
+// e ricorda «al posto di». Motivo obbligatorio. Solo admin, solo sull'ordine.
+async function apriModificaListaCommessa(o, art, pezzi, poi) {
+  const P = Number(pezzi) || Number(o.quantita) || 0;
+  if (!(P > 0)) return toast('La commessa non ha pezzi: non si possono calcolare le quantità', 'err');
+  const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 4 });
+  const num = (v) => { const t = String(v == null ? '' : v).trim().replace(',', '.'); return t === '' ? null : Number(t); };
+  const v = veloTerzista('✎ Modifica lista materiali · ' + (o.numero_ordine || '') + '/' + (o.pos || '') + ' · ' + P + ' pz', 1000);
+  // Lo stato della finestra: una voce per riga della lista di oggi + le nuove.
+  const voci = (o.materiali || []).map(r => ({ r, codice: r.codice, qpz: Number(r.qta_pz != null ? r.qta_pz : (Number(r.qta) || 0) / P),
+    tolto: false, nuovo: null, descr: r.descrizione || '', um: r.um || '', tipo: r.tipo || null, aggiunta: false }));
+  const anag = new Map();
+  const cercaDescr = async (cod) => {
+    const k = String(cod || '').trim().toUpperCase();
+    if (!k) return null;
+    if (anag.has(k)) return anag.get(k);
+    let m = null;
+    try { m = (await fabbAnagraficaMateriali([k])).get(k) || null; } catch (e) {}
+    if (!m) { const x = (state.mancantiAlnus || state.mancanti || []).find(y => String(y.codice).trim().toUpperCase() === k);
+      if (x) m = { descrizione: x.descrizione, um: x.um, tipo_parte: x.tipo_parte }; }
+    anag.set(k, m); return m;
+  };
+  const tab = el('div', {});
+  const inMotivo = el('input', { type:'text', placeholder:'Es. distinta dell’OP 2135 di Alnus, kit cavi da Elcotec, sostituito per mancanza…' });
+  const riepilogo = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
+  const COL = 'display:grid;grid-template-columns:minmax(150px,1.2fr) minmax(120px,2fr) 90px 80px 50px 64px 70px;gap:8px;align-items:center;';
+  const et = (t, s) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (s || '') }, t);
+  const cambiate = () => voci.filter(x => x.tolto || x.nuovo || x.aggiunta || (x.r && Math.abs(x.qpz - Number(x.r.qta_pz != null ? x.r.qta_pz : (Number(x.r.qta) || 0) / P)) > 1e-9));
+  const disegna = () => {
+    tab.replaceChildren(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);' },
+      et('Codice'), et('Descrizione'), et('Per pz', 'text-align:right;'), et('Totale', 'text-align:right;'), et('UM'), et('Tipo'), et('')));
+    voci.forEach((x) => {
+      const inQ = el('input', { type:'text', inputmode:'decimal', value: String(x.qpz).replace('.', ','), disabled: x.tolto,
+        style:'text-align:right;padding:3px 6px;font-size:12px;' });
+      const tot = el('span', { class:'mono', style:'font-size:12px;text-align:right;' }, nf(x.qpz * P));
+      inQ.oninput = () => { const q = num(inQ.value); if (q != null && q >= 0) { x.qpz = q; tot.textContent = nf(q * P); aggiorna(); } };
+      let cellaCod;
+      if (x.aggiunta || x.nuovo !== null) {
+        const inCod = el('input', { type:'text', class:'mono', value: x.aggiunta ? x.codice : x.nuovo, placeholder: x.aggiunta ? 'Codice' : 'Nuovo codice',
+          style:'padding:3px 6px;font-size:11px;' });
+        inCod.onchange = async () => {
+          const c = inCod.value.trim().toUpperCase();
+          if (x.aggiunta) x.codice = c; else x.nuovo = c;
+          const m = await cercaDescr(c);
+          if (m) { x.descr = m.descrizione || x.descr; x.um = m.um || x.um; if (m.tipo_parte) x.tipo = m.tipo_parte; }
+          disegna();
+        };
+        cellaCod = el('div', { style:'display:flex;flex-direction:column;gap:2px;' }, inCod,
+          x.aggiunta ? el('span', { class:'sub', style:'font-size:10px;color:var(--grn);' }, '+ aggiunto')
+            : el('span', { class:'sub', style:'font-size:10px;color:var(--or);' }, '⇄ al posto di ' + x.codice));
+      } else {
+        cellaCod = el('div', { style:'display:flex;flex-direction:column;gap:1px;' },
+          el('span', { class:'mono', style:'font-size:11px;' + (x.tolto ? 'text-decoration:line-through;color:var(--mut);' : '') }, x.codice),
+          x.r && x.r.al_posto_di ? el('span', { class:'sub', style:'font-size:10px;color:var(--or);' }, 'al posto di ' + x.r.al_posto_di) : '');
+      }
+      const selTipo = el('select', { style:'padding:3px 4px;font-size:11px;', disabled: !(x.aggiunta || x.nuovo !== null) },
+        ...['', 'ACQ', 'C/L', 'MAC'].map(t => el('option', { value: t, selected: (x.tipo || '') === t }, t || '—')));
+      selTipo.onchange = () => { x.tipo = selTipo.value || null; aggiorna(); };
+      const azioni = el('div', { style:'display:flex;gap:4px;justify-content:flex-end;' });
+      if (!x.aggiunta && x.nuovo === null && !x.tolto) azioni.append(el('button', { type:'button', class:'btnsm', title:'Sostituisci con un altro codice (tiene quantità e terzisti)',
+        onclick: () => { x.nuovo = ''; disegna(); } }, '⇄'));
+      if (x.nuovo !== null && !x.aggiunta) azioni.append(el('button', { type:'button', class:'btnsm', title:'Annulla la sostituzione',
+        onclick: () => { x.nuovo = null; x.descr = x.r.descrizione || ''; x.um = x.r.um || ''; x.tipo = x.r.tipo || null; disegna(); } }, '↺'));
+      azioni.append(el('button', { type:'button', class:'btnsm', title: x.tolto ? 'Rimetti' : (x.aggiunta ? 'Togli la riga aggiunta' : 'Togli dalla lista'),
+        onclick: () => { if (x.aggiunta) voci.splice(voci.indexOf(x), 1); else x.tolto = !x.tolto; disegna(); } }, x.tolto ? '↺' : '✕'));
+      tab.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);' + (x.tolto ? 'opacity:.55;' : '') },
+        cellaCod,
+        el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: x.descr }, x.descr || '—'),
+        inQ, tot, el('span', { class:'sub', style:'font-size:11px;' }, x.um || ''), selTipo, azioni));
+    });
+    tab.append(el('button', { type:'button', class:'btnsm', style:'margin-top:8px;',
+      onclick: () => { voci.push({ r: null, codice: '', qpz: 1, tolto: false, nuovo: null, descr: '', um: '', tipo: 'ACQ', aggiunta: true }); disegna(); } }, '+ Aggiungi codice'));
+    aggiorna();
+  };
+  const aggiorna = () => {
+    const c = cambiate();
+    const n = (f) => c.filter(f).length;
+    riepilogo.textContent = c.length ? [n(x => x.tolto) && n(x => x.tolto) + ' tolti', n(x => x.nuovo) && n(x => x.nuovo) + ' sostituiti',
+      n(x => x.aggiunta) && n(x => x.aggiunta) + ' aggiunti', n(x => !x.tolto && !x.nuovo && !x.aggiunta) && n(x => !x.tolto && !x.nuovo && !x.aggiunta) + ' quantità cambiate']
+      .filter(Boolean).join(' · ') : 'Nessuna modifica';
+  };
+  const salva = el('button', { class:'btnp' }, 'Salva la lista');
+  salva.onclick = async () => {
+    const c = cambiate();
+    if (!c.length) return v.chiudi();
+    const motivo = inMotivo.value.trim();
+    if (!motivo) { inMotivo.focus(); return toast('Scrivi il motivo della modifica', 'err'); }
+    const vuoti = voci.filter(x => (x.aggiunta && !x.codice) || (x.nuovo !== null && !x.aggiunta && !x.nuovo));
+    if (vuoti.length) return toast('Manca il codice su ' + vuoti.length + ' righe', 'err');
+    const visti = new Set(), doppi = [];
+    voci.filter(x => !x.tolto).forEach(x => { const k = String(x.aggiunta ? x.codice : (x.nuovo || x.codice)).trim().toUpperCase();
+      if (visti.has(k)) doppi.push(k); visti.add(k); });
+    if (doppi.length) return toast('Codice ripetuto nella lista: ' + doppi.join(', ') + '. Cambia la quantità della riga che c’è già.', 'err', 9000);
+    salva.disabled = true; salva.textContent = 'Salvo…';
+    try {
+      // La lista che si salva = quella vista.
+      const r4 = (q) => +(+q).toFixed(6);
+      const lista = voci.filter(x => !x.tolto).map(x => {
+        if (x.aggiunta) return { codice: x.codice, descrizione: x.descr || null, um: x.um || null, tipo: x.tipo || null, da: null,
+          qta_pz: r4(x.qpz), qta: +(x.qpz * P).toFixed(4), variante: 'aggiunto' };
+        const base = Object.assign({}, x.r, { qta_pz: r4(x.qpz), qta: +(x.qpz * P).toFixed(4) });
+        if (x.nuovo) Object.assign(base, { codice: x.nuovo, descrizione: x.descr || null, um: x.um || null, tipo: x.tipo || null,
+          al_posto_di: x.r.al_posto_di || x.codice, variante: 'sostituito' });
+        return base;
+      });
+      // Le varianti: contro la distinta di OGGI (se il prodotto ce l'ha).
+      const generata = art && art.codice ? await generaMaterialiCommessa(art.codice, P) : [];
+      const sost = voci.filter(x => x.nuovo && !x.tolto).map(x => ({ da: x.r.al_posto_di || x.codice, a: x.nuovo }))
+        .concat((o.materiali_varianti || []).filter(w => w.tipo === 'sostituito').map(w => ({ da: w.codice, a: w.nuovo })));
+      const chi = (state.profile && (state.profile.nome || state.profile.email)) || null;
+      const varianti = variantiDaConfronto(generata, lista, sost, o.materiali_varianti || [],
+        { motivo, il: toLocalISO(new Date()), chi });
+      // Ogni riga della lista dice se e' una variante (per vederlo nella scheda).
+      const tipoDi = new Map();
+      varianti.forEach(w => { if (w.tipo === 'sostituito') tipoDi.set(String(w.nuovo).toUpperCase(), 'sostituito');
+        else if (w.tipo !== 'tolto') tipoDi.set(String(w.codice).toUpperCase(), w.tipo === 'aggiunto' ? 'aggiunto' : 'quantita'); });
+      const gen = new Map(generata.map(r => [String(r.codice).toUpperCase(), r]));
+      lista.forEach(r => { const k = String(r.codice).toUpperCase(); const t = tipoDi.get(k);
+        if (t) { r.variante = t; if (t === 'quantita' && gen.has(k)) r.qta_pz_distinta = gen.get(k).qta_pz; }
+        else { delete r.variante; delete r.qta_pz_distinta; if (!varianti.some(w => w.tipo === 'sostituito' && String(w.nuovo).toUpperCase() === k)) delete r.al_posto_di; } });
+      await salvaMaterialiCommessa(o, lista, varianti);
+      v.chiudi();
+      toast('Lista salvata: ' + lista.length + ' materiali · ' + varianti.length + ' modifiche rispetto alla distinta', 'ok');
+      if (typeof poi === 'function') poi();
+    } catch (e) {
+      salva.disabled = false; salva.textContent = 'Salva la lista';
+      toast('Lista non salvata: ' + (e.message || e), 'err', 9000);
+    }
+  };
+  v.corpo.append(el('div', { class:'sub', style:'font-size:12px;margin-bottom:10px;' },
+    'Le modifiche valgono solo per questa commessa: la distinta del prodotto ' + (art && art.codice ? art.codice + ' ' : '')
+    + 'non cambia. «⟳ Rigenera dalla distinta» le riapplica. Per pezzo: la quantità totale è per pezzo × ' + P + '.'),
+    tab, el('div', { class:'field', style:'margin-top:12px;' }, el('label', {}, 'Motivo (obbligatorio)'), inMotivo));
+  if (Array.isArray(o.materiali_varianti) && o.materiali_varianti.length) {
+    const nomi = { tolto: 'tolto', quantita: 'quantità', sostituito: 'sostituito', aggiunto: 'aggiunto' };
+    v.corpo.append(el('details', { style:'margin-top:10px;font-size:12px;' },
+      el('summary', { class:'sub', style:'cursor:pointer;' }, 'Modifiche già fatte rispetto alla distinta (' + o.materiali_varianti.length + ')'),
+      ...o.materiali_varianti.map(w => el('div', { class:'sub', style:'font-size:11px;padding:2px 0;' },
+        nomi[w.tipo] + ' · ' + w.codice + (w.nuovo ? ' → ' + w.nuovo : '') + (w.qta_pz != null ? ' · ' + nf(w.qta_pz) + '/pz' : '')
+        + (w.motivo ? ' · «' + w.motivo + '»' : '') + (w.chi ? ' · ' + w.chi : '') + (w.il ? ' · ' + fmtIT(w.il) : '')))));
+  }
+  v.piede.append(riepilogo, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), salva);
+  disegna();
 }
 
 // La stessa cosa che fa il bottone "⚙ Crea dalla distinta", ma per un mazzo di
@@ -17700,30 +17854,41 @@ function openOperazioneModal(o, opts) {
       style:'font-size:11px;margin-bottom:8px;display:flex;align-items:center;gap:10px;' },
       el('span', {}, righe.length + (righe.length === 1 ? ' componente' : ' componenti')));
     if (isAdmin && art) {
-      const btnRi = el('button', { type:'button', class:'btnsm',
-        style:'margin-left:auto;' }, '⟳ Rigenera dalla distinta');
+      const btnRi = el('button', { type:'button', class:'btnsm' }, '⟳ Rigenera dalla distinta');
       btnRi.onclick = async () => {
         // Il rigenera scrive subito: con terzisti cambiati e non salvati
         // partirebbe da una commessa diversa da quella a database.
         if (materialiInSospeso) return toast('Prima salva le modifiche ai terzisti, poi rigenera la lista', 'err');
+        const nVar = Array.isArray(o.materiali_varianti) ? o.materiali_varianti.length : 0;
         if (!confirm('Rifare la lista dalla distinta di ' + art.codice + ' per ' + ordinati + ' pz?\n\n'
           + 'Le quantità attuali di questa commessa vengono sostituite. '
-          + 'I terzisti scelti su questa commessa restano.')) return;
+          + 'I terzisti scelti su questa commessa restano.'
+          + (nVar ? '\nLe ' + nVar + ' modifiche fatte su questa commessa (✎ Modifica lista) vengono riapplicate.' : ''))) return;
         btnRi.disabled = true; btnRi.textContent = 'Calcolo…';
         try {
           // ⚠ Quantita' e codici dal prodotto, TERZISTI dalla commessa (18 nov):
           // un terzista cambiato resta cambiato, una fase tolta resta tolta.
-          const nuove = terzistiDellaCommessa(await generaMaterialiCommessa(art.codice, ordinati),
-            righe, fornitoriSel.map(x => x.azienda_id));
+          // VARIANTI DELL'ORDINE (24 nov): riapplicate sopra la distinta.
+          const conVar = applicaVarianti(await generaMaterialiCommessa(art.codice, ordinati), o.materiali_varianti || [], ordinati);
+          const nuove = terzistiDellaCommessa(conVar.righe, righe, fornitoriSel.map(x => x.azienda_id));
           await salvaMaterialiCommessa(o, nuove);
-          toast('Lista rifatta: ' + nuove.length + ' materiali', 'ok');
+          if (conVar.saltate.length) toast('Lista rifatta, ma ' + conVar.saltate.length + ' modifiche non trovano più il loro codice nella distinta: '
+            + conVar.saltate.map(v => v.codice).join(', ') + '. Controlla con ✎ Modifica lista.', 'err', 12000);
+          else toast('Lista rifatta: ' + nuove.length + ' materiali' + (nVar ? ' (con le ' + nVar + ' modifiche della commessa)' : ''), 'ok');
           renderMancanti();
         } catch (e) {
           btnRi.disabled = false; btnRi.textContent = '⟳ Rigenera dalla distinta';
           toast('Errore: ' + (e.message || e), 'err');
         }
       };
-      intestazione.append(btnRi);
+      // ✎ MODIFICA LISTA (24 nov, Nico: le distinte degli ordini cambiano).
+      const nVar = Array.isArray(o.materiali_varianti) ? o.materiali_varianti.length : 0;
+      intestazione.append(el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
+        title:'Aggiungi, togli, cambia quantità o sostituisci un materiale solo su questa commessa. La scheda prodotto non cambia.',
+        onclick: () => {
+          if (materialiInSospeso) return toast('Prima salva le modifiche ai terzisti, poi modifica la lista', 'err');
+          apriModificaListaCommessa(o, art, ordinati, renderMancanti);
+        } }, '✎ Modifica lista' + (nVar ? ' · ' + nVar : '')), btnRi);
     }
     // CICLO PRODUTTIVO (17 nov): le fasi a tappe. Calcolato qui sopra perche'
     // se c'e' il reparto il suo bottone sta nella sua scheda, non in testa.
@@ -17847,6 +18012,13 @@ function openOperazioneModal(o, opts) {
             : 'Arriva da piu sottoassiemi: ' + origini.join(', ') },
           '◂ da ' + origini[0] + (origini.length > 1 ? '  +' + (origini.length - 1) : '')));
       }
+      // VARIANTE DELL'ORDINE (24 nov): la riga non e' quella della distinta.
+      if (r.variante === 'aggiunto') cellaCod.append(el('span', { class:'sub', style:'font-size:10px;color:var(--grn);',
+        title:'Aggiunto su questa commessa: non è nella distinta del prodotto' }, '+ aggiunto sull’ordine'));
+      else if (r.variante === 'sostituito' || r.al_posto_di) cellaCod.append(el('span', { class:'sub', style:'font-size:10px;color:var(--or);',
+        title:'Sostituito su questa commessa: nella distinta del prodotto c’è ' + (r.al_posto_di || '') }, '⇄ al posto di ' + (r.al_posto_di || '?')));
+      else if (r.variante === 'quantita') cellaCod.append(el('span', { class:'sub', style:'font-size:10px;color:var(--or);',
+        title:'Quantità cambiata su questa commessa' }, '✎ distinta ' + (r.qta_pz_distinta != null ? nf(r.qta_pz_distinta) + '/pz' : 'diversa')));
       // Clic sulla riga = scheda del codice (19 nov, Nico: al posto del 📇).
       const dR = datoRiga.get(iRiga) || 0, rR = restaRiga.get(iRiga) || 0;
       listaBox.append(el('div', { style: COLR + 'padding:4px 0;border-bottom:1px solid var(--brd);cursor:pointer;',
