@@ -7728,6 +7728,7 @@ const DOC_TIPI = {
   ddt_ricevuto: { verso: 'entrata', txt: 'DDT ricevuto' },
   ddt_rientro:  { verso: 'entrata', txt: 'DDT di rientro' },
   ddt_fs:       { verso: 'uscita',  txt: 'DDT al terzista' },
+  reso:         { verso: 'uscita',  txt: 'Reso al cliente' },
 };
 let docVerso = 'tutti', docTipo = '', docCerca = '';
 function documentiRegistro() {
@@ -7757,6 +7758,22 @@ function documentiRegistro() {
           movFiltroDoc = d.k; movVista = 'righe'; movQuante = 400; selectTab('movimenti'); } }] });
     });
   } else nonLetti.push('DDT ricevuti');
+  // 1b. Resi al cliente (24 nov): le uscite RESO raggruppate per documento.
+  if (Array.isArray(state.movimenti)) {
+    const per = new Map();
+    state.movimenti.filter(m => m.documento_tipo === 'RESO' && m.documento_numero).forEach(m => {
+      const k = movChiaveDoc(m);
+      if (!per.has(k)) per.set(k, { k, m, righe: 0, pezzi: 0 });
+      const d = per.get(k); d.righe++; d.pezzi += Math.abs(Number(m.qta) || 0);
+    });
+    per.forEach(d => out.push({ tipo: 'reso', data: giorno(d.m.documento_data || d.m.data),
+      numero: 'DDT ' + d.m.documento_numero, azienda: d.m.mittente || nomeAziendaDi(d.m.azienda_id) || '—',
+      rif: String(d.m.note || '').replace(/^Reso a [^·]*(· )?/, ''),
+      contenuto: d.righe + (d.righe === 1 ? ' riga' : ' righe') + ' · ' + nfIT(d.pezzi) + ' pz',
+      azioni: [{ t: 'Righe', title: 'Apri le righe di questo reso in Movimenti', fn: () => {
+        movFiltroTipo = ''; movFiltroMitt = ''; movFiltroOrd = ''; movCerca = '';
+        movFiltroDoc = d.k; movVista = 'righe'; movQuante = 400; selectTab('movimenti'); } }] }));
+  }
   // 2. DDT di rientro: il documento e' del terzista, qui c'e' la traccia.
   if (Array.isArray(state.rientriTerzista)) {
     state.rientriTerzista.forEach(r => {
@@ -8261,6 +8278,143 @@ function riquadroDaPreparare(ridisegna) {
   aperte.forEach(x => box.append(rigaRichiestaTerzista(x, ridisegna, true)));
   return box;
 }
+// ↩ RESO AL CLIENTE (24 nov, Nico: "come segno dei cod. di reso che sto facendo a Tema?
+// sono cod che non risulteranno su Alnus"). Materiale NOSTRO in giacenza (i TS- di Tema)
+// che esce verso il cliente con un DDT: una riga `scarico` per riga, documento RESO,
+// legata al cliente. Da dove esce: la sede o un posto del gestionale (reparto, terzista)
+// per la sua commessa. Scrive SOLO `mov_reso_cliente` (strumenti/migrazione-reso-cliente.sql):
+// admin, tutto o niente, mai oltre il disponibile, niente codici di Alnus (si rendono in Alnus).
+function apriResoCliente(poi) {
+  if (!Array.isArray(state.movimenti)) return toast('Movimenti non letti: premi ⟳ Aggiorna e riprova.', 'err');
+  const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  const num = (t) => { const s = String(t == null ? '' : t).trim().replace(',', '.'); return s === '' ? null : Number(s); };
+  const v = veloTerzista('↩ Reso al cliente', 920);
+  const campo = (et, inp, w) => el('div', { class:'field', style: w ? 'flex:' + w + ';' : '' }, el('label', {}, et), inp);
+  const clienti = (state.aziende || []).filter(a => a && a.is_cliente)
+    .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'it'));
+  const selCli = el('select', {}, el('option', { value:'' }, '— scegli il cliente —'),
+    ...clienti.map(a => el('option', { value: a.id }, a.nome)));
+  const inNum = el('input', { type:'text', placeholder:'n. del DDT di reso' });
+  const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
+  const inNota = el('input', { type:'text', placeholder:'Es. materiale non conforme, in eccesso…' });
+  const msg = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
+  const COL = 'display:grid;grid-template-columns:170px minmax(160px,1fr) 210px 80px 90px 28px;gap:8px;align-items:center;';
+  const et = (t, dx) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (dx ? 'text-align:right;' : '') }, t);
+  const corpo = el('div', {});
+  const righe = [];
+  // Dove sta il codice IN CONTO: sede e posti per commessa, col saldo.
+  const postiDi = (cod) => {
+    const per = new Map();
+    inConto(state.movimenti).filter(m => String(m.codice || '').trim().toUpperCase() === cod).forEach(m => {
+      const k = (m.presso_id || '') + '|' + (m.presso_id ? (m.operazione_id || '') : '');
+      per.set(k, +((per.get(k) || 0) + (Number(m.qta) || 0)).toFixed(6));
+    });
+    const out = [];
+    per.forEach((q, k) => {
+      const [presso, op] = k.split('|');
+      if (presso && !(q > 1e-9)) return;
+      const o = op ? (state.operazioni || []).find(x => x.id === op) : null;
+      out.push({ k, presso: presso || null, op: op || null, q,
+        txt: (presso ? (eReparto(presso) ? NOME_REPARTO : nomeAziendaDi(presso)) + (o ? ' · ' + etiOpTerzista(o) : '') : 'Sede') + ' · ' + nf(q) });
+    });
+    if (!out.some(p => !p.presso)) out.unshift({ k: '|', presso: null, op: null, q: 0, txt: 'Sede · 0' });
+    return out.sort((a, b) => (a.presso ? 1 : 0) - (b.presso ? 1 : 0) || b.q - a.q);
+  };
+  const aggiorna = () => {
+    let err = 0, n = 0;
+    const somma = new Map();
+    righe.forEach(r => { const q = num(r.inQta.value); const p = r.posto(); if (r.cod() && p && q > 0) somma.set(r.cod() + '#' + p.k, (somma.get(r.cod() + '#' + p.k) || 0) + q); });
+    righe.forEach(r => {
+      const cod = r.cod(), q = num(r.inQta.value), p = r.posto();
+      let e = '';
+      if (!cod && (q == null)) { r.err.textContent = ''; return; }
+      if (!cod) e = 'manca il codice';
+      else if (codiceDiAlnus(cod)) e = 'codice di Alnus: il reso si fa in Alnus';
+      else if (!(q > 0)) e = 'quantità';
+      else if (p && (somma.get(cod + '#' + p.k) || 0) > p.q + 1e-9) e = 'oltre il disponibile (' + nf(p.q) + ')';
+      r.err.textContent = e; r.inQta.style.borderColor = e ? 'var(--red)' : '';
+      if (e) err++; else n++;
+    });
+    msg.textContent = err ? err + (err === 1 ? ' riga da correggere' : ' righe da correggere') : n + (n === 1 ? ' riga' : ' righe');
+    msg.style.color = err ? 'var(--red)' : '';
+    ok.disabled = !!err || !n;
+  };
+  const nuovaRiga = () => {
+    const inCod = el('input', { type:'text', class:'mono', placeholder:'Codice' });
+    const descr = el('span', { style:'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' });
+    const selPosto = el('select', { style:'font-size:12px;' });
+    const inQta = el('input', { type:'text', inputmode:'decimal', style:'text-align:right;' });
+    const err = el('div', { class:'sub', style:'grid-column:1/-1;font-size:11px;color:var(--red);margin-top:-4px;' });
+    let posti = [];
+    const r = { inQta, err, cod: () => inCod.value.trim().toUpperCase(),
+      posto: () => posti.find(p => p.k === selPosto.value) || null, descr: () => descr.textContent, um: '' };
+    const disp = el('span', { class:'mono', style:'text-align:right;font-size:12px;' });
+    const rifai = () => {
+      const cod = r.cod();
+      posti = cod ? postiDi(cod) : [];
+      const prima = selPosto.value;
+      selPosto.innerHTML = '';
+      posti.forEach(p => selPosto.append(el('option', { value: p.k }, p.txt)));
+      if (posti.some(p => p.k === prima)) selPosto.value = prima;
+      const ult = cod ? state.movimenti.filter(m => String(m.codice || '').trim().toUpperCase() === cod && m.descrizione).slice(-1)[0] : null;
+      descr.textContent = ult ? ult.descrizione : (cod ? 'nessun movimento per questo codice' : '');
+      descr.title = descr.textContent;
+      r.um = ult ? (ult.um || '') : '';
+      disp.textContent = r.posto() ? nf(r.posto().q) : '';
+      aggiorna();
+    };
+    inCod.addEventListener('input', rifai);
+    selPosto.addEventListener('change', () => { disp.textContent = r.posto() ? nf(r.posto().q) : ''; aggiorna(); });
+    inQta.addEventListener('input', aggiorna);
+    const tolgo = el('button', { type:'button', class:'btnsm', title:'Togli la riga', onclick: () => {
+      const i = righe.indexOf(r); if (i >= 0) righe.splice(i, 1); riga.remove(); err.remove(); aggiorna(); } }, '✕');
+    const riga = el('div', { style: COL + 'padding:4px 0;' }, inCod, descr, selPosto, disp, inQta, tolgo);
+    righe.push(r);
+    corpo.append(riga, err);
+    rifai();
+    return inCod;
+  };
+  const ok = el('button', { class:'btnp' }, 'Registra reso');
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
+      'Il materiale esce dal magazzino del gestionale verso il cliente: per ogni riga un’uscita legata al DDT di reso. '
+      + 'Solo codici che conta il gestionale (come i TS- di Tema): quelli di Alnus si rendono in Alnus.'),
+    el('div', { class:'frow' }, campo('Cliente', selCli, 2), campo('N. DDT di reso', inNum, 1), campo('Data', inData, 1)),
+    campo('Nota (facoltativa)', inNota),
+    el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);margin-top:8px;' },
+      et('Codice'), et('Descrizione'), et('Da dove'), et('Disponibile', 1), et('Q.tà', 1), el('span')),
+    el('div', { style:'max-height:46vh;overflow-y:auto;' }, corpo),
+    el('button', { type:'button', class:'btnsm', style:'margin-top:8px;', onclick: () => nuovaRiga().focus() }, '+ Riga'));
+  ok.onclick = async () => {
+    const errore = !selCli.value ? 'Scegli il cliente' : (!inNum.value.trim() ? 'Scrivi il numero del DDT di reso'
+      : (!inData.value ? 'Scrivi la data' : ''));
+    if (errore) { msg.textContent = errore; msg.style.color = 'var(--red)'; return; }
+    const payload = righe.filter(r => r.cod()).map(r => { const p = r.posto();
+      return { codice: r.cod(), qta: num(r.inQta.value), descrizione: r.descr() || null, um: r.um || null,
+        presso_id: p && p.presso ? p.presso : null, operazione_id: p && p.presso ? p.op : null }; });
+    ok.disabled = true; ok.textContent = 'Registrazione…';
+    try {
+      const { error } = await sb.rpc('mov_reso_cliente', { p_cliente: selCli.value, p_numero: inNum.value.trim(),
+        p_data: inData.value, p_righe: payload, p_nota: inNota.value.trim() || null });
+      if (error) {
+        if (/could not find the function|PGRST202/i.test(error.message || '') || error.code === 'PGRST202')
+          throw new Error('la funzione mov_reso_cliente non c’è ancora a database (va eseguito lo SQL)');
+        throw new Error(error.message);
+      }
+      v.chiudi();
+      toast('Reso registrato: ' + payload.length + (payload.length === 1 ? ' riga' : ' righe') + ' · DDT ' + inNum.value.trim(), 'ok');
+      await caricaMovimenti();
+      if (typeof poi === 'function') poi();
+    } catch (e) {
+      ok.disabled = false; ok.textContent = 'Registra reso';
+      toast('Reso non registrato: ' + (e.message || e), 'err', 10000);
+    }
+  };
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+  nuovaRiga();
+  selCli.focus();
+}
+
 function renderDocumenti(root) {
   root.innerHTML = '';
   const ridisegna = () => renderDocumenti(root);
@@ -8270,7 +8424,10 @@ function renderDocumenti(root) {
   root.append(el('div', { class:'toolbar' }, el('h2', {}, 'Documenti'), ricarica,
     (eAdminOra() && Array.isArray(state.movimenti)) ? el('button', { class:'btnp', style:'margin-left:auto;',
       title:'Registra a mano un DDT ricevuto: le sue righe diventano carichi di magazzino',
-      onclick: () => apriDdtEntrataDaOrdini(ridisegna) }, '＋ DDT in entrata') : ''));
+      onclick: () => apriDdtEntrataDaOrdini(ridisegna) }, '＋ DDT in entrata') : '',
+    (eAdminOra() && Array.isArray(state.movimenti)) ? el('button', { class:'btnp',
+      title:'Registra un reso al cliente: le righe escono dal magazzino del gestionale con il DDT di reso',
+      onclick: () => apriResoCliente(ridisegna) }, '↩ Reso al cliente') : ''));
   // In cima il lavoro da fare: DDT da confermare e liste da preparare (23 nov).
   root.append(riquadroRicevimenti(ridisegna), riquadroDaPreparare(ridisegna));
   const { lista: tutti, nonLetti } = documentiRegistro();
@@ -8294,7 +8451,7 @@ function renderDocumenti(root) {
   const nE = lista.filter(d => DOC_TIPI[d.tipo].verso === 'entrata').length;
   root.append(el('div', { class:'sub', style:'margin:-4px 0 10px;font-size:12px;' },
     lista.length + (lista.length === 1 ? ' documento' : ' documenti') + ' · ' + nE + ' in entrata · ' + (lista.length - nE) + ' in uscita'
-    + '. I DDT ricevuti entrano dall’automazione delle scansioni o da «＋ DDT in entrata»; quelli in uscita dalle spedizioni ai terzisti.'));
+    + '. I DDT ricevuti entrano dall’automazione delle scansioni o da «＋ DDT in entrata»; quelli in uscita dalle spedizioni ai terzisti e da «↩ Reso al cliente».'));
   if (!lista.length) {
     root.append(el('div', { class:'empty' }, tutti.length ? 'Nessun documento con questi filtri.' : 'Nessun documento ancora.'));
     return;
