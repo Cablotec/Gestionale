@@ -17,7 +17,7 @@ const base = [
 ];
 const voluta = [
   { codice: 'CK03VS', qta_pz: 4 },
-  { codice: 'CKSF03', descrizione: 'frutto molla', um: 'nr', tipo: 'ACQ', qta_pz: 2 },
+  { codice: 'CKSF03', descrizione: 'frutto molla', um: 'nr', tipo: 'ACQ', qta_pz: 2, fasi_esterne: { T1: 1 } },
   { codice: 'FUSIBILE', qta_pz: 1 },
   { codice: 'KIT_KF', descrizione: 'kit fili', um: 'nr', tipo: 'ACQ', qta_pz: 1 },
 ];
@@ -71,6 +71,45 @@ sez('Riapplicate alla distinta (rigenera)');
   t('aggiunto che ora e\' in distinta: vale la quantita della variante', righe.filter(x => x.codice === 'KIT_KF').length === 1 && righe.find(x => x.codice === 'KIT_KF').qta === 50);
 }
 t('senza varianti la lista e\' la distinta', M.applicaVarianti(base, null, 50).righe.length === 4);
+
+sez('Modifiche dalla fase (terzista o reparto)');
+{
+  // Riga: 8/pz, di cui 6 a Bellini (B) e 2 in reparto.
+  const lista = [{ codice: 'K', qta_pz: 8, qta: 400, fasi_esterne: { B: 6 } }, { codice: 'Z', qta_pz: 1, qta: 50, fasi_esterne: null }];
+  const BEL = { id: 'B', reparto: false }, REP = { id: 'R', reparto: true };
+  t('quota di Bellini 6, del reparto 2', M.quotaInFase(lista[0], BEL) === 6 && M.quotaInFase(lista[0], REP) === 2);
+  let x = M.modificaInFase(lista, BEL, [{ tipo: 'quantita', codice: 'K', qta_pz: 3 }], 50).righe;
+  t('Bellini da 6 a 3: totale 5/pz, reparto resta 2', x[0].qta_pz === 5 && x[0].fasi_esterne.B === 3 && x[0].qta === 250 && M.quotaInFase(x[0], REP) === 2);
+  x = M.modificaInFase(lista, REP, [{ tipo: 'quantita', codice: 'K', qta_pz: 4 }], 50).righe;
+  t('reparto da 2 a 4: totale 10/pz, Bellini resta 6', x[0].qta_pz === 10 && x[0].fasi_esterne.B === 6);
+  x = M.modificaInFase(lista, BEL, [{ tipo: 'tolto', codice: 'K' }], 50).righe;
+  t('tolto da Bellini: resta in reparto 2/pz, nessun terzista', x[0].qta_pz === 2 && x[0].fasi_esterne === null);
+  x = M.modificaInFase(lista, REP, [{ tipo: 'tolto', codice: 'Z' }], 50).righe;
+  t('tolto dal reparto un codice solo suo: la riga sparisce', x.length === 1);
+  x = M.modificaInFase(lista, BEL, [{ tipo: 'aggiunto', codice: 'NUOVO', qta_pz: 2, descrizione: 'n', tipo_parte: 'ACQ' }], 50).righe;
+  const n = x.find(r => r.codice === 'NUOVO');
+  t('aggiunto a Bellini: va a Bellini', n.qta_pz === 2 && n.fasi_esterne.B === 2 && n.qta === 100 && n.tipo === 'ACQ');
+  x = M.modificaInFase(lista, REP, [{ tipo: 'aggiunto', codice: 'NUOVO', qta_pz: 2 }], 50).righe;
+  t('aggiunto al reparto: nessun terzista', x.find(r => r.codice === 'NUOVO').fasi_esterne === null);
+  x = M.modificaInFase(lista, BEL, [{ tipo: 'aggiunto', codice: 'Z', qta_pz: 1 }], 50).righe;
+  t('aggiunto a Bellini un codice che e\' gia\' in reparto: si somma', x.find(r => r.codice === 'Z').qta_pz === 2 && x.find(r => r.codice === 'Z').fasi_esterne.B === 1);
+  const s = M.modificaInFase(lista, BEL, [{ tipo: 'sostituito', codice: 'K', nuovo: 'KS' }], 50);
+  const k = s.righe.find(r => r.codice === 'K'), ks = s.righe.find(r => r.codice === 'KS');
+  t('sostituito solo per Bellini: K resta 2 in reparto, KS 6 a Bellini', k.qta_pz === 2 && !k.fasi_esterne && ks.qta_pz === 6 && ks.fasi_esterne.B === 6 && ks.al_posto_di === 'K');
+  t('la lista di partenza non cambia', lista[0].qta_pz === 8 && lista[0].fasi_esterne.B === 6);
+  // Dalla fase alle varianti e ritorno (il rigenera).
+  const V = M.variantiDaConfronto(lista, s.righe, s.sostituzioni, [], {});
+  t('sostituzione parziale = quantita + aggiunto (non sostituito)', V.length === 2 && V.some(v => v.tipo === 'quantita' && v.codice === 'K')
+    && V.some(v => v.tipo === 'aggiunto' && v.codice === 'KS' && v.fasi_esterne.B === 6 && v.al_posto_di === 'K'));
+  const g = M.applicaVarianti(lista, V, 50).righe;
+  t('rigenera: stessa lista, con le destinazioni', g.find(r => r.codice === 'K').qta_pz === 2 && !g.find(r => r.codice === 'K').fasi_esterne
+    && g.find(r => r.codice === 'KS').fasi_esterne.B === 6 && g.find(r => r.codice === 'KS').al_posto_di === 'K');
+  const tutta = M.modificaInFase([{ codice: 'K', qta_pz: 6, fasi_esterne: { B: 6 } }], BEL, [{ tipo: 'sostituito', codice: 'K', nuovo: 'KS' }], 50);
+  const V2 = M.variantiDaConfronto([{ codice: 'K', qta_pz: 6, fasi_esterne: { B: 6 } }], tutta.righe, tutta.sostituzioni, [], {});
+  t('sostituito per intero: una variante «sostituito»', V2.length === 1 && V2[0].tipo === 'sostituito' && V2[0].nuovo === 'KS');
+  const V3 = M.variantiDaConfronto(lista, M.modificaInFase(lista, REP, [{ tipo: 'quantita', codice: 'K', qta_pz: 0 }, { tipo: 'aggiunto', codice: 'X', qta_pz: 0 }], 50).righe, [], [], {});
+  t('spostare solo la destinazione e\' una variante', M.variantiDaConfronto(lista, [{ codice: 'K', qta_pz: 8, fasi_esterne: { B: 8 } }, lista[1]], [], [], {}).length === 1 && V3.length === 1);
+}
 
 console.log('\n' + ok + ' ok, ' + ko + ' KO');
 process.exit(ko ? 1 : 0);

@@ -4527,14 +4527,32 @@ async function salvaMaterialiCommessa(op, righe, varianti) {
 // (`variantiDaConfronto`) e si salvano accanto, cosi' il rigenera le
 // riapplica. Sostituire = la riga tiene quantita' e terzisti, cambia codice
 // e ricorda «al posto di». Motivo obbligatorio. Solo admin, solo sull'ordine.
-async function apriModificaListaCommessa(o, art, pezzi, poi) {
+// DALLA FASE (24 nov, Nico: "invece del tasto modifica lista in alto, potessi
+// cambiare le liste materiali dei terzisti o WIP?"): `opts.fase` = { id,
+// reparto } apre le sole righe di quella fase con la SUA quota per pezzo;
+// aggiungere li' = mandare li'. Si salva con `modificaInFase` (domain): la
+// riga totale cambia della stessa differenza, le quote degli altri restano.
+// Colonna «Già dato»: quanto e' gia' partito per quella fase (avviso se si
+// scende sotto). `opts.fornitori`: i terzisti della commessa (per la base
+// delle varianti, come il rigenera). Senza `opts.fase`: la lista intera.
+async function apriModificaListaCommessa(o, art, pezzi, poi, opts) {
+  opts = opts || {};
+  const fase = opts.fase || null;
   const P = Number(pezzi) || Number(o.quantita) || 0;
   if (!(P > 0)) return toast('La commessa non ha pezzi: non si possono calcolare le quantità', 'err');
   const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 4 });
   const num = (v) => { const t = String(v == null ? '' : v).trim().replace(',', '.'); return t === '' ? null : Number(t); };
-  const v = veloTerzista('✎ Modifica lista materiali · ' + (o.numero_ordine || '') + '/' + (o.pos || '') + ' · ' + P + ' pz', 1000);
-  // Lo stato della finestra: una voce per riga della lista di oggi + le nuove.
-  const voci = (o.materiali || []).map(r => ({ r, codice: r.codice, qpz: Number(r.qta_pz != null ? r.qta_pz : (Number(r.qta) || 0) / P),
+  const nomeFaseQui = fase ? (fase.reparto ? NOME_REPARTO : nomeAziendaDi(fase.id)) : null;
+  const v = veloTerzista('✎ ' + (fase ? 'Materiali · ' + nomeFaseQui : 'Modifica lista materiali') + ' · '
+    + (o.numero_ordine || '') + '/' + (o.pos || '') + ' · ' + P + ' pz', 1000);
+  // Gia' partito per questa fase (richieste confermate a quel posto, questa commessa).
+  const dato = new Map();
+  if (fase) (state.inviiTerzista || []).filter(x => x.stato === 'inviato' && x.terzista_id === fase.id).forEach(x => (x.righe || []).forEach(r => {
+    if (opDiRigaTerzista(x, r) !== o.id) return;
+    const k = chiaveCodice(r.codice); dato.set(k, (dato.get(k) || 0) + (Number(r.qta_inviata != null ? r.qta_inviata : r.qta) || 0)); }));
+  // Lo stato della finestra: una voce per riga (della fase o di tutta la lista) + le nuove.
+  const qpzDi = (r) => fase ? quotaInFase(r, fase) : Number(r.qta_pz != null ? r.qta_pz : (Number(r.qta) || 0) / P);
+  const voci = (o.materiali || []).filter(r => !fase || quotaInFase(r, fase) > 1e-9).map(r => ({ r, codice: r.codice, qpz: qpzDi(r), q0: qpzDi(r),
     tolto: false, nuovo: null, descr: r.descrizione || '', um: r.um || '', tipo: r.tipo || null, aggiunta: false }));
   const anag = new Map();
   const cercaDescr = async (cod) => {
@@ -4550,17 +4568,25 @@ async function apriModificaListaCommessa(o, art, pezzi, poi) {
   const tab = el('div', {});
   const inMotivo = el('input', { type:'text', placeholder:'Es. distinta dell’OP 2135 di Alnus, kit cavi da Elcotec, sostituito per mancanza…' });
   const riepilogo = el('span', { class:'sub', style:'font-size:12px;margin-right:auto;' });
-  const COL = 'display:grid;grid-template-columns:minmax(150px,1.2fr) minmax(120px,2fr) 90px 80px 50px 64px 70px;gap:8px;align-items:center;';
+  const COL = 'display:grid;grid-template-columns:minmax(150px,1.2fr) minmax(120px,2fr) 90px 80px' + (fase ? ' 80px' : '') + ' 50px 64px 70px;gap:8px;align-items:center;';
   const et = (t, s) => el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' + (s || '') }, t);
-  const cambiate = () => voci.filter(x => x.tolto || x.nuovo || x.aggiunta || (x.r && Math.abs(x.qpz - Number(x.r.qta_pz != null ? x.r.qta_pz : (Number(x.r.qta) || 0) / P)) > 1e-9));
+  const cambiate = () => voci.filter(x => x.tolto || x.nuovo || x.aggiunta || (x.r && Math.abs(x.qpz - x.q0) > 1e-9));
+  const datoDi = (x) => x.r ? +(dato.get(chiaveCodice(x.codice)) || 0).toFixed(4) : 0;
+  // Sotto il gia' dato: avviso, non blocco (a volte e' proprio quello che si vuole).
+  const sottoDato = (x) => fase && x.r && datoDi(x) > 0 && ((x.tolto || x.nuovo) ? 0 : x.qpz * P) < datoDi(x) - 1e-9;
   const disegna = () => {
     tab.replaceChildren(el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);' },
-      et('Codice'), et('Descrizione'), et('Per pz', 'text-align:right;'), et('Totale', 'text-align:right;'), et('UM'), et('Tipo'), et('')));
+      et('Codice'), et('Descrizione'), et('Per pz', 'text-align:right;'), et(fase ? (fase.reparto ? 'In casa' : 'Da mandare') : 'Totale', 'text-align:right;'),
+      ...(fase ? [et(fase.reparto ? 'Già portato' : 'Già dato', 'text-align:right;')] : []), et('UM'), et('Tipo'), et('')));
     voci.forEach((x) => {
       const inQ = el('input', { type:'text', inputmode:'decimal', value: String(x.qpz).replace('.', ','), disabled: x.tolto,
         style:'text-align:right;padding:3px 6px;font-size:12px;' });
       const tot = el('span', { class:'mono', style:'font-size:12px;text-align:right;' }, nf(x.qpz * P));
-      inQ.oninput = () => { const q = num(inQ.value); if (q != null && q >= 0) { x.qpz = q; tot.textContent = nf(q * P); aggiorna(); } };
+      const cDato = el('span', { class:'mono', style:'font-size:12px;text-align:right;' }, datoDi(x) ? nf(datoDi(x)) : '—');
+      const segnaDato = () => { cDato.style.color = sottoDato(x) ? 'var(--red)' : 'var(--mut)';
+        cDato.title = sottoDato(x) ? 'Ne è già partito di più: la differenza va fatta rientrare' : ''; };
+      segnaDato();
+      inQ.oninput = () => { const q = num(inQ.value); if (q != null && q >= 0) { x.qpz = q; tot.textContent = nf(q * P); segnaDato(); aggiorna(); } };
       let cellaCod;
       if (x.aggiunta || x.nuovo !== null) {
         const inCod = el('input', { type:'text', class:'mono', value: x.aggiunta ? x.codice : x.nuovo, placeholder: x.aggiunta ? 'Codice' : 'Nuovo codice',
@@ -4593,7 +4619,7 @@ async function apriModificaListaCommessa(o, art, pezzi, poi) {
       tab.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);' + (x.tolto ? 'opacity:.55;' : '') },
         cellaCod,
         el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: x.descr }, x.descr || '—'),
-        inQ, tot, el('span', { class:'sub', style:'font-size:11px;' }, x.um || ''), selTipo, azioni));
+        inQ, tot, ...(fase ? [cDato] : []), el('span', { class:'sub', style:'font-size:11px;' }, x.um || ''), selTipo, azioni));
     });
     tab.append(el('button', { type:'button', class:'btnsm', style:'margin-top:8px;',
       onclick: () => { voci.push({ r: null, codice: '', qpz: 1, tolto: false, nuovo: null, descr: '', um: '', tipo: 'ACQ', aggiunta: true }); disegna(); } }, '+ Aggiungi codice'));
@@ -4618,22 +4644,45 @@ async function apriModificaListaCommessa(o, art, pezzi, poi) {
     voci.filter(x => !x.tolto).forEach(x => { const k = String(x.aggiunta ? x.codice : (x.nuovo || x.codice)).trim().toUpperCase();
       if (visti.has(k)) doppi.push(k); visti.add(k); });
     if (doppi.length) return toast('Codice ripetuto nella lista: ' + doppi.join(', ') + '. Cambia la quantità della riga che c’è già.', 'err', 9000);
+    const sotto = voci.filter(sottoDato);
+    if (sotto.length && !confirm(sotto.length + (sotto.length === 1 ? ' materiale scende' : ' materiali scendono') + ' sotto quanto è già '
+      + (fase.reparto ? 'portato in reparto' : 'stato dato a ' + nomeFaseQui) + ' (' + sotto.map(x => x.codice).join(', ') + ').\n\n'
+      + 'La differenza resta là finché non la fai rientrare in sede. Salvo lo stesso?')) return;
     salva.disabled = true; salva.textContent = 'Salvo…';
     try {
-      // La lista che si salva = quella vista.
       const r4 = (q) => +(+q).toFixed(6);
-      const lista = voci.filter(x => !x.tolto).map(x => {
-        if (x.aggiunta) return { codice: x.codice, descrizione: x.descr || null, um: x.um || null, tipo: x.tipo || null, da: null,
-          qta_pz: r4(x.qpz), qta: +(x.qpz * P).toFixed(4), variante: 'aggiunto' };
-        const base = Object.assign({}, x.r, { qta_pz: r4(x.qpz), qta: +(x.qpz * P).toFixed(4) });
-        if (x.nuovo) Object.assign(base, { codice: x.nuovo, descrizione: x.descr || null, um: x.um || null, tipo: x.tipo || null,
-          al_posto_di: x.r.al_posto_di || x.codice, variante: 'sostituito' });
-        return base;
-      });
-      // Le varianti: contro la distinta di OGGI (se il prodotto ce l'ha).
-      const generata = art && art.codice ? await generaMaterialiCommessa(art.codice, P) : [];
-      const sost = voci.filter(x => x.nuovo && !x.tolto).map(x => ({ da: x.r.al_posto_di || x.codice, a: x.nuovo }))
-        .concat((o.materiali_varianti || []).filter(w => w.tipo === 'sostituito').map(w => ({ da: w.codice, a: w.nuovo })));
+      let lista, sostQui;
+      if (fase) {
+        // DALLA FASE: le modifiche toccano solo la quota di questa fase.
+        const modifiche = [];
+        voci.forEach(x => {
+          const m = { descrizione: x.descr || null, um: x.um || null, tipo_parte: x.tipo || null };
+          if (x.aggiunta) modifiche.push(Object.assign(m, { tipo: 'aggiunto', codice: x.codice, qta_pz: x.qpz }));
+          else if (x.tolto) modifiche.push({ tipo: 'tolto', codice: x.codice });
+          else if (x.nuovo) modifiche.push(Object.assign(m, { tipo: 'sostituito', codice: x.codice, nuovo: x.nuovo, qta_pz: x.qpz }));
+          else if (Math.abs(x.qpz - x.q0) > 1e-9) modifiche.push({ tipo: 'quantita', codice: x.codice, qta_pz: x.qpz });
+        });
+        const ris = modificaInFase(o.materiali || [], fase, modifiche, P);
+        lista = ris.righe; sostQui = ris.sostituzioni;
+      } else {
+        // LA LISTA INTERA: si salva quella vista. Una quantita' cambiata porta con
+        // se' le quote dei terzisti in proporzione (da 8 a 4/pz: 6 a Bellini → 3).
+        lista = voci.filter(x => !x.tolto).map(x => {
+          if (x.aggiunta) return { codice: x.codice, descrizione: x.descr || null, um: x.um || null, tipo: x.tipo || null, da: null,
+            qta_pz: r4(x.qpz), qta: +(x.qpz * P).toFixed(4), fasi_esterne: null, variante: 'aggiunto' };
+          const base = Object.assign({}, x.r, { qta_pz: r4(x.qpz), qta: +(x.qpz * P).toFixed(4) });
+          if (x.r.fasi_esterne && x.q0 > 0 && Math.abs(x.qpz - x.q0) > 1e-9)
+            base.fasi_esterne = Object.fromEntries(Object.entries(x.r.fasi_esterne).map(([k, q]) => [k, r4((Number(q) || 0) * x.qpz / x.q0)]));
+          if (x.nuovo) Object.assign(base, { codice: x.nuovo, descrizione: x.descr || null, um: x.um || null, tipo: x.tipo || null,
+            al_posto_di: x.r.al_posto_di || x.codice, variante: 'sostituito' });
+          return base;
+        });
+        sostQui = voci.filter(x => x.nuovo && !x.tolto).map(x => ({ da: x.r.al_posto_di || x.codice, a: x.nuovo }));
+      }
+      // Le varianti: contro la distinta di OGGI coi terzisti della commessa,
+      // la stessa base del «⟳ Rigenera» (che poi le riapplica).
+      const generata = art && art.codice ? terzistiDellaCommessa(await generaMaterialiCommessa(art.codice, P), o.materiali || [], opts.fornitori || []) : [];
+      const sost = sostQui.concat((o.materiali_varianti || []).filter(w => w.tipo === 'sostituito').map(w => ({ da: w.codice, a: w.nuovo })));
       const chi = (state.profile && (state.profile.nome || state.profile.email)) || null;
       const varianti = variantiDaConfronto(generata, lista, sost, o.materiali_varianti || [],
         { motivo, il: toLocalISO(new Date()), chi });
@@ -4655,7 +4704,9 @@ async function apriModificaListaCommessa(o, art, pezzi, poi) {
     }
   };
   v.corpo.append(el('div', { class:'sub', style:'font-size:12px;margin-bottom:10px;' },
-    'Le modifiche valgono solo per questa commessa: la distinta del prodotto ' + (art && art.codice ? art.codice + ' ' : '')
+    (fase ? 'Solo i materiali di ' + nomeFaseQui + ': quello che aggiungi qui va ' + (fase.reparto ? 'in reparto' : 'a ' + nomeFaseQui)
+      + ', quello che togli o riduci esce dalla lista della commessa. Le altre fasi non cambiano. ' : '')
+    + 'Le modifiche valgono solo per questa commessa: la distinta del prodotto ' + (art && art.codice ? art.codice + ' ' : '')
     + 'non cambia. «⟳ Rigenera dalla distinta» le riapplica. Per pezzo: la quantità totale è per pezzo × ' + P + '.'),
     tab, el('div', { class:'field', style:'margin-top:12px;' }, el('label', {}, 'Motivo (obbligatorio)'), inMotivo));
   if (Array.isArray(o.materiali_varianti) && o.materiali_varianti.length) {
@@ -9246,6 +9297,11 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
       return Object.assign({}, v, { serve, dato, resta: Math.max(0, +(serve - dato).toFixed(4)) });
     });
     const daDare = voci.filter(v => v.resta > 0), dati = voci.filter(v => v.resta <= 0);
+    // ✎ I MATERIALI SI CAMBIANO DALLA FASE (24 nov, Nico): aggiungere qui = mandare qui.
+    const btnModMat = typeof opts.modificaMateriali === 'function' ? el('button', { type:'button', class:'btnsm',
+      style:'margin-top:8px;margin-left:6px;font-size:11px;',
+      title: 'Aggiungi, togli, cambia quantità o sostituisci i materiali ' + (rep ? 'che restano in casa' : 'da mandare a ' + nomeAziendaDi(f.id))
+        + ', solo su questa commessa', onclick: () => opts.modificaMateriali(f) }, '✎ Modifica materiali') : null;
     const verbo = (n) => (n === 1 ? (rep ? 'portato in reparto' : 'già consegnato') : (rep ? 'portati in reparto' : 'già consegnati'));
     if (nMat || nRich) {
       const dett = el('div', { style:'display:none;margin-top:8px;' });
@@ -9298,8 +9354,8 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
           'Richieste annullate'));
         annullate.forEach(x => dett.append(rigaRichiestaTerzista(x, poi, false, o.id)));
       }
-      card.append(tog, dett);
-    }
+      card.append(tog, ...(btnModMat ? [btnModMat] : []), dett);
+    } else if (btnModMat) card.append(btnModMat);
     box.append(card);
   });
   if (opts.piede) box.append(opts.piede);
@@ -17269,6 +17325,11 @@ function openOperazioneModal(o, opts) {
       campiFornitore: (id) => { const sel = fornitoriSel.find(s => s.azienda_id === id); return sel ? rigaFornitore(sel, true) : null; },
       azioniFornitore,
       piede: btnAggiungiFase(),
+      // ✎ MATERIALI DELLA FASE (24 nov): solo admin, prodotto con distinta o lista.
+      modificaMateriali: (canEdit && eAdminOra()) ? (f) => {
+        if (materialiInSospeso || modificato) return toast('Prima salva le modifiche della commessa, poi cambia i materiali', 'err');
+        apriModificaListaCommessa(o, art, null, renderMancanti, { fase: { id: f.id, reparto: eReparto(f.id) }, fornitori: fornIds });
+      } : null,
     });
     const seq = ciclo ? sequenzaFasiCommessa(oV, art, fornIds) : [];
     fornNelCiclo = new Set(seq.map(f => f.id));
@@ -17863,14 +17924,16 @@ function openOperazioneModal(o, opts) {
         if (!confirm('Rifare la lista dalla distinta di ' + art.codice + ' per ' + ordinati + ' pz?\n\n'
           + 'Le quantità attuali di questa commessa vengono sostituite. '
           + 'I terzisti scelti su questa commessa restano.'
-          + (nVar ? '\nLe ' + nVar + ' modifiche fatte su questa commessa (✎ Modifica lista) vengono riapplicate.' : ''))) return;
+          + (nVar ? '\nLe ' + nVar + ' modifiche fatte su questa commessa vengono riapplicate.' : ''))) return;
         btnRi.disabled = true; btnRi.textContent = 'Calcolo…';
         try {
           // ⚠ Quantita' e codici dal prodotto, TERZISTI dalla commessa (18 nov):
           // un terzista cambiato resta cambiato, una fase tolta resta tolta.
-          // VARIANTI DELL'ORDINE (24 nov): riapplicate sopra la distinta.
-          const conVar = applicaVarianti(await generaMaterialiCommessa(art.codice, ordinati), o.materiali_varianti || [], ordinati);
-          const nuove = terzistiDellaCommessa(conVar.righe, righe, fornitoriSel.map(x => x.azienda_id));
+          // VARIANTI DELL'ORDINE (24 nov): riapplicate DOPO i terzisti, sulla
+          // stessa base con cui sono state calcolate.
+          const conVar = applicaVarianti(terzistiDellaCommessa(await generaMaterialiCommessa(art.codice, ordinati), righe,
+            fornitoriSel.map(x => x.azienda_id)), o.materiali_varianti || [], ordinati);
+          const nuove = conVar.righe;
           await salvaMaterialiCommessa(o, nuove);
           if (conVar.saltate.length) toast('Lista rifatta, ma ' + conVar.saltate.length + ' modifiche non trovano più il loro codice nella distinta: '
             + conVar.saltate.map(v => v.codice).join(', ') + '. Controlla con ✎ Modifica lista.', 'err', 12000);
@@ -17881,14 +17944,14 @@ function openOperazioneModal(o, opts) {
           toast('Errore: ' + (e.message || e), 'err');
         }
       };
-      // ✎ MODIFICA LISTA (24 nov, Nico: le distinte degli ordini cambiano).
+      // Le liste si cambiano DALLA FASE («✎ Modifica materiali» nel riquadro
+      // del terzista o del reparto, 24 nov, Nico). Qui resta solo il conto.
       const nVar = Array.isArray(o.materiali_varianti) ? o.materiali_varianti.length : 0;
-      intestazione.append(el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
-        title:'Aggiungi, togli, cambia quantità o sostituisci un materiale solo su questa commessa. La scheda prodotto non cambia.',
-        onclick: () => {
-          if (materialiInSospeso) return toast('Prima salva le modifiche ai terzisti, poi modifica la lista', 'err');
-          apriModificaListaCommessa(o, art, ordinati, renderMancanti);
-        } }, '✎ Modifica lista' + (nVar ? ' · ' + nVar : '')), btnRi);
+      if (nVar) intestazione.append(el('span', { class:'sub', style:'margin-left:auto;font-size:11px;color:var(--or);',
+        title: o.materiali_varianti.map(w => w.tipo + ' ' + w.codice + (w.nuovo ? ' → ' + w.nuovo : '') + (w.motivo ? ' · ' + w.motivo : '')).join('\n') },
+        '✎ ' + nVar + (nVar === 1 ? ' modifica' : ' modifiche') + ' rispetto alla distinta'));
+      btnRi.style.marginLeft = nVar ? '' : 'auto';
+      intestazione.append(btnRi);
     }
     // CICLO PRODUTTIVO (17 nov): le fasi a tappe. Calcolato qui sopra perche'
     // se c'e' il reparto il suo bottone sta nella sua scheda, non in testa.

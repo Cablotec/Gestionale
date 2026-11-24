@@ -881,9 +881,20 @@ function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
 // pezzo, cosi' «⟳ Rigenera dalla distinta» le riapplica anche con pezzi o
 // distinta cambiati. La scheda prodotto non si tocca: tutto sull'ordine.
 // Una variante: { tipo: 'tolto'|'quantita'|'sostituito'|'aggiunto', codice,
-//   nuovo? (sostituito), qta_pz?, descrizione?, um?, tipo_parte?, motivo, il, chi }.
+//   nuovo? (sostituito), qta_pz?, fasi_esterne?, al_posto_di?, descrizione?, um?,
+//   tipo_parte?, motivo, il, chi }.
+// DOVE VA (24 nov, Nico: le liste si cambiano dalla fase, terzista o reparto):
+// `fasi_esterne` = quota per pezzo di ogni terzista ({ id: qta_pz }), il resto
+// va in reparto. Una variante che lo porta lo riscrive sulla riga.
 const _kv = (c) => String(c == null ? '' : c).trim().toUpperCase();
 const _r4 = (n) => +(+n).toFixed(4);
+// Le quote dei terzisti in forma confrontabile: solo > 0, chiavi in ordine.
+function _fe(x) {
+  if (!x || typeof x !== 'object') return null;
+  const e = Object.entries(x).filter(([, q]) => Number(q) > 1e-9).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  return e.length ? Object.fromEntries(e.map(([k, q]) => [k, _r4(q)])) : null;
+}
+const _feUguali = (a, b) => JSON.stringify(_fe(a)) === JSON.stringify(_fe(b));
 // Riapplica le varianti a una lista generata. Ritorna { righe, saltate }:
 // `saltate` = varianti che non trovano piu' il loro codice (la distinta e'
 // cambiata), da dire a chi rigenera.
@@ -892,6 +903,7 @@ function applicaVarianti(base, varianti, pezzi) {
   let righe = (base || []).map(r => Object.assign({}, r));
   const trova = (c) => righe.findIndex(r => _kv(r.codice) === _kv(c));
   const conPz = (r, qpz) => Object.assign(r, { qta_pz: _r4(qpz), qta: _r4(qpz * P) });
+  const conFe = (r, v) => { if (v && 'fasi_esterne' in v) r.fasi_esterne = _fe(v.fasi_esterne); return r; };
   const saltate = [];
   (varianti || []).forEach(v => {
     if (!v || !v.tipo || !v.codice) return;
@@ -901,25 +913,81 @@ function applicaVarianti(base, varianti, pezzi) {
       if (i < 0) { saltate.push(v); return; }
       const r = righe[i];
       if (r.qta_pz_distinta == null) r.qta_pz_distinta = r.qta_pz;
-      conPz(r, Number(v.qta_pz) || 0); r.variante = 'quantita'; return;
+      conFe(conPz(r, v.qta_pz != null ? Number(v.qta_pz) || 0 : Number(r.qta_pz) || 0), v); r.variante = 'quantita'; return;
     }
     if (v.tipo === 'sostituito') {
       if (i < 0 || !v.nuovo) { saltate.push(v); return; }
       const r = righe[i];
       const qpz = v.qta_pz != null ? Number(v.qta_pz) : Number(r.qta_pz) || 0;
-      righe[i] = conPz(Object.assign({}, r, { codice: String(v.nuovo).trim(), descrizione: v.descrizione || r.descrizione,
-        um: v.um || r.um, tipo: v.tipo_parte !== undefined ? v.tipo_parte : r.tipo, al_posto_di: r.codice, variante: 'sostituito' }), qpz);
+      righe[i] = conFe(conPz(Object.assign({}, r, { codice: String(v.nuovo).trim(), descrizione: v.descrizione || r.descrizione,
+        um: v.um || r.um, tipo: v.tipo_parte !== undefined ? v.tipo_parte : r.tipo, al_posto_di: r.codice, variante: 'sostituito' }), qpz), v);
       return;
     }
     if (v.tipo === 'aggiunto') {
       if (i >= 0) { const r = righe[i]; if (r.qta_pz_distinta == null) r.qta_pz_distinta = r.qta_pz;
-        conPz(r, Number(v.qta_pz) || 0); r.variante = 'quantita'; return; }
-      righe.push(conPz({ codice: String(v.codice).trim(), descrizione: v.descrizione || null, um: v.um || null,
-        tipo: v.tipo_parte || null, da: null, variante: 'aggiunto' }, Number(v.qta_pz) || 0));
+        conFe(conPz(r, Number(v.qta_pz) || 0), v); r.variante = 'quantita'; return; }
+      const n = conFe(conPz({ codice: String(v.codice).trim(), descrizione: v.descrizione || null, um: v.um || null,
+        tipo: v.tipo_parte || null, da: null, fasi_esterne: null, variante: 'aggiunto' }, Number(v.qta_pz) || 0), v);
+      if (v.al_posto_di) n.al_posto_di = v.al_posto_di;
+      righe.push(n);
     }
   });
   return { righe, saltate };
 }
+// Quanto di una riga va in una FASE, per pezzo: un terzista ha la sua quota,
+// il reparto il resto. `fase`: { id, reparto: bool }.
+function quotaInFase(r, fase) {
+  const fe = (r && r.fasi_esterne && typeof r.fasi_esterne === 'object') ? r.fasi_esterne : {};
+  if (!fase || !fase.reparto) return Number(fe[fase && fase.id]) || 0;
+  const fuori = Object.values(fe).reduce((a, q) => a + (Number(q) || 0), 0);
+  return Math.max(0, _r4((Number(r && r.qta_pz) || 0) - fuori));
+}
+// Le modifiche fatte DALLA FASE, riportate sulla lista totale. Ogni modifica
+// tocca solo la quota di quella fase: la riga totale cresce o cala della
+// stessa differenza, le quote degli altri restano. `modifiche`:
+//   { tipo: 'quantita', codice, qta_pz }         nuova quota nella fase
+//   { tipo: 'tolto', codice }                     quota a zero
+//   { tipo: 'aggiunto', codice, qta_pz, descrizione?, um?, tipo_parte? }
+//   { tipo: 'sostituito', codice, nuovo, qta_pz?, descrizione?, um?, tipo_parte? }
+// Ritorna { righe, sostituzioni: [{ da, a }] } (righe a zero tolte, qta = qta_pz × pezzi).
+function modificaInFase(righe, fase, modifiche, pezzi) {
+  const P = Number(pezzi) || 0;
+  const out = (righe || []).map(r => Object.assign({}, r, { fasi_esterne: r.fasi_esterne ? Object.assign({}, r.fasi_esterne) : null }));
+  const trova = (c) => out.find(r => _kv(r.codice) === _kv(c));
+  const metti = (r, q) => {
+    const vecchia = quotaInFase(r, fase);
+    q = Math.max(0, Number(q) || 0);
+    if (!fase.reparto) { const fe = Object.assign({}, r.fasi_esterne || {}); if (q > 0) fe[fase.id] = _r4(q); else delete fe[fase.id];
+      r.fasi_esterne = _fe(fe); }
+    r.qta_pz = _r4((Number(r.qta_pz) || 0) - vecchia + q);
+  };
+  const aggiungi = (m, codice, q, alPosto) => {
+    const r = trova(codice);
+    if (r) { metti(r, quotaInFase(r, fase) + (Number(q) || 0)); return; }
+    const n = { codice: String(codice).trim(), descrizione: m.descrizione || null, um: m.um || null, tipo: m.tipo_parte || null,
+      da: null, qta_pz: 0, fasi_esterne: null };
+    if (alPosto) n.al_posto_di = alPosto;
+    out.push(n); metti(n, q);
+  };
+  const sostituzioni = [];
+  (modifiche || []).forEach(m => {
+    if (!m || !m.tipo || !m.codice) return;
+    const r = trova(m.codice);
+    if (m.tipo === 'quantita') { if (r) metti(r, m.qta_pz); return; }
+    if (m.tipo === 'tolto') { if (r) metti(r, 0); return; }
+    if (m.tipo === 'aggiunto') { aggiungi(m, m.codice, m.qta_pz, null); return; }
+    if (m.tipo === 'sostituito' && m.nuovo && r) {
+      const q = m.qta_pz != null ? Number(m.qta_pz) : quotaInFase(r, fase);
+      metti(r, 0);
+      aggiungi(m, m.nuovo, q, r.al_posto_di || r.codice);
+      sostituzioni.push({ da: r.al_posto_di || r.codice, a: String(m.nuovo).trim() });
+    }
+  });
+  const vive = out.filter(r => (Number(r.qta_pz) || 0) > 1e-9);
+  vive.forEach(r => { r.qta = _r4((Number(r.qta_pz) || 0) * P); });
+  return { righe: vive, sostituzioni };
+}
+
 // Le varianti che portano dalla lista della distinta (`base`) a quella voluta.
 // `sostituzioni`: [{ da, a }] dichiarate da chi modifica (altrimenti un cambio
 // di codice e' un tolto + un aggiunto). `vecchie`: le varianti di prima, per
@@ -934,18 +1002,26 @@ function variantiDaConfronto(base, voluta, sostituzioni, vecchie, meta) {
   const usatiB = new Set(), usatiV = new Set();
   (sostituzioni || []).forEach(s => {
     const da = _kv(s && s.da), a = _kv(s && s.a);
-    if (!da || !a || !B.has(da) || !V.has(a) || B.has(a) || usatiB.has(da)) return;
+    // Sostituzione = il vecchio sparisce del tutto. Se resta (sostituito solo in
+    // una fase) e' una quantita' + un aggiunto.
+    if (!da || !a || !B.has(da) || V.has(da) || !V.has(a) || B.has(a) || usatiB.has(da)) return;
     usatiB.add(da); usatiV.add(a);
     const rb = B.get(da), rv = V.get(a);
-    out.push({ tipo: 'sostituito', codice: rb.codice, nuovo: rv.codice,
-      qta_pz: uguali(rv.qta_pz, rb.qta_pz) ? null : _r4(rv.qta_pz), descrizione: rv.descrizione || null, um: rv.um || null, tipo_parte: rv.tipo || null });
+    const v = { tipo: 'sostituito', codice: rb.codice, nuovo: rv.codice,
+      qta_pz: uguali(rv.qta_pz, rb.qta_pz) ? null : _r4(rv.qta_pz), descrizione: rv.descrizione || null, um: rv.um || null, tipo_parte: rv.tipo || null };
+    if (!_feUguali(rv.fasi_esterne, rb.fasi_esterne)) v.fasi_esterne = _fe(rv.fasi_esterne);
+    out.push(v);
   });
   B.forEach((rb, k) => { if (!usatiB.has(k) && !V.has(k)) out.push({ tipo: 'tolto', codice: rb.codice }); });
-  B.forEach((rb, k) => { const rv = V.get(k); if (rv && !usatiB.has(k) && !uguali(rv.qta_pz, rb.qta_pz))
-    out.push({ tipo: 'quantita', codice: rb.codice, qta_pz: _r4(rv.qta_pz) }); });
-  V.forEach((rv, k) => { if (!usatiV.has(k) && !B.has(k))
-    out.push({ tipo: 'aggiunto', codice: rv.codice, qta_pz: _r4(rv.qta_pz), descrizione: rv.descrizione || null, um: rv.um || null, tipo_parte: rv.tipo || null }); });
-  const firma = (v) => [v.tipo, _kv(v.codice), _kv(v.nuovo), v.qta_pz == null ? '' : _r4(v.qta_pz)].join('|');
+  B.forEach((rb, k) => { const rv = V.get(k); if (!rv || usatiB.has(k)) return;
+    const q = !uguali(rv.qta_pz, rb.qta_pz), f = !_feUguali(rv.fasi_esterne, rb.fasi_esterne);
+    if (q || f) out.push({ tipo: 'quantita', codice: rb.codice, qta_pz: _r4(rv.qta_pz), fasi_esterne: _fe(rv.fasi_esterne) }); });
+  V.forEach((rv, k) => { if (!usatiV.has(k) && !B.has(k)) {
+    const v = { tipo: 'aggiunto', codice: rv.codice, qta_pz: _r4(rv.qta_pz), fasi_esterne: _fe(rv.fasi_esterne),
+      descrizione: rv.descrizione || null, um: rv.um || null, tipo_parte: rv.tipo || null };
+    if (rv.al_posto_di) v.al_posto_di = rv.al_posto_di;
+    out.push(v); } });
+  const firma = (v) => [v.tipo, _kv(v.codice), _kv(v.nuovo), v.qta_pz == null ? '' : _r4(v.qta_pz), JSON.stringify(_fe(v.fasi_esterne))].join('|');
   const prima = new Map((vecchie || []).map(v => [firma(v), v]));
   const m = meta || {};
   return out.map(v => { const p = prima.get(firma(v));
@@ -954,7 +1030,7 @@ function variantiDaConfronto(base, voluta, sostituzioni, vecchie, meta) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { applicaVarianti, variantiDaConfronto, DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto, chiaviCodiceFornitore, trovaCodiceNostro, voceCodiceFornitore, candidatiRicevimento,
+  module.exports = { applicaVarianti, variantiDaConfronto, quotaInFase, modificaInFase, DISTINTA_PROFONDITA_MAX, MATERIALI_SEGNAPOSTO, eSegnaposto, carichiCodiceSconosciuto, chiaviCodiceFornitore, trovaCodiceNostro, voceCodiceFornitore, candidatiRicevimento,
     esplodiDistinta, fabbisognoPerCodice, ripartisciGiacenza,
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
