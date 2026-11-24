@@ -7464,6 +7464,39 @@ function notaRiservato(codice, um) {
       + '\nLibero ' + nf(d.libero) + ' · totale ' + nf(d.totale) + '. Per ora la ripartizione usa ancora tutta la giacenza.' },
     'di cui ' + nf(d.riservato) + ' riserv.');
 }
+// LIBERO · WIP · TOTALE per la lista Produzione → Materiali (24 nov, Nico:
+// "la quantita' libera di un cod, quelle in WIP e la somma delle 2").
+//   WIP    = riservato dei posti del gestionale (reparto + terzisti), cioe' il
+//            materiale che ha gia' una commessa padrona. Il magazzino WIP di
+//            ALNUS non si conta a parte: sono gli stessi pezzi portati in
+//            reparto qui, contarli tutti e due li raddoppierebbe. Un prelievo
+//            fatto SOLO in Alnus resta quindi nel Libero.
+//   Libero = quello che lo scaffale ha per tutti (come «Dove si trova»).
+//   Totale = Libero + WIP, sempre. Il consumato in attesa dell'UP1 di Alnus
+//            non e' ne' l'uno ne' l'altro: si dice nel passaggio sul Libero.
+// Con i movimenti reali i numeri vengono dai movimenti; senza, dalla giacenza
+// della riga (Fabbisogno di Alnus, che comprende anche i posti).
+function treGiacenzeFn() {
+  const ris = riservatiPerCodice();
+  const reali = movimentiReali();
+  const sede = reali ? giacenzaDaMovimentiReali() : null;
+  const r6 = (n) => +(+n).toFixed(6);
+  return (m) => {
+    const k = chiaveCodice(m.codice);
+    const d = ris.get(k) || null;
+    const wip = d ? d.riservato : 0, attesa = d ? (d.inAttesa || 0) : 0;
+    let libero;
+    if (reali || m.fonte === 'gestionale') {
+      if (d) libero = d.libero;
+      else if (reali) { const g = sede.get(String(m.codice || '').trim()); libero = g ? g.totale : 0; }
+      else libero = m.giacenza == null ? null : Number(m.giacenza) || 0;
+    } else {
+      libero = m.giacenza == null ? null : r6((Number(m.giacenza) || 0) - wip - attesa);
+    }
+    return { libero: libero == null ? null : r6(libero), wip: r6(wip), attesa: r6(attesa),
+      totale: libero == null ? null : r6(libero + wip), d, reali };
+  };
+}
 function riquadroDoveSiTrova(codice, um) {
   const d = doveSiTrovaCodice(codice);
   const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
@@ -10479,6 +10512,9 @@ function matManca(m) { return matMancaDettaglio(m).manca; }
 function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
   const primaCons = (m) => (mancanteConsegne(m) || [])[0] || null;
   const testo = (v) => el('span', { class:'sub', style:'font-size:11px;' }, v || '—');
+  // Libero/WIP/Totale: una funzione per disegno, un conto per riga (ordinamento compreso).
+  const treFn = treGiacenzeFn(), treMemo = new Map();
+  const treDi = (m) => { if (!treMemo.has(m)) treMemo.set(m, treFn(m)); return treMemo.get(m); };
   return [
     { k:'stato', t:'Stato', ord: m => MAT_CAT_ORDINE[mancanteCategoria(m)],
       num:true,
@@ -10517,8 +10553,28 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
     { k:'tipo_parte', t:'Tipo', ord: m => String(m.tipo_parte || ''),
       cella: (m) => testo(m.tipo_parte) },
     { k:'um', t:'UM', ord: m => String(m.um || ''), cella: (m) => testo(m.um) },
-    { k:'giacenza', t:'Giacenza', tr:true, num:true, giuInizio:true, ord: m => Number(m.giacenza),
-      cella: (m) => el('span', { class:'mono' }, nf(m.giacenza), notaRiservato(m.codice, m.um)) },
+    // LIBERO · WIP · TOTALE (24 nov, Nico) al posto della sola «Giacenza».
+    { k:'libero', t:'Libero', tr:true, num:true, giuInizio:true, ord: m => { const g = treDi(m); return g.libero == null ? null : g.libero; },
+      cella: (m) => { const g = treDi(m);
+        if (g.libero == null) return el('span', { class:'mono', style:'color:var(--mut);' }, '—');
+        const u = m.um ? ' ' + m.um : '';
+        return el('span', { class:'mono', style: g.libero < 0 ? 'color:var(--red);font-weight:700;' : g.libero === 0 ? 'color:var(--red);' : '',
+          title: 'Libero per tutte le commesse: ' + nf(g.libero) + u
+            + (g.attesa > 0 ? '\nConsumato dai nostri lotti, in attesa dell\'UP1 di Alnus: ' + nf(g.attesa) + u + ' (non conta né qui né nel WIP)' : '')
+            + (g.reali || m.fonte === 'gestionale' ? '\nDai movimenti del gestionale.' : '\nDalla giacenza del Fabbisogno di Alnus, meno il WIP.') },
+          nf(g.libero)); } },
+    { k:'wip', t:'WIP', tr:true, num:true, giuInizio:true, ord: m => treDi(m).wip,
+      cella: (m) => { const g = treDi(m);
+        if (!(g.wip > 0)) return el('span', { class:'mono', style:'color:var(--mut);' }, '—');
+        const u = m.um ? ' ' + m.um : '';
+        return el('span', { class:'mono', style:'color:var(--or);',
+          title: 'In WIP (reparto e terzisti, gia\' di una commessa): ' + nf(g.wip) + u + '\n'
+            + g.d.posti.map(p => p.nome + (p.commessa ? ' per ' + p.commessa : '') + ': ' + nf(p.qta) + u).join('\n') },
+          nf(g.wip)); } },
+    { k:'totale', t:'Totale', tr:true, num:true, giuInizio:true, ord: m => { const g = treDi(m); return g.totale == null ? null : g.totale; },
+      cella: (m) => { const g = treDi(m);
+        return el('span', { class:'mono', style: g.totale == null ? 'color:var(--mut);' : 'font-weight:600;', title:'Libero + WIP' },
+          g.totale == null ? '—' : nf(g.totale)); } },
     // DA DOVE VIENE LA GIACENZA (14 ott): durante il passaggio da Alnus al
     // gestionale un codice sta in una fonte sola, e chi legge il numero deve
     // sapere quale. "Gestionale" porta ai suoi movimenti.
