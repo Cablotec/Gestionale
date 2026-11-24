@@ -6,6 +6,17 @@
 // da mettere accanto al «da ordinare» di Alnus. Vedi strumenti/migrazione-alnus-specchio.sql.
 // Date: stringhe locali 'YYYY-MM-DDTHH:MM:SS' o ISO dal database; si confrontano con Date.parse.
 
+// CODICI LETTI DA EXCEL (24 nov): Excel salva i codici tutti cifre come NUMERI
+// e perde lo zero davanti. In Alnus i codici numerici sono SEMPRE a 8 cifre
+// (i codici Sacmi: 04010100, 04959125...; verificato su foto e Fabbisogno);
+// un numero a 7 cifre e' quindi un codice a cui manca lo zero. Prima di
+// questa regola 441 codici Sacmi erano entrati cosi' in anagrafica, distinte
+// e liste, e il gestionale non ne trovava giacenza ne' OF.
+function codiceDaExcel(v) {
+  const s = String(v == null ? '' : v).trim();
+  return /^\d{7}$/.test(s) ? '0' + s : s;
+}
+
 // Numeri all'italiana di Alnus: "1.234,500", "3,000-" (meno in fondo), "-1,000".
 function numAlnus(s) {
   if (typeof s === 'number') return s;
@@ -129,7 +140,7 @@ function leggiOfAlnus(matrice) {
   M.slice(iInt + 1).forEach(r => {
     if (!Array.isArray(r)) return;
     const v = (k) => C[k] >= 0 ? r[C[k]] : null;
-    const cod = String(v('codice') == null ? '' : v('codice')).trim();
+    const cod = codiceDaExcel(v('codice'));
     const anno = Number(v('anno')), num = Number(v('numero'));
     if (!cod && !num) return;
     const ord = numAlnus(v('ordinata')), int = numAlnus(v('interna'));
@@ -421,6 +432,6 @@ function righeFabbisognoSpecchio(o) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { numAlnus, dataAlnus, leggiGiacenzeAlnus, leggiMovimentiAlnus, leggiOfAlnus, dataCella,
+  module.exports = { codiceDaExcel, numAlnus, dataAlnus, leggiGiacenzeAlnus, leggiMovimentiAlnus, leggiOfAlnus, dataCella,
     magazzinoAlnus, MAGAZZINI_CONTATI_DI_SERIE, giacenzaAlnus, giacenzaContata, giacenzaGestionale, confrontoGiacenze, ofAlnusAperti, confrontoDaOrdinare, controlloGiacenze, righeFabbisognoSpecchio };
 }

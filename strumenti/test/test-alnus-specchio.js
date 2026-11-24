@@ -17,6 +17,14 @@ t('testo = NaN', isNaN(A.numAlnus('nr 1,')));
 t('data e ora', A.dataAlnus('20/11/2026', '9:42:53') === '2026-11-20T09:42:53');
 t('data senza ora', A.dataAlnus('1/2/2026') === '2026-02-01T00:00:00');
 
+sez('Codici letti da Excel (lo zero dei codici Sacmi)');
+t('numero a 7 cifre: torna lo zero', A.codiceDaExcel(4010100) === '04010100');
+t('testo a 7 cifre: torna lo zero', A.codiceDaExcel(' 4959125 ') === '04959125');
+t('8 cifre con lo zero: invariato', A.codiceDaExcel('04010100') === '04010100');
+t('8 cifre senza zero: invariato', A.codiceDaExcel(12345678) === '12345678');
+t('codice con lettere: invariato', A.codiceDaExcel('24511PHOE00003212166') === '24511PHOE00003212166');
+t('vuoto resta vuoto', A.codiceDaExcel(null) === '');
+
 const TAB = '\t';
 const giac = [
   'CABLOTEC S.R.L.\tStampa Giacenze di Magazzino\t10:33:11\t20/11/2026\t\t\t',

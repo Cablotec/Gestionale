@@ -13036,7 +13036,8 @@ function leggiDistintaExcel(griglia) {
   const etCod = distNorm((griglia[testa] || [])[col.codice]);
   for (let i = testa + 1; i < griglia.length; i++) {
     const r = griglia[i] || [];
-    const cod = String(r[col.codice] == null ? '' : r[col.codice]).trim();
+    // Excel perde lo zero davanti ai codici Sacmi (04010100): `codiceDaExcel`.
+    const cod = codiceDaExcel(r[col.codice]);
     if (!cod) continue;
     // Certe estrazioni ripetono l'intestazione a ogni pagina.
     if (distNorm(cod) === etCod) continue;
