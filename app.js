@@ -7123,6 +7123,93 @@ function rigaGiacenzaUnica(u, um) {
     u.movimentiLetti ? '' : el('div', { class:'sub', style:'font-size:11px;margin-top:3px;' }, 'Movimenti non letti: mancano DDT e rettifiche.'));
 }
 
+// ── DOVE SI TROVA (24 nov, Nico: "dove vedo se un codice e' in 01 o in WIP?") ──
+// Solo vista, niente si scrive. Due fonti:
+//   · MAGAZZINI DI ALNUS (codice di Alnus, movimenti reali): WIP = WIP della
+//     foto d'apertura (Specchio, solo admin) + righe ALNUS con documento_pos WIP;
+//     01 = giacenza in sede − WIP, cosi' la somma e' sempre la giacenza.
+//   · POSTI DEL GESTIONALE (presso_id): reparto e terzisti, per commessa.
+//     Per un codice di Alnus quei movimenti sono FUORI giacenza (il materiale e'
+//     ancora contato nei magazzini di Alnus finche' Alnus non lo consuma con
+//     l'UP1) e il lotto non li scarica: si mostra il dato fino a quanto la
+//     commessa chiede ancora (lista a residuo), non il dato per sempre.
+function doveSiTrovaCodice(codice) {
+  const cod = chiaveCodice(codice);
+  if (!Array.isArray(state.movimenti)) return { letto: false };
+  const tutti = state.movimenti.filter(m => chiaveCodice(m.codice) === cod);
+  const diAlnus = codiceDiAlnus(cod);
+  const r2 = (n) => +(+n).toFixed(6);
+  const out = { letto: true, diAlnus, magazzini: null, posti: [] };
+  if (diAlnus && movimentiReali()) {
+    const sede = r2(inConto(tutti).filter(m => !m.presso_id).reduce((s, m) => s + (Number(m.qta) || 0), 0));
+    const A = state.alnus;
+    const fotoLetta = !!(A && A.apertura && Array.isArray(A.giacApertura));
+    const fotoWip = fotoLetta ? A.giacApertura.filter(r => chiaveCodice(r.codice) === cod && magazzinoAlnus(r.magazzino) === 'WIP')
+      .reduce((s, r) => s + (Number(r.qta) || 0), 0) : 0;
+    const movWip = tutti.filter(m => m.documento_tipo === 'ALNUS' && magazzinoAlnus(m.documento_pos) === 'WIP')
+      .reduce((s, m) => s + (Number(m.qta) || 0), 0);
+    const wip = r2(fotoWip + movWip);
+    out.magazzini = { sede, wip, m01: r2(sede - wip), fotoLetta };
+  }
+  const per = new Map();
+  tutti.filter(m => m.presso_id).forEach(m => {
+    const k = m.presso_id + '|' + (m.operazione_id || '');
+    if (!per.has(k)) per.set(k, { presso: m.presso_id, opId: m.operazione_id || null, qta: 0, fuori: true, ultimo: null });
+    const p = per.get(k);
+    p.qta = r2(p.qta + (Number(m.qta) || 0));
+    if (!m.fuori_giacenza) p.fuori = false;
+    const d = m.creato_il || m.data;
+    if (d && (!p.ultimo || String(d) > String(p.ultimo))) p.ultimo = d;
+  });
+  per.forEach(p => {
+    const o = p.opId ? (state.operazioni || []).find(x => x.id === p.opId) : null;
+    let qta = p.qta;
+    // Fuori giacenza (codice di Alnus): il lotto non lo scarica, quindi resta
+    // al massimo quanto la commessa chiede ancora su questo codice.
+    if (p.fuori && o) {
+      const viva = o.stato === 'aperta' || o.stato === 'sospesa';
+      const chiede = viva && Array.isArray(o.materiali)
+        ? (commessaSuResiduo(o).materiali || []).filter(r => chiaveCodice(r.codice) === cod).reduce((s, r) => s + (Number(r.qta) || 0), 0) : 0;
+      qta = r2(Math.max(0, Math.min(qta, chiede)));
+    }
+    if (Math.abs(qta) < 1e-9) return;
+    out.posti.push({ presso: p.presso, reparto: eReparto(p.presso), nome: nomeAziendaDi(p.presso), op: o,
+      commessa: o ? (o.numero_ordine || '') + (o.pos ? '/' + o.pos : '') : '', qta, fuori: p.fuori, dato: p.qta, ultimo: p.ultimo });
+  });
+  out.posti.sort((a, b) => (b.reparto - a.reparto) || a.nome.localeCompare(b.nome, 'it') || a.commessa.localeCompare(b.commessa, 'it'));
+  return out;
+}
+function riquadroDoveSiTrova(codice, um) {
+  const d = doveSiTrovaCodice(codice);
+  const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+  const u_ = um ? ' ' + um : '';
+  if (!d.letto) return el('div', { class:'sub', style:'font-size:12px;' }, 'Movimenti non letti.');
+  const righe = [];
+  const riga = (etich, qta, nota, colore) => el('div', { style:'display:flex;gap:10px;align-items:baseline;padding:3px 0;border-bottom:1px solid var(--brd);font-size:12px;' },
+    el('span', { style:'min-width:190px;font-weight:600;' + (colore ? 'color:' + colore + ';' : '') }, etich),
+    el('span', { class:'mono', style:'min-width:70px;text-align:right;font-weight:700;' + (qta < 0 ? 'color:var(--red);' : '') }, nf(qta) + u_),
+    el('span', { class:'sub', style:'font-size:11px;' }, nota || ''));
+  if (d.magazzini) {
+    const M = d.magazzini;
+    righe.push(riga('Magazzino 01 (Alnus)', M.m01, 'scaffale'));
+    righe.push(riga('Magazzino WIP (Alnus)', M.wip, M.fotoLetta ? 'prelevato per gli OP (UT1/ET1)'
+      : 'solo i movimenti dopo la foto: la foto per magazzino la legge un admin'));
+  } else if (!d.diAlnus) {
+    const sede = +inConto(state.movimenti.filter(m => chiaveCodice(m.codice) === chiaveCodice(codice) && !m.presso_id))
+      .reduce((s, m) => s + (Number(m.qta) || 0), 0).toFixed(6);
+    righe.push(riga('Sede', sede, 'codice che Alnus non conta: saldo dei movimenti del gestionale'));
+  }
+  d.posti.forEach(p => {
+    const nota = [p.commessa ? 'per ' + p.commessa : '',
+      p.fuori ? 'registrato nel gestionale, ' + (d.diAlnus ? 'in Alnus ancora nei magazzini qui sopra finché l’UP1 non lo consuma' : 'fuori giacenza')
+        + (p.dato !== p.qta ? ' · dato ' + nf(p.dato) + ', la commessa ne chiede ancora ' + nf(p.qta) : '') : '',
+      p.ultimo ? 'dal ' + fmtQuando(p.ultimo) : ''].filter(Boolean).join(' · ');
+    righe.push(riga(p.nome, p.qta, nota, p.reparto ? 'var(--grn)' : 'var(--or)'));
+  });
+  if (!righe.length) return el('div', { class:'sub', style:'font-size:12px;' }, 'Nessun movimento che dica dove si trova.');
+  return el('div', {}, ...righe);
+}
+
 // La pillola in alto: chi ha acceso il gestionale come fonte non deve dimenticarlo.
 function segnaFonteFabbisogno() {
   const ruolo = document.getElementById('role-pill');
@@ -9495,8 +9582,12 @@ async function apriSchedaCodice(codice) {
   // ── GIACENZA UNICA (20 nov): specchio Alnus + movimenti del gestionale ──
   const giacBox = el('div', { class:'sub', style:'font-size:12px;' }, 'Leggo la giacenza…');
   v.corpo.append(titoloSez('Giacenza'), giacBox);
-  giacenzaUnicaOra(cod).then(u => giacBox.replaceChildren(rigaGiacenzaUnica(u, (m && m.um) || (movD && movD.um) || '')))
-    .catch(e => { giacBox.textContent = 'Giacenza non calcolabile: ' + (e.message || e); });
+  const doveBox = el('div', {});
+  v.corpo.append(titoloSez('Dove si trova'), doveBox);
+  giacenzaUnicaOra(cod).then(u => {
+    giacBox.replaceChildren(rigaGiacenzaUnica(u, (m && m.um) || (movD && movD.um) || ''));
+    doveBox.replaceChildren(riquadroDoveSiTrova(cod, (m && m.um) || (movD && movD.um) || ''));
+  }).catch(e => { giacBox.textContent = 'Giacenza non calcolabile: ' + (e.message || e); });
 
   // ── ULTIMI MOVIMENTI (19 nov, Nico) ──
   v.corpo.append(titoloSez('Ultimi movimenti'));
@@ -11530,9 +11621,15 @@ function renderMovimenti(root) {
           (q > 0 ? '+' : '') + nf(q)); } },
     { k:'um', t:'UM', ord: m => String(m.um || ''), cella: m => el('span', { class:'sub', style:'font-size:11px;' }, m.um || '') },
     // DOVE (5 nov): sede, o il terzista a cui il materiale e' stato mandato.
-    { k:'dove', t:'Dove', ord: m => m.presso_id ? nomeAziendaDi(m.presso_id).toUpperCase() : '',
+    // Righe di Alnus (24 nov, Nico): il magazzino di Alnus (01 / WIP), non «sede».
+    { k:'dove', t:'Dove', ord: m => m.presso_id ? nomeAziendaDi(m.presso_id).toUpperCase()
+        : m.documento_tipo === 'ALNUS' ? 'MAG. ' + (magazzinoAlnus(m.documento_pos) || '') : '',
       cella: m => {
         if (m.alnus) return el('span', { class:'sub', style:'font-size:11px;white-space:nowrap;' }, 'mag. ' + (m.magazzino || '?'));
+        if (m.documento_tipo === 'ALNUS' && !m.presso_id) return el('span', { class:'sub', style:'font-size:11px;white-space:nowrap;',
+          title:'Magazzino di Alnus del movimento (01 scaffale, WIP prelevato per gli OP)' }, 'mag. ' + (magazzinoAlnus(m.documento_pos) || m.documento_pos || '?'));
+        if (m.documento_tipo === 'APERTURA') return el('span', { class:'sub', style:'font-size:11px;white-space:nowrap;',
+          title:'Apertura: la foto di Alnus, magazzini contati insieme (01 + WIP)' }, 'mag. 01 + WIP');
         const dove = m.presso_id
           ? el('span', { class:'badge bor', style:'white-space:nowrap;', title: eReparto(m.presso_id)
               ? 'In reparto: materiale riservato alla sua commessa, fuori dallo scaffale' : 'Presso il terzista: materiale nostro, fuori sede' },
