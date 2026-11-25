@@ -11009,7 +11009,7 @@ function renderFabbisogno(root) {
   selOp.value = matFiltroOp;
   if (selOp.value !== matFiltroOp) matFiltroOp = '';
   const inCerca = el('input', { class:'search', type:'search',
-    placeholder:'Cerca codice, descrizione, fornitore, OF…', value: matCerca, style:'min-width:260px;' });
+    placeholder:'Cerca codice, cod. fornitore, descrizione, fornitore, OF…', value: matCerca, style:'min-width:260px;' });
 
   const tabWrap = el('div');
   // Quando arrivano (o cambiano) i fornitori abituali si ridisegna la lista,
@@ -11030,11 +11030,24 @@ function renderFabbisogno(root) {
       // codici trovare il proprio e' il gesto piu' frequente della scheda, e
       // chi cerca "BOTTURI" non sa se e' un fornitore o un pezzo del codice.
       const q = matCerca.trim().toUpperCase();
+      // Anche i CODICI FORNITORE registrati nella scheda del codice (25 nov,
+      // Nico): «SIE 5SY63027» si trova anche scrivendo 5SY63027 o 5SY 63027
+      // (confronto anche senza spazi ne' punteggiatura).
+      const compatto = (v) => String(v == null ? '' : v).toUpperCase().replace(/[^0-9A-Z]/g, '');
+      const qc = compatto(q);
+      const codForn = new Map();
+      (Array.isArray(state.codiciFornitore) ? state.codiciFornitore : []).forEach(r => {
+        const k = String(r.codice || '').trim();
+        if (!codForn.has(k)) codForn.set(k, []);
+        codForn.get(k).push(String(r.codice_fornitore || ''));
+      });
       righe = righe.filter(m => {
         const c = mancanteConsegne(m)[0];
-        return [m.codice, m.descrizione, m.um, m.tipo_parte, m.numero_op,
+        if ([m.codice, m.descrizione, m.um, m.tipo_parte, m.numero_op,
           c && c.ordine, c && c.fornitore, matAbitualeDi(m.codice)]
-          .some(v => String(v == null ? '' : v).toUpperCase().includes(q));
+          .some(v => String(v == null ? '' : v).toUpperCase().includes(q))) return true;
+        return (codForn.get(String(m.codice || '').trim()) || []).some(cf =>
+          cf.toUpperCase().includes(q) || (qc.length >= 3 && compatto(cf).includes(qc)));
       });
     }
     const col = colonne.find(c => c.k === matSortKey) || colonne[0];
