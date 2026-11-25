@@ -10545,18 +10545,8 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
         const eti = MAT_CAT_ETI[cat] || MAT_CAT_ETI.da_ordinare;
         // Clic = lo stesso menu della commessa (9 nov): scrivere a chi lo
         // manda, fornitore abituale, copia codice/OF.
-        const b = el('span', { class:'badge ' + eti.cls, style:'cursor:pointer;',
-          title: eti.tip + '\nClic: scrivi al fornitore, copia codice/OF' }, eti.txt);
-        b.onclick = (e) => {
-          e.stopPropagation();
-          const cod = String(m.codice || '').trim();
-          const c = primaCons(m);
-          const u = usiDi(cod);
-          apriMenuMateriale(b, { codice: cod, op: (u[0] && u[0].commessa) || null,
-            stato: { stato: cat, fornitore: (c && c.fornitore) || null, of: (c && c.ordine) || null,
-              lavorazione: typeof eLavorazione === 'function' && eLavorazione(cod) } });
-        };
-        return b;
+        // Dal 25 nov il menu sta nella colonna ✉ in fondo (Nico), non sul badge.
+        return el('span', { class:'badge ' + eti.cls, title: eti.tip }, eti.txt);
       } },
     // Il codice apre il dettaglio delle commesse che lo usano, quando ce n'e'.
     { k:'codice', t:'Codice', ord: m => String(m.codice || ''),
@@ -10681,6 +10671,22 @@ function matColonne(nf, oggi, opDelGest, usiDi, apriChiudi) {
             + 'del gestionale ha questo codice nella sua lista materiali.',
           onclick:(e)=>{ e.preventDefault(); openOperazioneModal(o, { scheda:'mat' }); } },
           (o.numero_ordine || '—') + '/' + (o.pos || '—'));
+      } },
+    // ✉ IN UNA COLONNA SUA (25 nov, Nico): lo stesso menu della commessa
+    // (scrivere a chi lo manda, copia codice/OF), su ogni riga. Senza `ord`.
+    { k:'mail', t:'✉', titolo:'Scrivi al fornitore, copia codice/OF',
+      cella: (m) => {
+        const b = el('button', { type:'button', class:'ico-mat', title:'Scrivi al fornitore, copia codice/OF' }, '✉');
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const cod = String(m.codice || '').trim();
+          const c = primaCons(m);
+          const u = usiDi(cod);
+          apriMenuMateriale(b, { codice: cod, op: (u[0] && u[0].commessa) || null,
+            stato: { stato: mancanteCategoria(m), fornitore: (c && c.fornitore) || null, of: (c && c.ordine) || null,
+              lavorazione: typeof eLavorazione === 'function' && eLavorazione(cod) } });
+        };
+        return b;
       } },
   ];
 }
@@ -11063,6 +11069,7 @@ function renderFabbisogno(root) {
     }
 
     const intestazione = (c) => {
+      if (!c.ord) return el('th', { title: c.titolo || '' }, c.t);
       const attiva = matSortKey === c.k;
       return el('th', { class: c.tr ? 'tr' : '', style:'cursor:pointer;user-select:none;',
         title:'Ordina per ' + c.t,
@@ -18157,7 +18164,8 @@ function openOperazioneModal(o, opts) {
     // dai movimenti reali se allineati, altrimenti da Alnus (Specchio o
     // Fabbisogno). Sempre visibile; null = non la sappiamo.
     const giacDi = giacenzaScaffaleFn();
-    const COLR = COL.replace('70px 90px 44px', conResto ? '70px 80px 70px 70px 80px 44px' : '70px 90px 80px 44px');
+    const COLR = COL.replace('70px 90px 44px', conResto ? '70px 80px 70px 70px 80px 44px' : '70px 90px 80px 44px')
+      .replace('minmax(160px,1.2fr);', 'minmax(160px,1.2fr) 26px;');  // l'ultima: l'icona ✉ (25 nov)
     listaBox.append(el('div', { style: COLR + 'padding-bottom:4px;border-bottom:1px solid var(--brd);' },
       et('Codice'), et('Descrizione'), et('Per pz', 'text-align:right;'),
       et('Necessari', 'text-align:right;'),
@@ -18167,7 +18175,7 @@ function openOperazioneModal(o, opts) {
           title:'Quanto la commessa chiede ancora allo scaffale: necessari − dati, mai più di quanto chiedono i pezzi ancora da fare' }, 'Restano')] : []),
       el('span', { class:'sub', style:'font-size:10px;text-transform:uppercase;letter-spacing:.08em;text-align:right;',
         title:'Giacenza del codice in sede (' + giacDi.fonte + '), per tutte le commesse: lo stato dice quanta ne tocca a questa' }, 'Giacenza'),
-      et('UM'), et('Stato')));
+      et('UM'), et('Stato'), el('span', { class:'sub', style:'font-size:11px;text-align:center;', title:'Scrivi al fornitore, copia codice/OF' }, '✉')));
 
     const celleStato = new Map();
     // Il tipo sta sulla RIGA salvata, non sul codice: qui sotto si gira per
@@ -18176,9 +18184,10 @@ function openOperazioneModal(o, opts) {
     righe.forEach((r, iRiga) => {
       // Stato + icona ✉ (25 nov, Nico): il menu per chiedere al fornitore c'e'
       // su TUTTE le righe, anche non mancanti, dall'icona e non dal testo.
+      // In una colonna sua (25 nov, Nico: «fai una colonna apposita»).
       const testoStato = el('span', { class:'sub', style:'font-size:11px;min-width:0;' }, '…');
       const icoStato = el('button', { type:'button', class:'ico-mat', title:'Scrivi al fornitore, copia codice/OF' }, '✉');
-      const stato = el('span', { style:'display:flex;align-items:center;gap:4px;min-width:0;' }, testoStato, icoStato);
+      const stato = testoStato;
       celleStato.set(r.codice, { testo: testoStato, ico: icoStato });
       // Sotto il codice, DA DOVE VIENE: senza, un materiale che nella
       // distinta non compare sembra spuntato dal nulla (7 set, segnalato da
@@ -18220,7 +18229,7 @@ function openOperazioneModal(o, opts) {
           return el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (g == null ? 'var(--mut)' : g <= 0 ? 'var(--red)' : 'var(--txt)') + ';' },
             g == null ? '—' : nf(g), g == null ? '' : notaRiservato(r.codice, r.um)); })(),
         el('span', { class:'sub', style:'font-size:11px;' }, r.um || ''),
-        stato));
+        stato, icoStato));
     });
 
     // Il riquadro «Arrivati con i DDT dell'ordine ma non in questa lista»
