@@ -9647,8 +9647,11 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
       const q = Number(r.qta_inviata != null ? r.qta_inviata : r.qta) || 0;
       consegnato.set(k, (consegnato.get(k) || 0) + q);
     }));
+    // I pezzi prodotti prima della prima lista non chiedono materiale alla fase
+    // (25 nov, 00464/0040: 5 su 6 prodotti prima, «26 materiali da portare»).
+    const pezziFase = Math.max(0, tot - prodottiPrimaDellaListaTerzista(o, f.id));
     const voci = f.voci.map(v => {
-      const serve = +(v.qta_pz * tot).toFixed(4);
+      const serve = +(v.qta_pz * pezziFase).toFixed(4);
       const dato = +(consegnato.get(chiaveCodice(v.riga.codice)) || 0).toFixed(4);
       return Object.assign({}, v, { serve, dato, resta: Math.max(0, +(serve - dato).toFixed(4)) });
     });
