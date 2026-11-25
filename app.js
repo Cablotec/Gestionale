@@ -7899,7 +7899,9 @@ function documentiRegistro() {
         rif: commesse.join(', '), contenuto: d.righe + (d.righe === 1 ? ' riga' : ' righe'),
         azioni: [{ t: 'Righe', title: 'Apri le righe di questo DDT in Movimenti', fn: () => {
           movFiltroTipo = ''; movFiltroMitt = ''; movFiltroOrd = ''; movCerca = '';
-          movFiltroDoc = d.k; movVista = 'righe'; movQuante = 400; selectTab('movimenti'); } }] });
+          movFiltroDoc = d.k; movVista = 'righe'; movQuante = 400; selectTab('movimenti'); } }]
+          .concat(eAdminOra() && d.m.documento_tipo === 'DDT' && d.m.azienda_id
+            ? [{ t: '✎ Modifica', title: 'Correggi numero, data o quantità di questo DDT', fn: () => apriModificaDdt(d.k) }] : []) });
     });
   } else nonLetti.push('DDT ricevuti');
   // 1b. Resi al cliente (24 nov): le uscite RESO raggruppate per documento.
@@ -8007,6 +8009,145 @@ function righeOrdineFornitore(aziendaId) {
 // ricerca nelle righe d'OF del fornitore e nell'anagrafica materiali. Clic o Invio =
 // abbinata, e si passa alla prossima da fare; frecce per scorrere i candidati.
 // Senza `ric` e' il DDT scritto a mano: «+ Riga» e si scrive a destra.
+// MODIFICA DI UN DDT IN ENTRATA (25 nov, Nico: "ho sbagliato la data, vorrei poter
+// modificare i DDT in caso di errore"). Numero e data del DDT, quantita' per riga
+// (0 = riga tolta). Scrive solo `mov_modifica_ddt` (strumenti/migrazione-modifica-ddt.sql,
+// admin, tutto o niente, traccia nella nota). Il residuo degli OF si ricalcola da solo.
+function apriModificaDdt(k) {
+  const righe = (state.movimenti || []).filter(m => m.tipo === 'carico' && m.documento_tipo === 'DDT' && movChiaveDoc(m) === k)
+    .sort((a, b) => String(a.documento_pos || '').localeCompare(String(b.documento_pos || ''), 'it', { numeric: true }));
+  if (!righe.length) return toast('DDT non trovato fra i movimenti: premi ⟳ Aggiorna', 'err');
+  const m0 = righe[0];
+  const v = veloTerzista('Modifica DDT ' + m0.documento_numero + ' · ' + (m0.mittente || nomeAziendaDi(m0.azienda_id)), 900);
+  const dataDi = (m) => String(m.documento_data || m.data || '').slice(0, 10);
+  const inNum = el('input', { type:'text', class:'mono', value: m0.documento_numero || '' });
+  const inData = el('input', { type:'date', value: dataDi(m0) });
+  const nq = new Map(righe.map(r => [r.id, Number(r.qta) || 0]));
+  const tb = el('tbody');
+  righe.forEach(r => {
+    const inQ = el('input', { type:'text', inputmode:'decimal', class:'mono', value: nfIT(r.qta), style:'width:90px;text-align:right;font-size:12px;' });
+    const stato = el('span', { class:'sub', style:'font-size:11px;' });
+    inQ.oninput = () => {
+      const n = numeroDaTesto(inQ.value);
+      nq.set(r.id, n == null || isNaN(n) ? NaN : n);
+      const q = nq.get(r.id);
+      stato.textContent = q === 0 ? 'si toglie' : (!isNaN(q) && q !== Number(r.qta)) ? 'era ' + nfIT(r.qta) : '';
+      stato.style.color = q === 0 ? 'var(--red)' : 'var(--or)';
+    };
+    tb.append(el('tr', {},
+      el('td', { class:'mono', style:'font-weight:700;white-space:nowrap;' }, r.codice),
+      el('td', { style:'font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: r.descrizione || '' }, r.descrizione || '—'),
+      el('td', { class:'mono', style:'font-size:12px;white-space:nowrap;' }, r.ordine_rif || '—'),
+      el('td', {}, inQ), el('td', { style:'font-size:11px;' }, r.um || ''), el('td', {}, stato)));
+  });
+  const campo = (t, i) => el('div', { class:'field' }, el('label', {}, t), i);
+  v.corpo.append(
+    el('div', { class:'sub', style:'font-size:12px;margin-bottom:8px;' },
+      'Correggi numero, data o quantità. Quantità 0 = la riga si toglie. Ogni modifica lascia la traccia nella nota della riga.'),
+    el('div', { class:'frow' }, campo('Numero DDT', inNum), campo('Data DDT', inData)),
+    el('table', { class:'rt', style:'margin-top:8px;' },
+      el('thead', {}, el('tr', {}, ...['Codice', 'Descrizione', 'Ordine', 'Q.tà', '', ''].map(t => el('th', {}, t)))), tb));
+  const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
+  const ok = el('button', { class:'btnp' }, '✓ Salva le modifiche');
+  ok.onclick = async () => {
+    const cambiate = righe.filter(r => nq.get(r.id) !== Number(r.qta));
+    const err = !inNum.value.trim() ? 'Scrivi il numero del DDT' : !inData.value ? 'Manca la data'
+      : cambiate.some(r => isNaN(nq.get(r.id)) || nq.get(r.id) < 0) ? 'Una quantità non è valida'
+      : righe.every(r => nq.get(r.id) === 0) ? 'Il DDT non può restare senza righe' : null;
+    if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
+    const testata = inNum.value.trim() !== m0.documento_numero || inData.value !== dataDi(m0);
+    if (!testata && !cambiate.length) { v.chiudi(); return; }
+    const tolte = cambiate.filter(r => nq.get(r.id) === 0);
+    if (tolte.length && !confirm('Togli ' + tolte.length + (tolte.length === 1 ? ' riga' : ' righe') + ' dal DDT ('
+      + tolte.map(r => r.codice).join(', ') + ')? La riga si cancella.')) return;
+    ok.disabled = true; ok.textContent = 'Salvataggio…';
+    const { error } = await sb.rpc('mov_modifica_ddt', { p_azienda: m0.azienda_id, p_numero: m0.documento_numero,
+      p_nuovo_numero: inNum.value.trim(), p_data: inData.value, p_righe: cambiate.map(r => ({ id: r.id, qta: nq.get(r.id) })) });
+    if (error) {
+      ok.disabled = false; ok.textContent = '✓ Salva le modifiche';
+      msg.textContent = /mov_modifica_ddt|does not exist|schema cache/i.test(error.message || '')
+        ? 'Non ancora attiva: manca lo SQL migrazione-modifica-ddt.sql' : error.message;
+      msg.style.color = 'var(--red)'; return;
+    }
+    v.chiudi(); toast('DDT ' + inNum.value.trim() + ' modificato', 'ok');
+    await caricaMovimenti();
+    if (state.currentTab) renderTab(state.currentTab);
+  };
+  v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
+}
+// CAMPO DI RICERCA DI UN CODICE (25 nov, Nico: "quando inserisco a mano i codici, potrei
+// avere anche li un riscontro mentre scrivo, la descrizione una volta selezionato, non
+// modificabile"). Cerca nell'anagrafica `materiali` (dal server, da 3 caratteri, per
+// codice o descrizione) e fra i codici dei movimenti (i TS- non sono in anagrafica).
+// `onscegli({ codice, descrizione, um })`, `oncambia(testo)` a ogni tasto.
+// Elenco `position:fixed` come `campoCercaAzienda`.
+function campoCercaCodice(opts) {
+  const o = opts || {};
+  let evid = 0, lista = [], timer = null, giro = 0, avviso = '';
+  const wrap = el('div', { style:'position:relative;' });
+  const inp = el('input', { type:'text', class:'mono', placeholder: o.placeholder || 'codice o descrizione…', autocomplete:'off',
+    value: o.valore || '', style:'width:100%;box-sizing:border-box;font-size:12px;' });
+  const menu = el('div', { style:'position:fixed;z-index:10050;display:none;max-height:300px;overflow:auto;background:var(--sur);'
+    + 'border:1px solid var(--brd);border-radius:6px;box-shadow:0 8px 24px var(--shadow);font-size:12px;' });
+  const chiudi = () => { menu.style.display = 'none'; };
+  const disegna = () => {
+    menu.innerHTML = '';
+    if (avviso) menu.append(el('div', { class:'sub', style:'padding:8px 10px;' }, avviso));
+    lista.forEach((c, i) => {
+      const r = el('div', { style:'padding:5px 10px;cursor:pointer;display:flex;gap:10px;' + (i === evid ? 'background:var(--hover3);' : '') },
+        el('span', { class:'mono', style:'font-weight:700;white-space:nowrap;' }, c.codice),
+        el('span', { style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, c.descrizione || ''),
+        c.um ? el('span', { class:'sub', style:'margin-left:auto;font-size:10.5px;' }, c.um) : '');
+      r.onmousedown = (e) => { e.preventDefault(); scegli(c); };
+      r.onmouseenter = () => { if (evid !== i) { evid = i; disegna(); } };
+      menu.append(r);
+    });
+    const b = inp.getBoundingClientRect();
+    Object.assign(menu.style, { left: b.left + 'px', top: (b.bottom + 2) + 'px', width: Math.max(b.width, 520) + 'px', display:'' });
+    const sel = menu.children[evid + (avviso ? 1 : 0)];
+    if (sel && sel.scrollIntoView) sel.scrollIntoView({ block:'nearest' });
+  };
+  const scegli = (c) => { inp.value = c.codice; chiudi(); if (typeof o.onscegli === 'function') o.onscegli(c); };
+  const cerca = async () => {
+    const q = inp.value.trim();
+    if (q.length < 3) { lista = []; avviso = 'Scrivi almeno 3 caratteri'; disegna(); return; }
+    const mio = ++giro;
+    const qU = q.toUpperCase();
+    const locali = new Map();
+    (state.movimenti || []).forEach(m => {
+      const c = chiaveCodice(m.codice);
+      if (c && c.includes(qU) && !locali.has(c)) locali.set(c, { codice: c, descrizione: m.descrizione || '', um: m.um || '' });
+    });
+    let server = [];
+    try {
+      const pulito = q.replace(/[,()%*]/g, ' ').trim();
+      const { data } = await sb.from('materiali').select('codice,descrizione,um')
+        .or('codice.ilike.*' + pulito + '*,descrizione.ilike.*' + pulito + '*').limit(40);
+      server = data || [];
+    } catch (e) {}
+    if (mio !== giro) return;
+    const per = new Map();
+    server.forEach(c => { const k = chiaveCodice(c.codice); per.set(k, { codice: k, descrizione: c.descrizione || '', um: c.um || '' }); });
+    locali.forEach((c, k) => { if (!per.has(k)) per.set(k, c); });
+    lista = [...per.values()].sort((a, b) => (b.codice.startsWith(qU) - a.codice.startsWith(qU)) || a.codice.localeCompare(b.codice)).slice(0, 40);
+    evid = 0; avviso = lista.length ? '' : 'Nessun codice trovato';
+    if (document.activeElement === inp) disegna();
+  };
+  inp.oninput = () => { if (typeof o.oncambia === 'function') o.oncambia(inp.value); clearTimeout(timer); timer = setTimeout(cerca, 250); };
+  inp.onblur = () => setTimeout(chiudi, 0);
+  inp.onkeydown = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); evid = Math.min(lista.length - 1, evid + 1); disegna(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); evid = Math.max(0, evid - 1); disegna(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (menu.style.display !== 'none' && lista[evid]) scegli(lista[evid]); }
+    else if (e.key === 'Escape') { if (menu.style.display !== 'none') { e.preventDefault(); e.stopPropagation(); chiudi(); } }
+  };
+  document.body.append(menu);
+  const sorveglia = setInterval(() => { if (!document.body.contains(wrap) && wrap.dataset.montato) { menu.remove(); clearInterval(sorveglia); } }, 1000);
+  setTimeout(() => { wrap.dataset.montato = '1'; }, 0);
+  wrap.append(inp);
+  wrap.focus = () => inp.focus();
+  return wrap;
+}
 // CAMPO DI RICERCA DI UN'AZIENDA (25 nov, Nico: "nel DDT in entrata, ricerca fornitore
 // che filtra man mano che scrivo"). Al posto di una tendina: si scrive, sotto compaiono
 // le aziende che contengono il testo (nome, anche a pezzi), frecce + Invio o clic per
@@ -8385,20 +8526,22 @@ async function apriDdtEntrataDaOrdini(poi) {
     // Righe fuori ordine.
     corpo.append(el('div', { style:'margin:14px 0 4px;font-weight:700;font-size:12px;' }, 'Fuori ordine (ordini a voce, merce non in un OF)'));
     extra.forEach((r, i) => {
-      const inC = el('input', { type:'text', class:'mono', value: r.codice, placeholder:'nostro codice', style:'font-size:12px;' });
-      inC.onchange = async () => { r.codice = chiaveCodice(inC.value);
-        if (r.codice && !r.descrizione) { try { const { data } = await sb.from('materiali').select('descrizione,um').eq('codice', r.codice).limit(1);
-          if (data && data[0]) { r.descrizione = data[0].descrizione || ''; r.um = r.um || data[0].um || ''; } } catch (e) {} }
-        disegnaRighe(); };
-      const inD = el('input', { type:'text', value: r.descrizione, placeholder:'descrizione', style:'font-size:12px;' });
-      inD.oninput = () => { r.descrizione = inD.value; };
+      // Il codice si cerca mentre si scrive; scelto dall'elenco, la descrizione e' quella
+      // dell'anagrafica e non si cambia. Un codice scritto e non scelto resta da scegliere.
+      const descr = el('div', { style:'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + (r.scelto ? '' : 'color:var(--mut);'),
+        title: r.descrizione || '' }, r.scelto ? (r.descrizione || '—') + (r.um ? ' · ' + r.um : '') : (r.codice ? 'scegli il codice dall’elenco' : '—'));
+      const inC = campoCercaCodice({ valore: r.codice, placeholder:'cerca codice o descrizione…',
+        oncambia: (t) => { if (r.scelto) { r.scelto = false; r.descrizione = ''; r.um = ''; }
+          r.codice = chiaveCodice(t); descr.textContent = r.codice ? 'scegli il codice dall’elenco' : '—'; descr.style.color = 'var(--mut)'; aggiornaRiepilogo(); },
+        onscegli: (c) => { r.codice = c.codice; r.descrizione = c.descrizione; r.um = c.um; r.scelto = true; disegnaRighe(); } });
+      if (!r.codice) setTimeout(() => inC.focus(), 0);
+      const inD = descr;
       const inQ = el('input', { type:'text', inputmode:'decimal', class:'mono', value: r.qta ? nfIT(r.qta) : '', placeholder:'0', style:'font-size:12px;text-align:right;' });
       inQ.oninput = () => { const n = numeroDaTesto(inQ.value); r.qta = n == null || isNaN(n) ? 0 : n; aggiornaRiepilogo(); };
       const inN = el('input', { type:'text', value: r.note, placeholder:'nota (es. ordine a voce di Massimo)', style:'font-size:12px;' });
       inN.oninput = () => { r.note = inN.value; };
-      const sconosciuto = r.codice && codiciAnagrafica && !codiciAnagrafica.has(r.codice);
-      corpo.append(el('div', { style:'display:grid;grid-template-columns:200px minmax(160px,1fr) 90px minmax(140px,.8fr) 30px;gap:8px;align-items:center;padding:3px 0;' },
-        el('div', {}, inC, sconosciuto ? el('div', { style:'font-size:10px;color:var(--or);' }, 'non è nell’anagrafica') : ''),
+      corpo.append(el('div', { style:'display:grid;grid-template-columns:220px minmax(160px,1fr) 90px minmax(140px,.8fr) 30px;gap:8px;align-items:center;padding:3px 0;' },
+        el('div', {}, inC),
         inD, inQ, inN, el('button', { type:'button', class:'btnsm', style:'padding:0 6px;', onclick: () => { extra.splice(i, 1); disegnaRighe(); } }, '✕')));
     });
     corpo.append(el('button', { type:'button', class:'btnsm', style:'margin-top:4px;', onclick: () => {
@@ -8425,7 +8568,8 @@ async function apriDdtEntrataDaOrdini(poi) {
       um: r.um || '', qta: r.qta, ordine_rif: '', note: r.note || 'fuori ordine' }));
     const valide = daOf.concat(fuori);
     const err = !selMitt.value ? 'Scegli il fornitore' : !inNum.value.trim() ? 'Scrivi il numero del DDT' : !inData.value ? 'Manca la data'
-      : !valide.length ? 'Nessuna riga con quantità arrivata' : extra.some(r => r.qta > 0 && !r.codice) ? 'Una riga fuori ordine non ha il codice' : null;
+      : !valide.length ? 'Nessuna riga con quantità arrivata' : extra.some(r => r.qta > 0 && !r.codice) ? 'Una riga fuori ordine non ha il codice'
+      : extra.some(r => r.qta > 0 && r.codice && !r.scelto) ? 'Scegli dall’elenco il codice delle righe fuori ordine (' + extra.filter(r => r.qta > 0 && r.codice && !r.scelto).map(r => r.codice).join(', ') + ')' : null;
     if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
     const oltre = tutte.filter(o => (arrivi.get(o.k) || 0) > o.aperto);
     if (oltre.length && !confirm(oltre.length + (oltre.length === 1 ? ' riga supera' : ' righe superano') + ' quanto l’ordine aspetta ('
