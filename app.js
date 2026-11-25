@@ -5184,9 +5184,25 @@ function daFareTerzista(x) {
 // dati a Botturi e 215 prodotti → serviva 35, proponeva 0). Mai piu' di
 // quanto chiedono i pezzi ancora da fare: una commessa nata prima delle
 // richieste, gia' prodotta in parte, non chiede il materiale dei fatti.
-function serveTerzista(x, qta_pz, gia) {
+// ⚠ I pezzi prodotti PRIMA della prima lista a quella fase non sono fatti col
+// materiale delle liste (25 nov, 00464/0040: 6 pz, 5 prodotti il 16/11, prima
+// lista il 17/11 per l'ultimo pezzo): contarli nel fabbisogno faceva proporre
+// sempre di nuovo l'ultimo pezzo, e «Prepara il resto» non spariva mai.
+function prodottiPrimaDellaListaTerzista(x, ter) {
+  if (!x || !ter) return 0;
+  const prima = (state.inviiTerzista || [])
+    .filter(v => v.terzista_id === ter && v.stato !== 'annullato'
+      && (v.righe || []).some(r => opDiRigaTerzista(v, r) === x.id))
+    .map(v => String(v.creato_il || '')).filter(Boolean).sort()[0];
+  if (!prima) return 0;
+  return (typeof consegneDiOperazione === 'function' ? consegneDiOperazione(x.id) : [])
+    .filter(c => String(c.creato_il || c.data || '') < prima)
+    .reduce((a, c) => a + (Number(c.quantita) || 0), 0);
+}
+function serveTerzista(x, qta_pz, gia, ter) {
   const q = Number(qta_pz) || 0;
-  const tutto = q * (Number(x.quantita) || 0) - (Number(gia) || 0);
+  const pezzi = Math.max(0, (Number(x.quantita) || 0) - prodottiPrimaDellaListaTerzista(x, ter));
+  const tutto = q * pezzi - (Number(gia) || 0);
   return Math.max(0, +Math.min(tutto, q * daFareTerzista(x)).toFixed(4));
 }
 // Un C/L che Alnus non conosce ha giacenza nel gestionale; il resto no (24 nov:
@@ -5287,7 +5303,7 @@ function mancantiTerzistaInSede(o) {
     voci.forEach(({ riga, qta_pz }) => {
       const cod = String(riga.codice || '').trim();
       if (!segnati.has(cod) || !contaTerzista(o, riga, ter)) return;
-      const serve = serveTerzista(o, qta_pz, giaRichiestoTerzista(o.id, ter, cod));
+      const serve = serveTerzista(o, qta_pz, giaRichiestoTerzista(o.id, ter, cod), ter);
       const lib = libero(cod);
       if (serve > 0 && lib > 0) righe.push({ codice: cod, serve, libero: lib });
     });
@@ -5475,7 +5491,7 @@ function apriRichiestaTerzistaOra(o, poi, opts) {
       const gia = giaRichiestoTerzista(c.id, selTer.value, cod);
       g.gia = +(g.gia + gia).toFixed(4);
       const cA = contaAlnusTerzista(c, riga) && liberoA(cod) != null;
-      g.voci.push({ commessa: c, serve: serveTerzista(c, qta_pz, gia), conta: conta(c, riga, selTer.value) || cA });
+      g.voci.push({ commessa: c, serve: serveTerzista(c, qta_pz, gia, selTer.value), conta: conta(c, riga, selTer.value) || cA });
       if (conta(c, riga, selTer.value)) g.conta = true;
       else if (cA) g.contaA = true;
     }));
@@ -9219,7 +9235,7 @@ function passiFase(o, f, poi) {
   // 35 pz ancora da dare a Botturi) il passo offre «↗ Prepara il resto»: prima
   // non c'era piu' nessuna porta per la seconda lista.
   const ancoraDaChiedere = viva && !senzaOf && f.voci.filter(v =>
-    serveTerzista(o, v.qta_pz, giaRichiestoTerzista(o.id, f.id, String(v.riga.codice || '').trim())) > 0).length;
+    serveTerzista(o, v.qta_pz, giaRichiestoTerzista(o.id, f.id, String(v.riga.codice || '').trim()), f.id) > 0).length;
   const resto = ancoraDaChiedere ? btn('↗ Prepara il resto', prepara,
     ancoraDaChiedere + (ancoraDaChiedere === 1 ? ' materiale' : ' materiali') + ' ancora da chiedere') : '';
   const dettResto = ancoraDaChiedere ? ' · ' + ancoraDaChiedere + (ancoraDaChiedere === 1 ? ' materiale' : ' materiali') + ' ancora da chiedere' : '';
