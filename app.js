@@ -7090,6 +7090,10 @@ async function applicaFonteFabbisogno() {
 // (realtime del gestionale, ogni disegno del kiosk).
 function ricalcolaFabbisogno() {
   fonteFabbProblema = null;
+  // Movimenti NON ANCORA letti (undefined, all'avvio `caricaMancanti` viene
+  // prima di `caricaMovimenti`): si aspetta in silenzio, senza pillola rossa
+  // per un attimo (25 nov, Nico). `null` = lettura fallita: quello si' si dice.
+  if (state.movimenti === undefined) { state.mancanti = null; segnaFonteFabbisogno(); return; }
   if (!Array.isArray(state.movimenti)) fonteFabbProblema = 'i movimenti di magazzino non si leggono';
   else if (!movimentiReali() && !(state.alnus && state.alnus.apertura)) fonteFabbProblema = 'manca l’apertura delle giacenze (Specchio Alnus)';
   if (fonteFabbProblema) { state.mancanti = null; segnaFonteFabbisogno(); return; }
