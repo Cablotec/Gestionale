@@ -5052,9 +5052,15 @@ function repartoDaPreparare(o) {
 // ── RIENTRO IN SEDE (16 nov): gli avanzi tornano sullo scaffale ─────
 // Dal reparto o da un terzista, per QUESTA commessa. `mov_rientro_in_sede`
 // (security definer, admin, tutto-o-niente) scrive i trasferimenti.
-function apriRientroInSede(o, presso, poi) {
-  const gruppo = fuoriSedeCommessa(o).find(g => g.presso_id === presso);
-  if (!gruppo) return toast('Niente da far rientrare.', 'err');
+// `proposta` (Map codice -> quantita', facoltativa): solo quei codici, con
+// quelle quantita' (il materiale in piu' di una fase, `eccedenzeFase`).
+function apriRientroInSede(o, presso, poi, proposta) {
+  const tutto = fuoriSedeCommessa(o).find(g => g.presso_id === presso);
+  const gruppo = tutto && proposta
+    ? { presso_id: tutto.presso_id, righe: tutto.righe.filter(r => (proposta.get(r.codice) || 0) > 0)
+        .map(r => ({ codice: r.codice, qta: r.qta, proposta: Math.min(r.qta, proposta.get(r.codice)) })) }
+    : tutto;
+  if (!gruppo || !gruppo.righe.length) return toast('Niente da far rientrare.', 'err');
   const v = veloTerzista('Rientro in sede ' + (eReparto(presso) ? 'dal reparto' : 'da ' + nomeAziendaDi(presso))
     + ' · ' + etiOpTerzista(o), 720);
   const num = (t) => { const n = Number(String(t == null ? '' : t).replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
@@ -5082,7 +5088,7 @@ function apriRientroInSede(o, presso, poi) {
   };
   gruppo.righe.forEach(r => {
     const riga = (o.materiali || []).find(z => String(z.codice || '').trim() === r.codice) || {};
-    const inp = el('input', { type:'text', inputmode:'decimal', class:'mono', value: String(r.qta),
+    const inp = el('input', { type:'text', inputmode:'decimal', class:'mono', value: String(r.proposta != null ? r.proposta : r.qta),
       style:'width:100%;text-align:right;font-size:12px;padding:3px 6px;' });
     inp.oninput = aggiorna;
     tab.append(el('div', { style: COL + 'padding:4px 0;border-bottom:1px solid var(--brd);' },
@@ -5097,7 +5103,8 @@ function apriRientroInSede(o, presso, poi) {
   v.corpo.append(
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
       'Quello che torna sullo scaffale e smette di essere riservato a questa commessa. '
-      + 'Proposto tutto: abbassa le righe che restano dove sono (0 = resta).'),
+      + (proposta ? 'Proposto solo il materiale in più rispetto alla quota di oggi: poi la lista della fase che ne ha bisogno lo prende dalla sede.'
+        : 'Proposto tutto: abbassa le righe che restano dove sono (0 = resta).')),
     tab,
     el('div', { class:'field', style:'margin-top:10px;' }, el('label', {}, 'Nota'), inNota));
   ok.onclick = async () => {
@@ -5170,6 +5177,59 @@ function giaRichiestoTerzista(opId, terzistaId, codice) {
       && Number(m.qta) < 0 && (m.documento_tipo === 'RIENTRO' || m.documento_tipo === 'RESO' || m.documento_tipo === 'USCITA'))
     .reduce((a, m) => a - Number(m.qta), 0);
   return Math.max(0, +(chiesto - tornato).toFixed(4));
+}
+
+// MATERIALE IN PIU' IN UNA FASE (25 nov, Nico su TS-342010003: TS-515000019
+// passato da 4/pz a Bellini a 3/pz + 1 in casa, ma Bellini li aveva gia' tutti
+// e 4). Dato = partito con le liste confermate a quella fase per questa
+// commessa, meno quanto tornato indietro; serve = quota di OGGI × pezzi ORDINATI.
+// Il di piu' va fatto
+// rientrare: `rientrabile` = quanto c'e' davvero in conto in quel posto (i
+// MAC, fuori giacenza, si segnalano ma non rientrano).
+// Ritorna [{ codice, descrizione, um, quota, dato, serve, eccesso, rientrabile }].
+function eccedenzeFase(o, ter) {
+  if (!o || !ter || !Array.isArray(state.inviiTerzista)) return [];
+  const rep = eReparto(ter);
+  // Pezzi ORDINATI, non quelli rimasti: un eccesso e' piu' di quanto chiede
+  // tutto l'ordine (sui dati del 25/11, coi pezzi rimasti, 0236 e 0107 davano
+  // decine di falsi allarmi: liste fatte per l'ordine intero dopo lotti gia' registrati).
+  const pezzi = Number(o.quantita) || 0;
+  const dato = new Map(), info = new Map();
+  state.inviiTerzista.filter(x => x.terzista_id === ter && x.stato === 'inviato').forEach(x => (x.righe || []).forEach(r => {
+    if (opDiRigaTerzista(x, r) !== o.id) return;
+    const c = String(r.codice || '').trim();
+    // I codici lavorazione (`_K`) non sono materiale: non hanno quota.
+    if (typeof eLavorazione === 'function' && eLavorazione(c)) return;
+    dato.set(c, (dato.get(c) || 0) + (Number(r.qta_inviata != null ? r.qta_inviata : r.qta) || 0));
+    if (!info.has(c)) info.set(c, { descrizione: r.descrizione || '', um: r.um || '' });
+  }));
+  if (!dato.size) return [];
+  const tornato = new Map();
+  (Array.isArray(state.movimenti) ? state.movimenti : []).forEach(m => {
+    if (m.presso_id !== ter || m.operazione_id !== o.id || !(Number(m.qta) < 0)) return;
+    if (!['RIENTRO', 'RESO', 'USCITA'].includes(m.documento_tipo)) return;
+    const c = String(m.codice || '').trim();
+    tornato.set(c, (tornato.get(c) || 0) - Number(m.qta));
+  });
+  const inPosto = new Map(((fuoriSedeCommessa(o).find(g => g.presso_id === ter) || {}).righe || []).map(r => [r.codice, r.qta]));
+  const out = [];
+  dato.forEach((d, c) => {
+    const riga = (o.materiali || []).find(z => String(z.codice || '').trim() === c);
+    let quota = 0;
+    if (riga) {
+      const qpz = Number(riga.qta_pz) || 0;
+      const fe = (riga.fasi_esterne && typeof riga.fasi_esterne === 'object') ? riga.fasi_esterne : {};
+      quota = rep ? Math.max(0, qpz - Object.values(fe).reduce((a, x) => a + (Number(x) || 0), 0)) : (Number(fe[ter]) || 0);
+    }
+    const netto = d - (tornato.get(c) || 0);
+    const serve = +(quota * pezzi).toFixed(4);
+    const eccesso = +(netto - serve).toFixed(4);
+    if (eccesso <= 1e-6) return;
+    out.push(Object.assign({ codice: c, quota, dato: +netto.toFixed(4), serve, eccesso,
+      rientrabile: +Math.min(eccesso, inPosto.get(c) || 0).toFixed(4) }, info.get(c),
+      riga ? { descrizione: riga.descrizione || info.get(c).descrizione, um: riga.um || info.get(c).um } : {}));
+  });
+  return out.sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true }));
 }
 
 // Pezzi ancora da fare di una commessa (ordinati − gia' prodotti).
@@ -9559,6 +9619,25 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
           title:'Nuova richiesta: propone solo quello che manca ancora',
           onclick: () => apriRichiestaTerzista(o, poi, { terzista: f.id }) }, '↗ Prepara la richiesta')
           : (mancaOfTerzista(o.id, f.id) ? el('span', { style:'margin-left:auto;color:var(--red);font-weight:700;font-size:11px;' }, 'prima l’ordine fornitore') : '')));
+    }
+    // MATERIALE IN PIU' (25 nov, Nico): la quota della fase e' scesa dopo che il
+    // materiale era gia' partito. Arancio, con il rientro gia' compilato.
+    const ecc = (o.stato === 'aperta' || o.stato === 'sospesa') ? eccedenzeFase(o, f.id) : [];
+    if (ecc.length) {
+      const dove = rep ? 'In reparto c’è' : nomeAziendaDi(f.id) + ' ha';
+      const rientrabili = ecc.filter(e => e.rientrabile > 0);
+      card.append(el('div', { class:'promemoria-eccedenza',
+        style:'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px;padding:6px 10px;'
+          + 'border:1px solid var(--or);border-radius:6px;font-size:12px;background:color-mix(in srgb, var(--or) 10%, transparent);' },
+        el('span', { style:'font-weight:700;color:var(--or);' },
+          '⚠ ' + dove + ' più del necessario: ' + ecc.length + (ecc.length === 1 ? ' materiale' : ' materiali')),
+        el('span', { class:'sub', style:'font-size:11px;' },
+          ecc.map(e => e.codice + ' · ' + nfIT(e.eccesso) + ' in più (dato ' + nfIT(e.dato) + ', quota ora '
+            + nfIT(e.quota) + '/pz = ' + nfIT(e.serve) + ')' + (e.rientrabile < e.eccesso ? ' · fuori giacenza, non rientra' : '')).join(' · ')),
+        (eAdminOra() && rientrabili.length) ? el('button', { type:'button', class:'btnsm', style:'margin-left:auto;border-color:var(--or);color:var(--or);',
+          title: rep ? 'Rientro in sede dal reparto, già compilato col solo materiale in più'
+            : 'Fattelo ridare: rientro in sede da ' + nomeAziendaDi(f.id) + ', già compilato col solo materiale in più',
+          onclick: () => apriRientroInSede(o, f.id, poi, new Map(rientrabili.map(e => [e.codice, e.rientrabile]))) }, '↩ Fai rientrare') : ''));
     }
     // I DOCUMENTI SEMPRE IN VISTA (17 nov, Nico: "senza che rimangano
     // nascosti"): ogni lista di preparazione e il suo DDT, in ordine di data,
