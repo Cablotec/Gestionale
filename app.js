@@ -18100,6 +18100,9 @@ function openOperazioneModal(o, opts) {
     // schermata troppo delirante"). Senza fasi resta aperta: chiuderla
     // sarebbe solo un clic in piu'. Aperta/chiusa resiste ai ridisegni.
     const listaBox = el('div', {});
+    // I mancanti li conta lo stato, piu' sotto: il bottone della lista li
+    // dice in arancio come «N materiali da dare» delle fasi (25 nov, Nico).
+    let segnaMancantiLista = null;
     if (ciclo) {
       // «1 · MATERIALI» (19 nov): quello che stava sopra il ciclo (da che distinta,
       // n. componenti, ⟳ Rigenera) e la lista completa diventano il primo riquadro.
@@ -18111,9 +18114,18 @@ function openOperazioneModal(o, opts) {
       sezMateriali.append(ciclo);
       // Senza fasi il ciclo e' solo il bottone «+ Fase terzista»: la lista resta aperta.
       if (listaMatAperta === null) listaMatAperta = !seqCiclo.length;
+      let nManc = 0;
       const etiLista = () => (listaMatAperta ? '▾ ' : '▸ ') + 'Lista materiali completa · '
-        + righe.length + (righe.length === 1 ? ' componente' : ' componenti');
+        + righe.length + (righe.length === 1 ? ' componente' : ' componenti')
+        + (nManc ? ' · ' + nManc + (nManc === 1 ? ' manca' : ' mancano') : '');
       const togLista = el('button', { type:'button', class:'btnsm', style:'margin:2px 0 10px;' }, etiLista());
+      segnaMancantiLista = (n) => {
+        nManc = n;
+        togLista.textContent = etiLista();
+        togLista.style.borderColor = n ? 'var(--or)' : '';
+        togLista.style.color = n ? 'var(--or)' : '';
+        togLista.style.fontWeight = n ? '700' : '';
+      };
       togLista.onclick = () => { listaMatAperta = !listaMatAperta; listaBox.style.display = listaMatAperta ? '' : 'none';
         togLista.textContent = etiLista(); };
       listaBox.style.display = listaMatAperta ? '' : 'none';
@@ -18294,6 +18306,7 @@ function openOperazioneModal(o, opts) {
           cella.style.fontWeight = '700';
         }
       });
+      if (segnaMancantiLista) segnaMancantiLista(nMancano);
       if (nMancano) {
         intestazione.append(document.createTextNode(' · '),
           el('span', { style:'color:var(--red);font-weight:700;' },
