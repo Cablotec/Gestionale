@@ -5353,16 +5353,32 @@ function mancantiTerzistaInSede(o) {
   const { libero } = liberoTerzista();
   const out = [];
   fasi.forEach((voci, ter) => {
-    const segnati = new Set();
-    (state.inviiTerzista || []).filter(x => x.terzista_id === ter && x.stato !== 'annullato')
-      .forEach(x => (x.righe || []).forEach(r => {
-        if (opDiRigaTerzista(x, r) === o.id && Number(r.mancante) > 0) segnati.add(String(r.codice || '').trim());
-      }));
-    if (!segnati.size) return;
+    // DAL 25 NOV (Nico, TS-515000019 tornato da Bellini per il reparto): non
+    // solo i codici segnati mancanti, ma tutto quello che la fase chiede
+    // ancora, purche' la fase abbia gia' una lista (prima della prima lista
+    // c'e' «↗ Prepara», non serve un promemoria).
+    // Solo i codici segnati MANCANTI, o RIENTRATI IN SEDE per questa commessa
+    // da un altro posto e mai chiesti a questa fase (il distanziale: nella
+    // lista del reparto non c'era, la sua quota allora era 0). Con tutti quelli
+    // ancora da chiedere l'avviso si accendeva su 14 fasi (una con 62 codici,
+    // liste del reparto fatte a rate): quelli li dice gia' «↗ Prepara il resto».
+    const vive = (state.inviiTerzista || []).filter(x => x.terzista_id === ter && x.stato !== 'annullato'
+      && (x.righe || []).some(r => opDiRigaTerzista(x, r) === o.id));
+    if (!vive.length) return;
+    const segnati = new Set(), chiesti = new Set();
+    vive.forEach(x => (x.righe || []).forEach(r => {
+      if (opDiRigaTerzista(x, r) !== o.id) return;
+      const c = String(r.codice || '').trim();
+      chiesti.add(c);
+      if (Number(r.mancante) > 0) segnati.add(c);
+    }));
+    const tornati = new Set((Array.isArray(state.movimenti) ? state.movimenti : [])
+      .filter(m => m.documento_tipo === 'RIENTRO' && !m.presso_id && m.operazione_id === o.id && Number(m.qta) > 0)
+      .map(m => String(m.codice || '').trim()));
     const righe = [];
     voci.forEach(({ riga, qta_pz }) => {
       const cod = String(riga.codice || '').trim();
-      if (!segnati.has(cod) || !contaTerzista(o, riga, ter)) return;
+      if (!(segnati.has(cod) || (tornati.has(cod) && !chiesti.has(cod))) || !contaTerzista(o, riga, ter)) return;
       const serve = serveTerzista(o, qta_pz, giaRichiestoTerzista(o.id, ter, cod), ter);
       const lib = libero(cod);
       if (serve > 0 && lib > 0) righe.push({ codice: cod, serve, libero: lib });
@@ -9612,7 +9628,8 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
         style:'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px;padding:6px 10px;'
           + 'border:1px solid var(--grn);border-radius:6px;font-size:12px;' },
         el('span', { style:'font-weight:700;color:var(--grn);' },
-          '🔔 Arrivati i mancanti: ' + pm.righe.length + (pm.righe.length === 1 ? ' materiale ora in sede' : ' materiali ora in sede')),
+          '🔔 Ora in sede, ' + (rep ? 'da portare in reparto: ' : 'da dare a ' + nomeAziendaDi(f.id) + ': ')
+            + pm.righe.length + (pm.righe.length === 1 ? ' materiale' : ' materiali')),
         el('span', { class:'sub', style:'font-size:11px;' },
           pm.righe.map(r => r.codice + ' (serve ' + nfIT(r.serve) + ', in sede ' + nfIT(r.libero) + ')').join(' · ')),
         (eAdminOra() && !mancaOfTerzista(o.id, f.id)) ? el('button', { type:'button', class:'btnsm', style:'margin-left:auto;',
