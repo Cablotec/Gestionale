@@ -8009,6 +8009,13 @@ function righeOrdineFornitore(aziendaId) {
 // ricerca nelle righe d'OF del fornitore e nell'anagrafica materiali. Clic o Invio =
 // abbinata, e si passa alla prossima da fare; frecce per scorrere i candidati.
 // Senza `ric` e' il DDT scritto a mano: «+ Riga» e si scrive a destra.
+// Un campo OBBLIGATORIO si vede (25 nov, Nico: "il campo numero DDT obbligatorio"):
+// bordo rosso finche' e' vuoto. Il blocco vero resta al salvataggio.
+function segnaObbligatorio(inp) {
+  const agg = () => { inp.style.borderColor = String(inp.value || '').trim() ? '' : 'var(--red)'; };
+  inp.addEventListener('input', agg); inp.addEventListener('change', agg); agg();
+  return inp;
+}
 // MODIFICA DI UN DDT IN ENTRATA (25 nov, Nico: "ho sbagliato la data, vorrei poter
 // modificare i DDT in caso di errore"). Numero e data del DDT, quantita' per riga
 // (0 = riga tolta). Scrive solo `mov_modifica_ddt` (strumenti/migrazione-modifica-ddt.sql,
@@ -8020,7 +8027,7 @@ function apriModificaDdt(k) {
   const m0 = righe[0];
   const v = veloTerzista('Modifica DDT ' + m0.documento_numero + ' · ' + (m0.mittente || nomeAziendaDi(m0.azienda_id)), 900);
   const dataDi = (m) => String(m.documento_data || m.data || '').slice(0, 10);
-  const inNum = el('input', { type:'text', class:'mono', value: m0.documento_numero || '' });
+  const inNum = segnaObbligatorio(el('input', { type:'text', class:'mono', value: m0.documento_numero || '' }));
   const inData = el('input', { type:'date', value: dataDi(m0) });
   const nq = new Map(righe.map(r => [r.id, Number(r.qta) || 0]));
   const tb = el('tbody');
@@ -8044,7 +8051,7 @@ function apriModificaDdt(k) {
   v.corpo.append(
     el('div', { class:'sub', style:'font-size:12px;margin-bottom:8px;' },
       'Correggi numero, data o quantità. Quantità 0 = la riga si toglie. Ogni modifica lascia la traccia nella nota della riga.'),
-    el('div', { class:'frow' }, campo('Numero DDT', inNum), campo('Data DDT', inData)),
+    el('div', { class:'frow' }, campo('Numero DDT *', inNum), campo('Data DDT', inData)),
     el('table', { class:'rt', style:'margin-top:8px;' },
       el('thead', {}, el('tr', {}, ...['Codice', 'Descrizione', 'Ordine', 'Q.tà', '', ''].map(t => el('th', {}, t)))), tb));
   const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
@@ -8054,7 +8061,7 @@ function apriModificaDdt(k) {
     const err = !inNum.value.trim() ? 'Scrivi il numero del DDT' : !inData.value ? 'Manca la data'
       : cambiate.some(r => isNaN(nq.get(r.id)) || nq.get(r.id) < 0) ? 'Una quantità non è valida'
       : righe.every(r => nq.get(r.id) === 0) ? 'Il DDT non può restare senza righe' : null;
-    if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
+    if (err) { if (!inNum.value.trim()) inNum.focus(); msg.textContent = err; msg.style.color = 'var(--red)'; return; }
     const testata = inNum.value.trim() !== m0.documento_numero || inData.value !== dataDi(m0);
     if (!testata && !cambiate.length) { v.chiudi(); return; }
     const tolte = cambiate.filter(r => nq.get(r.id) === 0);
@@ -8221,9 +8228,9 @@ async function apriDdtEntrataManuale(poi, ric) {
   let righe = [], sel = 0, evid = 0, cerca = '', anag = [], anagPer = '';
   const selMitt = campoCercaAzienda(aziende, { placeholder:'Scrivi il mittente…',
     onchange: () => { righe.forEach(r => { r.toccata = false; proponi(r); }); disegna(); } });
-  const inNum = el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' });
+  const inNum = segnaObbligatorio(el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' }));
   const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
-  if (ric) { selMitt.value = ric.azienda_id || ''; selMitt.disabled = true; inNum.value = ric.ddt_numero || ''; if (ric.ddt_data) inData.value = String(ric.ddt_data).slice(0, 10); }
+  if (ric) { selMitt.value = ric.azienda_id || ''; selMitt.disabled = true; inNum.value = ric.ddt_numero || ''; inNum.dispatchEvent(new Event('input')); if (ric.ddt_data) inData.value = String(ric.ddt_data).slice(0, 10); }
   const nfq = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   const noto = (c) => !!c && ((codiciAnagrafica ? codiciAnagrafica.has(c) : true) || codiceInGiacenzaGestionale(c, selMitt.value));
   const abbinata = (r) => noto(chiaveCodice(r.codice));
@@ -8399,7 +8406,7 @@ async function apriDdtEntrataManuale(poi, ric) {
   disegna();
   const campoT = (etichetta, input) => el('div', { class:'field' }, el('label', {}, etichetta), input);
   v.corpo.append(
-    el('div', { class:'frow' }, campoT('Mittente', selMitt), campoT('Numero DDT', inNum), campoT('Data DDT', inData),
+    el('div', { class:'frow' }, campoT('Mittente', selMitt), campoT('Numero DDT *', inNum), campoT('Data DDT', inData),
       el('div', { style:'display:flex;align-items:flex-end;padding-bottom:4px;' }, accettaTutte)),
     el('div', { style:'display:grid;grid-template-columns:330px minmax(0,1fr);gap:14px;margin-top:6px;' },
       el('div', {}, sinistra, riepilogo), destra));
@@ -8411,7 +8418,7 @@ async function apriDdtEntrataManuale(poi, ric) {
     valide.forEach(r => { if (!r.codice) r.codice = r.codice_mittente; });
     const err = !selMitt.value ? 'Scegli il mittente' : !inNum.value.trim() ? 'Scrivi il numero del DDT' : !inData.value ? 'Manca la data'
       : !valide.length ? 'Aggiungi almeno una riga' : valide.some(r => !(r.qta > 0)) ? 'Ogni riga vuole una quantità maggiore di zero' : null;
-    if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
+    if (err) { if (!inNum.value.trim()) inNum.focus(); msg.textContent = err; msg.style.color = 'var(--red)'; return; }
     const daFare = valide.filter(r => !abbinata(r));
     if (daFare.length && !confirm(daFare.length + (daFare.length === 1 ? ' riga è ancora' : ' righe sono ancora') + ' da abbinare ('
       + daFare.slice(0, 5).map(r => r.codice).join(', ') + (daFare.length > 5 ? '…' : '') + ').\nEntrano col codice del fornitore. Confermi lo stesso?')) return;
@@ -8468,7 +8475,7 @@ async function apriDdtEntrataDaOrdini(poi) {
   const selMitt = campoCercaAzienda(aziende, { placeholder:'Scrivi il fornitore…', nota: a => conOf.has(a.id) ? 'OF aperti' : '',
     onchange: () => { arrivi = new Map(); extra = []; disegna(); } });
   setTimeout(() => selMitt.focus(), 50);
-  const inNum = el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' });
+  const inNum = segnaObbligatorio(el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' }));
   const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
   const nfq = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   let arrivi = new Map();   // k riga d'ordine -> quantita' arrivata
@@ -8555,7 +8562,7 @@ async function apriDdtEntrataDaOrdini(poi) {
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:8px;' },
       'Scegli il fornitore: compaiono le righe dei suoi OF ancora da ricevere. Scrivi quanto è arrivato secondo il DDT (o «= tutto» sulla riga). '
       + 'Le righe lasciate a zero non si caricano e restano in attesa.'),
-    el('div', { class:'frow' }, campo('Fornitore', selMitt), campo('Numero DDT', inNum), campo('Data DDT', inData)),
+    el('div', { class:'frow' }, campo('Fornitore', selMitt), campo('Numero DDT *', inNum), campo('Data DDT', inData)),
     el('div', { style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, cerca, tutto, svuota),
     corpo);
   const msg = el('span', { class:'sub', style:'margin-right:auto;font-size:12px;' });
@@ -8570,7 +8577,7 @@ async function apriDdtEntrataDaOrdini(poi) {
     const err = !selMitt.value ? 'Scegli il fornitore' : !inNum.value.trim() ? 'Scrivi il numero del DDT' : !inData.value ? 'Manca la data'
       : !valide.length ? 'Nessuna riga con quantità arrivata' : extra.some(r => r.qta > 0 && !r.codice) ? 'Una riga fuori ordine non ha il codice'
       : extra.some(r => r.qta > 0 && r.codice && !r.scelto) ? 'Scegli dall’elenco il codice delle righe fuori ordine (' + extra.filter(r => r.qta > 0 && r.codice && !r.scelto).map(r => r.codice).join(', ') + ')' : null;
-    if (err) { msg.textContent = err; msg.style.color = 'var(--red)'; return; }
+    if (err) { if (!inNum.value.trim()) inNum.focus(); msg.textContent = err; msg.style.color = 'var(--red)'; return; }
     const oltre = tutte.filter(o => (arrivi.get(o.k) || 0) > o.aperto);
     if (oltre.length && !confirm(oltre.length + (oltre.length === 1 ? ' riga supera' : ' righe superano') + ' quanto l’ordine aspetta ('
       + oltre.slice(0, 4).map(o => o.codice + ' ' + nfq(arrivi.get(o.k)) + '/' + nfq(o.aperto)).join(', ') + '). Carico lo stesso?')) return;
