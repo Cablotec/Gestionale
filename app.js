@@ -18214,8 +18214,11 @@ function openOperazioneModal(o, opts) {
         title:'Quantità cambiata su questa commessa' }, '✎ distinta ' + (r.qta_pz_distinta != null ? nf(r.qta_pz_distinta) + '/pz' : 'diversa')));
       // Clic sulla riga = scheda del codice (19 nov, Nico: al posto del 📇).
       const dR = datoRiga.get(iRiga) || 0, rR = restaRiga.get(iRiga) || 0;
-      listaBox.append(el('div', { style: COLR + 'padding:4px 0;border-bottom:1px solid var(--brd);cursor:pointer;',
-          title:'Clic: scheda del codice ' + r.codice, onclick: () => apriSchedaCodice(r.codice) },
+      const rigaEl = el('div', { style: COLR + 'padding:4px 0;border-bottom:1px solid var(--brd);cursor:pointer;',
+          title:'Clic: scheda del codice ' + r.codice, onclick: () => apriSchedaCodice(r.codice) });
+      Object.assign(celleStato.get(r.codice), { riga: rigaEl, cod: cellaCod });
+      listaBox.append(rigaEl);
+      rigaEl.append(
         cellaCod,
         el('span', { class:'sub', style:'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
           title: r.descrizione || '' }, r.descrizione || '—'),
@@ -18229,7 +18232,7 @@ function openOperazioneModal(o, opts) {
           return el('span', { class:'mono', style:'font-size:11px;text-align:right;color:' + (g == null ? 'var(--mut)' : g <= 0 ? 'var(--red)' : 'var(--txt)') + ';' },
             g == null ? '—' : nf(g), g == null ? '' : notaRiservato(r.codice, r.um)); })(),
         el('span', { class:'sub', style:'font-size:11px;' }, r.um || ''),
-        stato, icoStato));
+        stato, icoStato);
     });
 
     // Il riquadro «Arrivati con i DDT dell'ordine ma non in questa lista»
@@ -18264,7 +18267,7 @@ function openOperazioneModal(o, opts) {
       // Quanto resta da servire per codice (righe dello stesso codice sommate).
       const restaCod = new Map();
       righe.forEach((r, i) => restaCod.set(r.codice, (restaCod.get(r.codice) || 0) + (restaRiga.get(i) || 0)));
-      celleStato.forEach(({ testo: cella, ico }, codice) => {
+      celleStato.forEach(({ testo: cella, ico, riga: rigaEl, cod: cellaCod }, codice) => {
         const r = materialeStatoRiga(codice, tipoDi.get(codice), ctx);
         // L'icona apre il menu del materiale su ogni riga (scrivere a chi lo
         // manda, copiare codice e OF); il testo dello stato non e' piu' cliccabile.
@@ -18278,10 +18281,18 @@ function openOperazioneModal(o, opts) {
             : 'I pezzi ancora da fare non chiedono altro materiale';
           return;
         }
-        if (r.manca > 0) nMancano++;
         cella.textContent = r.testo;
         cella.style.color = r.colore;
         cella.title = r.titolo || '';
+        // MANCANTI IN ARANCIO (25 nov, Nico): come i «da dare / da portare» delle
+        // fasi: riga su fondo arancio, codice e stato in grassetto arancio.
+        if (r.manca > 0) {
+          nMancano++;
+          if (rigaEl) rigaEl.style.background = 'color-mix(in srgb, var(--or) 10%, transparent)';
+          if (cellaCod) cellaCod.style.fontWeight = '700';
+          cella.style.color = 'var(--or)';
+          cella.style.fontWeight = '700';
+        }
       });
       if (nMancano) {
         intestazione.append(document.createTextNode(' · '),
