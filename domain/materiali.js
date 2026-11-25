@@ -851,7 +851,10 @@ function candidatiRicevimento(riga, voci) {
   return [...visti.values()].sort((a, b) => (b.punteggio - a.punteggio) || ((Number(b.aperto) || 0) - (Number(a.aperto) || 0)));
 }
 
-function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
+// opz.saltaMittente(azienda_id) → true per i DDT dei clienti (C/L di Tema: i TS- non
+// sono in anagrafica e non sono codici del fornitore). `codiciNoti` basta che abbia .has().
+function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini, opz) {
+  const o = opz || {};
   const K = c => String(c == null ? '' : c).trim().toUpperCase();
   const righeOf = [];   // { azienda_id, codice_fornitore, codice, ordine }
   (ordini || []).forEach(o => (o.righe || []).forEach(r => {
@@ -863,7 +866,12 @@ function carichiCodiceSconosciuto(movimenti, codiciNoti, ordini) {
     return c ? { codice: c, ordine: righeOf.find(x => x.azienda_id === az && x.codice === c).ordine } : null; };
   const per = new Map();
   (movimenti || []).forEach(m => {
-    if (!m || m.tipo !== 'carico' || !m.fuori_giacenza) return;
+    if (!m || m.tipo !== 'carico') return;
+    // 26 nov: dal 25 nov le righe di Alnus sono fuori giacenza (EA1 = carico) e i nostri
+    // DDT sono IN giacenza: si guardano i DDT, non piu' il solo «fuori giacenza».
+    if (m.documento_tipo === 'ALNUS' || m.documento_tipo === 'APERTURA') return;
+    if (!m.fuori_giacenza && m.documento_tipo !== 'DDT') return;
+    if (typeof o.saltaMittente === 'function' && o.saltaMittente(m.azienda_id)) return;
     const cod = K(m.codice);
     if (!cod || codiciNoti.has(cod)) return;
     const k = cod + '|' + (m.azienda_id || m.mittente || '');

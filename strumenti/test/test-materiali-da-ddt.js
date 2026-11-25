@@ -306,6 +306,13 @@ sez('Codici non riconosciuti nei DDT (20 nov)');
     { codice: 'A', ordine: 'OF 822/2026', ordinato: 15, aperto: 0 }, { codice: 'B', ordine: 'OF 822/2026', ordinato: 200, aperto: 0 }]);
   t('candidati: OF gia evaso, conta la quantita ordinata', c5[0].codice === 'B' && c5[0].perche.includes('ordinati proprio 200'));
   t('candidati: un carattere di differenza (050ASL / 050DSL) passa in cima', c4[0].codice === '2822GELFI00000050DSL' && c4[0].perche.includes('codice quasi uguale'));
+  // 26 nov: righe ALNUS fuori giacenza escluse, nostri DDT in giacenza controllati, clienti saltati.
+  const r26 = M.carichiCodiceSconosciuto([
+    { tipo: 'carico', fuori_giacenza: true, documento_tipo: 'ALNUS', codice: '50511CABL000000000340', qta: 150 },
+    { tipo: 'carico', fuori_giacenza: false, documento_tipo: 'DDT', codice: 'GX1', azienda_id: 'lov', qta: 5 },
+    { tipo: 'carico', fuori_giacenza: false, documento_tipo: 'DDT', codice: 'TS-9', azienda_id: 'tema', qta: 5 } ],
+    { has: c => c === 'NOTO' }, [], { saltaMittente: id => id === 'tema' });
+  t('ALNUS escluse, DDT in giacenza controllato, cliente saltato', r26.map(x => x.codice).join() === 'GX1');
   t('proposta nel riquadro con la marca', M.carichiCodiceSconosciuto([{ tipo: 'carico', fuori_giacenza: true, codice: 'RZKE65', azienda_id: 'fab', qta: 1 }], new Set(),
     [{ serie: 'OF', numero: 807, anno: 2026, fornitore_id: 'fab', righe: [{ codice: '242AA0DKC00000RZKE65', codice_fornitore: 'DKC RZKE65' }] }])[0].proposta.codice === '242AA0DKC00000RZKE65');
 }

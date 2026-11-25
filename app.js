@@ -12003,7 +12003,11 @@ function avvisoCodiciSconosciuti(ridisegna) {
   if (!Array.isArray(state.movimenti)) return box;
   if (codiciAnagrafica === undefined) { caricaCodiciAnagrafica().then(() => { if (codiciAnagrafica) ridisegna(); }); return box; }
   if (!codiciAnagrafica) return box;
-  const voci = carichiCodiceSconosciuto(state.movimenti, codiciAnagrafica, state.ordiniFornitore || []);
+  // Noto = in anagrafica o conosciuto da Alnus (foto, movimenti: un codice nuovo di Alnus
+  // non e' il codice del fornitore). I DDT dei soli clienti (TS- di Tema) non si guardano.
+  const noti = { has: (c) => codiciAnagrafica.has(c) || codiceDiAlnus(c) };
+  const soloCliente = (id) => { const a = id && (state.aziende || []).find(x => x.id === id); return !!a && !!a.is_cliente && !a.is_fornitore; };
+  const voci = carichiCodiceSconosciuto(state.movimenti, noti, state.ordiniFornitore || [], { saltaMittente: soloCliente });
   if (!voci.length) return box;
   const nf = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
   box.style.cssText = 'margin:0 0 18px;padding:10px 14px;border:1px solid var(--red);border-radius:6px;max-width:1100px;';
