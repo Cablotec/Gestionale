@@ -18174,8 +18174,12 @@ function openOperazioneModal(o, opts) {
     // codice, quindi serve poterlo ritrovare.
     const tipoDi = new Map(righe.map(r => [r.codice, String(r.tipo || '').toUpperCase()]));
     righe.forEach((r, iRiga) => {
-      const stato = el('span', { class:'sub', style:'font-size:11px;' }, '…');
-      celleStato.set(r.codice, stato);
+      // Stato + icona ✉ (25 nov, Nico): il menu per chiedere al fornitore c'e'
+      // su TUTTE le righe, anche non mancanti, dall'icona e non dal testo.
+      const testoStato = el('span', { class:'sub', style:'font-size:11px;min-width:0;' }, '…');
+      const icoStato = el('button', { type:'button', class:'ico-mat', title:'Scrivi al fornitore, copia codice/OF' }, '✉');
+      const stato = el('span', { style:'display:flex;align-items:center;gap:4px;min-width:0;' }, testoStato, icoStato);
+      celleStato.set(r.codice, { testo: testoStato, ico: icoStato });
       // Sotto il codice, DA DOVE VIENE: senza, un materiale che nella
       // distinta non compare sembra spuntato dal nulla (7 set, segnalato da
       // Nico su `83010FILO00101042GVM`). La distinta mostra un livello, la
@@ -18251,7 +18255,11 @@ function openOperazioneModal(o, opts) {
       // Quanto resta da servire per codice (righe dello stesso codice sommate).
       const restaCod = new Map();
       righe.forEach((r, i) => restaCod.set(r.codice, (restaCod.get(r.codice) || 0) + (restaRiga.get(i) || 0)));
-      celleStato.forEach((cella, codice) => {
+      celleStato.forEach(({ testo: cella, ico }, codice) => {
+        const r = materialeStatoRiga(codice, tipoDi.get(codice), ctx);
+        // L'icona apre il menu del materiale su ogni riga (scrivere a chi lo
+        // manda, copiare codice e OF); il testo dello stato non e' piu' cliccabile.
+        ico.onclick = (e) => { e.stopPropagation(); apriMenuMateriale(ico, { codice, stato: r, op: o }); };
         // Niente piu' da prendere dallo scaffale: lo si dice, e non si cerca altro.
         if (conResto && !(restaCod.get(codice) > 0)) {
           const chi = datoChi.get(chiaveCodice(codice));
@@ -18261,15 +18269,10 @@ function openOperazioneModal(o, opts) {
             : 'I pezzi ancora da fare non chiedono altro materiale';
           return;
         }
-        const r = materialeStatoRiga(codice, tipoDi.get(codice), ctx);
         if (r.manca > 0) nMancano++;
         cella.textContent = r.testo;
         cella.style.color = r.colore;
-        // Clic = menu del materiale (scrivere a chi lo manda, copiare codice e OF)
-        cella.title = (r.titolo ? r.titolo + '\n' : '') + 'Clic: scrivi al fornitore, copia codice/OF';
-        cella.style.cursor = 'pointer';
-        cella.classList.add('stato-mat');
-        cella.onclick = (e) => { e.stopPropagation(); apriMenuMateriale(cella, { codice, stato: r, op: o }); };
+        cella.title = r.titolo || '';
       });
       if (nMancano) {
         intestazione.append(document.createTextNode(' · '),
