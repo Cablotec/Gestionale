@@ -7674,7 +7674,18 @@ function renderAlnus(root) {
 // Alnus, codice per codice (`collaudoGiacenze`, domain/alnus.js). Conta il
 // risultato sul totale del codice, non i passaggi.
 const COLLAUDO_DAL_CHIAVE = 'cablotec.collaudoDalZero';   // nuova chiave il 25 nov: di serie il punto zero
-let collaudoSoloDiversi = true, collaudoCerca = '', collaudoTutti = false;
+let collaudoSoloDiversi = true, collaudoCerca = '', collaudoTutti = false, collaudoVediSistemati = false;
+// «SISTEMATO» (26 nov, Nico): la ✕ su una riga che non torna salva il codice CON la
+// differenza di quel momento ({ codice: differenza }, nel browser come la data «Dal»).
+// La riga resta nascosta finche' la differenza e' quella; se cambia (un altro EA1 su
+// un _K, un fatto nuovo) ricompare da sola. Nascondere il codice per sempre farebbe
+// perdere le differenze vere che arrivano dopo.
+const COLLAUDO_SISTEMATI_CHIAVE = 'cablotec.collaudoSistemati';
+function collaudoSistematiLeggi() {
+  try { const x = JSON.parse(localStorage.getItem(COLLAUDO_SISTEMATI_CHIAVE) || '{}'); return x && typeof x === 'object' ? x : {}; }
+  catch (e) { return {}; }
+}
+function collaudoSistematiScrivi(x) { try { localStorage.setItem(COLLAUDO_SISTEMATI_CHIAVE, JSON.stringify(x)); } catch (e) {} }
 function riquadroCollaudo(ridisegna) {
   const box = el('div', { style: 'margin-top:18px;' });
   // Il punto zero: l'ultima apertura fra i movimenti. Le nostre righe registrate prima
@@ -7688,42 +7699,61 @@ function riquadroCollaudo(ridisegna) {
   box.append(el('h3', { style: 'margin:6px 0 6px;' }, 'Collaudo: il gestionale contro Alnus'));
   if (!Array.isArray(state.movimenti)) { box.append(el('div', { class: 'sub' }, 'Movimenti non letti: premi ⟳ Aggiorna.')); return box; }
   const prodotti = new Set((state.articoli || []).map(a => String(a.codice || '').trim().toUpperCase()));
-  // Fuori anche i codici lavorazione `_K` (26 nov, Nico): in Alnus sono l'articolo
-  // dell'OF al terzista (EA1 al rientro, UP1 al versamento), da noi il rientro e'
-  // `rientri_terzista` e non muove la giacenza. Non potrebbero mai tornare.
-  const righe = collaudoGiacenze(state.movimenti, dal, { codiceDiAlnus: c => codiceDiAlnus(c) && !eLavorazione(c), escludi: prodotti,
+  const righe = collaudoGiacenze(state.movimenti, dal, { codiceDiAlnus, escludi: prodotti,
     dopo: apertura && apertura.creato_il ? Date.parse(apertura.creato_il) : null });
   const diversi = righe.filter(r => Math.abs(r.differenza) >= 0.0005);
-  const soloAlnus = diversi.filter(r => !r.righeNostre).length;
+  // Sistemati: stessa differenza di quando si e' premuta la ✕. Una segnatura il cui
+  // codice ha ora un'altra differenza si butta (la riga e' gia' ricomparsa).
+  const sistemati = collaudoSistematiLeggi();
+  let potati = false;
+  righe.forEach(r => { if (sistemati[r.codice] != null && Math.abs(Number(sistemati[r.codice]) - r.differenza) >= 0.0005) { delete sistemati[r.codice]; potati = true; } });
+  if (potati) collaudoSistematiScrivi(sistemati);
+  const eSistemato = (r) => sistemati[r.codice] != null && Math.abs(r.differenza) >= 0.0005;
+  const nSistemati = diversi.filter(eSistemato).length;
+  const aperti = diversi.filter(r => !eSistemato(r));
+  const soloAlnus = aperti.filter(r => !r.righeNostre).length;
   box.append(el('div', { class: 'sub', style: 'font-size:12px;line-height:1.6;margin-bottom:8px;max-width:980px;' },
     'Dal punto zero' + (apertura && apertura.creato_il ? ' (' + fmtQuando(apertura.creato_il) + ')' : '') + ' la giacenza è del gestionale; i movimenti di Alnus importati sono solo il termine di paragone. '
     + 'Dal giorno scelto, per ogni codice di Alnus: quello che è stato registrato nel gestionale (DDT in entrata, lotti di produzione, rettifiche, resi) '
-    + 'contro i movimenti di Alnus. Spostamenti in reparto, dai terzisti e prelievi 01→WIP si annullano. Fuori i prodotti finiti e i codici lavorazione (_K): il rientro dal terzista non è materiale. A destra la giacenza dei due. '
+    + 'contro i movimenti di Alnus. Spostamenti in reparto, dai terzisti e prelievi 01→WIP si annullano. A destra la giacenza dei due. '
+    + 'Una differenza controllata (es. un _K rientrato dal terzista: da noi il rientro non è materiale) si toglie con ✕: ricompare da sola se cambia. '
     + plAlnus(righe.length, 'codice mosso', 'codici mossi') + ' · ' + (righe.length - diversi.length) + ' tornano · '
-    + (diversi.length ? diversi.length + ' non tornano' + (soloAlnus ? ' (' + soloAlnus + ' mossi solo in Alnus)' : '') : 'nessuno che non torna') + '.'));
+    + (aperti.length ? aperti.length + ' non tornano' + (soloAlnus ? ' (' + soloAlnus + ' mossi solo in Alnus)' : '') : 'nessuno che non torna')
+    + (nSistemati ? ' · ' + plAlnus(nSistemati, 'sistemato', 'sistemati') : '') + '.'));
   const cerca = el('input', { type: 'text', class: 'search', id: 'collaudo-cerca', value: collaudoCerca, placeholder: 'Cerca codice o descrizione…',
     oninput: (e) => { collaudoCerca = e.target.value; ridisegnaDopoRicerca('alnus'); } });
   box.append(el('div', { style: 'display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px;' },
     el('label', { style: 'font-size:12px;display:inline-flex;gap:6px;align-items:center;' }, 'Dal', inDal),
     el('label', { style: 'font-size:12px;display:inline-flex;gap:4px;align-items:center;cursor:pointer;' },
       el('input', { type: 'checkbox', checked: collaudoSoloDiversi ? true : null, onchange: (e) => { collaudoSoloDiversi = e.target.checked; ridisegna(); } }),
-      'Solo i codici che non tornano'), cerca));
+      'Solo i codici che non tornano'),
+    nSistemati ? el('label', { style: 'font-size:12px;display:inline-flex;gap:4px;align-items:center;cursor:pointer;' },
+      el('input', { type: 'checkbox', checked: collaudoVediSistemati ? true : null, onchange: (e) => { collaudoVediSistemati = e.target.checked; ridisegna(); } }),
+      'Mostra i ' + nSistemati + ' sistemati') : '',
+    cerca));
   const q = collaudoCerca.trim().toLowerCase();
   const vis = righe.filter(r => (!collaudoSoloDiversi || Math.abs(r.differenza) >= 0.0005)
+    && (collaudoVediSistemati || !eSistemato(r))
     && (!q || r.codice.toLowerCase().includes(q) || String(r.descrizione).toLowerCase().includes(q)));
-  if (!vis.length) { box.append(el('div', { class: 'empty' }, righe.length ? 'Tutti i codici mossi tornano.' : 'Nessun movimento dal giorno scelto.')); return box; }
+  if (!vis.length) { box.append(el('div', { class: 'empty' }, righe.length ? (nSistemati ? 'Tutti i codici mossi tornano o sono sistemati.' : 'Tutti i codici mossi tornano.') : 'Nessun movimento dal giorno scelto.')); return box; }
   const n = (x) => Math.abs(x) < 0.0005 ? '—' : (x > 0 ? '+' : '') + nfIT(x);
   const coppia = (r, t) => { const a = r.nostro[t], b = r.alnus[t], ugu = Math.abs(a - b) < 0.0005;
     return el('td', { class: 'mono', style: 'text-align:right;white-space:nowrap;font-size:12px;' + (ugu ? 'color:var(--mut);' : ''),
       title: 'Gestionale ' + n(a) + ' · Alnus ' + n(b) }, ugu ? n(a) : el('span', {}, el('b', {}, n(a)), el('span', { class: 'sub' }, ' / ' + n(b)))); };
   const tbl = el('table', { class: 'rt' });
-  tbl.append(el('thead', {}, el('tr', {}, ...['Codice', 'Descrizione', 'Arrivi', 'Consumi', 'Rettifiche', 'Uscite', 'Gestionale', 'Alnus', 'Differenza', 'Giac. gestionale', 'Giac. Alnus']
+  tbl.append(el('thead', {}, el('tr', {}, ...['Codice', 'Descrizione', 'Arrivi', 'Consumi', 'Rettifiche', 'Uscite', 'Gestionale', 'Alnus', 'Differenza', 'Giac. gestionale', 'Giac. Alnus', '']
     .map((t, i) => el('th', { style: i >= 2 ? 'text-align:right;' : '', title: i >= 2 && i <= 5 ? 'Gestionale / Alnus'
       : i >= 9 ? 'Giacenza di oggi: gestionale = somma dei movimenti in conto; Alnus = foto d’apertura + movimenti di Alnus' : '' }, t)))));
   const tb = el('tbody');
   (collaudoTutti ? vis : vis.slice(0, 200)).forEach(r => {
-    const dif = r.differenza;
-    tb.append(el('tr', { style: 'cursor:pointer;', title: 'Apri la scheda del codice', onclick: () => apriSchedaCodice(r.codice) },
+    const dif = r.differenza, sis = eSistemato(r);
+    const segna = Math.abs(dif) < 0.0005 ? '' : el('button', { class: 'btnsm',
+      style: 'padding:1px 7px;font-size:11px;',
+      title: sis ? 'Rimetti fra quelli che non tornano' : 'Segna come sistemato: la riga sparisce finché la differenza resta ' + (dif > 0 ? '+' : '') + nfIT(dif),
+      onclick: (e) => { e.stopPropagation(); const x = collaudoSistematiLeggi();
+        if (sis) delete x[r.codice]; else x[r.codice] = dif;
+        collaudoSistematiScrivi(x); ridisegna(); } }, sis ? '↺' : '✕');
+    tb.append(el('tr', { style: 'cursor:pointer;' + (sis ? 'opacity:.55;' : ''), title: sis ? 'Sistemato · apri la scheda del codice' : 'Apri la scheda del codice', onclick: () => apriSchedaCodice(r.codice) },
       el('td', { class: 'mono', style: 'font-weight:700;white-space:nowrap;' }, testoCopiabile(r.codice, 'Codice copiato')),
       el('td', { style: 'max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;', title: r.descrizione }, r.descrizione),
       coppia(r, 'arrivi'), coppia(r, 'consumi'), coppia(r, 'rettifiche'), coppia(r, 'uscite'),
@@ -7734,7 +7764,8 @@ function riquadroCollaudo(ridisegna) {
         Math.abs(dif) < 0.0005 ? '=' : (dif > 0 ? '+' : '') + nfIT(dif)),
       el('td', { class: 'mono', style: 'text-align:right;font-weight:700;' }, nfIT(r.giacenza.nostro)),
       el('td', { class: 'mono', style: 'text-align:right;color:' + (Math.abs(r.giacenza.nostro - r.giacenza.alnus) < 0.0005 ? 'var(--grn)' : 'var(--or)') + ';' },
-        nfIT(r.giacenza.alnus))));
+        nfIT(r.giacenza.alnus)),
+      el('td', { style: 'text-align:center;' }, segna)));
   });
   tbl.append(tb);
   box.append(el('div', { style: 'overflow-x:auto;' }, tbl));
