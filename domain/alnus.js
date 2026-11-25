@@ -429,10 +429,29 @@ function collaudoGiacenze(movimenti, dal, opz) {
   const giorno = String(dal || '').slice(0, 10);
   const r6 = (n) => +(+n).toFixed(6);
   const vuoto = () => ({ arrivi: 0, consumi: 0, rettifiche: 0, uscite: 0, spostamenti: 0, altri: 0, totale: 0 });
+  // `dopo` (ms): il punto zero; le righe registrate prima sono gia' dentro l'apertura.
+  const dopo = o.dopo != null && !isNaN(o.dopo) ? Number(o.dopo) : null;
+  // GIACENZA (25 nov, la giacenza e' nostra): su TUTTE le righe, senza guardare il giorno.
+  // Gestionale = righe in conto (apertura compresa). Alnus = la foto d'apertura + le righe
+  // di Alnus; la foto e' l'APERTURA (che e' foto − saldo di prima) + le righe in conto
+  // registrate fino al punto zero (`dopo`); senza `dopo` solo l'APERTURA.
+  const giac = new Map();
+  (movimenti || []).forEach(m => {
+    if (!m) return;
+    const c = String(m.codice || '').trim().toUpperCase();
+    if (!c) return;
+    if (!giac.has(c)) giac.set(c, { nostro: 0, alnus: 0 });
+    const g = giac.get(c), q = Number(m.qta) || 0;
+    if (!m.fuori_giacenza && m.documento_tipo !== 'ALNUS') g.nostro = r6(g.nostro + q);
+    const primaDelZero = dopo != null && !m.fuori_giacenza && m.documento_tipo !== 'ALNUS'
+      && (!m.creato_il || Date.parse(m.creato_il) <= dopo);
+    if (m.documento_tipo === 'ALNUS' || primaDelZero || (dopo == null && m.documento_tipo === 'APERTURA')) g.alnus = r6(g.alnus + q);
+  });
   const per = new Map();
   (movimenti || []).forEach(m => {
     if (!m || m.documento_tipo === 'APERTURA') return;
     if (giorno && String(m.data || '').slice(0, 10) < giorno) return;
+    if (dopo != null && m.creato_il && Date.parse(m.creato_il) <= dopo) return;
     const c = String(m.codice || '').trim().toUpperCase();
     if (!c || escludi.has(c) || !diAlnus(c)) return;
     if (!per.has(c)) per.set(c, { codice: c, descrizione: '', nostro: vuoto(), alnus: vuoto(), righeNostre: 0, righeAlnus: 0 });
@@ -443,7 +462,8 @@ function collaudoGiacenze(movimenti, dal, opz) {
     const t = tipoCollaudo(m), q = Number(m.qta) || 0;
     lato[t] = r6(lato[t] + q); lato.totale = r6(lato.totale + q);
   });
-  return [...per.values()].map(x => Object.assign(x, { differenza: r6(x.nostro.totale - x.alnus.totale) }))
+  return [...per.values()].map(x => Object.assign(x, { differenza: r6(x.nostro.totale - x.alnus.totale),
+    giacenza: giac.get(x.codice) || { nostro: 0, alnus: 0 } }))
     // Solo i codici con un fatto vero (arrivo, consumo, rettifica, uscita): quelli
     // solo spostati (reparto, terzisti, 01→WIP) tornano per forza e farebbero numero.
     .filter(x => ['arrivi', 'consumi', 'rettifiche', 'uscite', 'altri'].some(t => x.nostro[t] || x.alnus[t]))

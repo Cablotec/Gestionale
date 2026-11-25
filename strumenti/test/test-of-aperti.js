@@ -89,6 +89,15 @@ sez('Serie: un OF di Alnus col suo numero, sincronizzato');
   const nostro = [Object.assign({}, ord[0], { id: 'g', origine: 'gestionale', sincronizzato_il: null })];
   t('OF del gestionale: contano anche i carichi di Alnus come prima', M.ordinatoApertoOf(nostro, [ea1, ddt]).get('X').aperto === 200);
 }
+{
+  // 25 nov: un nostro DDT con la data del giorno della sincronizzazione, registrato DOPO.
+  const ord = [{ id: 'c', tipo: 'acquisto', stato: 'emesso', serie: 'OF', anno: 2026, numero: 730, origine: 'alnus',
+    sincronizzato_il: '2026-11-23T11:04:29Z', righe: [{ codice: 'X', qta: 400, qta_residua: 400 }] }];
+  const dopo = { tipo: 'carico', codice: 'X', qta: 100, ordine_rif: 'OF 730/2026', data: '2026-11-23', creato_il: '2026-11-23T15:01:38Z' };
+  const prima = { tipo: 'carico', codice: 'X', qta: 100, ordine_rif: 'OF 730/2026', data: '2026-11-23', creato_il: '2026-11-23T09:00:00Z' };
+  t('DDT dello stesso giorno registrato dopo la sincronizzazione: scala', M.ordinatoApertoOf(ord, [dopo]).get('X').aperto === 300);
+  t('DDT registrato prima della sincronizzazione: gia nel residuo', M.ordinatoApertoOf(ord, [prima]).get('X').aperto === 400);
+}
 
 console.log('\n' + ok + ' ok, ' + ko + ' KO');
 process.exit(ko ? 1 : 0);

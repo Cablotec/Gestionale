@@ -49,6 +49,21 @@ sez('Collaudo: il gestionale contro Alnus');
   t('tipo da causale: EA1 arrivi, UC1 uscite, EP1 altri', A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/EA1/1' }) === 'arrivi'
     && A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/UC1/1' }) === 'uscite' && A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/EP1/1' }) === 'altri');
   t('reso al cliente: uscite', A.tipoCollaudo({ documento_tipo: 'RESO', tipo: 'scarico' }) === 'uscite');
+  // Giacenza (25 nov): gestionale = righe in conto, Alnus = apertura + righe di Alnus.
+  t('giacenza A: gestionale 50 (DDT registro), Alnus 56', di('A').giacenza.nostro === 50 && di('A').giacenza.alnus === 56);
+  t('giacenza C: gestionale -1,5 (la parte registro no), Alnus -2', di('C').giacenza.nostro === -1.5 && di('C').giacenza.alnus === -2);
+}
+{
+  // Punto zero: le righe registrate prima dell'apertura sono gia' dentro di lei.
+  const M = [
+    { data: '2026-11-23', codice: 'A', qta: 50, documento_tipo: 'APERTURA', creato_il: '2026-11-23T11:04:35Z' },
+    { data: '2026-11-23', codice: 'A', qta: 4, tipo: 'carico', documento_tipo: 'DDT', creato_il: '2026-11-23T09:00:00Z' },
+    { data: '2026-11-23', codice: 'A', qta: 7, tipo: 'carico', documento_tipo: 'DDT', creato_il: '2026-11-23T15:00:00Z' },
+    { data: '2026-11-23', codice: 'A', qta: 7, tipo: 'carico', documento_tipo: 'ALNUS', documento_numero: '2026/EA1/1', creato_il: '2026-11-23T14:00:00Z', fuori_giacenza: true },
+  ];
+  const r = A.collaudoGiacenze(M, '2026-11-23', { dopo: Date.parse('2026-11-23T11:04:35Z') });
+  t('punto zero: il DDT del mattino non conta, quello del pomeriggio si', r.length === 1 && r[0].nostro.arrivi === 7 && r[0].differenza === 0);
+  t('punto zero: giacenze uguali (foto 54 = apertura 50 + DDT del mattino 4; poi +7 da tutte e due)', r[0].giacenza.nostro === 61 && r[0].giacenza.alnus === 61);
 }
 
 sez('Codici letti da Excel (lo zero dei codici Sacmi)');

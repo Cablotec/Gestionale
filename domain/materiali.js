@@ -718,7 +718,10 @@ function ordinatoApertoOf(ordini, movimenti, escludiId) {
     if (!k) return;
     const c = String(m.codice || '').trim().toUpperCase();
     if (!arrivi.has(k + '|' + c)) arrivi.set(k + '|' + c, []);
-    arrivi.get(k + '|' + c).push({ qta: Number(m.qta), t: Date.parse(m.data), alnus: !!m.alnus });
+    // L'ora in cui il carico e' stato REGISTRATO (25 nov): con la sola data, un DDT del
+    // giorno della sincronizzazione degli OF (mezzanotte < ora della sincronizzazione) non
+    // scalava l'ordine (Comet 7467 sull'OF 730: aperto 400 invece di 300).
+    arrivi.get(k + '|' + c).push({ qta: Number(m.qta), t: Date.parse(m.creato_il || m.data), alnus: !!m.alnus });
   });
   const per = new Map();        // CODICE -> { aperto, ordini:[{ id, serie, anno, numero, ordinato, arrivato, aperto, consegna }] }
   (ordini || []).forEach(of => {

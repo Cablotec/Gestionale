@@ -7034,13 +7034,11 @@ async function allineaDopoImport() {
 // Gli OF di Alnus sono gia' stati caricati come ordini del gestionale?
 function ofAlnusSincronizzati() { return (state.ordiniFornitore || []).some(o => o && o.origine === 'alnus'); }
 // I carichi che legano gli arrivi agli OF: i nostri (DDT) + i carichi da OF di Alnus nello specchio.
+// ⚠ Dal 25 nov (la giacenza e' nostra) solo i NOSTRI carichi: i carichi da OF di Alnus
+// dopo il punto zero sono termine di paragone e non chiudono piu' le righe d'ordine
+// (lo Specchio legge solo i movimenti dopo l'apertura). Prima c'erano anche loro.
 function movimentiPerOf() {
-  const A = state.alnus;
-  const daAlnus = (A && Array.isArray(A.movimenti) ? A.movimenti : [])
-    .filter(m => ['OF', 'OL'].includes(String(m.tipo_doc || '').trim().toUpperCase()) && Number(m.qta) > 0 && m.numero_doc && m.anno_doc)
-    .map(m => ({ tipo: 'carico', codice: m.codice, qta: Number(m.qta), data: m.data, alnus: true,
-      ordine_rif: String(m.tipo_doc).trim().toUpperCase() + ' ' + Number(m.numero_doc) + '/' + Number(m.anno_doc) }));
-  return (state.movimenti || []).concat(daAlnus);
+  return state.movimenti || [];
 }
 // Gli OF aperti (da ordinatoApertoOf) nella forma di ofAlnusAperti, per il motore dello specchio.
 function ofApertiComeAlnus(aperti, filtro, oggi) {
@@ -7311,17 +7309,8 @@ function doveSiTrovaCodice(codice, movDelCodice) {
   const diAlnus = codiceDiAlnus(cod);
   const r2 = (n) => +(+n).toFixed(6);
   const out = { letto: true, diAlnus, magazzini: null, posti: [] };
-  if (diAlnus && movimentiReali()) {
-    const sede = r2(inConto(tutti).filter(m => !m.presso_id).reduce((s, m) => s + (Number(m.qta) || 0), 0));
-    const A = state.alnus;
-    const fotoLetta = !!(A && A.apertura && Array.isArray(A.giacApertura));
-    const fotoWip = fotoLetta ? A.giacApertura.filter(r => chiaveCodice(r.codice) === cod && magazzinoAlnus(r.magazzino) === 'WIP')
-      .reduce((s, r) => s + (Number(r.qta) || 0), 0) : 0;
-    const movWip = tutti.filter(m => m.documento_tipo === 'ALNUS' && magazzinoAlnus(m.documento_pos) === 'WIP')
-      .reduce((s, m) => s + (Number(m.qta) || 0), 0);
-    const wip = r2(fotoWip + movWip);
-    out.magazzini = { sede, wip, m01: r2(sede - wip), fotoLetta };
-  }
+  // Dal 25 nov la giacenza e' nostra: i magazzini 01/WIP di Alnus non si mostrano piu'
+  // (le righe di Alnus sono solo registro); conta la sede e i posti del gestionale.
   const per = new Map();
   tutti.filter(m => m.presso_id).forEach(m => {
     const k = m.presso_id + '|' + (m.operazione_id || '');
@@ -7441,14 +7430,14 @@ function riquadroDoveSiTrova(codice, um) {
     righe.push(riga('Magazzino 01 (Alnus)', M.m01, 'scaffale'));
     righe.push(riga('Magazzino WIP (Alnus)', M.wip, M.fotoLetta ? 'prelevato per gli OP (UT1/ET1)'
       : 'solo i movimenti dopo la foto: la foto per magazzino la legge un admin'));
-  } else if (!d.diAlnus) {
+  } else {
     const sede = +inConto(state.movimenti.filter(m => chiaveCodice(m.codice) === chiaveCodice(codice) && !m.presso_id))
       .reduce((s, m) => s + (Number(m.qta) || 0), 0).toFixed(6);
-    righe.push(riga('Sede', sede, 'codice che Alnus non conta: saldo dei movimenti del gestionale'));
+    righe.push(riga('Sede', sede, 'saldo dei movimenti del gestionale'));
   }
   d.posti.forEach(p => {
     const nota = [p.commessa ? 'per ' + p.commessa : '',
-      p.fuori ? 'registrato nel gestionale, ' + (d.diAlnus ? 'in Alnus ancora nei magazzini qui sopra finché l’UP1 non lo consuma' : 'fuori giacenza')
+      p.fuori ? 'registrato nel gestionale, fuori giacenza'
         + (p.dato !== p.qta ? ' · dato ' + nf(p.dato) + ', la commessa ne chiede ancora ' + nf(p.qta) : '') : '',
       p.ultimo ? 'dal ' + fmtQuando(p.ultimo) : ''].filter(Boolean).join(' · ');
     righe.push(riga(p.nome, p.qta, nota, p.reparto ? 'var(--grn)' : 'var(--or)'));
@@ -7583,23 +7572,29 @@ function renderAlnus(root) {
 // confronto, dal giorno scelto, quello registrato nel gestionale con quello di
 // Alnus, codice per codice (`collaudoGiacenze`, domain/alnus.js). Conta il
 // risultato sul totale del codice, non i passaggi.
-const COLLAUDO_DAL_CHIAVE = 'cablotec.collaudoDal';
+const COLLAUDO_DAL_CHIAVE = 'cablotec.collaudoDalZero';   // nuova chiave il 25 nov: di serie il punto zero
 let collaudoSoloDiversi = true, collaudoCerca = '', collaudoTutti = false;
 function riquadroCollaudo(ridisegna) {
   const box = el('div', { style: 'margin-top:18px;' });
-  let dal = '2026-11-25';
+  // Il punto zero: l'ultima apertura fra i movimenti. Le nostre righe registrate prima
+  // sono gia' dentro l'apertura e non contano.
+  const apertura = (state.movimenti || []).filter(m => m.documento_tipo === 'APERTURA')
+    .sort((a, b) => String(b.creato_il).localeCompare(String(a.creato_il)))[0] || null;
+  let dal = apertura ? String(apertura.data || apertura.creato_il).slice(0, 10) : '2026-11-23';
   try { dal = localStorage.getItem(COLLAUDO_DAL_CHIAVE) || dal; } catch (e) {}
   const inDal = el('input', { type: 'date', value: dal, style: 'font-size:12px;',
     onchange: (e) => { try { localStorage.setItem(COLLAUDO_DAL_CHIAVE, e.target.value); } catch (er) {} ridisegna(); } });
   box.append(el('h3', { style: 'margin:6px 0 6px;' }, 'Collaudo: il gestionale contro Alnus'));
   if (!Array.isArray(state.movimenti)) { box.append(el('div', { class: 'sub' }, 'Movimenti non letti: premi ⟳ Aggiorna.')); return box; }
   const prodotti = new Set((state.articoli || []).map(a => String(a.codice || '').trim().toUpperCase()));
-  const righe = collaudoGiacenze(state.movimenti, dal, { codiceDiAlnus, escludi: prodotti });
+  const righe = collaudoGiacenze(state.movimenti, dal, { codiceDiAlnus, escludi: prodotti,
+    dopo: apertura && apertura.creato_il ? Date.parse(apertura.creato_il) : null });
   const diversi = righe.filter(r => Math.abs(r.differenza) >= 0.0005);
   const soloAlnus = diversi.filter(r => !r.righeNostre).length;
   box.append(el('div', { class: 'sub', style: 'font-size:12px;line-height:1.6;margin-bottom:8px;max-width:980px;' },
-    'Dal giorno scelto, per ogni codice di Alnus: quello che è stato registrato nel gestionale (DDT in entrata, lotti di produzione, rettifiche, resi) '
-    + 'contro i movimenti di Alnus importati. Si confronta il totale del codice: spostamenti in reparto, dai terzisti e prelievi 01→WIP si annullano. '
+    'Dal punto zero' + (apertura && apertura.creato_il ? ' (' + fmtQuando(apertura.creato_il) + ')' : '') + ' la giacenza è del gestionale; i movimenti di Alnus importati sono solo il termine di paragone. '
+    + 'Dal giorno scelto, per ogni codice di Alnus: quello che è stato registrato nel gestionale (DDT in entrata, lotti di produzione, rettifiche, resi) '
+    + 'contro i movimenti di Alnus. Spostamenti in reparto, dai terzisti e prelievi 01→WIP si annullano. A destra la giacenza dei due. '
     + plAlnus(righe.length, 'codice mosso', 'codici mossi') + ' · ' + (righe.length - diversi.length) + ' tornano · '
     + (diversi.length ? diversi.length + ' non tornano' + (soloAlnus ? ' (' + soloAlnus + ' mossi solo in Alnus)' : '') : 'nessuno che non torna') + '.'));
   const cerca = el('input', { type: 'text', class: 'search', id: 'collaudo-cerca', value: collaudoCerca, placeholder: 'Cerca codice o descrizione…',
@@ -7618,8 +7613,9 @@ function riquadroCollaudo(ridisegna) {
     return el('td', { class: 'mono', style: 'text-align:right;white-space:nowrap;font-size:12px;' + (ugu ? 'color:var(--mut);' : ''),
       title: 'Gestionale ' + n(a) + ' · Alnus ' + n(b) }, ugu ? n(a) : el('span', {}, el('b', {}, n(a)), el('span', { class: 'sub' }, ' / ' + n(b)))); };
   const tbl = el('table', { class: 'rt' });
-  tbl.append(el('thead', {}, el('tr', {}, ...['Codice', 'Descrizione', 'Arrivi', 'Consumi', 'Rettifiche', 'Uscite', 'Gestionale', 'Alnus', 'Differenza']
-    .map((t, i) => el('th', { style: i >= 2 ? 'text-align:right;' : '', title: i >= 2 && i <= 5 ? 'Gestionale / Alnus' : '' }, t)))));
+  tbl.append(el('thead', {}, el('tr', {}, ...['Codice', 'Descrizione', 'Arrivi', 'Consumi', 'Rettifiche', 'Uscite', 'Gestionale', 'Alnus', 'Differenza', 'Giac. gestionale', 'Giac. Alnus']
+    .map((t, i) => el('th', { style: i >= 2 ? 'text-align:right;' : '', title: i >= 2 && i <= 5 ? 'Gestionale / Alnus'
+      : i >= 9 ? 'Giacenza di oggi: gestionale = somma dei movimenti in conto; Alnus = foto d’apertura + movimenti di Alnus' : '' }, t)))));
   const tb = el('tbody');
   (collaudoTutti ? vis : vis.slice(0, 200)).forEach(r => {
     const dif = r.differenza;
@@ -7631,7 +7627,10 @@ function riquadroCollaudo(ridisegna) {
       el('td', { class: 'mono', style: 'text-align:right;' }, n(r.alnus.totale)),
       el('td', { class: 'mono', style: 'text-align:right;font-weight:700;color:' + (Math.abs(dif) < 0.0005 ? 'var(--grn)' : 'var(--or)') + ';',
         title: dif > 0 ? 'Il gestionale ne ha registrati di più' : dif < 0 ? 'Alnus ne ha mossi di più: qualcosa da rifare nel gestionale' : '' },
-        Math.abs(dif) < 0.0005 ? '=' : (dif > 0 ? '+' : '') + nfIT(dif))));
+        Math.abs(dif) < 0.0005 ? '=' : (dif > 0 ? '+' : '') + nfIT(dif)),
+      el('td', { class: 'mono', style: 'text-align:right;font-weight:700;' }, nfIT(r.giacenza.nostro)),
+      el('td', { class: 'mono', style: 'text-align:right;color:' + (Math.abs(r.giacenza.nostro - r.giacenza.alnus) < 0.0005 ? 'var(--grn)' : 'var(--or)') + ';' },
+        nfIT(r.giacenza.alnus))));
   });
   tbl.append(tb);
   box.append(el('div', { style: 'overflow-x:auto;' }, tbl));
@@ -7956,13 +7955,11 @@ function documentiRegistro() {
 function codiceInGiacenzaGestionale(codice, mittenteId) {
   const c = String(codice || '').trim().toUpperCase();
   if (!c) return false;
-  // Una giacenza sola (23 nov): un codice di Alnus lo conta Alnus, i nostri
-  // carichi restano registro (fuori giacenza).
-  if (codiceDiAlnus(c)) return false;
-  // Un C/L di una commessa viva che Alnus non conosce (24 nov, era la spunta).
-  if ((state.operazioni || []).some(o => (o.stato === 'aperta' || o.stato === 'sospesa')
-    && (o.materiali || []).some(x => String(x.codice || '').trim().toUpperCase() === c && eCL(x)))) return true;
-  return inConto(state.movimenti || []).some(m => String(m.codice || '').trim().toUpperCase() === c);
+  // ⚠⚠ LA GIACENZA E' NOSTRA (25 nov, Nico: "Alnus serve solo come termine di paragone
+  // finale ... i movimenti da adesso devono essere al 100% del nostro gestionale"). Dal
+  // punto zero (foto d'apertura del 23/11) ogni nostro DDT entra in giacenza, anche sui
+  // codici di Alnus; i movimenti di Alnus importati restano solo registro (confronto).
+  return true;
 }
 // ── DDT IN ENTRATA e RICEVIMENTO (23 nov) ──────────────────────────────────
 // Nico: "rendere agevole all'operatore l'inserimento e l'abbinamento dei codici in
@@ -8475,7 +8472,6 @@ function apriResoCliente(poi) {
       let e = '';
       if (!cod && (q == null)) { r.err.textContent = ''; return; }
       if (!cod) e = 'manca il codice';
-      else if (codiceDiAlnus(cod)) e = 'codice di Alnus: il reso si fa in Alnus';
       else if (!(q > 0)) e = 'quantità';
       else if (p && (somma.get(cod + '#' + p.k) || 0) > p.q + 1e-9) e = 'oltre il disponibile (' + nf(p.q) + ')';
       r.err.textContent = e; r.inQta.style.borderColor = e ? 'var(--red)' : '';
