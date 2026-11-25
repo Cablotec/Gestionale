@@ -49,6 +49,7 @@ sez('Collaudo: il gestionale contro Alnus');
   t('tipo da causale: EA1 arrivi, UC1 uscite, EP1 altri', A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/EA1/1' }) === 'arrivi'
     && A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/UC1/1' }) === 'uscite' && A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/EP1/1' }) === 'altri');
   t('reso al cliente: uscite', A.tipoCollaudo({ documento_tipo: 'RESO', tipo: 'scarico' }) === 'uscite');
+  t('DDT in uscita (vendita): uscite', A.tipoCollaudo({ documento_tipo: 'USCITA', tipo: 'scarico' }) === 'uscite');
   // Giacenza (25 nov): gestionale = righe in conto, Alnus = apertura + righe di Alnus.
   t('giacenza A: gestionale 50 (DDT registro), Alnus 56', di('A').giacenza.nostro === 50 && di('A').giacenza.alnus === 56);
   t('giacenza C: gestionale -1,5 (la parte registro no), Alnus -2', di('C').giacenza.nostro === -1.5 && di('C').giacenza.alnus === -2);

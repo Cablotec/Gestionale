@@ -417,7 +417,7 @@ function tipoCollaudo(m) {
   }
   if (m.tipo === 'trasferimento') return 'spostamenti';
   if (m.documento_tipo === 'PRODUZIONE') return 'consumi';
-  if (m.documento_tipo === 'RESO') return 'uscite';
+  if (m.documento_tipo === 'RESO' || m.documento_tipo === 'USCITA') return 'uscite';
   if (m.tipo === 'carico') return 'arrivi';
   if (m.tipo === 'rettifica') return 'rettifiche';
   return 'altri';
