@@ -7688,14 +7688,17 @@ function riquadroCollaudo(ridisegna) {
   box.append(el('h3', { style: 'margin:6px 0 6px;' }, 'Collaudo: il gestionale contro Alnus'));
   if (!Array.isArray(state.movimenti)) { box.append(el('div', { class: 'sub' }, 'Movimenti non letti: premi ⟳ Aggiorna.')); return box; }
   const prodotti = new Set((state.articoli || []).map(a => String(a.codice || '').trim().toUpperCase()));
-  const righe = collaudoGiacenze(state.movimenti, dal, { codiceDiAlnus, escludi: prodotti,
+  // Fuori anche i codici lavorazione `_K` (26 nov, Nico): in Alnus sono l'articolo
+  // dell'OF al terzista (EA1 al rientro, UP1 al versamento), da noi il rientro e'
+  // `rientri_terzista` e non muove la giacenza. Non potrebbero mai tornare.
+  const righe = collaudoGiacenze(state.movimenti, dal, { codiceDiAlnus: c => codiceDiAlnus(c) && !eLavorazione(c), escludi: prodotti,
     dopo: apertura && apertura.creato_il ? Date.parse(apertura.creato_il) : null });
   const diversi = righe.filter(r => Math.abs(r.differenza) >= 0.0005);
   const soloAlnus = diversi.filter(r => !r.righeNostre).length;
   box.append(el('div', { class: 'sub', style: 'font-size:12px;line-height:1.6;margin-bottom:8px;max-width:980px;' },
     'Dal punto zero' + (apertura && apertura.creato_il ? ' (' + fmtQuando(apertura.creato_il) + ')' : '') + ' la giacenza è del gestionale; i movimenti di Alnus importati sono solo il termine di paragone. '
     + 'Dal giorno scelto, per ogni codice di Alnus: quello che è stato registrato nel gestionale (DDT in entrata, lotti di produzione, rettifiche, resi) '
-    + 'contro i movimenti di Alnus. Spostamenti in reparto, dai terzisti e prelievi 01→WIP si annullano. A destra la giacenza dei due. '
+    + 'contro i movimenti di Alnus. Spostamenti in reparto, dai terzisti e prelievi 01→WIP si annullano. Fuori i prodotti finiti e i codici lavorazione (_K): il rientro dal terzista non è materiale. A destra la giacenza dei due. '
     + plAlnus(righe.length, 'codice mosso', 'codici mossi') + ' · ' + (righe.length - diversi.length) + ' tornano · '
     + (diversi.length ? diversi.length + ' non tornano' + (soloAlnus ? ' (' + soloAlnus + ' mossi solo in Alnus)' : '') : 'nessuno che non torna') + '.'));
   const cerca = el('input', { type: 'text', class: 'search', id: 'collaudo-cerca', value: collaudoCerca, placeholder: 'Cerca codice o descrizione…',
