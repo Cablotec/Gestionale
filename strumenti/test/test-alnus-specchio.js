@@ -17,6 +17,40 @@ t('testo = NaN', isNaN(A.numAlnus('nr 1,')));
 t('data e ora', A.dataAlnus('20/11/2026', '9:42:53') === '2026-11-20T09:42:53');
 t('data senza ora', A.dataAlnus('1/2/2026') === '2026-02-01T00:00:00');
 
+sez('Collaudo: il gestionale contro Alnus');
+{
+  const M = [
+    { data: '2026-11-23', codice: 'A', qta: 50, documento_tipo: 'APERTURA' },
+    { data: '2026-11-25', codice: 'A', qta: 6, tipo: 'carico', documento_tipo: 'ALNUS', documento_numero: '2026/EA1/9' },
+    { data: '2026-11-25', codice: 'A', qta: 6, tipo: 'carico', documento_tipo: 'DDT', documento_numero: '91', fuori_giacenza: true },
+    { data: '2026-11-25', codice: 'A', qta: -3, tipo: 'trasferimento', documento_tipo: 'ALNUS', documento_numero: '2026/UT1/4' },
+    { data: '2026-11-25', codice: 'A', qta: 3, tipo: 'trasferimento', documento_tipo: 'ALNUS', documento_numero: '2026/ET1/4' },
+    { data: '2026-11-25', codice: 'A', qta: -3, tipo: 'trasferimento', documento_tipo: 'REPARTO', presso_id: null },
+    { data: '2026-11-25', codice: 'A', qta: 3, tipo: 'trasferimento', documento_tipo: 'REPARTO', presso_id: 'r' },
+    { data: '2026-11-25', codice: 'B', qta: -5, tipo: 'rettifica', documento_tipo: 'ALNUS', documento_numero: '2026/UR1/7' },
+    { data: '2026-11-25', codice: 'C', qta: -2, tipo: 'scarico', documento_tipo: 'ALNUS', documento_numero: '2026/UP1/8' },
+    { data: '2026-11-25', codice: 'C', qta: -1.5, tipo: 'scarico', documento_tipo: 'PRODUZIONE' },
+    { data: '2026-11-25', codice: 'C', qta: -0.5, tipo: 'scarico', documento_tipo: 'PRODUZIONE', fuori_giacenza: true },
+    { data: '2026-11-20', codice: 'D', qta: 9, tipo: 'carico', documento_tipo: 'DDT' },
+    { data: '2026-11-25', codice: 'TS-1', qta: 4, tipo: 'carico', documento_tipo: 'DDT' },
+    { data: '2026-11-25', codice: 'PROD', qta: 1, tipo: 'carico', documento_tipo: 'ALNUS', documento_numero: '2026/EP1/2' },
+  ];
+  const r = A.collaudoGiacenze(M, '2026-11-25', { codiceDiAlnus: c => !c.startsWith('TS-'), escludi: new Set(['PROD']) });
+  const di = c => r.find(x => x.codice === c);
+  t('arrivo registrato in tutti e due (il nostro solo registro): torna', di('A').differenza === 0 && di('A').nostro.arrivi === 6 && di('A').alnus.arrivi === 6);
+  t('prelievo 01→WIP contro portato in reparto: spostamenti a zero da tutte e due le parti', di('A').alnus.spostamenti === 0 && di('A').nostro.spostamenti === 0);
+  t('rettifica solo in Alnus: differenza +5', di('B').differenza === 5 && di('B').alnus.rettifiche === -5);
+  t('consumo: lotto (anche la parte gia\' consumata da Alnus) contro UP1: torna', di('C').differenza === 0 && di('C').nostro.consumi === -2);
+  t('movimenti prima del giorno di partenza: fuori', !di('D'));
+  t('codici che Alnus non conosce: fuori', !di('TS-1'));
+  t('prodotti finiti: fuori', !di('PROD'));
+  t('apertura: fuori', di('A').alnus.totale === 6);
+  t('in testa i codici che non tornano', r[0].codice === 'B');
+  t('tipo da causale: EA1 arrivi, UC1 uscite, EP1 altri', A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/EA1/1' }) === 'arrivi'
+    && A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/UC1/1' }) === 'uscite' && A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/EP1/1' }) === 'altri');
+  t('reso al cliente: uscite', A.tipoCollaudo({ documento_tipo: 'RESO', tipo: 'scarico' }) === 'uscite');
+}
+
 sez('Codici letti da Excel (lo zero dei codici Sacmi)');
 t('numero a 7 cifre: torna lo zero', A.codiceDaExcel(4010100) === '04010100');
 t('testo a 7 cifre: torna lo zero', A.codiceDaExcel(' 4959125 ') === '04959125');

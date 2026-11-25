@@ -7574,6 +7574,70 @@ function renderAlnus(root) {
   // Interruttore della fonte e confronto «Da ordinare: gestionale contro Alnus»
   // TOLTI il 24 nov: il Fabbisogno di Alnus non si importa piu', il fabbisogno
   // lo calcola il gestionale per tutti (vedi `ricalcolaFabbisogno`).
+  root.append(riquadroCollaudo(ridisegna));
+}
+
+// ── COLLAUDO: IL GESTIONALE CONTRO ALNUS (25 nov, Nico) ─────────────────────
+// Nico carica i movimenti di Alnus e rifa' qui le stesse cose COL NOSTRO MODO
+// (DDT dagli ordini, liste del reparto, lotti, rettifiche); il riquadro mette a
+// confronto, dal giorno scelto, quello registrato nel gestionale con quello di
+// Alnus, codice per codice (`collaudoGiacenze`, domain/alnus.js). Conta il
+// risultato sul totale del codice, non i passaggi.
+const COLLAUDO_DAL_CHIAVE = 'cablotec.collaudoDal';
+let collaudoSoloDiversi = true, collaudoCerca = '', collaudoTutti = false;
+function riquadroCollaudo(ridisegna) {
+  const box = el('div', { style: 'margin-top:18px;' });
+  let dal = '2026-11-25';
+  try { dal = localStorage.getItem(COLLAUDO_DAL_CHIAVE) || dal; } catch (e) {}
+  const inDal = el('input', { type: 'date', value: dal, style: 'font-size:12px;',
+    onchange: (e) => { try { localStorage.setItem(COLLAUDO_DAL_CHIAVE, e.target.value); } catch (er) {} ridisegna(); } });
+  box.append(el('h3', { style: 'margin:6px 0 6px;' }, 'Collaudo: il gestionale contro Alnus'));
+  if (!Array.isArray(state.movimenti)) { box.append(el('div', { class: 'sub' }, 'Movimenti non letti: premi ⟳ Aggiorna.')); return box; }
+  const prodotti = new Set((state.articoli || []).map(a => String(a.codice || '').trim().toUpperCase()));
+  const righe = collaudoGiacenze(state.movimenti, dal, { codiceDiAlnus, escludi: prodotti });
+  const diversi = righe.filter(r => Math.abs(r.differenza) >= 0.0005);
+  const soloAlnus = diversi.filter(r => !r.righeNostre).length;
+  box.append(el('div', { class: 'sub', style: 'font-size:12px;line-height:1.6;margin-bottom:8px;max-width:980px;' },
+    'Dal giorno scelto, per ogni codice di Alnus: quello che è stato registrato nel gestionale (DDT in entrata, lotti di produzione, rettifiche, resi) '
+    + 'contro i movimenti di Alnus importati. Si confronta il totale del codice: spostamenti in reparto, dai terzisti e prelievi 01→WIP si annullano. '
+    + plAlnus(righe.length, 'codice mosso', 'codici mossi') + ' · ' + (righe.length - diversi.length) + ' tornano · '
+    + (diversi.length ? diversi.length + ' non tornano' + (soloAlnus ? ' (' + soloAlnus + ' mossi solo in Alnus)' : '') : 'nessuno che non torna') + '.'));
+  const cerca = el('input', { type: 'text', class: 'search', id: 'collaudo-cerca', value: collaudoCerca, placeholder: 'Cerca codice o descrizione…',
+    oninput: (e) => { collaudoCerca = e.target.value; ridisegnaDopoRicerca('alnus'); } });
+  box.append(el('div', { style: 'display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px;' },
+    el('label', { style: 'font-size:12px;display:inline-flex;gap:6px;align-items:center;' }, 'Dal', inDal),
+    el('label', { style: 'font-size:12px;display:inline-flex;gap:4px;align-items:center;cursor:pointer;' },
+      el('input', { type: 'checkbox', checked: collaudoSoloDiversi ? true : null, onchange: (e) => { collaudoSoloDiversi = e.target.checked; ridisegna(); } }),
+      'Solo i codici che non tornano'), cerca));
+  const q = collaudoCerca.trim().toLowerCase();
+  const vis = righe.filter(r => (!collaudoSoloDiversi || Math.abs(r.differenza) >= 0.0005)
+    && (!q || r.codice.toLowerCase().includes(q) || String(r.descrizione).toLowerCase().includes(q)));
+  if (!vis.length) { box.append(el('div', { class: 'empty' }, righe.length ? 'Tutti i codici mossi tornano.' : 'Nessun movimento dal giorno scelto.')); return box; }
+  const n = (x) => Math.abs(x) < 0.0005 ? '—' : (x > 0 ? '+' : '') + nfIT(x);
+  const coppia = (r, t) => { const a = r.nostro[t], b = r.alnus[t], ugu = Math.abs(a - b) < 0.0005;
+    return el('td', { class: 'mono', style: 'text-align:right;white-space:nowrap;font-size:12px;' + (ugu ? 'color:var(--mut);' : ''),
+      title: 'Gestionale ' + n(a) + ' · Alnus ' + n(b) }, ugu ? n(a) : el('span', {}, el('b', {}, n(a)), el('span', { class: 'sub' }, ' / ' + n(b)))); };
+  const tbl = el('table', { class: 'rt' });
+  tbl.append(el('thead', {}, el('tr', {}, ...['Codice', 'Descrizione', 'Arrivi', 'Consumi', 'Rettifiche', 'Uscite', 'Gestionale', 'Alnus', 'Differenza']
+    .map((t, i) => el('th', { style: i >= 2 ? 'text-align:right;' : '', title: i >= 2 && i <= 5 ? 'Gestionale / Alnus' : '' }, t)))));
+  const tb = el('tbody');
+  (collaudoTutti ? vis : vis.slice(0, 200)).forEach(r => {
+    const dif = r.differenza;
+    tb.append(el('tr', { style: 'cursor:pointer;', title: 'Apri la scheda del codice', onclick: () => apriSchedaCodice(r.codice) },
+      el('td', { class: 'mono', style: 'font-weight:700;white-space:nowrap;' }, testoCopiabile(r.codice, 'Codice copiato')),
+      el('td', { style: 'max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;', title: r.descrizione }, r.descrizione),
+      coppia(r, 'arrivi'), coppia(r, 'consumi'), coppia(r, 'rettifiche'), coppia(r, 'uscite'),
+      el('td', { class: 'mono', style: 'text-align:right;' }, n(r.nostro.totale)),
+      el('td', { class: 'mono', style: 'text-align:right;' }, n(r.alnus.totale)),
+      el('td', { class: 'mono', style: 'text-align:right;font-weight:700;color:' + (Math.abs(dif) < 0.0005 ? 'var(--grn)' : 'var(--or)') + ';',
+        title: dif > 0 ? 'Il gestionale ne ha registrati di più' : dif < 0 ? 'Alnus ne ha mossi di più: qualcosa da rifare nel gestionale' : '' },
+        Math.abs(dif) < 0.0005 ? '=' : (dif > 0 ? '+' : '') + nfIT(dif))));
+  });
+  tbl.append(tb);
+  box.append(el('div', { style: 'overflow-x:auto;' }, tbl));
+  if (!collaudoTutti && vis.length > 200) box.append(el('button', { class: 'btnsm', style: 'margin-top:8px;',
+    onclick: () => { collaudoTutti = true; ridisegna(); } }, 'Mostra tutti i ' + vis.length));
+  return box;
 }
 
 // La tabella «Giacenza: gestionale contro Alnus» dello Specchio. Di serie solo i
@@ -11365,7 +11429,20 @@ function apriRettificaMagazzino(codiceIniziale, poi) {
     if (q == null || !Number.isFinite(q)) return null;
     return modo.v === 'contato' ? q - saldo() : q;
   };
+  // COLLAUDO (25 nov): su un codice di Alnus in sede la giacenza la porta la
+  // rettifica di Alnus importata; la nostra resta SOLO REGISTRO e conta nel
+  // confronto «Collaudo» dello Specchio. Si scrive la stessa quantita' (± ),
+  // non «ho contato»: il saldo comprende gia' la rettifica di Alnus.
+  const registro = () => { const c = inCod.value.trim().toUpperCase();
+    return !!c && !selPosto.value && !codiceInGiacenzaGestionale(c) && codiceDiAlnus(c); };
+  const avvisoReg = el('div', { style:'font-size:12px;line-height:1.5;margin:-2px 0 8px;padding:6px 8px;border-radius:6px;border:1px solid var(--or);display:none;' },
+    'Codice di Alnus: questa rettifica resta solo registro (non cambia la giacenza, che porta la rettifica di Alnus) e conta nel Collaudo dello Specchio. '
+    + 'Scrivi la stessa quantità della rettifica di Alnus, col segno.');
   const aggiorna = () => {
+    const reg = registro();
+    avvisoReg.style.display = reg ? '' : 'none';
+    bContato.style.display = reg ? 'none' : '';
+    if (reg && modo.v !== 'delta') modo.v = 'delta';
     const d = delta(), s0 = saldo();
     saldoTxt.textContent = 'Oggi il gestionale dice: ' + nf(s0) + ' ' + (selPosto.value ? dovePosto(selPosto.value) : 'in sede');
     bContato.style.fontWeight = modo.v === 'contato' ? '700' : '400';
@@ -11373,7 +11450,8 @@ function apriRettificaMagazzino(codiceIniziale, poi) {
     lblQta.textContent = modo.v === 'contato' ? 'Quanti ce ne sono davvero' : 'Quantità da aggiungere (−3 per togliere)';
     if (d == null) { anteprima.textContent = ''; return; }
     if (Math.abs(d) < 1e-9) { anteprima.textContent = 'Nessuna differenza: niente da rettificare'; anteprima.style.color = 'var(--mut)'; return; }
-    anteprima.textContent = 'Scrive una rettifica di ' + (d > 0 ? '+' : '') + nf(d) + ' · da ' + nf(s0) + ' a ' + nf(s0 + d);
+    anteprima.textContent = reg ? 'Scrive una rettifica solo registro di ' + (d > 0 ? '+' : '') + nf(d) + ' · la giacenza resta ' + nf(s0)
+      : 'Scrive una rettifica di ' + (d > 0 ? '+' : '') + nf(d) + ' · da ' + nf(s0) + ' a ' + nf(s0 + d);
     anteprima.style.color = d < 0 ? 'var(--red)' : 'var(--grn)';
   };
   const riempiOp = () => {
@@ -11412,7 +11490,7 @@ function apriRettificaMagazzino(codiceIniziale, poi) {
     el('div', { class:'sub', style:'font-size:12px;line-height:1.6;margin-bottom:10px;' },
       'Un movimento non si modifica: la rettifica ne scrive uno nuovo, col motivo, e resta nello storico.'),
     el('div', { class:'frow' }, campo('Codice', inCod, 2), campo('Dove', selPosto, 1)),
-    descr, boxOp, saldoTxt,
+    descr, boxOp, saldoTxt, avvisoReg,
     el('div', { style:'display:flex;gap:6px;margin-bottom:8px;' }, bContato, bDelta),
     el('div', { class:'frow' }, el('div', { class:'field', style:'flex:2;' }, lblQta, inQta), campo('Data', inData, 1)),
     anteprima,
@@ -11424,23 +11502,24 @@ function apriRettificaMagazzino(codiceIniziale, poi) {
     const errore = !cod ? 'Manca il codice'
       : (d == null ? 'Scrivi la quantità'
       : (Math.abs(d) < 1e-9 ? 'Nessuna differenza da rettificare'
-      : (!inMotivo.value.trim() ? 'Scrivi il motivo'
-      // Una giacenza sola (23 nov): i codici di Alnus in sede si rettificano in Alnus.
-      : (!selPosto.value && !codiceInGiacenzaGestionale(cod) && codiceDiAlnus(cod)
-        ? 'Questo codice lo conta Alnus: la rettifica va fatta in Alnus, poi si importano i suoi movimenti nello Specchio Alnus.' : ''))));
+      : (!inMotivo.value.trim() ? 'Scrivi il motivo' : '')));
+    // Una giacenza sola (23 nov): sui codici di Alnus in sede la giacenza la porta
+    // Alnus; dal 25 nov la nostra rettifica passa come solo registro (collaudo).
+    const reg = registro();
     if (errore) { msg.textContent = errore; msg.style.color = 'var(--red)'; return; }
     ok.disabled = true; ok.textContent = 'Registrazione…';
     try {
       const { error } = await sb.rpc('mov_rettifica', { p_codice: cod, p_qta: Math.round(d * 1000) / 1000,
         p_motivo: inMotivo.value.trim(), p_presso: selPosto.value || null,
-        p_operazione: (selPosto.value && selOp.value) ? selOp.value : null, p_data: inData.value || null });
+        p_operazione: (selPosto.value && selOp.value) ? selOp.value : null, p_data: inData.value || null,
+        ...(reg ? { p_registro: true } : {}) });
       if (error) {
         if (/could not find the function|PGRST202/i.test(error.message || '') || error.code === 'PGRST202')
-          throw new Error('la funzione mov_rettifica non c’è ancora a database (va eseguito lo SQL)');
+          throw new Error('' + (reg ? 'la rettifica solo registro non è ancora attiva: va eseguito lo SQL «migrazione-rettifiche-registro»' : 'la funzione mov_rettifica non c’è ancora a database (va eseguito lo SQL)') + '');
         throw new Error(error.message);
       }
       v.chiudi();
-      toast('Rettifica registrata: ' + cod + ' ' + (d > 0 ? '+' : '') + nf(d), 'ok');
+      toast((reg ? 'Rettifica solo registro (collaudo): ' : 'Rettifica registrata: ') + cod + ' ' + (d > 0 ? '+' : '') + nf(d), 'ok');
       await caricaMovimenti();
       if (typeof poi === 'function') poi(cod);
     } catch (e) {
@@ -11464,7 +11543,7 @@ function apriModificaRettifica(m, poi) {
   const v = veloTerzista('✎ Modifica rettifica · ' + m.codice, 560);
   const campo = (et, inp, w) => el('div', { class:'field', style: w ? 'flex:' + w + ';' : '' }, el('label', {}, et), inp);
   const nota = String(m.note || '');
-  const motivo0 = nota.replace(/^Rettifica a mano · /, '').replace(/ · modificata .*$/, '');
+  const motivo0 = nota.replace(/^Rettifica a mano( \([^)]*\))? · /, '').replace(/ · modificata .*$/, '');
   const storia = (nota.match(/ · modificata .*$/) || [''])[0].replace(/^ · /, '');
   const inQta = el('input', { type:'text', inputmode:'decimal', value: String(m.qta).replace('.', ',') });
   const inData = el('input', { type:'date', value: String(m.data || '').slice(0, 10) });

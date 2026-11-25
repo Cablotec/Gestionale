@@ -394,6 +394,62 @@ function controlloGiacenze(calcolata, stampata, tolleranza) {
 //   (fabbisognoDaListe), tipi, descr, um: Map, giacenza (giacenzaAlnus), magazzini,
 //   ofAlnus (ofAlnusAperti), ofNostri: [{ codice, aperto, consegna, ordine, fornitore }],
 //   contaScaduti }.
+// ── COLLAUDO: IL GESTIONALE CONTRO ALNUS (25 nov, Nico: "io carico i movimenti e
+// tu mi dici cosa fare sul nostro gestionale ... ci interessa il risultato che sia
+// corretto, non che segua le stesse dinamiche"). Dal giorno `dal`, per ogni codice:
+//   NOSTRO = quello che e' stato registrato nel gestionale (DDT, lotti, rettifiche,
+//            resi; anche le righe «solo registro»), tutto tranne APERTURA e ALNUS;
+//   ALNUS  = i movimenti di Alnus importati (righe ALNUS).
+// Si confrontano i TOTALI del codice: gli spostamenti (reparto, terzisti, prelievi
+// 01→WIP) restano dentro e si annullano, quindi i processi possono essere diversi
+// (da noi il materiale va «presso Botturi», in Alnus resta nello 01) e il risultato
+// uguale. Per tipo, per capire cosa manca: arrivi, consumi, rettifiche, uscite.
+// opz: { codiceDiAlnus(c) → bool, escludi: Set di codici (prodotti finiti) }.
+function tipoCollaudo(m) {
+  if (m.documento_tipo === 'ALNUS') {
+    const cau = String(m.documento_numero || '').split('/')[1] || '';
+    if (/^EA/.test(cau)) return 'arrivi';
+    if (/^UP/.test(cau)) return 'consumi';
+    if (/^(ER|UR)/.test(cau)) return 'rettifiche';
+    if (/^UC/.test(cau)) return 'uscite';
+    if (/^(UT|ET)/.test(cau)) return 'spostamenti';
+    return 'altri';
+  }
+  if (m.tipo === 'trasferimento') return 'spostamenti';
+  if (m.documento_tipo === 'PRODUZIONE') return 'consumi';
+  if (m.documento_tipo === 'RESO') return 'uscite';
+  if (m.tipo === 'carico') return 'arrivi';
+  if (m.tipo === 'rettifica') return 'rettifiche';
+  return 'altri';
+}
+function collaudoGiacenze(movimenti, dal, opz) {
+  const o = opz || {};
+  const diAlnus = typeof o.codiceDiAlnus === 'function' ? o.codiceDiAlnus : () => true;
+  const escludi = o.escludi || new Set();
+  const giorno = String(dal || '').slice(0, 10);
+  const r6 = (n) => +(+n).toFixed(6);
+  const vuoto = () => ({ arrivi: 0, consumi: 0, rettifiche: 0, uscite: 0, spostamenti: 0, altri: 0, totale: 0 });
+  const per = new Map();
+  (movimenti || []).forEach(m => {
+    if (!m || m.documento_tipo === 'APERTURA') return;
+    if (giorno && String(m.data || '').slice(0, 10) < giorno) return;
+    const c = String(m.codice || '').trim().toUpperCase();
+    if (!c || escludi.has(c) || !diAlnus(c)) return;
+    if (!per.has(c)) per.set(c, { codice: c, descrizione: '', nostro: vuoto(), alnus: vuoto(), righeNostre: 0, righeAlnus: 0 });
+    const x = per.get(c);
+    if (m.descrizione) x.descrizione = m.descrizione;
+    const lato = m.documento_tipo === 'ALNUS' ? x.alnus : x.nostro;
+    if (m.documento_tipo === 'ALNUS') x.righeAlnus++; else x.righeNostre++;
+    const t = tipoCollaudo(m), q = Number(m.qta) || 0;
+    lato[t] = r6(lato[t] + q); lato.totale = r6(lato.totale + q);
+  });
+  return [...per.values()].map(x => Object.assign(x, { differenza: r6(x.nostro.totale - x.alnus.totale) }))
+    // Solo i codici con un fatto vero (arrivo, consumo, rettifica, uscita): quelli
+    // solo spostati (reparto, terzisti, 01→WIP) tornano per forza e farebbero numero.
+    .filter(x => ['arrivi', 'consumi', 'rettifiche', 'uscite', 'altri'].some(t => x.nostro[t] || x.alnus[t]))
+    .sort((a, b) => Math.abs(b.differenza) - Math.abs(a.differenza) || a.codice.localeCompare(b.codice));
+}
+
 function righeFabbisognoSpecchio(o) {
   const codici = new Set();
   (o.fabbisogno || new Map()).forEach((r, c) => codici.add(c));
@@ -432,6 +488,6 @@ function righeFabbisognoSpecchio(o) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { codiceDaExcel, numAlnus, dataAlnus, leggiGiacenzeAlnus, leggiMovimentiAlnus, leggiOfAlnus, dataCella,
+  module.exports = { codiceDaExcel, collaudoGiacenze, tipoCollaudo, numAlnus, dataAlnus, leggiGiacenzeAlnus, leggiMovimentiAlnus, leggiOfAlnus, dataCella,
     magazzinoAlnus, MAGAZZINI_CONTATI_DI_SERIE, giacenzaAlnus, giacenzaContata, giacenzaGestionale, confrontoGiacenze, ofAlnusAperti, confrontoDaOrdinare, controlloGiacenze, righeFabbisognoSpecchio };
 }
