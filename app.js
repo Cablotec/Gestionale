@@ -8007,6 +8007,69 @@ function righeOrdineFornitore(aziendaId) {
 // ricerca nelle righe d'OF del fornitore e nell'anagrafica materiali. Clic o Invio =
 // abbinata, e si passa alla prossima da fare; frecce per scorrere i candidati.
 // Senza `ric` e' il DDT scritto a mano: «+ Riga» e si scrive a destra.
+// CAMPO DI RICERCA DI UN'AZIENDA (25 nov, Nico: "nel DDT in entrata, ricerca fornitore
+// che filtra man mano che scrivo"). Al posto di una tendina: si scrive, sotto compaiono
+// le aziende che contengono il testo (nome, anche a pezzi), frecce + Invio o clic per
+// scegliere. Il contenitore si comporta come una <select>: `.value` (id scelto, '' se
+// nessuno), `.disabled`, e chiama `onchange` quando la scelta cambia. L'elenco e'
+// `position:fixed` per non restare tagliato dentro le finestre che scorrono.
+// `nota(a)` = testo grigio accanto al nome (es. «OF aperti»).
+function campoCercaAzienda(aziende, opts) {
+  const o = opts || {};
+  let valore = '', evid = 0, lista = [];
+  const wrap = el('div', { style:'position:relative;min-width:260px;' });
+  const inp = el('input', { type:'text', placeholder: o.placeholder || 'Scrivi per cercare…', autocomplete:'off', style:'width:100%;box-sizing:border-box;' });
+  const menu = el('div', { style:'position:fixed;z-index:10050;display:none;max-height:300px;overflow:auto;background:var(--sur);'
+    + 'border:1px solid var(--brd);border-radius:6px;box-shadow:0 8px 24px var(--shadow);font-size:12.5px;' });
+  const nome = (id) => { const a = aziende.find(x => x.id === id); return a ? a.nome : ''; };
+  const norm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const filtra = () => {
+    const parole = norm(inp.value).split(/\s+/).filter(Boolean);
+    return aziende.filter(a => { const n = norm(a.nome); return parole.every(p => n.includes(p)); });
+  };
+  const chiudi = () => { menu.style.display = 'none'; };
+  const disegna = () => {
+    lista = filtra().slice(0, 60);
+    if (evid >= lista.length) evid = Math.max(0, lista.length - 1);
+    menu.innerHTML = '';
+    if (!lista.length) menu.append(el('div', { class:'sub', style:'padding:8px 10px;' }, 'Nessuna azienda con questo nome'));
+    lista.forEach((a, i) => {
+      const n = o.nota ? o.nota(a) : '';
+      const r = el('div', { style:'padding:6px 10px;cursor:pointer;display:flex;gap:8px;justify-content:space-between;'
+        + (i === evid ? 'background:var(--hover3);' : '') + (a.id === valore ? 'font-weight:700;' : '') },
+        el('span', {}, a.nome), n ? el('span', { class:'sub', style:'font-size:11px;white-space:nowrap;' }, n) : '');
+      r.onmousedown = (e) => { e.preventDefault(); scegli(a.id); };
+      r.onmouseenter = () => { if (evid !== i) { evid = i; disegna(); } };
+      menu.append(r);
+    });
+    const b = inp.getBoundingClientRect();
+    Object.assign(menu.style, { left: b.left + 'px', top: (b.bottom + 2) + 'px', width: Math.max(b.width, 320) + 'px', display:'' });
+    const sel = menu.children[evid]; if (sel && sel.scrollIntoView) sel.scrollIntoView({ block:'nearest' });
+  };
+  const scegli = (id) => {
+    const cambia = id !== valore;
+    valore = id || ''; inp.value = nome(valore); chiudi();
+    if (cambia && typeof o.onchange === 'function') o.onchange(valore);
+  };
+  inp.onfocus = () => { inp.select(); evid = Math.max(0, filtra().findIndex(a => a.id === valore)); disegna(); };
+  inp.oninput = () => { evid = 0; disegna(); };
+  inp.onblur = () => { chiudi(); inp.value = nome(valore); };
+  inp.onkeydown = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); evid = Math.min(lista.length - 1, evid + 1); disegna(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); evid = Math.max(0, evid - 1); disegna(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (lista[evid]) { scegli(lista[evid].id); inp.blur(); } }
+    else if (e.key === 'Escape') { if (menu.style.display !== 'none') { e.preventDefault(); e.stopPropagation(); chiudi(); } }
+  };
+  // L'elenco sta fuori dalla finestra: si toglie quando il campo esce dal documento.
+  document.body.append(menu);
+  const sorveglia = setInterval(() => { if (!document.body.contains(wrap) && wrap.dataset.montato) { menu.remove(); clearInterval(sorveglia); } }, 1000);
+  setTimeout(() => { wrap.dataset.montato = '1'; }, 0);
+  wrap.append(inp);
+  Object.defineProperty(wrap, 'value', { get: () => valore, set: (id) => { valore = id || ''; inp.value = nome(valore); } });
+  Object.defineProperty(wrap, 'disabled', { get: () => inp.disabled, set: (d) => { inp.disabled = !!d; } });
+  wrap.focus = () => inp.focus();
+  return wrap;
+}
 async function apriDdtEntrataManuale(poi, ric) {
   if (state.codiciFornitore === undefined) await caricaCodiciFornitore();
   if (codiciAnagrafica === undefined) await caricaCodiciAnagrafica();
@@ -8015,8 +8078,8 @@ async function apriDdtEntrataManuale(poi, ric) {
   const aziende = (state.aziende || []).filter(a => a.attivo !== false)
     .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
   let righe = [], sel = 0, evid = 0, cerca = '', anag = [], anagPer = '';
-  const selMitt = el('select', { onchange: () => { righe.forEach(r => { r.toccata = false; proponi(r); }); disegna(); } }, el('option', { value:'' }, '— mittente —'),
-    ...aziende.map(a => el('option', { value: a.id }, a.nome)));
+  const selMitt = campoCercaAzienda(aziende, { placeholder:'Scrivi il mittente…',
+    onchange: () => { righe.forEach(r => { r.toccata = false; proponi(r); }); disegna(); } });
   const inNum = el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' });
   const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
   if (ric) { selMitt.value = ric.azienda_id || ''; selMitt.disabled = true; inNum.value = ric.ddt_numero || ''; if (ric.ddt_data) inData.value = String(ric.ddt_data).slice(0, 10); }
@@ -8261,8 +8324,9 @@ async function apriDdtEntrataDaOrdini(poi) {
   const conOf = new Set((state.ordiniFornitore || []).filter(o => o.stato === 'emesso').map(o => o.fornitore_id));
   const aziende = (state.aziende || []).filter(a => a.attivo !== false)
     .sort((a, b) => (conOf.has(b.id) - conOf.has(a.id)) || String(a.nome).localeCompare(String(b.nome), 'it'));
-  const selMitt = el('select', { onchange: () => { arrivi = new Map(); extra = []; disegna(); } }, el('option', { value:'' }, '— fornitore —'),
-    ...aziende.map(a => el('option', { value: a.id }, a.nome + (conOf.has(a.id) ? '  · OF aperti' : ''))));
+  const selMitt = campoCercaAzienda(aziende, { placeholder:'Scrivi il fornitore…', nota: a => conOf.has(a.id) ? 'OF aperti' : '',
+    onchange: () => { arrivi = new Map(); extra = []; disegna(); } });
+  setTimeout(() => selMitt.focus(), 50);
   const inNum = el('input', { type:'text', class:'mono', placeholder:'numero sul DDT' });
   const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
   const nfq = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
