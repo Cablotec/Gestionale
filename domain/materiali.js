@@ -710,50 +710,152 @@ function chiaveOfDaRif(rif) {
   return serie + ' ' + Number(m[3]) + '/' + Number(m[2]);
 }
 function chiaveOf(of) { return (String((of && of.serie) || 'OF').toUpperCase() === 'OL' ? 'OL' : 'OF') + ' ' + Number(of.anno) + '/' + Number(of.numero); }
-function ordinatoApertoOf(ordini, movimenti, escludiId) {
-  const arrivi = new Map();     // 'SERIE anno/numero|CODICE' -> [{ qta, t }]
+// ⚠⚠ GLI OF DI ALNUS LI CHIUDIAMO NOI (27 nov, Nico: "possiamo trovare il modo di
+// caricare tutti gli OF aperti in modo che li chiuda io correttamente?"). Stessa regola
+// della giacenza dal 25 nov: da Alnus si prende COSA e' stato ordinato, non quanto e'
+// arrivato. Per ogni riga di un OF di Alnus:
+//   PARTENZA = quello che mancava al punto zero (l'ultima APERTURA fra i movimenti):
+//              residuo di Alnus di oggi + gli arrivi di Alnus (righe ALNUS, EA1 con
+//              «OF anno/numero» nella nota) registrati dopo il punto zero, mai oltre
+//              l'ordinato. Un OF con la data dopo il giorno del punto zero parte intero.
+//              Si ricalcola a ogni import: se in Alnus cambiano quantita' o codici
+//              (OF 775, 805) torna da solo. ⚠ Importare i movimenti PRIMA degli OF:
+//              un EA1 non ancora importato fa partire la riga piu' bassa.
+//   APERTO   = partenza − i NOSTRI carichi (DDT con l'ordine) registrati dopo il punto
+//              zero, assegnati alle righe del codice nell'ordine.
+// Alnus non chiude e non riapre piu' niente: «chiuso» lo decide solo chi salda a mano.
+// Senza punto zero (movimenti non letti) e per gli ordini del gestionale vale la regola
+// di prima: residuo (o ordinato) meno i carichi dopo la sincronizzazione.
+function puntoZeroMovimenti(movimenti) {
+  let t = null;
+  (movimenti || []).forEach(m => {
+    if (!m || m.documento_tipo !== 'APERTURA' || !m.creato_il) return;
+    const x = Date.parse(m.creato_il);
+    if (!isNaN(x) && (t == null || x > t)) t = x;
+  });
+  return t;
+}
+// L'OF di una riga di Alnus dalla nota «Alnus · EA1 · mag 01 · OF 2026/839 · ESA».
+function chiaveOfDaNotaAlnus(note) {
+  const m = /\b(OF|OL)\s+(\d{4})\/(\d+)\b/.exec(String(note || ''));
+  return m ? m[1] + ' ' + Number(m[2]) + '/' + Number(m[3]) : null;
+}
+function giornoLocale(ms) {
+  const d = new Date(ms), p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+// Gli arrivi per 'SERIE anno/numero|CODICE', una volta sola per tutti gli ordini.
+function indiceArriviOf(movimenti) {
+  const zero = puntoZeroMovimenti(movimenti);
+  const nostri = new Map(), alnus = new Map();
   (movimenti || []).forEach(m => {
     if (!m || m.tipo !== 'carico' || !(Number(m.qta) > 0)) return;
+    const c = String(m.codice || '').trim().toUpperCase();
+    // L'ora in cui il carico e' stato REGISTRATO (25 nov): con la sola data, un DDT del
+    // giorno della sincronizzazione non scalava (Comet 7467 sull'OF 730).
+    const t = Date.parse(m.creato_il || m.data);
+    if (m.documento_tipo === 'ALNUS') {
+      const k = chiaveOfDaNotaAlnus(m.note);
+      if (!k || zero == null || !(t > zero)) return;
+      alnus.set(k + '|' + c, (alnus.get(k + '|' + c) || 0) + Number(m.qta));
+      return;
+    }
+    if (m.documento_tipo === 'APERTURA') return;
     const k = chiaveOfDaRif(m.ordine_rif);
     if (!k) return;
-    const c = String(m.codice || '').trim().toUpperCase();
-    if (!arrivi.has(k + '|' + c)) arrivi.set(k + '|' + c, []);
-    // L'ora in cui il carico e' stato REGISTRATO (25 nov): con la sola data, un DDT del
-    // giorno della sincronizzazione degli OF (mezzanotte < ora della sincronizzazione) non
-    // scalava l'ordine (Comet 7467 sull'OF 730: aperto 400 invece di 300).
-    arrivi.get(k + '|' + c).push({ qta: Number(m.qta), t: Date.parse(m.creato_il || m.data), alnus: !!m.alnus });
+    if (!nostri.has(k + '|' + c)) nostri.set(k + '|' + c, []);
+    nostri.get(k + '|' + c).push({ qta: Number(m.qta), t, m });
   });
+  return { zero, nostri, alnus };
+}
+// Le righe di un OF con partenza, arrivato (nostro) e aperto. `idx` da indiceArriviOf.
+// Ritorna { dalZero, righe: [{ riga, codice, ordinato, residuoAlnus, partenza, arrivato,
+// aperto, consegna }], arrivi: [movimenti nostri che lo scalano] }.
+function righeApertoOf(of, idx) {
+  const zero = idx ? idx.zero : null;
+  const dalZero = !!of && of.origine === 'alnus' && zero != null;
+  const k = chiaveOf(of);
+  const dopo = dalZero ? zero : (of && of.sincronizzato_il ? Date.parse(of.sincronizzato_il) : null);
+  const nuovo = dalZero && !!of.data && String(of.data).slice(0, 10) > giornoLocale(zero);
+  const restoAlnus = new Map(), restoNostro = new Map(), arrivi = [];
+  const righe = ((of && of.righe) || []).map(r => {
+    const c = String((r && r.codice) || '').trim().toUpperCase();
+    const ordinato = Number(r && r.qta) || 0;
+    const residuoAlnus = r && r.qta_residua != null ? Number(r.qta_residua) || 0 : null;
+    let partenza = residuoAlnus != null ? residuoAlnus : ordinato;
+    if (dalZero && c) {
+      if (nuovo) partenza = Math.max(partenza, ordinato);
+      else {
+        if (!restoAlnus.has(c)) restoAlnus.set(c, idx.alnus.get(k + '|' + c) || 0);
+        const ridai = Math.min(Math.max(0, ordinato - partenza), restoAlnus.get(c));
+        restoAlnus.set(c, +(restoAlnus.get(c) - ridai).toFixed(6));
+        partenza = +(partenza + ridai).toFixed(6);
+      }
+    }
+    if (c && !restoNostro.has(c)) {
+      const lista = ((idx && idx.nostri.get(k + '|' + c)) || []).filter(a => dopo == null || isNaN(dopo) || a.t > dopo);
+      lista.forEach(a => arrivi.push(a.m));
+      restoNostro.set(c, lista.reduce((s2, a) => s2 + a.qta, 0));
+    }
+    const preso = c ? Math.min(Math.max(0, partenza), restoNostro.get(c)) : 0;
+    if (c) restoNostro.set(c, +(restoNostro.get(c) - preso).toFixed(6));
+    return { riga: r && r.riga != null ? r.riga : null, codice: c, ordinato, residuoAlnus, partenza,
+      arrivato: +preso.toFixed(6), aperto: Math.max(0, +(partenza - preso).toFixed(6)),
+      consegna: (r && r.consegna) || (of && of.consegna) || null };
+  });
+  return { dalZero, righe, arrivi };
+}
+// COLLAUDO DEGLI OF (27 nov): per ogni riga d'OF di Alnus, il residuo di Alnus contro il
+// nostro aperto. Un OF che manca dall'ultima estrazione (`sincronizzato_il` piu' vecchio
+// dell'ultimo import) non ha piu' un residuo di Alnus: conta se da noi e' ancora aperto.
+// Ritorna [{ of, codice, descrizione, alnus (null = assente), nostro, perche }]:
+//   'manca_ddt' Alnus l'ha ricevuto, da noi manca il DDT; 'assente' non piu' in Alnus;
+//   'solo_nostro' arrivato da noi, non in Alnus; 'chiuso_a_mano' saldato qui, aperto la'.
+function collaudoOf(ordini, movimenti) {
+  const idx = indiceArriviOf(movimenti);
+  if (idx.zero == null) return null;
+  const alnus = (ordini || []).filter(o => o && o.origine === 'alnus' && o.tipo === 'acquisto' && o.stato !== 'annullato');
+  const ultimo = alnus.reduce((m, o) => (o.sincronizzato_il && o.sincronizzato_il > m ? o.sincronizzato_il : m), '');
+  const out = [];
+  alnus.forEach(of => {
+    const assente = !!ultimo && String(of.sincronizzato_il || '') < ultimo;
+    const aMano = of.stato === 'chiuso';
+    righeApertoOf(of, idx).righe.forEach((x, i) => {
+      if (!x.codice) return;
+      const nostro = aMano ? 0 : x.aperto;
+      const ra = assente ? null : (x.residuoAlnus != null ? x.residuoAlnus : x.ordinato);
+      let perche = null;
+      if (ra == null) { if (nostro > 0) perche = 'assente'; }
+      else if (Math.abs(ra - nostro) >= 0.0005) perche = ra < nostro ? 'manca_ddt' : aMano ? 'chiuso_a_mano' : 'solo_nostro';
+      if (perche) out.push({ of, riga: x.riga, codice: x.codice, descrizione: ((of.righe || [])[i] || {}).descrizione || '',
+        alnus: ra, nostro, perche });
+    });
+  });
+  return out;
+}
+function ordinatoApertoOf(ordini, movimenti, escludiId) {
+  const idx = indiceArriviOf(movimenti);
   const per = new Map();        // CODICE -> { aperto, ordini:[{ id, serie, anno, numero, ordinato, arrivato, aperto, consegna }] }
   (ordini || []).forEach(of => {
     if (!of || of.tipo !== 'acquisto' || of.stato !== 'emesso' || of.id === escludiId) return;
-    const dopo = of.sincronizzato_il ? Date.parse(of.sincronizzato_il) : null;
-    const somma = new Map();    // CODICE -> { q, consegna }
-    (of.righe || []).forEach(r => {
-      const c = String((r && r.codice) || '').trim().toUpperCase();
-      const q = Number(r && r.qta_residua != null ? r.qta_residua : r && r.qta) || 0;
-      if (!c || !(q > 0)) return;
-      const v = somma.get(c) || { q: 0, consegna: null };
-      v.q += q;
-      const d = (r && r.consegna) || of.consegna || null;
-      if (d && (!v.consegna || String(d) < v.consegna)) v.consegna = String(d).slice(0, 10);
-      somma.set(c, v);
+    const somma = new Map();    // CODICE -> { q (partenza), arr, ap, consegna }
+    righeApertoOf(of, idx).righe.forEach(r => {
+      if (!r.codice || !(r.partenza > 0)) return;
+      const v = somma.get(r.codice) || { q: 0, arr: 0, ap: 0, consegna: null };
+      v.q = +(v.q + r.partenza).toFixed(6); v.arr = +(v.arr + r.arrivato).toFixed(6); v.ap = +(v.ap + r.aperto).toFixed(6);
+      const d = r.consegna;
+      // La consegna che conta e' quella delle righe ancora aperte (tutte evase: la prima).
+      if (d && (!v.consegna || (r.aperto > 0 && !v.cAperta) || ((r.aperto > 0) === !!v.cAperta && String(d) < v.consegna))) {
+        v.consegna = String(d).slice(0, 10); v.cAperta = r.aperto > 0;
+      }
+      somma.set(r.codice, v);
     });
-    const k = chiaveOf(of);
     somma.forEach((v, c) => {
-      // ⚠ UN ARRIVO SOLO (23 nov, Nico: DDT Comet 7467 registrato nel gestionale e
-      // EA1 dello stesso carico importato da Alnus). Su un ordine di Alnus, se ci
-      // sono carichi di Alnus (`alnus`) contano solo loro: i nostri DDT restano
-      // registro. Senza carichi di Alnus vale tutto, come prima.
-      let lista = arrivi.get(k + '|' + c) || [];
-      if (of.origine === 'alnus' && lista.some(a => a.alnus)) lista = lista.filter(a => a.alnus);
-      const arr = lista.filter(a => dopo == null || isNaN(dopo) || (a.t > dopo))
-        .reduce((s2, a) => s2 + a.qta, 0);
-      const ap = Math.max(0, +(v.q - arr).toFixed(6));
       if (!per.has(c)) per.set(c, { aperto: 0, ordini: [] });
       const x = per.get(c);
-      x.aperto = +(x.aperto + ap).toFixed(6);
+      x.aperto = +(x.aperto + v.ap).toFixed(6);
       x.ordini.push({ id: of.id, serie: String(of.serie || 'OF').toUpperCase(), anno: of.anno, numero: of.numero,
-        ordinato: v.q, arrivato: arr, aperto: ap, consegna: v.consegna, fornitore_id: of.fornitore_id || null,
+        ordinato: v.q, arrivato: v.arr, aperto: v.ap, consegna: v.consegna, fornitore_id: of.fornitore_id || null,
         origine: of.origine || 'gestionale' });
     });
   });
@@ -1046,5 +1148,5 @@ if (typeof module !== 'undefined' && module.exports) {
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
     ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne, assegnaPerServizio, terzistiDellaCommessa,
-    chiaveOfDaRif, chiaveOf, ordinatoApertoOf };
+    chiaveOfDaRif, chiaveOf, ordinatoApertoOf, puntoZeroMovimenti, chiaveOfDaNotaAlnus, indiceArriviOf, righeApertoOf, collaudoOf };
 }

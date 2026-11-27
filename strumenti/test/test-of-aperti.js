@@ -79,17 +79,6 @@ sez('Serie: un OF di Alnus col suo numero, sincronizzato');
   t('chiuso non conta', a.ordini.length === 2 && a.aperto === 126);
 }
 {
-  // UN ARRIVO SOLO (23 nov): stesso carico registrato col nostro DDT e importato da Alnus (EA1).
-  const ord = [{ id: 'c', tipo: 'acquisto', stato: 'emesso', serie: 'OF', anno: 2026, numero: 730, origine: 'alnus',
-    sincronizzato_il: '2026-11-23T11:04:29Z', righe: [{ codice: 'X', qta: 200, qta_residua: 200 }, { codice: 'X', qta: 200, qta_residua: 200 }] }];
-  const ea1 = { tipo: 'carico', codice: 'X', qta: 100, ordine_rif: 'OF 730/2026', data: '2026-11-23T12:44:30Z', alnus: true };
-  const ddt = { tipo: 'carico', codice: 'X', qta: 100, ordine_rif: 'OF 730/2026', data: '2026-11-24' };
-  t('OF di Alnus: EA1 + nostro DDT = scende una volta', M.ordinatoApertoOf(ord, [ea1, ddt]).get('X').aperto === 300);
-  t('OF di Alnus: solo il nostro DDT (EA1 non ancora importato) = scende', M.ordinatoApertoOf(ord, [ddt]).get('X').aperto === 300);
-  const nostro = [Object.assign({}, ord[0], { id: 'g', origine: 'gestionale', sincronizzato_il: null })];
-  t('OF del gestionale: contano anche i carichi di Alnus come prima', M.ordinatoApertoOf(nostro, [ea1, ddt]).get('X').aperto === 200);
-}
-{
   // 25 nov: un nostro DDT con la data del giorno della sincronizzazione, registrato DOPO.
   const ord = [{ id: 'c', tipo: 'acquisto', stato: 'emesso', serie: 'OF', anno: 2026, numero: 730, origine: 'alnus',
     sincronizzato_il: '2026-11-23T11:04:29Z', righe: [{ codice: 'X', qta: 400, qta_residua: 400 }] }];
@@ -97,6 +86,49 @@ sez('Serie: un OF di Alnus col suo numero, sincronizzato');
   const prima = { tipo: 'carico', codice: 'X', qta: 100, ordine_rif: 'OF 730/2026', data: '2026-11-23', creato_il: '2026-11-23T09:00:00Z' };
   t('DDT dello stesso giorno registrato dopo la sincronizzazione: scala', M.ordinatoApertoOf(ord, [dopo]).get('X').aperto === 300);
   t('DDT registrato prima della sincronizzazione: gia nel residuo', M.ordinatoApertoOf(ord, [prima]).get('X').aperto === 400);
+}
+
+sez('27 nov: gli OF di Alnus li chiudiamo noi (partenza al punto zero, scalano i nostri DDT)');
+{
+  const ap = { documento_tipo: 'APERTURA', tipo: 'carico', codice: 'Z', qta: 1, creato_il: '2026-11-23T11:04:35Z' };
+  const of = (extra) => Object.assign({ id: 'o', tipo: 'acquisto', stato: 'emesso', serie: 'OF', anno: 2026, numero: 839, origine: 'alnus',
+    data: '2026-11-10', sincronizzato_il: '2026-11-27T09:57:45Z', righe: [{ riga: 10, codice: 'FR515', qta: 10, qta_residua: 0 }] }, extra || {});
+  const ea1 = { documento_tipo: 'ALNUS', tipo: 'carico', codice: 'FR515', qta: 10, note: 'Alnus · EA1 · mag 01 · OF 2026/839 · ESA', creato_il: '2026-11-26T12:22:28Z' };
+  const ddt = { documento_tipo: 'DDT', tipo: 'carico', codice: 'FR515', qta: 10, ordine_rif: 'OF 839/2026', creato_il: '2026-11-27T10:30:00Z' };
+  const a0 = (ords, mv) => { const x = M.ordinatoApertoOf(ords, mv).get('FR515'); return x ? x.aperto : 0; };
+  t('evaso in Alnus (EA1 dopo lo zero), nessun nostro DDT: da noi ancora aperto 10', a0([of()], [ap, ea1]) === 10);
+  t('col nostro DDT registrato DOPO l\'import degli OF: chiuso', a0([of()], [ap, ea1, ddt]) === 0);
+  const ddtPrima = Object.assign({}, ddt, { creato_il: '2026-11-26T15:00:00Z' });
+  t('col nostro DDT registrato PRIMA dell\'import degli OF: chiuso lo stesso (conta il punto zero)', a0([of()], [ap, ea1, ddtPrima]) === 0);
+  const ddtVecchio = Object.assign({}, ddt, { creato_il: '2026-11-20T10:00:00Z' });
+  t('un nostro DDT di prima del punto zero non scala (e\' gia\' nel residuo)', a0([of({ righe: [{ codice: 'FR515', qta: 10, qta_residua: 10 }] })], [ap, ddtVecchio]) === 10);
+  const eaPrima = Object.assign({}, ea1, { creato_il: '2026-11-20T10:00:00Z' });
+  t('un EA1 di prima del punto zero non rida\' niente (residuo 0 = era gia\' evaso)', a0([of()], [ap, eaPrima]) === 0);
+  t('OF nato dopo il punto zero: parte intero anche se Alnus l\'ha gia\' evaso', a0([of({ data: '2026-11-24' })], [ap]) === 10);
+  t('mai oltre l\'ordinato: due EA1 da 10 su una riga da 10', a0([of()], [ap, ea1, Object.assign({}, ea1, { creato_il: '2026-11-26T13:00:00Z' })]) === 10);
+  t('l\'EA1 di un altro OF non conta', a0([of()], [ap, Object.assign({}, ea1, { note: 'Alnus · EA1 · mag 01 · OF 2026/840 · ESA' })]) === 0);
+  t('OL: la serie conta', M.chiaveOfDaNotaAlnus('Alnus · EA1 · mag 01 · OL 2026/24 · ERO') === 'OL 2026/24');
+  t('chiuso a mano (saldo): non conta piu\'', a0([of({ stato: 'chiuso' })], [ap, ea1]) === 0);
+  t('senza punto zero: la regola di prima (residuo 0 = niente)', a0([of()], [ea1]) === 0);
+  // Due righe dello stesso codice: gli EA1 tornano alle righe evase, i nostri DDT scalano nell'ordine.
+  const due = of({ righe: [{ riga: 10, codice: 'FR515', qta: 6, qta_residua: 0 }, { riga: 20, codice: 'FR515', qta: 4, qta_residua: 4 }] });
+  const idx = M.indiceArriviOf([ap, Object.assign({}, ea1, { qta: 6 }), Object.assign({}, ddt, { qta: 7 })]);
+  const r = M.righeApertoOf(due, idx).righe;
+  t('righe: partenza 6 + 4', r[0].partenza === 6 && r[1].partenza === 4);
+  t('righe: il nostro DDT da 7 chiude la prima e lascia 3 sulla seconda', r[0].aperto === 0 && r[1].aperto === 3);
+  t('righe: il residuo di Alnus resta per il paragone', r[0].residuoAlnus === 0 && r[1].residuoAlnus === 4);
+  // Collaudo: residuo di Alnus contro il nostro aperto.
+  const ord3 = [of(), of({ id: 'p', numero: 627, sincronizzato_il: '2026-11-27T09:44:00Z', righe: [{ codice: 'GUIDA', qta: 100, qta_residua: 100 }] }),
+    of({ id: 'q', numero: 900, righe: [{ codice: 'X', qta: 5, qta_residua: 5 }] }), of({ id: 's', numero: 901, stato: 'chiuso', righe: [{ codice: 'Y', qta: 5, qta_residua: 5 }] })];
+  const col = M.collaudoOf(ord3, [ap, ea1]);
+  const per = (n) => col.filter(x => x.of.numero === n).map(x => x.perche).join(',');
+  t('collaudo: 839 evaso in Alnus senza il nostro DDT = manca_ddt', per(839) === 'manca_ddt');
+  t('collaudo: 627 non nell\'ultima estrazione e aperto da noi = assente', per(627) === 'assente');
+  t('collaudo: 900 uguale nei due = niente', per(900) === '');
+  t('collaudo: 901 chiuso a mano qui, aperto in Alnus = chiuso_a_mano', per(901) === 'chiuso_a_mano');
+  t('collaudo: col nostro DDT l\'839 torna', M.collaudoOf([of()], [ap, ea1, ddt]).length === 0);
+  t('collaudo: senza punto zero non si fa', M.collaudoOf([of()], [ea1]) === null);
+  t('punto zero = ultima apertura',M.puntoZeroMovimenti([ap, { documento_tipo: 'APERTURA', creato_il: '2026-11-20T09:33:11Z' }]) === Date.parse('2026-11-23T11:04:35Z'));
 }
 
 console.log('\n' + ok + ' ok, ' + ko + ' KO');

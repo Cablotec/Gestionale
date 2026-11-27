@@ -6865,7 +6865,7 @@ function renderOrdiniFornitore(root) {
     ...[['tutti', 'Tutti i tipi'], ['acquisto', 'D’acquisto'], ['terzista', 'Ai terzisti']].map(([v, t]) => el('option', { value: v }, t)));
   selTipo.value = ofFiltroTipo;
   const selStato = el('select', { onchange: (e) => { ofFiltroStato = e.target.value; ridisegna(); } },
-    ...[['emesso', 'Emessi'], ['chiuso', 'Chiusi (evasi in Alnus)'], ['annullato', 'Annullati'], ['tutti', 'Tutti']].map(([v, t]) => el('option', { value: v }, t)));
+    ...[['emesso', 'Aperti'], ['evaso', 'Evasi'], ['chiuso', 'Chiusi a mano'], ['annullato', 'Annullati'], ['tutti', 'Tutti']].map(([v, t]) => el('option', { value: v }, t)));
   selStato.value = ofFiltroStato;
   const cerca = el('input', { type:'text', class:'search', id:'of-cerca', value: ofCerca,
     placeholder:'Cerca fornitore, numero, codice, commessa…',
@@ -6875,15 +6875,15 @@ function renderOrdiniFornitore(root) {
   const q = ofCerca.trim().toLowerCase();
   const lista = state.ordiniFornitore.filter(of =>
     (ofFiltroTipo === 'tutti' || of.tipo === ofFiltroTipo)
-    && (ofFiltroStato === 'tutti' || of.stato === ofFiltroStato)
+    && (ofFiltroStato === 'tutti' || statoVisibileOf(of) === ofFiltroStato)
     && (!q || [numeroOrdineFornitore(of), nomeAziendaDi(of.fornitore_id), ...(of.righe || []).flatMap(r => [r.codice, r.descrizione, r.etichetta, r.articolo])]
       .some(s => String(s || '').toLowerCase().includes(q))))
     .sort((a, b) => (b.anno - a.anno) || (b.numero - a.numero));
   const totOf = (of) => (of.righe || []).reduce((s, r) => s + (Number(r.totale) || 0), 0);
   root.append(el('div', { class:'sub', style:'margin:-4px 0 10px;font-size:12px;' },
     lista.length + (lista.length === 1 ? ' ordine' : ' ordini')
-    + (lista.length ? ' · ' + cartaEuro(lista.filter(o => o.stato === 'emesso').reduce((s, o) => s + totOf(o), 0)) + ' emessi' : '')
-    + ' · gli ordini «Alnus» si aggiornano importando gli OF aperti nello Specchio Alnus; quelli ai terzisti si abbinano col «n. OF» sulla commessa.'));
+    + (lista.length ? ' · ' + cartaEuro(lista.filter(o => statoVisibileOf(o) === 'emesso').reduce((s, o) => s + totOf(o), 0)) + ' aperti' : '')
+    + ' · gli ordini «Alnus» arrivano importando gli OF nello Specchio Alnus e li chiudono i nostri DDT (o il saldo a mano); quelli ai terzisti si abbinano col «n. OF» sulla commessa.'));
   if (!lista.length) {
     root.append(el('div', { class:'empty' }, state.ordiniFornitore.length ? 'Nessun ordine con questi filtri.'
       : 'Nessun ordine ancora. Gli OF d’acquisto nascono da «＋ Nuovo OF d’acquisto»; quelli ai terzisti dal Ciclo produttivo della commessa.'));
@@ -6897,7 +6897,8 @@ function renderOrdiniFornitore(root) {
     const contenuto = of.tipo === 'terzista'
       ? righe.map(r => r.etichetta).join(', ')
       : righe.length + (righe.length === 1 ? ' riga: ' : ' righe: ') + righe.slice(0, 3).map(r => r.codice).join(', ') + (righe.length > 3 ? '…' : '');
-    const ann = of.stato === 'annullato' || of.stato === 'chiuso';
+    const sv = statoVisibileOf(of);
+    const ann = sv === 'annullato' || sv === 'chiuso' || sv === 'evaso';
     const daAlnus = of.origine === 'alnus';
     tb.append(el('tr', { style: (ann ? 'opacity:.55;' : '') + 'cursor:pointer;', title: 'Apri l’ordine',
       // Clic sulla riga = dettaglio (20 nov, Nico). I tasti della riga tengono il loro clic.
@@ -6905,8 +6906,8 @@ function renderOrdiniFornitore(root) {
       el('td', {}, el('span', { class:'mono', style:'font-weight:700;white-space:nowrap;' }, numeroOrdineFornitore(of)),
         of.revisione ? el('span', { class:'sub', style:'margin-left:6px;font-size:11px;', title: of.modificato_il
           ? 'Modificato il ' + fmtIT(String(of.modificato_il).slice(0, 10)) : '' }, 'rev. ' + of.revisione) : '',
-        ann ? el('span', { class:'badge bgry', style:'margin-left:6px;' }, of.stato === 'chiuso' ? 'chiuso' : 'annullato') : '',
-        daAlnus ? el('span', { class:'badge bor', style:'margin-left:6px;', title:'Ordine fatto in Alnus e caricato col suo numero: si modifica e si chiude in Alnus'
+        ann ? el('span', { class:'badge ' + (sv === 'evaso' ? 'bok' : 'bgry'), style:'margin-left:6px;' }, sv === 'evaso' ? 'evaso' : sv === 'chiuso' ? 'chiuso a mano' : 'annullato') : '',
+        daAlnus ? el('span', { class:'badge bor', style:'margin-left:6px;', title:'Ordine fatto in Alnus e caricato col suo numero: si modifica in Alnus, lo chiudono i nostri DDT'
           + (of.sincronizzato_il ? ' · aggiornato il ' + fmtIT(String(of.sincronizzato_il).slice(0, 10)) : '') }, 'Alnus') : ''),
       el('td', { class:'mono', style:'font-size:11px;white-space:nowrap;' }, fmtIT(String(of.data || '').slice(0, 10))),
       el('td', {}, el('span', { class:'badge ' + (of.tipo === 'terzista' ? 'bvio' : 'bblu') }, of.tipo === 'terzista' ? 'terzista' : 'acquisto')),
@@ -7043,7 +7044,7 @@ async function importaOfAlnus(f, poi) {
     + plAlnus(scad, 'riga aperta', 'righe aperte') + ' con la consegna già passata: si vedono come «scadute».'
     + (o.scartate.length ? '\n' + o.scartate.length + ' righe illeggibili saltate.' : '')
     + '\n\nFotografia del ' + fmtQuando(presoIl) + ' (ora del file): i carichi da OF stampati dopo quest’ora la scalano. Sostituisce la fotografia OF precedente.'
-    + '\n\nGli OF diventano anche ORDINI del gestionale, col loro numero (OF n/anno): nuovi entrano, quelli già caricati si aggiornano, quelli non più aperti diventano «chiuso».',
+    + '\n\nGli OF diventano anche ORDINI del gestionale, col loro numero (OF n/anno): nuovi entrano, quelli già caricati si aggiornano (righe, quantità, consegne); lo stato non lo cambia Alnus: un OF si chiude coi nostri DDT o col saldo a mano. Prima i movimenti, poi gli OF.',
     conferma: 'Importa', annulla: 'Annulla' });
   if (sc !== 'conferma') return;
   let foto = null;
@@ -7070,7 +7071,7 @@ async function importaOfAlnus(f, poi) {
 // caricare gli ordini fornitori attuali nel nostro gestionale per buoni?").
 // Serie «OF»/«OL» col numero di Alnus (`sincronizza_of_alnus`, strumenti/
 // migrazione-of-alnus.sql): nuovi entrano, esistenti si aggiornano, quelli spariti
-// dall'estrazione diventano «chiuso». Fornitore = scheda in Aziende col nome di Alnus;
+// dall'estrazione restano come sono (dal 27 nov lo stato lo decidono i nostri DDT). Fornitore = scheda in Aziende col nome di Alnus;
 // chi non ce l'ha si crea (con conferma) o i suoi ordini restano fuori.
 // Per ogni nomignolo di Alnus senza scheda: «è questa scheda» (si salva in
 // `aziende.nomi_alnus`, e dalla volta dopo si riconosce da solo), «crea scheda
@@ -7147,20 +7148,9 @@ async function sincronizzaOfAlnus(righe, presoIl) {
   // OF INTERI (20 nov): con anche le righe evase, un ordine con tutto il residuo a zero e' chiuso.
   ordini.forEach(g => { g.stato = g.righe.some(r => Number(r.qta_residua) > 0) ? 'emesso' : 'chiuso'; });
   if (!ordini.length) return toast('Nessun OF di Alnus caricabile come ordine (fornitori senza scheda).', 'err', 9000);
-  // ⚠ GUARDIA (23 nov): un OF aperto che non e' nel file la funzione lo CHIUDE come evaso.
-  // Il 23 nov un file con le sole righe evase ha chiuso tutti i 93 OF aperti. Prima di
-  // mandare, si dice quanti OF aperti verrebbero chiusi e si chiede.
-  const anniFile = new Set(ordini.map(g => Number(g.anno)));
-  const chiaviFile = new Set(ordini.map(g => g.serie + ' ' + g.anno + '/' + g.numero).concat([...fuori]));
-  const daChiudere = (state.ordiniFornitore || []).filter(o => o.origine === 'alnus' && o.stato === 'emesso' && anniFile.has(Number(o.anno))
-    && !chiaviFile.has(String(o.serie || 'OF').toUpperCase() + ' ' + o.anno + '/' + o.numero));
-  const apertiFile = ordini.filter(g => g.stato === 'emesso').length;
-  if (daChiudere.length && !confirm((apertiFile ? '' : '⚠ Nel file non c’è NESSUNA riga ancora aperta (residuo): sembra un’estrazione dei soli evasi.\n\n')
-    + daChiudere.length + (daChiudere.length === 1 ? ' OF aperto nel gestionale non è' : ' OF aperti nel gestionale non sono') + ' nel file ('
-    + daChiudere.slice(0, 6).map(o => (o.serie || 'OF') + ' ' + o.numero + '/' + o.anno).join(', ') + (daChiudere.length > 6 ? '…' : '') + ').\n'
-    + 'Continuando verranno CHIUSI come evasi. Va bene solo se il file è l’estrazione completa (aperti + evasi).\n\nContinuare?')) {
-    return toast('Import degli ordini annullato: nessun OF chiuso. La fotografia degli OF resta nello specchio.', 'err', 9000);
-  }
+  // ⚠ 27 nov: la sincronizzazione NON chiude piu' niente (migrazione-of-chiusi-da-noi.sql):
+  // un OF che manca dal file resta com'era e si conta solo. Era la guardia del 23 nov
+  // (un file di soli evasi aveva chiuso tutti gli OF aperti; il 27 un file parziale 15).
   const { data, error } = await sb.rpc('sincronizza_of_alnus', { p_ordini: ordini, p_preso_il: presoIl });
   if (error) {
     const manca = /(could not find|does not exist|schema cache)/i.test(error.message || '');
@@ -7170,8 +7160,11 @@ async function sincronizzaOfAlnus(righe, presoIl) {
   await caricaOrdiniFornitore();
   const e = data || {};
   const nAperti = ordini.filter(g => g.stato === 'emesso').length;
-  toast('OF di Alnus nel gestionale (' + plAlnus(ordini.length, 'ordine', 'ordini') + ', ' + nAperti + ' aperti): ' + plAlnus(e.nuovi || 0, 'nuovo', 'nuovi') + ', ' + plAlnus(e.aggiornati || 0, 'aggiornato', 'aggiornati')
-    + ', ' + plAlnus(e.chiusi || 0, 'chiuso', 'chiusi')
+  // Senza lo SQL del 27 nov la funzione vecchia chiude ancora gli spariti: lo si dice.
+  const vecchia = e.assenti == null;
+  toast('OF di Alnus nel gestionale (' + plAlnus(ordini.length, 'ordine', 'ordini') + ', ' + nAperti + ' aperti in Alnus): ' + plAlnus(e.nuovi || 0, 'nuovo', 'nuovi') + ', ' + plAlnus(e.aggiornati || 0, 'aggiornato', 'aggiornati')
+    + (vecchia ? ', ' + plAlnus(e.chiusi || 0, 'chiuso', 'chiusi') + ' (⚠ manca lo SQL migrazione-of-chiusi-da-noi.sql: Alnus chiude ancora gli OF)'
+      : (e.assenti ? ', ' + plAlnus(e.assenti, 'aperto non nel file', 'aperti non nel file') + ' (restano come sono)' : '') + ' · lo stato lo decidono i nostri DDT')
     + (Array.isArray(e.conflitti) && e.conflitti.length ? ' · ⚠ stesso numero di un ordine fatto nel gestionale, non toccati: ' + e.conflitti.join(', ') : '') + (fuori.size ? ' · ' + plAlnus(fuori.size, 'ordine saltato', 'ordini saltati') + ' (fornitore senza scheda)' : ''), 'ok', 12000);
 }
 
@@ -7234,6 +7227,45 @@ function ofAlnusSincronizzati() { return (state.ordiniFornitore || []).some(o =>
 // (lo Specchio legge solo i movimenti dopo l'apertura). Prima c'erano anche loro.
 function movimentiPerOf() {
   return state.movimenti || [];
+}
+// LO STATO DI UN OF COME LO VEDE IL GESTIONALE (27 nov, gli OF di Alnus li chiudiamo
+// noi): «annullato», «chiuso» (a mano, saldo), «evaso» (tutte le righe arrivate coi
+// nostri DDT, `righeApertoOf`), «emesso» (qualcosa da arrivare). Lo stato salvato
+// dice solo annullato/chiuso a mano; l'evaso si calcola. Indice degli arrivi in cache
+// sui movimenti letti.
+let _idxArriviOf = null;
+function indiceArriviOfOra() {
+  const mv = movimentiPerOf();
+  if (!_idxArriviOf || _idxArriviOf.mv !== mv || _idxArriviOf.n !== mv.length) _idxArriviOf = { mv, n: mv.length, idx: indiceArriviOf(mv) };
+  return _idxArriviOf.idx;
+}
+function righeApertoOfOra(of) { return righeApertoOf(of, indiceArriviOfOra()); }
+function statoVisibileOf(of) {
+  if (!of) return '';
+  if (of.stato === 'annullato' || of.stato === 'chiuso') return of.stato;
+  if (of.tipo !== 'acquisto' || !Array.isArray(state.movimenti)) return of.stato;
+  return righeApertoOfOra(of).righe.some(r => r.aperto > 0) ? 'emesso' : 'evaso';
+}
+// Come lo si scrive: «aperto», «evaso», «chiuso a mano (saldo)», «annullato».
+function testoStatoOf(of) {
+  const s = statoVisibileOf(of);
+  return s === 'emesso' ? 'aperto' : s === 'evaso' ? 'evaso' : s === 'chiuso' ? (of.saldato_il || of.origine !== 'alnus' ? 'chiuso a mano (saldo)' : 'chiuso') : s;
+}
+async function saldaOrdineFornitore(of, chiudi, poi) {
+  if (!of || !of.id) return;
+  let nota = null;
+  if (chiudi) {
+    nota = prompt('Chiudere ' + numeroOrdineFornitore(of) + ' a mano (il fornitore non manderà il resto)?\nMotivo (facoltativo):', '');
+    if (nota === null) return;
+  } else if (!confirm('Riaprire ' + numeroOrdineFornitore(of) + '? Tornerà a contare quello che manca.')) return;
+  const { error } = await sb.rpc('salda_ordine_fornitore', { p_id: of.id, p_chiudi: !!chiudi, p_nota: nota });
+  if (error) {
+    const manca = /(could not find|does not exist|schema cache)/i.test(error.message || '');
+    return toast(manca ? 'Per chiudere a mano manca lo SQL migrazione-of-chiusi-da-noi.sql.' : 'Ordine non cambiato: ' + error.message, 'err', 9000);
+  }
+  await caricaOrdiniFornitore();
+  toast(numeroOrdineFornitore(of) + (chiudi ? ' chiuso a mano' : ' riaperto'), 'ok');
+  if (typeof poi === 'function') poi();
 }
 // Gli OF aperti (da ordinatoApertoOf) nella forma di ofAlnusAperti, per il motore dello specchio.
 function ofApertiComeAlnus(aperti, filtro, oggi) {
@@ -7763,6 +7795,41 @@ function renderAlnus(root) {
   // TOLTI il 24 nov: il Fabbisogno di Alnus non si importa piu', il fabbisogno
   // lo calcola il gestionale per tutti (vedi `ricalcolaFabbisogno`).
   root.append(riquadroCollaudo(ridisegna));
+  root.append(riquadroCollaudoOf());
+}
+
+// ── COLLAUDO DEGLI OF (27 nov, Nico: gli OF li chiudiamo noi) ─────────────────
+// Per ogni riga d'OF di Alnus: residuo di Alnus contro il nostro aperto (`collaudoOf`,
+// domain/materiali.js). Una riga diversa e' quasi sempre un DDT da registrare.
+function riquadroCollaudoOf() {
+  const box = el('div', { style: 'margin-top:22px;' });
+  box.append(el('h3', { style: 'margin:6px 0 6px;' }, 'Collaudo degli OF: il gestionale contro Alnus'));
+  if (!Array.isArray(state.ordiniFornitore) || !Array.isArray(state.movimenti)) {
+    box.append(el('div', { class: 'sub' }, 'Ordini o movimenti non letti: premi ⟳ Aggiorna.')); return box;
+  }
+  const righe = collaudoOf(state.ordiniFornitore, state.movimenti);
+  if (righe == null) { box.append(el('div', { class: 'sub' }, 'Serve il punto zero (l’apertura fra i movimenti).')); return box; }
+  const PERCHE = { manca_ddt: 'arrivato in Alnus: manca il nostro DDT', assente: 'non è più nell’estrazione di Alnus',
+    solo_nostro: 'arrivato da noi, non in Alnus', chiuso_a_mano: 'chiuso a mano qui, aperto in Alnus' };
+  box.append(el('div', { class: 'sub', style: 'font-size:12px;line-height:1.6;margin-bottom:8px;max-width:980px;' },
+    'Gli OF arrivano da Alnus, ma li chiudono i nostri DDT (o il saldo a mano). Qui le righe dove il residuo di Alnus è diverso da quello che manca per il gestionale. '
+    + (righe.length ? plAlnus(righe.length, 'riga diversa', 'righe diverse') + '.' : 'Nessuna riga diversa: gli OF tornano.')));
+  if (!righe.length) return box;
+  const tbl = el('table', { class: 'rt' });
+  tbl.append(el('thead', {}, el('tr', {}, ...['OF', 'Fornitore', 'Codice', 'Descrizione', 'Residuo Alnus', 'Manca per noi', 'Cosa']
+    .map((t, i) => el('th', { style: i === 4 || i === 5 ? 'text-align:right;' : '' }, t)))));
+  const tb = el('tbody');
+  righe.forEach(r => tb.append(el('tr', { style: 'cursor:pointer;', title: 'Apri l’ordine', onclick: () => apriDettaglioOf(r.of, () => renderTab(state.currentTab)) },
+    el('td', { class: 'mono', style: 'font-weight:700;white-space:nowrap;' }, numeroOrdineFornitore(r.of)),
+    el('td', { style: 'font-size:12px;' }, nomeAziendaDi(r.of.fornitore_id)),
+    el('td', { class: 'mono', style: 'white-space:nowrap;' }, r.codice),
+    el('td', { style: 'max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;', title: r.descrizione }, r.descrizione),
+    el('td', { class: 'mono', style: 'text-align:right;' }, r.alnus == null ? '—' : nfIT(r.alnus)),
+    el('td', { class: 'mono', style: 'text-align:right;font-weight:700;color:var(--or);' }, nfIT(r.nostro)),
+    el('td', { style: 'font-size:12px;' }, PERCHE[r.perche] + (/_K$/.test(r.codice) && r.perche === 'manca_ddt' ? ' (lavorazione: il rientro dal terzista non scala l’OF)' : '')))));
+  tbl.append(tb);
+  box.append(el('div', { style: 'overflow-x:auto;' }, tbl));
+  return box;
 }
 
 // ── COLLAUDO: IL GESTIONALE CONTRO ALNUS (25 nov, Nico) ─────────────────────
@@ -7940,13 +8007,10 @@ async function apriDettaglioOf(of, poi) {
   const daAlnus = of.origine === 'alnus';
   const righe = of.righe || [];
   const terz = of.tipo === 'terzista';
-  // Arrivi legati: carichi che citano questo ordine, dopo l'ultimo import se e' di Alnus.
-  const k = chiaveOf(of);
-  const dopo = of.sincronizzato_il ? Date.parse(of.sincronizzato_il) : null;
-  const arrivi = movimentiPerOf().filter(m => m.tipo === 'carico' && chiaveOfDaRif(m.ordine_rif) === k
-    && (dopo == null || Date.parse(m.data) > dopo));
-  const arrivatiPer = new Map();
-  arrivi.forEach(m => { const c = String(m.codice || '').trim().toUpperCase(); arrivatiPer.set(c, (arrivatiPer.get(c) || 0) + (Number(m.qta) || 0)); });
+  // Righe e arrivi dal motore (27 nov): per un OF di Alnus partenza al punto zero e i
+  // NOSTRI DDT dopo lo zero; per gli altri residuo/ordinato e i carichi dopo l'import.
+  const calc = terz ? { dalZero: false, righe: [], arrivi: [] } : righeApertoOfOra(of);
+  const arrivi = calc.arrivi;
   // Le commesse che lo hanno come «n. OF» (abbinamento) o dentro le righe (ordine al terzista).
   const commesse = [];
   (state.opFornitori || []).forEach(r => {
@@ -7960,7 +8024,7 @@ async function apriDettaglioOf(of, poi) {
   const scheda = (titolo, valore) => el('div', { style: 'min-width:150px;' },
     el('div', { class: 'sub', style: 'font-size:10px;text-transform:uppercase;letter-spacing:.08em;' }, titolo),
     el('div', { style: 'font-size:13px;font-weight:600;margin-top:2px;' }, valore == null || valore === '' ? '—' : valore));
-  const statoTxt = of.stato === 'chiuso' ? 'chiuso (evaso in Alnus)' : of.stato === 'annullato' ? 'annullato' : 'aperto';
+  const statoTxt = testoStatoOf(of) + (of.saldato_il ? ' il ' + fmtQuando(of.saldato_il) + (of.saldo_nota ? ' · ' + of.saldo_nota : '') : '');
   const tot = righe.reduce((s2, r) => s2 + (Number(r.totale) || 0), 0);
   v.corpo.append(el('div', { style: 'display:flex;flex-wrap:wrap;gap:14px 24px;margin-bottom:12px;' },
     scheda('Numero', numeroOrdineFornitore(of) + (of.revisione ? ' · rev. ' + of.revisione : '')),
@@ -7984,23 +8048,21 @@ async function apriDettaglioOf(of, poi) {
       td(r.prezzo_pz != null ? cartaEuro(r.prezzo_pz, 5) : '', 1), td(r.totale != null ? cartaEuro(r.totale) : '', 1))));
     tbl.append(tb);
   } else {
+    const z = calc.dalZero;
     tbl.append(el('thead', {}, el('tr', {}, th('Riga'), th('Codice'), th('Descrizione'), th('UM'), th('Ordinato', 1),
-      th(daAlnus ? 'Residuo in Alnus' : 'Arrivato', 1), th('Arrivato dopo', 1), th('Da arrivare', 1), th('Consegna'), th('€/unità', 1), th('Totale', 1), th('Cod. fornitore'))));
+      th(z ? 'Al punto zero' : daAlnus ? 'Residuo all’import' : 'Ordinato', 1), th(z ? 'Arrivato (nostri DDT)' : 'Arrivato', 1), th('Da arrivare', 1),
+      daAlnus ? th('Residuo in Alnus', 1) : '', th('Consegna'), th('€/unità', 1), th('Totale', 1), th('Cod. fornitore'))));
     const tb = el('tbody');
-    const arrivatiResto = new Map(arrivatiPer);
-    righe.forEach(r => {
-      const c = String(r.codice || '').trim().toUpperCase();
+    const chiusoAMano = of.stato === 'chiuso' || of.stato === 'annullato';
+    righe.forEach((r, i) => {
+      const x = calc.righe[i] || { partenza: 0, arrivato: 0, aperto: 0, residuoAlnus: null };
       const ord = Number(r.qta) || 0;
-      const res = r.qta_residua != null ? Number(r.qta_residua) : null;
-      // Gli arrivi dopo l'import si attribuiscono alle righe aperte del codice, nell'ordine.
-      const disp = arrivatiResto.get(c) || 0;
-      const base = res != null ? res : ord;
-      const preso = Math.min(base, disp);
-      arrivatiResto.set(c, disp - preso);
-      const aperto = Math.max(0, base - preso);
+      const aperto = chiusoAMano ? 0 : x.aperto;
       const cons = consegnaRigaOf(of, r);
-      const scaduta = aperto > 0 && cons && cons < oggi && of.stato === 'emesso';
+      const scaduta = aperto > 0 && cons && cons < oggi;
       const evasa = !(aperto > 0);
+      // Paragone con Alnus: il suo residuo diverso dal nostro aperto si vede in arancio.
+      const diversoAlnus = daAlnus && x.residuoAlnus != null && Math.abs(x.residuoAlnus - x.aperto) >= 0.0005;
       tb.append(el('tr', { style: evasa ? 'opacity:.6;' : '' },
         td(r.riga != null ? String(r.riga) : ''),
         el('td', { class: 'mono', style: 'font-weight:700;cursor:pointer;white-space:nowrap;', title: 'Scheda del codice',
@@ -8008,9 +8070,10 @@ async function apriDettaglioOf(of, poi) {
         td(r.descrizione, 0, 'max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;'),
         td(r.um),
         td(nfIT(ord), 1),
-        td(daAlnus ? (res != null ? nfIT(res) : '') : nfIT(preso), 1),
-        td(daAlnus && preso ? nfIT(preso) : '', 1),
-        td(aperto > 0 ? nfIT(aperto) : '✓', 1, aperto > 0 ? 'font-weight:700;' : 'color:var(--grn);'),
+        td(nfIT(x.partenza), 1),
+        td(x.arrivato ? nfIT(x.arrivato) : '', 1),
+        td(aperto > 0 ? nfIT(aperto) : chiusoAMano && x.aperto > 0 ? 'chiusa' : '✓', 1, aperto > 0 ? 'font-weight:700;' : chiusoAMano && x.aperto > 0 ? 'color:var(--mut);' : 'color:var(--grn);'),
+        daAlnus ? td(x.residuoAlnus != null ? nfIT(x.residuoAlnus) : '', 1, diversoAlnus ? 'color:var(--or);font-weight:700;' : 'color:var(--mut);') : '',
         td(cons ? fmtIT(cons) + (scaduta ? ' ⚠' : '') : '', 0, 'white-space:nowrap;' + (scaduta ? 'color:var(--or);font-weight:700;' : '')),
         td(r.prezzo != null ? cartaEuro(r.prezzo, 5) : '', 1),
         td(r.totale != null ? cartaEuro(r.totale) : '', 1),
@@ -8018,17 +8081,19 @@ async function apriDettaglioOf(of, poi) {
     });
     tbl.append(tb);
   }
-  const aperteN = terz ? 0 : righe.filter(r => (r.qta_residua != null ? Number(r.qta_residua) : Number(r.qta) || 0) > 0).length;
+  const aperteN = terz ? 0 : calc.righe.filter(x => x.aperto > 0).length;
   v.corpo.append(el('div', { class: 'sub', style: 'font-size:12px;margin:4px 0 6px;' },
     plAlnus(righe.length, 'riga', 'righe') + (terz ? '' : ' · ' + plAlnus(aperteN, 'aperta', 'aperte') + ' · ' + plAlnus(righe.length - aperteN, 'evasa', 'evase'))
-    + (daAlnus ? ' · il residuo è quello dell’ultimo import; «Arrivato dopo» = carichi di Alnus successivi' : '')),
+    + (calc.dalZero ? ' · «Al punto zero» = quello che mancava il ' + fmtQuando(new Date(indiceArriviOfOra().zero).toISOString())
+      + '; lo scalano solo i nostri DDT. «Residuo in Alnus» è il paragone (in arancio se diverso).'
+      : daAlnus ? ' · il residuo è quello dell’ultimo import; «Arrivato» = nostri carichi successivi' : '')),
     el('div', { style: 'overflow-x:auto;max-height:46vh;overflow-y:auto;' }, tbl));
 
   // Arrivi e commesse.
   if (arrivi.length) v.corpo.append(el('div', { style: 'margin-top:12px;' },
-    el('div', { style: 'font-weight:700;font-size:13px;margin-bottom:4px;' }, 'Arrivi registrati' + (daAlnus ? ' dopo l’ultimo import' : '')),
+    el('div', { style: 'font-weight:700;font-size:13px;margin-bottom:4px;' }, 'Arrivi registrati' + (calc.dalZero ? ' dal punto zero' : daAlnus ? ' dopo l’ultimo import' : '')),
     ...arrivi.slice().sort((a, b) => String(a.data).localeCompare(String(b.data))).map(m => el('div', { class: 'mono', style: 'font-size:12px;padding:1px 0;' },
-      fmtQuando(m.data) + ' · ' + m.codice + ' · ' + nfIT(m.qta)))));
+      fmtIT(String(m.data || '').slice(0, 10)) + ' · ' + (m.documento_tipo === 'DDT' && m.documento_numero ? 'DDT ' + m.documento_numero + ' · ' : '') + m.codice + ' · ' + nfIT(m.qta)))));
   v.corpo.append(el('div', { style: 'margin-top:12px;' },
     el('div', { style: 'font-weight:700;font-size:13px;margin-bottom:4px;' }, 'Commesse collegate'),
     commesse.length ? el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;' }, ...commesse.map(o => el('button', { type: 'button', class: 'btnsm',
@@ -8039,6 +8104,11 @@ async function apriDettaglioOf(of, poi) {
   v.piede.append(
     el('button', { class: 'btng', onclick: () => stampaOrdineFornitore(of) }, '🖨 Stampa'),
     (eAdminOra() && !daAlnus && of.stato === 'emesso') ? el('button', { class: 'btng', onclick: () => { v.chiudi(); modificaOrdineFornitore(of, poi); } }, '✎ Modifica') : '',
+    // Saldo a mano (27 nov): il fornitore non manda il resto. Solo OF d'acquisto.
+    (eAdminOra() && !terz && of.stato === 'emesso' && aperteN > 0) ? el('button', { class: 'btng',
+      title: 'Il fornitore non manderà il resto: l’ordine si chiude e non conta più come in arrivo',
+      onclick: () => { v.chiudi(); saldaOrdineFornitore(of, true, poi); } }, '✓ Chiudi (saldo)') : '',
+    (eAdminOra() && !terz && of.stato === 'chiuso') ? el('button', { class: 'btng', onclick: () => { v.chiudi(); saldaOrdineFornitore(of, false, poi); } }, '↺ Riapri') : '',
     el('button', { class: 'btnp', onclick: v.chiudi }, 'Chiudi'));
 }
 
@@ -8617,7 +8687,7 @@ async function apriDdtEntrataManuale(poi, ric) {
             el('span', { class:'mono', style: Math.abs((Number(c.ordinato) || 0) - (Number(r.qta) || 0)) < 1e-9 && r.qta ? 'color:var(--grn);font-weight:700;' : 'color:var(--mut);' }, 'ord. ' + nfq(c.ordinato)),
             el('span', { class:'sub' }, ' · '),
             el('span', { class:'mono', style: c.aperto > 0 && Math.abs(c.aperto - (Number(r.qta) || 0)) < 1e-9 ? 'color:var(--grn);font-weight:700;' : 'color:var(--mut);' },
-              c.aperto > 0 ? 'aspetta ' + nfq(c.aperto) : c.stato === 'chiuso' ? 'chiuso' : 'evasa')) : ''))));
+              c.aperto > 0 ? 'aspetta ' + nfq(c.aperto) : c.stato === 'chiuso' ? 'chiuso a mano' : 'evasa')) : ''))));
     };
     const box = el('div', { style:'margin-top:6px;max-height:40vh;overflow:auto;' });
     inCerca.oninput = () => { cerca = inCerca.value; evid = 0; disegnaLista();
@@ -9814,7 +9884,7 @@ function sezioneCicloProduttivo(o, art, poi, opts) {
           docs.append(rigaDoc('📑', 'Ordine ' + numeroOrdineFornitore(of) + (of.data ? ' del ' + fmtIT(String(of.data).slice(0, 10)) : ''),
             of.nonImportato ? 'Alnus · abbinato col «n. OF» della commessa, non ancora fra gli OF importati'
               : 'Alnus · ' + (tot ? cartaEuro(tot) + ' · ' : '') + (of.consegna ? 'consegna ' + fmtIT(String(of.consegna).slice(0, 10)) + ' · ' : '')
-                + (of.stato === 'chiuso' ? 'chiuso in Alnus' : 'aperto'),
+                + testoStatoOf(of),
             of.id ? bt('🖨 OF', () => stampaOrdineFornitore(of), 'Stampa l’ordine come caricato da Alnus') : null));
         } else if (of) {
           const altre = (of.righe || []).filter(r => r.operazione_id !== o.id).map(r => r.etichetta);
