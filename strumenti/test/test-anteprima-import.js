@@ -108,8 +108,8 @@ t('fusione BOX di Senzani', () => {
   conStato([], [{ id:'abox', codice:'BOX_EL000999' }], [{ id:'csz', nome:'Senzani Brevetti S.p.a.' }]);
   apri([R({ 'Ragione Sociale ':'SENZANI BREVETTI S.p.a.', 'Riferimento Cliente _1':'EL000999' }),
         R({ 'Ragione Sociale ':'SENZANI BREVETTI S.p.a.', 'Riferimento Cliente _1':'EL000999', 'Riga ':'20' })]); });
-t('righe scartate: OD e senza codice', () => { conStato([]);
-  apri([R({ 'Sz Cl ':'OD' }), R({ 'Codice Articolo ':'', 'Riga ':'20' })]); });
+t('righe scartate: sezionale sconosciuto e senza codice', () => { conStato([]);
+  apri([R({ 'Sz Cl ':'OX' }), R({ 'Codice Articolo ':'', 'Riga ':'20' })]); });
 
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);

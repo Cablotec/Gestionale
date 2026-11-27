@@ -1969,7 +1969,8 @@ function sessioneInConflitto(utenteId, inizioIso, fineIso, escludiId) {
    verificata sui dati veri prima di toccare il database.
 
    Decisioni prese con Nico il 25 ago, tutte visibili nel codice sotto:
-   · SOLO sezionale OC. Le righe OD si scartano dichiarandole.
+   · Sezionali OC e OD (gli OD dal 27 nov, Nico: "si' apri agli OD"; il 25 ago
+     erano stati esclusi). Gli altri si scartano dichiarandoli.
    · Senzani + riferimento che inizia per EL → le righe si FONDONO in una
      sola commessa per ordine: articolo `BOX_<riferimento>`, descrizione
      `SBNE`, pos 0010, quantità 1, prezzo = somma degli imponibili.
@@ -2241,7 +2242,7 @@ function analizzaImportOrdini(righe, ctx) {
   righe.forEach((r, i) => {
     const nRiga = i + 2;                     // +2: la riga 1 sono le intestazioni
     const sz = (val(r, 'sz') || 'OC').toUpperCase();
-    if (sz !== 'OC') return scarta(nRiga, 'sezionale ' + sz + ' (per ora si importa solo OC)');
+    if (sz !== 'OC' && sz !== 'OD') return scarta(nRiga, 'sezionale ' + sz + ' (si importano solo OC e OD)');
 
     const ord = val(r, 'ord');
     if (!ord) return scarta(nRiga, 'numero ordine mancante');

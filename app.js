@@ -16013,8 +16013,8 @@ function openNuovoOrdineModal() {
     onChange: () => righe.forEach(r => r.prefillPrezzo()),
   });
   const inpOC = el('input', { type:'text', class:'ord-inp', value: new Date().getFullYear() + '/OC/',
-    placeholder:'2026/OC/00001', pattern:'\\d{4}/OC/\\d{5}',
-    onblur:(e)=>{ const m=e.target.value.trim().match(/^(\d{4})\/OC\/(\d{1,4})$/); if(m) e.target.value=m[1]+'/OC/'+m[2].padStart(5,'0'); } });
+    placeholder:'2026/OC/00001', pattern:'\\d{4}/O[CD]/\\d{5}',
+    onblur:(e)=>{ const m=e.target.value.trim().toUpperCase().match(/^(\d{4})\/(O[CD])\/(\d{1,4})$/); if(m) e.target.value=m[1]+'/'+m[2]+'/'+m[3].padStart(5,'0'); } });
   // Intestazione: il campo OC replica ESATTAMENTE la geometria del cliente
   // (margin-top:6px come .util-dropwrap + spaziatore alto quanto l'hint),
   // così i due input sono sovrapponibili al pixel (misurato: 121→153 entrambi).
@@ -16164,7 +16164,7 @@ function openNuovoOrdineModal() {
     const cliVal = acCliente.getValue();
     const oc = (inpOC.value||'').trim();
     if (cliVal.mode === 'empty') return toast('Cliente obbligatorio', 'err');
-    if (!/^\d{4}\/OC\/\d{5}$/.test(oc)) return toast('Numero ordine nel formato AAAA/OC/NNNNN', 'err');
+    if (!/^\d{4}\/O[CD]\/\d{5}$/.test(oc)) return toast('Numero ordine nel formato AAAA/OC/NNNNN o AAAA/OD/NNNNN', 'err');
     const dati = righe.map(r => r.getData()).filter(d => (d.articoloId || d.nuovoCodice) && d.quantita > 0);
     if (!dati.length) return toast('Aggiungi almeno una posizione con articolo e quantità', 'err');
     // Un OP scritto e non capito si FERMA qui: prima veniva scartato in
@@ -18911,16 +18911,16 @@ function openOperazioneModal(o, opts) {
         el('input', { type:'text', name:'numero_ordine',
           value: o.numero_ordine || (new Date().getFullYear() + '/OC/'),
           placeholder:'es. 2026/OC/00388',
-          pattern:'\\d{4}/OC/\\d{5}',
+          pattern:'\\d{4}/O[CD]/\\d{5}',
           required:'true',
-          title:'Formato richiesto: AAAA/OC/NNNNN (numero a 5 cifre, es. 2026/OC/00388)',
+          title:'Formato richiesto: AAAA/OC/NNNNN o AAAA/OD/NNNNN (numero a 5 cifre, es. 2026/OC/00388)',
           // Al blur: se l'input matcha "AAAA/OC/N" con 1-4 cifre, padda a 5.
           // Niente altra magia: l'utente vede solo lo zero-padding,
           // qualsiasi altra deviazione resta com'è (gestita dalla validazione).
           onblur: (e) => {
             const v = e.target.value.trim();
-            const m = v.match(/^(\d{4})\/OC\/(\d{1,4})$/);
-            if (m) e.target.value = m[1] + '/OC/' + m[2].padStart(5, '0');
+            const m = v.toUpperCase().match(/^(\d{4})\/(O[CD])\/(\d{1,4})$/);
+            if (m) e.target.value = m[1] + '/' + m[2] + '/' + m[3].padStart(5, '0');
           },
         })),
       el('div', { class:'field' }, el('label', {}, 'POS'),
@@ -20331,13 +20331,13 @@ function openOperazioneModal(o, opts) {
       // Applichiamo qui lo stesso zero-padding dell'onblur, in caso il submit
       // arrivi senza blur preventivo (es. Invio da tastiera).
       let numOrd = (fd.get('numero_ordine')||'').trim();
-      const padMatch = numOrd.match(/^(\d{4})\/OC\/(\d{1,4})$/);
-      if (padMatch) numOrd = padMatch[1] + '/OC/' + padMatch[2].padStart(5, '0');
+      const padMatch = numOrd.toUpperCase().match(/^(\d{4})\/(O[CD])\/(\d{1,4})$/);
+      if (padMatch) numOrd = padMatch[1] + '/' + padMatch[2] + '/' + padMatch[3].padStart(5, '0');
       if (!numOrd) {
         return toast('Numero ordine obbligatorio', 'err');
       }
-      if (!/^\d{4}\/OC\/\d{5}$/.test(numOrd)) {
-        return toast('Numero ordine non valido. Usa il formato AAAA/OC/NNNNN (es. 2026/OC/00388).', 'err');
+      if (!/^\d{4}\/O[CD]\/\d{5}$/.test(numOrd)) {
+        return toast('Numero ordine non valido. Usa il formato AAAA/OC/NNNNN o AAAA/OD/NNNNN (es. 2026/OC/00388).', 'err');
       }
 
       // Validazione numero OP: opzionale, ma se valorizzato deve essere AAAA/OP/NNNNN.

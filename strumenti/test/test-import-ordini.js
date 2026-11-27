@@ -56,12 +56,13 @@ sez('NUMERO ORDINE E POS');
   t('minuti dal default articolo', v.minutiUnitari === 42);
 }
 
-sez('SOLO OC: le righe OD si scartano dichiarandole');
+sez('OC e OD entrano (27 nov), gli altri sezionali si scartano dichiarandoli');
 {
-  const p = analizza([R({}), R({ 'Sz Cl ':'OD', 'Riga ':'20' })], CTX);
-  t('una sola voce importabile', p.nuove.length === 1);
-  t('la riga OD e scartata', p.scartate.length === 1);
-  t('e il motivo lo nomina', /OD/.test(p.scartate[0].motivo));
+  const p = analizza([R({}), R({ 'Sz Cl ':'OD', 'Riga ':'20' }), R({ 'Sz Cl ':'OX', 'Riga ':'30' })], CTX);
+  t('OC e OD importabili', p.nuove.length === 2);
+  t('l OD ha il suo numero', p.nuove.some(v => /\/OD\//.test(v.numeroOrdine || v.numero_ordine || JSON.stringify(v))));
+  t('il sezionale sconosciuto e scartato', p.scartate.length === 1);
+  t('e il motivo lo nomina', /OX/.test(p.scartate[0].motivo));
 }
 
 sez('FUSIONE SENZANI EL -> una commessa BOX');
