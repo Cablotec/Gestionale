@@ -1053,7 +1053,8 @@ function applicaVarianti(base, varianti, pezzi) {
   const conFe = (r, v) => { if (v && 'fasi_esterne' in v) r.fasi_esterne = _fe(v.fasi_esterne); return r; };
   const saltate = [];
   (varianti || []).forEach(v => {
-    if (!v || !v.tipo || !v.codice) return;
+    // Portata nella distinta del prodotto (27 nov): la base la contiene gia'.
+    if (!v || !v.tipo || !v.codice || v.in_distinta) return;
     const i = trova(v.codice);
     if (v.tipo === 'tolto') { if (i < 0) saltate.push(v); else righe.splice(i, 1); return; }
     if (v.tipo === 'quantita') {
@@ -1173,7 +1174,70 @@ function variantiDaConfronto(base, voluta, sostituzioni, vecchie, meta) {
   const m = meta || {};
   return out.map(v => { const p = prima.get(firma(v));
     return Object.assign(v, p ? { motivo: p.motivo || null, il: p.il || null, chi: p.chi || null }
-      : { motivo: m.motivo || null, il: m.il || null, chi: m.chi || null }); });
+      : { motivo: m.motivo || null, il: m.il || null, chi: m.chi || null }); })
+    // Le varianti gia' portate nella distinta (27 nov) non sono piu' differenze, ma
+    // restano come storia della commessa («✓ nella distinta dal …»).
+    .concat((vecchie || []).filter(v => v && v.in_distinta));
+}
+
+// ⚠⚠ PORTARE UNA VARIANTE NELLA DISTINTA DEL PRODOTTO (27 nov, Nico: "come potremmo
+// chiedere all'operatore di andare a modificare la distinta base originale. Mi dice
+// Claudio che capita che alcune modifiche apportate in corso d'opera, poi siano
+// definitive anche per quelle future"). Le varianti di una commessa sono per PEZZO;
+// la distinta del prodotto (`articoli.distinta`, righe { codice, qta per pezzo, um,
+// tipo?, descrizione? }) e' a UN livello (al 27/11 nessun prodotto ha sottoassiemi).
+// Ritorna { distinta (nuova, copia), applicate, saltate: [{ v, perche }] }:
+//   tolto      → le righe del codice tolte;
+//   quantita   → il codice a qta_pz (piu' righe dello stesso codice diventano una);
+//   sostituito → il codice diventa `nuovo`, qta = qta_pz della variante o quella di prima;
+//   aggiunto   → riga nuova, o la quantita' se il codice c'e' gia'.
+// Le quote ai terzisti della variante NON passano: stanno in «Fasi» della scheda prodotto.
+function distintaConVarianti(distinta, varianti) {
+  let righe = (Array.isArray(distinta) ? distinta : []).map(r => Object.assign({}, r));
+  const applicate = [], saltate = [];
+  const idx = (c) => righe.reduce((a, r, i) => (_kv(r.codice) === _kv(c) ? a.concat(i) : a), []);
+  const unaSola = (c) => { const ii = idx(c); if (ii.length > 1) righe = righe.filter((r, i) => !ii.slice(1).includes(i)); return ii.length ? ii[0] : -1; };
+  (varianti || []).forEach(v => {
+    if (!v || !v.tipo || !v.codice) return;
+    if (v.in_distinta) { saltate.push({ v, perche: 'gia\' nella distinta' }); return; }
+    const c = String(v.codice).trim();
+    if (v.tipo === 'tolto') {
+      const ii = idx(c);
+      if (!ii.length) { saltate.push({ v, perche: 'il codice non e\' piu\' nella distinta' }); return; }
+      righe = righe.filter((r, i) => !ii.includes(i)); applicate.push(v); return;
+    }
+    if (v.tipo === 'quantita') {
+      const i = unaSola(c);
+      if (i < 0) { saltate.push({ v, perche: 'il codice non e\' piu\' nella distinta' }); return; }
+      if (v.qta_pz == null) { saltate.push({ v, perche: 'quantita\' mancante' }); return; }
+      righe[i].qta = _r4(v.qta_pz); applicate.push(v); return;
+    }
+    if (v.tipo === 'sostituito') {
+      if (!v.nuovo) { saltate.push({ v, perche: 'manca il codice nuovo' }); return; }
+      const i = unaSola(c);
+      if (i < 0) { saltate.push({ v, perche: 'il codice non e\' piu\' nella distinta' }); return; }
+      if (idx(v.nuovo).length) { saltate.push({ v, perche: String(v.nuovo).trim() + ' e\' gia\' nella distinta' }); return; }
+      const r = righe[i];
+      righe[i] = Object.assign({}, r, { codice: String(v.nuovo).trim(), qta: v.qta_pz != null ? _r4(v.qta_pz) : r.qta,
+        um: v.um || r.um || null, descrizione: v.descrizione || null });
+      if (v.tipo_parte !== undefined) { if (v.tipo_parte === 'MAC') righe[i].tipo = 'MAC'; else delete righe[i].tipo; }
+      if (righe[i].descrizione == null) delete righe[i].descrizione;
+      applicate.push(v); return;
+    }
+    if (v.tipo === 'aggiunto') {
+      if (!(Number(v.qta_pz) > 0)) { saltate.push({ v, perche: 'quantita\' mancante' }); return; }
+      const i = unaSola(c);
+      if (i >= 0) righe[i].qta = _r4(v.qta_pz);
+      else {
+        const n = { codice: c, qta: _r4(v.qta_pz), um: v.um || null };
+        if (v.descrizione) n.descrizione = v.descrizione;
+        if (v.tipo_parte === 'MAC') n.tipo = 'MAC';
+        righe.push(n);
+      }
+      applicate.push(v);
+    }
+  });
+  return { distinta: righe, applicate, saltate };
 }
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -1182,5 +1246,5 @@ if (typeof module !== 'undefined' && module.exports) {
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
     ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne, assegnaPerServizio, terzistiDellaCommessa,
-    chiaveOfDaRif, chiaveOf, ordinatoApertoOf, puntoZeroMovimenti, chiaveOfDaNotaAlnus, indiceArriviOf, righeApertoOf, collaudoOf, codiciFuoriRepartoAlLotto };
+    chiaveOfDaRif, chiaveOf, ordinatoApertoOf, puntoZeroMovimenti, chiaveOfDaNotaAlnus, indiceArriviOf, righeApertoOf, collaudoOf, codiciFuoriRepartoAlLotto, distintaConVarianti };
 }

@@ -111,5 +111,37 @@ sez('Modifiche dalla fase (terzista o reparto)');
   t('spostare solo la destinazione e\' una variante', M.variantiDaConfronto(lista, [{ codice: 'K', qta_pz: 8, fasi_esterne: { B: 8 } }, lista[1]], [], [], {}).length === 1 && V3.length === 1);
 }
 
+console.log('\nPortare le varianti nella distinta del prodotto (27 nov)');
+{
+  const dist = [{ codice: 'A', qta: 2, um: 'nr' }, { codice: 'B', qta: 1, um: 'nr' }, { codice: 'C', qta: 3, um: 'mt', tipo: 'MAC' },
+    { codice: 'D', qta: 1 }, { codice: 'D', qta: 2 }, { codice: 'E', qta: 4 }];
+  const v = [
+    { tipo: 'tolto', codice: 'a' },
+    { tipo: 'quantita', codice: 'D', qta_pz: 5 },
+    { tipo: 'sostituito', codice: 'B', nuovo: 'B2', qta_pz: null, descrizione: 'B nuovo', um: 'nr', tipo_parte: 'ACQ' },
+    { tipo: 'aggiunto', codice: 'F', qta_pz: 0.5, um: 'mt', descrizione: 'filo', tipo_parte: 'MAC' },
+    { tipo: 'aggiunto', codice: 'E', qta_pz: 6 },
+    { tipo: 'tolto', codice: 'ZZ' },
+    { tipo: 'sostituito', codice: 'C', nuovo: 'E' },
+    { tipo: 'tolto', codice: 'C', in_distinta: '2026-11-20' },
+  ];
+  const r = M.distintaConVarianti(dist, v);
+  const di = (c) => r.distinta.filter(x => x.codice === c);
+  t('tolto A (maiuscole indifferenti)', !di('A').length);
+  t('quantita D: due righe diventano una da 5', di('D').length === 1 && di('D')[0].qta === 5);
+  t('sostituito B → B2, quantita di prima, descrizione nuova', di('B2').length === 1 && di('B2')[0].qta === 1 && di('B2')[0].descrizione === 'B nuovo' && !di('B').length);
+  t('aggiunto F nuovo, MAC sull\'arco', di('F').length === 1 && di('F')[0].qta === 0.5 && di('F')[0].tipo === 'MAC');
+  t('aggiunto E gia\' presente = quantita 6', di('E').length === 1 && di('E')[0].qta === 6);
+  t('saltate: codice sparito, sostituto gia\' in distinta, gia\' portata', r.saltate.length === 3);
+  t('C resta (sostituzione saltata)', di('C').length === 1 && di('C')[0].tipo === 'MAC');
+  t('la distinta di partenza non cambia', dist.length === 6 && dist[0].codice === 'A');
+  t('applicate 5', r.applicate.length === 5);
+  // Dopo: la variante portata non si riapplica e resta come storia.
+  const lista = [{ codice: 'A', qta_pz: 2, qta: 2 }];
+  t('applicaVarianti salta le varianti in_distinta', M.applicaVarianti(lista, [{ tipo: 'tolto', codice: 'A', in_distinta: '2026-11-27' }], 1).righe.length === 1);
+  const storia = M.variantiDaConfronto(lista, lista, [], [{ tipo: 'tolto', codice: 'X', in_distinta: '2026-11-27' }], {});
+  t('variantiDaConfronto tiene la storia delle varianti portate', storia.length === 1 && storia[0].in_distinta === '2026-11-27');
+}
+
 console.log('\n' + ok + ' ok, ' + ko + ' KO');
 process.exit(ko ? 1 : 0);

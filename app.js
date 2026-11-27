@@ -4479,6 +4479,100 @@ async function salvaMaterialiCommessa(op, righe, varianti) {
 // Colonna «Già dato»: quanto e' gia' partito per quella fase (avviso se si
 // scende sotto). `opts.fornitori`: i terzisti della commessa (per la base
 // delle varianti, come il rigenera). Senza `opts.fase`: la lista intera.
+// Una variante in una riga di testo (nota in cima, finestre).
+function testoVariante(w) {
+  const nomi = { tolto: 'tolto', quantita: 'quantità', sostituito: 'sostituito', aggiunto: 'aggiunto' };
+  return (nomi[w.tipo] || w.tipo) + ' ' + w.codice + (w.nuovo ? ' → ' + w.nuovo : '') + (w.qta_pz != null ? ' · ' + nfIT(w.qta_pz) + '/pz' : '')
+    + (w.motivo ? ' · «' + w.motivo + '»' : '') + (w.in_distinta ? ' · ✓ nella distinta dal ' + fmtIT(w.in_distinta) : '');
+}
+// ⇪ PORTA NELLA DISTINTA (27 nov, Nico: "Claudio dice che capita che alcune modifiche
+// apportate in corso d'opera poi siano definitive anche per quelle future"). Si scelgono
+// le varianti della commessa che valgono per sempre; la finestra mostra la distinta del
+// prodotto prima/dopo (`distintaConVarianti`, domain) e scrive `articoli.distinta`.
+// Sulla commessa la variante resta, segnata `in_distinta` (data) e `in_distinta_da`:
+// non e' piu' una differenza (il ⟳ Rigenera non la riapplica) ma resta la storia.
+// A un livello: al 27/11 nessun prodotto del gestionale ha sottoassiemi.
+async function apriPortaInDistinta(o, art, poi) {
+  if (!o || !art || !Array.isArray(art.distinta)) return;
+  const vive = (o.materiali_varianti || []).map((w, i) => ({ w, i })).filter(x => !x.w.in_distinta);
+  if (!vive.length) return toast('Nessuna modifica da portare nella distinta', 'ok');
+  const v = veloTerzista('Porta nella distinta di ' + art.codice, 980);
+  const scelte = new Set();
+  const lista = el('div', { style:'display:flex;flex-direction:column;gap:4px;margin:8px 0 12px;' });
+  const anteprima = el('div', { style:'margin-top:6px;' });
+  const salva = el('button', { class:'btnp', disabled: true }, 'Scrivi nella distinta');
+  const etichettaRiga = (r) => r ? nfIT(r.qta) + (r.um ? ' ' + r.um : '') + (r.tipo === 'MAC' ? ' · MAC' : '') : '—';
+  const disegna = () => {
+    const sel = vive.filter(x => scelte.has(x.i)).map(x => x.w);
+    const esito = distintaConVarianti(art.distinta, sel);
+    anteprima.innerHTML = '';
+    salva.disabled = !esito.applicate.length;
+    if (!sel.length) { anteprima.append(el('div', { class:'sub', style:'font-size:12px;' }, 'Spunta le modifiche che valgono anche per i prossimi ordini.')); return; }
+    // Prima / dopo: solo i codici che cambiano.
+    const per = (d) => { const m = new Map(); d.forEach(r => { const k = String(r.codice).trim().toUpperCase(); m.set(k, m.has(k) ? Object.assign({}, r, { qta: m.get(k).qta + (Number(r.qta) || 0) }) : r); }); return m; };
+    const P = per(art.distinta), D = per(esito.distinta);
+    const codici = [...new Set([...P.keys(), ...D.keys()])].filter(k => JSON.stringify(P.get(k) || null) !== JSON.stringify(D.get(k) || null))
+      .sort((a, b) => a.localeCompare(b, 'it', { numeric: true }));
+    const tbl = el('table', { class:'rt' });
+    tbl.append(el('thead', {}, el('tr', {}, el('th', {}, 'Codice'), el('th', {}, 'Descrizione'), el('th', { style:'text-align:right;' }, 'Prima (per pezzo)'), el('th', { style:'text-align:right;' }, 'Dopo (per pezzo)'))));
+    const tb = el('tbody');
+    codici.forEach(k => { const a = P.get(k), b = D.get(k);
+      tb.append(el('tr', {}, el('td', { class:'mono', style:'font-weight:700;white-space:nowrap;' }, (b || a).codice),
+        el('td', { style:'font-size:12px;' }, (b && b.descrizione) || (a && a.descrizione) || ''),
+        el('td', { class:'mono', style:'text-align:right;' + (a ? '' : 'color:var(--mut);') }, etichettaRiga(a)),
+        el('td', { class:'mono', style:'text-align:right;font-weight:700;color:' + (b ? 'var(--grn)' : 'var(--or)') + ';' }, b ? etichettaRiga(b) : 'tolto'))); });
+    tbl.append(tb);
+    anteprima.append(el('div', { style:'font-weight:700;font-size:13px;margin-bottom:4px;' },
+      'Distinta di ' + art.codice + ': ' + art.distinta.length + ' → ' + esito.distinta.length + ' righe'), tbl);
+    if (esito.saltate.length) anteprima.append(el('div', { style:'margin-top:8px;font-size:12px;color:var(--or);' },
+      '⚠ Non si possono portare: ' + esito.saltate.map(x => x.v.codice + (x.v.nuovo ? ' → ' + x.v.nuovo : '') + ' (' + x.perche + ')').join(', ')));
+    const altre = (state.operazioni || []).filter(z => z.id !== o.id && z.articolo_id === art.id && (z.stato === 'aperta' || z.stato === 'sospesa'));
+    if (altre.length) anteprima.append(el('div', { class:'sub', style:'margin-top:8px;font-size:12px;' },
+      'Altre commesse aperte di ' + art.codice + ' (hanno la lista fatta con la distinta di prima; per aggiornarle aprile e usa «⟳ Rigenera dalla distinta»): '
+      + altre.map(z => z.numero_ordine + (z.pos ? '/' + z.pos : '')).join(', ') + '.'));
+  };
+  vive.forEach(x => lista.append(el('label', { style:'display:flex;gap:8px;align-items:flex-start;font-size:12px;cursor:pointer;' },
+    el('input', { type:'checkbox', onchange: (e) => { if (e.target.checked) scelte.add(x.i); else scelte.delete(x.i); disegna(); } }),
+    el('span', {}, testoVariante(x.w) + (x.w.chi ? ' · ' + x.w.chi : '') + (x.w.il ? ' · ' + fmtIT(x.w.il) : '')))));
+  salva.onclick = async () => {
+    const sel = vive.filter(x => scelte.has(x.i));
+    const esito = distintaConVarianti(art.distinta, sel.map(x => x.w));
+    if (!esito.applicate.length) return;
+    if (!confirm('Scrivere ' + esito.applicate.length + (esito.applicate.length === 1 ? ' modifica' : ' modifiche') + ' nella distinta di ' + art.codice
+      + '?\n\nVale per tutti i prossimi ordini di questo prodotto. Finché c’è Alnus, la stessa modifica va fatta anche lì.')) return;
+    salva.disabled = true; salva.textContent = 'Salvataggio…';
+    try {
+      const { data: artNuovo, error } = await sb.from('articoli').update({ distinta: esito.distinta }).eq('id', art.id).select().single();
+      if (error) throw error;
+      if (!artNuovo) throw new Error('la distinta non è stata scritta (permessi?)');
+      Object.assign(art, artNuovo);
+      const ia = (state.articoli || []).findIndex(z => z.id === art.id);
+      if (ia >= 0) state.articoli[ia] = artNuovo;
+      // Sulla commessa: le varianti portate segnate, le righe della lista senza l'etichetta.
+      const oggi = toLocalISO(new Date());
+      const chi = (state.profile && (state.profile.nome || state.profile.email)) || null;
+      const portate = new Set(esito.applicate);
+      const varianti = (o.materiali_varianti || []).map(w => portate.has(w) ? Object.assign({}, w, { in_distinta: oggi, in_distinta_da: chi }) : w);
+      const chiavi = new Set(esito.applicate.map(w => String(w.tipo === 'sostituito' ? w.nuovo : w.codice).trim().toUpperCase()));
+      const righe = (o.materiali || []).map(r => { if (!chiavi.has(String(r.codice).trim().toUpperCase())) return r;
+        const n = Object.assign({}, r); delete n.variante; delete n.qta_pz_distinta; delete n.al_posto_di; return n; });
+      await salvaMaterialiCommessa(o, righe, varianti);
+      v.chiudi();
+      toast('Distinta di ' + art.codice + ' aggiornata (' + esito.applicate.length + (esito.applicate.length === 1 ? ' modifica' : ' modifiche')
+        + '). Ricordati di farlo anche in Alnus.', 'ok', 10000);
+      if (typeof poi === 'function') poi();
+    } catch (e) {
+      salva.disabled = false; salva.textContent = 'Scrivi nella distinta';
+      toast('Distinta non aggiornata: ' + (e.message || e), 'err', 9000);
+    }
+  };
+  v.corpo.append(el('div', { class:'sub', style:'font-size:12px;' },
+    'Le modifiche fatte su ' + o.numero_ordine + (o.pos ? '/' + o.pos : '') + ' rispetto alla distinta. Spunta quelle che valgono anche per i prossimi ordini: '
+    + 'vanno nella distinta del prodotto. Sulla commessa restano come storia («✓ nella distinta»). Le quote ai terzisti non passano: si cambiano in «Fasi» della scheda prodotto.'),
+    lista, anteprima);
+  v.piede.append(el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), salva);
+  disegna();
+}
 async function apriModificaListaCommessa(o, art, pezzi, poi, opts) {
   opts = opts || {};
   const fase = opts.fase || null;
@@ -4632,7 +4726,7 @@ async function apriModificaListaCommessa(o, art, pezzi, poi, opts) {
         { motivo, il: toLocalISO(new Date()), chi });
       // Ogni riga della lista dice se e' una variante (per vederlo nella scheda).
       const tipoDi = new Map();
-      varianti.forEach(w => { if (w.tipo === 'sostituito') tipoDi.set(String(w.nuovo).toUpperCase(), 'sostituito');
+      varianti.filter(w => !w.in_distinta).forEach(w => { if (w.tipo === 'sostituito') tipoDi.set(String(w.nuovo).toUpperCase(), 'sostituito');
         else if (w.tipo !== 'tolto') tipoDi.set(String(w.codice).toUpperCase(), w.tipo === 'aggiunto' ? 'aggiunto' : 'quantita'); });
       const gen = new Map(generata.map(r => [String(r.codice).toUpperCase(), r]));
       lista.forEach(r => { const k = String(r.codice).toUpperCase(); const t = tipoDi.get(k);
@@ -4640,7 +4734,7 @@ async function apriModificaListaCommessa(o, art, pezzi, poi, opts) {
         else { delete r.variante; delete r.qta_pz_distinta; if (!varianti.some(w => w.tipo === 'sostituito' && String(w.nuovo).toUpperCase() === k)) delete r.al_posto_di; } });
       await salvaMaterialiCommessa(o, lista, varianti);
       v.chiudi();
-      toast('Lista salvata: ' + lista.length + ' materiali · ' + varianti.length + ' modifiche rispetto alla distinta', 'ok');
+      toast('Lista salvata: ' + lista.length + ' materiali · ' + varianti.filter(w => !w.in_distinta).length + ' modifiche rispetto alla distinta', 'ok');
       if (typeof poi === 'function') poi();
     } catch (e) {
       salva.disabled = false; salva.textContent = 'Salva la lista';
@@ -4657,9 +4751,10 @@ async function apriModificaListaCommessa(o, art, pezzi, poi, opts) {
     const nomi = { tolto: 'tolto', quantita: 'quantità', sostituito: 'sostituito', aggiunto: 'aggiunto' };
     v.corpo.append(el('details', { style:'margin-top:10px;font-size:12px;' },
       el('summary', { class:'sub', style:'cursor:pointer;' }, 'Modifiche già fatte rispetto alla distinta (' + o.materiali_varianti.length + ')'),
-      ...o.materiali_varianti.map(w => el('div', { class:'sub', style:'font-size:11px;padding:2px 0;' },
+      ...o.materiali_varianti.map(w => el('div', { class:'sub', style:'font-size:11px;padding:2px 0;' + (w.in_distinta ? 'color:var(--grn);' : '') },
         nomi[w.tipo] + ' · ' + w.codice + (w.nuovo ? ' → ' + w.nuovo : '') + (w.qta_pz != null ? ' · ' + nf(w.qta_pz) + '/pz' : '')
-        + (w.motivo ? ' · «' + w.motivo + '»' : '') + (w.chi ? ' · ' + w.chi : '') + (w.il ? ' · ' + fmtIT(w.il) : '')))));
+        + (w.motivo ? ' · «' + w.motivo + '»' : '') + (w.chi ? ' · ' + w.chi : '') + (w.il ? ' · ' + fmtIT(w.il) : '')
+        + (w.in_distinta ? ' · ✓ nella distinta dal ' + fmtIT(w.in_distinta) : '')))));
   }
   v.piede.append(riepilogo, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), salva);
   disegna();
@@ -18440,11 +18535,19 @@ function openOperazioneModal(o, opts) {
       };
       // Le liste si cambiano DALLA FASE («✎ Modifica materiali» nel riquadro
       // del terzista o del reparto, 24 nov, Nico). Qui resta solo il conto.
-      const nVar = Array.isArray(o.materiali_varianti) ? o.materiali_varianti.length : 0;
-      if (nVar) intestazione.append(el('span', { class:'sub', style:'margin-left:auto;font-size:11px;color:var(--or);',
-        title: o.materiali_varianti.map(w => w.tipo + ' ' + w.codice + (w.nuovo ? ' → ' + w.nuovo : '') + (w.motivo ? ' · ' + w.motivo : '')).join('\n') },
-        '✎ ' + nVar + (nVar === 1 ? ' modifica' : ' modifiche') + ' rispetto alla distinta'));
-      btnRi.style.marginLeft = nVar ? '' : 'auto';
+      const tutteVar = Array.isArray(o.materiali_varianti) ? o.materiali_varianti : [];
+      const vive = tutteVar.filter(w => !w.in_distinta);
+      const nVar = vive.length, nPortate = tutteVar.length - vive.length;
+      if (nVar || nPortate) intestazione.append(el('span', { class:'sub', style:'margin-left:auto;font-size:11px;color:var(--or);',
+        title: tutteVar.map(w => testoVariante(w)).join('\n') },
+        (nVar ? '✎ ' + nVar + (nVar === 1 ? ' modifica' : ' modifiche') + ' rispetto alla distinta' : '')
+        + (nPortate ? (nVar ? ' · ' : '') + '✓ ' + nPortate + ' già nella distinta' : '')));
+      // ⇪ PORTA NELLA DISTINTA (27 nov, Nico/Claudio): una modifica fatta in corso
+      // d'opera che vale anche per i prossimi ordini.
+      if (nVar && Array.isArray(art.distinta)) intestazione.append(el('button', { type:'button', class:'btnsm',
+        title:'Le modifiche di questa commessa che valgono anche per i prossimi ordini: si scrivono nella distinta di ' + art.codice,
+        onclick: () => apriPortaInDistinta(o, art, renderMancanti) }, '⇪ Porta nella distinta…'));
+      btnRi.style.marginLeft = (nVar || nPortate) ? '' : 'auto';
       intestazione.append(btnRi);
     }
     // CICLO PRODUTTIVO (17 nov): le fasi a tappe. Calcolato qui sopra perche'
