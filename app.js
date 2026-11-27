@@ -3816,8 +3816,8 @@ function boxDocumentiAzienda(c, readonly) {
       ...sotto.flatMap((s, i) => [el('span', { class:'sub' }, ' › '),
         el('a', { href:'#', onclick:(e) => { e.preventDefault(); sotto = sotto.slice(0, i + 1); disegna(); } }, s)]));
     const azioni = el('div', { class:'doc-azioni' },
-      bottone('↻', () => disegna()),
-      '');
+      esploraAttivo() ? bottone('📂 Apri in Esplora risorse', () => apriInEsplora(piva)) : '',
+      bottone('↻', () => disegna()));
     box.append(el('div', { class:'doc-testa' }, briciole, azioni));
 
     const lista = el('div', { class:'doc-lista' }, nota('Lettura della cartella…'));
@@ -3905,7 +3905,21 @@ function apriImpostazioniPersonali() {
   };
   disegnaCartella();
 
-  body.append(titolo('── Cartella principale del server ──'), boxCartella);
+  const chkEsplora = el('input', { type:'checkbox' });
+  chkEsplora.checked = esploraAttivo();
+  chkEsplora.onchange = () => {
+    try { localStorage.setItem(ESPLORA_CHIAVE, chkEsplora.checked ? '1' : '0'); } catch (_) {}
+    if (state.currentTab === 'aziende') renderTab('aziende');
+  };
+  const boxEsplora = el('div', { class:'doc-box' },
+    el('label', { style:'display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;' }, chkEsplora,
+      'Apri le cartelle in Esplora risorse'),
+    el('div', { class:'sub', style:'font-size:12px;' },
+      'La 📁 della lista Aziende apre la cartella direttamente in Windows. Va installato una volta su questo PC '
+      + '(installa.cmd nella cartella apri-cartella, senza amministratore); al primo clic il browser chiede se aprire '
+      + 'Cablotec: «Consenti sempre». Spunta solo dopo l’installazione: senza, il clic non fa niente.'));
+  body.append(titolo('── Cartella principale del server ──'), boxCartella,
+    el('div', { style:'height:14px;' }), titolo('── Esplora risorse ──'), boxEsplora);
   modal.append(body);
   modal.append(el('div', { class:'mfoot' }, el('button', { class:'btng', onclick:closeModal }, 'Chiudi')));
   openModal(modal);
@@ -3918,10 +3932,31 @@ function apriImpostazioniPersonali() {
 function cellaCartellaAzienda(c, celle) {
   const piva = cartellaDiAzienda(c);
   if (!piva) return el('span', { class:'sub', title:'Senza P.IVA non c’è cartella' }, '—');
-  const btn = el('button', { type:'button', class:'btnsm doc-btn-riga', title:'Apri la cartella ' + piva,
-    onclick: () => apriDocumentiAzienda(c) }, '📁');
+  const esplora = esploraAttivo();
+  const btn = el('button', { type:'button', class:'btnsm doc-btn-riga',
+    title: esplora ? 'Apri ' + piva + ' in Esplora risorse' : 'Apri la cartella ' + piva,
+    onclick: () => esplora ? apriInEsplora(piva) : apriDocumentiAzienda(c) }, '📁');
   celle.push({ piva, btn });
-  return btn;
+  if (!esplora) return btn;
+  return el('span', { style:'white-space:nowrap;' }, btn, ' ',
+    el('button', { type:'button', class:'btnsm doc-btn-riga', title:'Documenti nel gestionale (vedi i file, trascinane di nuovi)',
+      onclick: () => apriDocumentiAzienda(c) }, '≡'));
+}
+// APRIRE LA CARTELLA IN ESPLORA RISORSE (27 nov, Nico: "non esiste proprio un
+// modo per aprire cartella con quel click?"). Il browser da solo non puo': su
+// ogni PC si installa una volta il collegamento `cablotec-cartella:` (file
+// fuori dal repo, Z:\SOFTWARE\MegaAPP\apri-cartella, solo utente Windows). Lo
+// script locale accetta SOLO lettere e cifre e apre SOLO una sottocartella
+// esistente della principale: una pagina qualsiasi puo' chiamarlo, quindi al
+// gestionale si passa la P.IVA e nient'altro. Il gestionale non sa se il PC
+// l'ha installato: lo dice la spunta nelle impostazioni personali (per PC).
+const ESPLORA_CHIAVE = 'cablotec.apriInEsplora';
+function esploraAttivo() { try { return localStorage.getItem(ESPLORA_CHIAVE) === '1'; } catch (_) { return false; } }
+function apriInEsplora(piva) {
+  const nome = String(piva || '').replace(/[^A-Za-z0-9]/g, '');
+  if (!nome) return toast('P.IVA mancante', 'err');
+  const a = el('a', { href: 'cablotec-cartella:' + nome });
+  document.body.append(a); a.click(); a.remove();
 }
 // Dopo il disegno: le righe la cui cartella non c'e' ancora si spengono (si
 // aprono lo stesso: dalla finestra un admin la crea). Solo se l'accesso alla
