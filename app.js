@@ -3365,7 +3365,7 @@ function renderAziende(root) {
       el('td', {}, c.nome || '—'),
       el('td', { class:'tc' }, ruoloBadge),
       el('td', { style:'font-size:11px;' }, c.citta ? c.citta + (c.provincia ? ' ('+c.provincia+')' : '') : ''),
-      el('td', { class:'mono', style:'font-size:11px;' }, c.p_iva || ''),
+      el('td', { class:'mono', style:'font-size:11px;' }, ...cellaPIva(c.p_iva)),
       el('td', { class:'tc' }, c.attivo
         ? el('span', { class:'badge bok' }, 'attivo')
         : el('span', { class:'badge bgry' }, 'disatt.')),
@@ -3413,7 +3413,19 @@ function openClienteModal(c) {
   const inCap = el('input', { type:'text', name:'cap', value:c.cap||'', placeholder:'20100', maxlength:'5' });
   const inProvincia = el('input', { type:'text', name:'provincia', value:c.provincia||'', placeholder:'MI', maxlength:'2', style:'text-transform:uppercase;' });
   const inPIva = el('input', { type:'text', name:'p_iva', value:c.p_iva||'', placeholder:'es. IT01234567890' });
-  inPIva.addEventListener('blur', () => { inPIva.value = normalizzaPIva(inPIva.value) || ''; });
+  // Sotto il campo si dice subito se va bene (P.IVA obbligatoria sulle nuove).
+  const notaPIva = el('div', { class:'sub', style:'font-size:11px;margin-top:3px;min-height:14px;' });
+  const aggiornaNotaPIva = () => {
+    const r = controllaPIva(inPIva.value);
+    const scritto = !!String(inPIva.value).trim();
+    notaPIva.textContent = r.ok ? '✓ ' + r.msg
+      : scritto ? '⚠ ' + r.msg
+      : (isNew ? 'Obbligatoria: IT + 11 cifre, partita estera o codice fiscale' : '⚠ Manca la P.IVA');
+    notaPIva.style.color = r.ok ? 'var(--grn)' : (scritto || !isNew ? 'var(--or)' : 'var(--mut)');
+  };
+  inPIva.addEventListener('input', aggiornaNotaPIva);
+  inPIva.addEventListener('blur', () => { inPIva.value = normalizzaPIva(inPIva.value) || ''; aggiornaNotaPIva(); });
+  aggiornaNotaPIva();
   // SITO WEB (9 nov, Nico): per i fornitori online (Farnell, Mouser...) dove
   // si ordina dal sito e non per mail. Il menu del materiale lo apre. Campo
   // spento finche' la colonna `aziende.sito` non esiste (stesso patto della tariffa).
@@ -3625,7 +3637,7 @@ function openClienteModal(c) {
     el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
       '── Altri dati ──'),
     el('div', { class:'frow' },
-      el('div', { class:'field' }, el('label', {}, 'P. IVA / C.F.'), inPIva),
+      el('div', { class:'field' }, el('label', {}, 'P. IVA / C.F.' + (isNew ? ' *' : '')), inPIva, notaPIva),
       el('div', { class:'field' }, el('label', {}, 'Stato'), selAttivo),
     ),
     el('div', { class:'field' }, el('label', {}, 'Sito web (ordini online)'), inSito),
@@ -3702,6 +3714,17 @@ function openClienteModal(c) {
         payload.contatti = pieni;
       }
       if (!payload.nome) return toast('Nome obbligatorio', 'err');
+      // P.IVA (27 nov): obbligatoria e controllata sulle NUOVE. Su una scheda
+      // esistente si controlla solo se e' cambiata: una vecchia scheda senza
+      // P.IVA si corregge lo stesso (avviso, non blocco).
+      const pivaCambiata = isNew || (payload.p_iva || null) !== (normalizzaPIva(c.p_iva) || null);
+      const ctrlPIva = controllaPIva(payload.p_iva);
+      if (isNew && !payload.p_iva) return toast('P.IVA obbligatoria (o codice fiscale per un privato)', 'err');
+      if (payload.p_iva && pivaCambiata && !ctrlPIva.ok) return toast(ctrlPIva.msg, 'err');
+      // Due schede con la stessa P.IVA aprirebbero la stessa cartella.
+      const doppia = payload.p_iva && pivaCambiata
+        && (state.aziende || []).find(x => x.id !== c.id && normalizzaPIva(x.p_iva) === payload.p_iva);
+      if (doppia) return toast('P.IVA ' + payload.p_iva + ' già usata da «' + doppia.nome + '»', 'err');
       btnSave.disabled = true;
       btnSave.textContent = 'Salvataggio…';
       try {
@@ -3930,6 +3953,12 @@ function apriImpostazioniPersonali() {
 // riga di Aziende in fondo dove clicco e mi apre la cartella"). Il browser non
 // puo' aprire Esplora risorse: il clic apre la finestra «Documenti» con la
 // stessa sezione della scheda (`boxDocumentiAzienda`).
+// La P.IVA nella lista Aziende, con ⚠ se manca o non passa il controllo.
+function cellaPIva(v) {
+  const r = controllaPIva(v);
+  if (r.ok) return [v];
+  return [v || '', el('span', { class:'piva-avviso', title: r.msg }, (v ? ' ' : '') + '⚠')];
+}
 function cellaCartellaAzienda(c, celle) {
   const piva = cartellaDiAzienda(c);
   if (!piva) return el('span', { class:'sub', title:'Senza P.IVA non c’è cartella' }, '—');
@@ -10412,12 +10441,43 @@ function chiediTesto(opz) {
 // aprirebbe (il browser lo leggerebbe come un percorso dentro il gestionale).
 // P.IVA SEMPRE CON «IT» (27 nov, Nico: "voglio che siano tutte con IT"): la
 // cartella di rete dell'azienda si chiama come la P.IVA, identica, e sul
-// server sono IT03552340279. Undici cifre → IT davanti; spazi tolti,
+// server sono IT03552340279. Undici cifre → IT davanti; spazi, punti e trattini tolti,
 // maiuscole. Un codice fiscale (16) o una partita estera restano com'erano.
 function normalizzaPIva(v) {
-  const t = String(v == null ? '' : v).replace(/\s+/g, '').toUpperCase();
+  const t = String(v == null ? '' : v).replace(/[\s.\-]+/g, '').toUpperCase();   // spazi, punti, trattini (CHE-123.456.789)
   if (!t) return null;
   return /^\d{11}$/.test(t) ? 'IT' + t : t;
+}
+// CONTROLLO DELLA P.IVA (27 nov, Nico: obbligatoria sulle aziende nuove). La
+// cartella di rete si chiama come la P.IVA, identica: un refuso = cartella
+// che non si trova. Accetta, DOPO normalizzaPIva:
+//   - IT + 11 cifre col codice di controllo giusto (l'undicesima cifra);
+//   - partita estera: due lettere di paese + 2-13 lettere/cifre (UE: DE, FR,
+//     ES, ATU...; fuori UE: CHE, GB...). Qui solo la forma: i formati
+//     nazionali sono troppi, e si verificano sul VIES;
+//   - codice fiscale di 16 caratteri (privati).
+// → { ok, tipo: 'it'|'estera'|'cf', msg }. Vuoto = { ok:false, tipo:null }.
+function controllaPIva(v) {
+  const t = normalizzaPIva(v);
+  if (!t) return { ok: false, tipo: null, msg: 'P.IVA mancante' };
+  const m = /^IT(\d{11})$/.exec(t);
+  if (m) {
+    const d = m[1].split('').map(Number);
+    let somma = 0;
+    for (let i = 0; i < 10; i++) {
+      if (i % 2 === 0) somma += d[i];
+      else { const x = d[i] * 2; somma += x > 9 ? x - 9 : x; }
+    }
+    return (10 - somma % 10) % 10 === d[10]
+      ? { ok: true, tipo: 'it', msg: 'P.IVA italiana valida' }
+      : { ok: false, tipo: 'it', msg: 'P.IVA italiana con il codice di controllo sbagliato: c’è un refuso' };
+  }
+  if (/^IT/.test(t)) return { ok: false, tipo: 'it', msg: 'P.IVA italiana: dopo IT servono 11 cifre' };
+  if (/^[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]$/.test(t))
+    return { ok: true, tipo: 'cf', msg: 'Codice fiscale (privato)' };
+  if (/^[A-Z]{2}[A-Z0-9]{2,13}$/.test(t)) return { ok: true, tipo: 'estera', msg: 'Partita IVA estera ' + t.slice(0, 2) };
+  if (/^\d+$/.test(t)) return { ok: false, tipo: 'it', msg: 'P.IVA italiana: servono 11 cifre (ne hai ' + t.length + ')' };
+  return { ok: false, tipo: null, msg: 'Formato non riconosciuto: IT + 11 cifre, partita estera col prefisso del paese o codice fiscale' };
 }
 function normalizzaSito(v) {
   const t = String(v == null ? '' : v).trim();
