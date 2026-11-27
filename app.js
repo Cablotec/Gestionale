@@ -3965,7 +3965,7 @@ function cellaCartellaAzienda(c, celle) {
   const esplora = esploraAttivo();
   const btn = el('button', { type:'button', class:'btnsm doc-btn-riga',
     title: esplora ? 'Apri ' + piva + ' in Esplora risorse' : 'Apri la cartella ' + piva,
-    onclick: () => esplora ? apriInEsplora(piva) : apriDocumentiAzienda(c) }, '📁');
+    onclick: () => esplora ? apriInEsplora(piva, c) : apriDocumentiAzienda(c) }, '📁');
   celle.push({ piva, btn });
   if (!esplora) return btn;
   return el('span', { style:'white-space:nowrap;' }, btn, ' ',
@@ -3982,9 +3982,24 @@ function cellaCartellaAzienda(c, celle) {
 // l'ha installato: lo dice la spunta nelle impostazioni personali (per PC).
 const ESPLORA_CHIAVE = 'cablotec.apriInEsplora';
 function esploraAttivo() { try { return localStorage.getItem(ESPLORA_CHIAVE) === '1'; } catch (_) { return false; } }
-function apriInEsplora(piva) {
+// ⚠ Prima si guarda se la cartella c'e' (27 nov, Nico: "clicco e non succede
+// nulla" su Berton): lo script, lanciato senza finestra, non riesce a mostrare
+// il suo messaggio «cartella non trovata» e il clic sembrava morto. Se manca,
+// lo dice il gestionale e si apre la finestra Documenti, da dove si crea.
+async function apriInEsplora(piva, c) {
   const nome = String(piva || '').replace(/[^A-Za-z0-9]/g, '');
   if (!nome) return toast('P.IVA mancante', 'err');
+  try {
+    const r = typeof cartelleSupportate === 'function' && cartelleSupportate() ? await cartellaRadice() : null;
+    if (r && await cartellaPermesso(r, false) === 'granted') {
+      try { await r.getDirectoryHandle(nome); }
+      catch (_) {
+        toast('La cartella ' + nome + ' non c’è ancora in «' + r.name + '»' + (c ? ': si crea da qui' : ''), 'err', 5000);
+        if (c) apriDocumentiAzienda(c);
+        return;
+      }
+    }
+  } catch (_) { /* senza accesso alla cartella si prova lo stesso */ }
   const a = el('a', { href: 'cablotec-cartella:' + nome });
   document.body.append(a); a.click(); a.remove();
 }
