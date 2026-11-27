@@ -7958,8 +7958,9 @@ function riquadroCollaudo(ridisegna) {
     onchange: (e) => { try { localStorage.setItem(COLLAUDO_DAL_CHIAVE, e.target.value); } catch (er) {} ridisegna(); } });
   box.append(el('h3', { style: 'margin:6px 0 6px;' }, 'Collaudo: il gestionale contro Alnus'));
   if (!Array.isArray(state.movimenti)) { box.append(el('div', { class: 'sub' }, 'Movimenti non letti: premi ⟳ Aggiorna.')); return box; }
-  const prodotti = new Set((state.articoli || []).map(a => String(a.codice || '').trim().toUpperCase()));
-  const righe = collaudoGiacenze(state.movimenti, dal, { codiceDiAlnus, escludi: prodotti,
+  // I prodotti finiti DENTRO dal 27 nov: il lotto li carica e la spedizione li scarica
+  // (migrazione-prodotto-in-giacenza.sql). Prima erano esclusi perche' non li contavamo.
+  const righe = collaudoGiacenze(state.movimenti, dal, { codiceDiAlnus,
     dopo: apertura && apertura.creato_il ? Date.parse(apertura.creato_il) : null });
   const diversi = righe.filter(r => Math.abs(r.differenza) >= 0.0005);
   // Sistemati: stessa differenza di quando si e' premuta la ✕. Una segnatura il cui
