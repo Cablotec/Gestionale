@@ -964,3 +964,20 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
 /* Tasto «Aggiorna» accanto alla versione (gestionale e kiosk) */
 .btn-aggiorna{margin-left:8px;padding:2px 8px;border-color:var(--acc);color:var(--acc);vertical-align:middle;}
 .btn-aggiorna:hover{background:var(--acc);color:var(--bg);border-color:var(--acc);}
+
+/* Documenti della cartella di rete, nella scheda azienda (27 nov) */
+.doc-box{display:flex;flex-direction:column;gap:6px;}
+.doc-testa{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+.doc-briciole{font-size:12px;min-width:0;overflow-wrap:anywhere;}
+.doc-briciole a{color:var(--acc);text-decoration:none;}
+.doc-briciole a:hover{text-decoration:underline;}
+.doc-azioni{display:flex;gap:6px;flex-wrap:wrap;}
+.doc-prima{border-color:var(--acc);color:var(--acc);}
+.doc-lista{border:1px solid var(--brd);border-radius:4px;max-height:260px;overflow:auto;}
+.doc-lista.doc-drop.sopra{border:1px dashed var(--acc);background:var(--sur2);}
+.doc-lista > .sub{padding:8px 10px;}
+.doc-riga{display:grid;grid-template-columns:22px 1fr 70px 80px;gap:8px;align-items:center;padding:5px 10px;font-size:12.5px;cursor:pointer;border-top:1px solid var(--brd);}
+.doc-riga:first-child{border-top:0;}
+.doc-riga:hover{background:var(--sur2);}
+.doc-nome{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.doc-dim,.doc-data{color:var(--mut);text-align:right;font-variant-numeric:tabular-nums;}

@@ -3629,6 +3629,12 @@ function openClienteModal(c) {
   );
 
   body.append(form);
+  // DOCUMENTI (27 nov): i file della cartella di rete dell'azienda, letti dal
+  // server aziendale e mai caricati su Supabase. Solo su una scheda gia' salvata.
+  if (!isNew) body.append(
+    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
+      '── Documenti (cartella di rete) ──'),
+    boxDocumentiAzienda(c, readonly));
   modal.append(body);
 
   const foot = el('div', { class:'mfoot' });
@@ -3720,6 +3726,159 @@ function openClienteModal(c) {
   }
   modal.append(foot);
   openModal(modal);
+}
+
+// LA CARTELLA DI RETE DELL'AZIENDA (27 nov, Nico: "legare clienti e fornitori
+// a un percorso di rete [...] per avere il peso di allegati ed altro in
+// locale"). Accesso alle cartelle in core/cartelle.js; qui solo la scheda.
+//   - radice: scelta una volta per PC (la cartella comune sul server);
+//   - `aziende.cartella`: percorso RELATIVO alla radice, salvato subito
+//     quando si collega (non aspetta «Salva»: serve per vedere i file);
+//   - si naviga nelle sottocartelle, si apre un file con un clic, si
+//     trascinano file nuovi dentro (mai sovrascritti: "nome (2).pdf").
+// ⚠ Un file Office si apre come COPIA scaricata: dal browser non si puo'
+// lanciare Excel sul file del server. Per modificarlo si apre dalla cartella.
+function boxDocumentiAzienda(c, readonly) {
+  const box = el('div', { class:'doc-box' });
+  const colonna = (state.aziende || []).some(a => a && ('cartella' in a));
+  let sotto = [];          // sottocartelle aperte dentro quella dell'azienda
+  let radice = null;
+  let giro = 0;            // ogni disegno ha il suo numero: uno vecchio rimasto in attesa non scrive
+
+  const nota = (t, tono) => el('div', { class:'sub', style:'font-size:12px;' + (tono === 'err' ? 'color:var(--red,#c33);' : '') }, t);
+  const bottone = (t, fn, cls) => el('button', { type:'button', class: cls || 'btnsm', onclick: fn }, t);
+  const fmtByte = (n) => n == null ? '' : n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' kB'
+    : (n / 1048576).toLocaleString('it-IT', { maximumFractionDigits: 1 }) + ' MB';
+  const fmtData = (ms) => ms ? new Date(ms).toLocaleDateString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric' }) : '';
+
+  const salvaCartella = async (percorso) => {
+    const { data, error } = await sb.from('aziende').update({ cartella: percorso || null }).eq('id', c.id).select().single();
+    if (error) { toast(error.message, 'err'); return false; }
+    c.cartella = data.cartella;
+    state.aziende = (state.aziende || []).map(x => x.id === c.id ? { ...x, cartella: data.cartella } : x);
+    sotto = [];
+    return true;
+  };
+  const collega = async () => {
+    try {
+      const p = await cartellaScegliDentro(radice);
+      if (p == null) return toast('Quella cartella non sta dentro «' + radice.name + '»: scegline una lì dentro', 'err');
+      if (!p) return toast('Scegli la cartella dell\'azienda, non la radice', 'err');
+      if (await salvaCartella(p)) { toast('Cartella collegata'); disegna(); }
+    } catch (e) { if (e.name !== 'AbortError') toast(e.message || String(e), 'err'); }
+  };
+  const crea = async () => {
+    const nome = cartellaNomeValido(c.nome);
+    if (!nome) return toast('Nome azienda non valido per una cartella', 'err');
+    try {
+      await cartellaApri(radice, nome, true);
+      if (await salvaCartella(nome)) { toast('Cartella «' + nome + '» creata e collegata'); disegna(); }
+    } catch (e) { toast(e.message || String(e), 'err'); }
+  };
+  const apriFile = async (voce) => {
+    // La finestra si apre SUBITO, dentro il clic: dopo un `await` il browser la bloccherebbe.
+    const anteprima = /\.(pdf|png|jpe?g|gif|webp|bmp|svg|txt|csv|xml|html?)$/i.test(voce.nome);
+    const w = anteprima ? window.open('', '_blank') : null;
+    try {
+      const f = await voce.handle.getFile();
+      const url = URL.createObjectURL(f);
+      if (w) w.location.href = url;
+      else { const a = el('a', { href:url, download:voce.nome }); document.body.append(a); a.click(); a.remove(); }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) { if (w) w.close(); toast('Non riesco ad aprire ' + voce.nome + ': ' + (e.message || e), 'err'); }
+  };
+
+  const disegna = async () => {
+    const g = ++giro, vecchio = () => g !== giro;
+    box.innerHTML = '';
+    if (!colonna) return box.append(nota('Richiede la colonna aziende.cartella (migrazione dal pannello Supabase).'));
+    if (typeof cartelleSupportate !== 'function' || !cartelleSupportate())
+      return box.append(nota('Le cartelle di rete si vedono solo da Chrome o Edge su PC.'));
+    const r = await cartellaRadice();
+    if (vecchio()) return;
+    radice = r;
+    if (!radice) {
+      return box.append(nota('Su questo PC non è ancora scelta la cartella comune del server (quella che contiene le cartelle di clienti e fornitori). Si sceglie una volta sola.'),
+        bottone('📁 Scegli la cartella del server', async () => {
+          try { radice = await cartellaRadiceScegli(); disegna(); }
+          catch (e) { if (e.name !== 'AbortError') toast(e.message || String(e), 'err'); }
+        }, 'btnsm doc-prima'));
+    }
+    const perm = await cartellaPermesso(radice, false);
+    if (vecchio()) return;
+    if (perm !== 'granted') {
+      return box.append(nota('Il browser chiede di nuovo il permesso per «' + radice.name + '».'),
+        bottone('🔓 Consenti l\'accesso', async () => {
+          if (await cartellaPermesso(radice, true) === 'granted') disegna();
+          else toast('Accesso negato: senza permesso i file non si vedono', 'err');
+        }, 'btnsm doc-prima'));
+    }
+    if (!c.cartella) {
+      box.append(nota('Nessuna cartella collegata a questa azienda.'));
+      if (!readonly) box.append(el('div', { class:'doc-azioni' },
+        bottone('🔗 Collega una cartella esistente…', collega, 'btnsm doc-prima'),
+        bottone('＋ Crea «' + (cartellaNomeValido(c.nome) || '?') + '» in ' + radice.name, crea)));
+      return;
+    }
+    let dir;
+    try { dir = await cartellaApri(radice, cartellaPercorso([...cartellaSegmenti(c.cartella), ...sotto])); }
+    catch (e) {
+      if (vecchio()) return;
+      box.append(nota('Non trovo la cartella «' + radice.name + '\\' + cartellaSegmenti(c.cartella).join('\\') + '»: spostata, rinominata o la radice di questo PC è un\'altra.', 'err'));
+      if (!readonly) box.append(el('div', { class:'doc-azioni' }, bottone('🔗 Collega di nuovo…', collega)));
+      return;
+    }
+    if (vecchio()) return;
+    // Briciole: radice › cartella azienda › sottocartelle (cliccabili per tornare su).
+    const briciole = el('div', { class:'doc-briciole' },
+      el('span', { class:'sub' }, radice.name + ' › '),
+      el('a', { href:'#', onclick:(e) => { e.preventDefault(); sotto = []; disegna(); } }, cartellaSegmenti(c.cartella).join(' › ')),
+      ...sotto.flatMap((s, i) => [el('span', { class:'sub' }, ' › '),
+        el('a', { href:'#', onclick:(e) => { e.preventDefault(); sotto = sotto.slice(0, i + 1); disegna(); } }, s)]));
+    const azioni = el('div', { class:'doc-azioni' },
+      bottone('↻', () => disegna()),
+      readonly ? '' : bottone('🔗 Cambia cartella…', collega));
+    box.append(el('div', { class:'doc-testa' }, briciole, azioni));
+
+    const lista = el('div', { class:'doc-lista' }, nota('Lettura della cartella…'));
+    box.append(lista);
+    let voci;
+    try { voci = await cartellaElenco(dir); }
+    catch (e) { lista.innerHTML = ''; lista.append(nota('Errore di lettura: ' + (e.message || e), 'err')); return; }
+    if (vecchio()) return;
+    lista.innerHTML = '';
+    if (sotto.length) lista.append(el('div', { class:'doc-riga', onclick:() => { sotto.pop(); disegna(); } },
+      el('span', { class:'doc-ico' }, '↩'), el('span', { class:'doc-nome' }, '..'), el('span'), el('span')));
+    if (!voci.length) lista.append(nota('Cartella vuota.'));
+    voci.forEach(v => lista.append(el('div', {
+        class:'doc-riga', title: v.tipo === 'cartella' ? 'Apri la cartella' : 'Apri ' + v.nome,
+        onclick: () => { if (v.tipo === 'cartella') { sotto.push(v.nome); disegna(); } else apriFile(v); } },
+      el('span', { class:'doc-ico' }, v.tipo === 'cartella' ? '📁' : '📄'),
+      el('span', { class:'doc-nome' }, v.nome),
+      el('span', { class:'doc-dim' }, fmtByte(v.dimensione)),
+      el('span', { class:'doc-data' }, fmtData(v.modificato)))));
+
+    if (readonly) return;
+    // Trascinare file sulla lista = copiarli nella cartella aperta.
+    lista.classList.add('doc-drop');
+    box.append(nota('Trascina qui i file per copiarli in questa cartella (un nome già presente diventa «nome (2)»).'));
+    lista.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); lista.classList.add('sopra'); } });
+    lista.addEventListener('dragleave', () => lista.classList.remove('sopra'));
+    lista.addEventListener('drop', async (e) => {
+      e.preventDefault(); lista.classList.remove('sopra');
+      const files = [...(e.dataTransfer?.files || [])];
+      if (!files.length) return;
+      let fatti = 0;
+      for (const f of files) {
+        try { await cartellaSalvaFile(dir, f); fatti++; }
+        catch (err) { toast('Non salvato ' + f.name + ': ' + (err.message || err), 'err'); }
+      }
+      if (fatti) toast(fatti === 1 ? '1 file copiato' : fatti + ' file copiati');
+      disegna();
+    });
+  };
+  disegna();
+  return box;
 }
 
 async function deleteCliente(c) {
