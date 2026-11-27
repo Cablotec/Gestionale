@@ -9709,6 +9709,11 @@ function rientriDiFase(o, terzistaId) {
 // magazzino (trigger dei lotti), e al 100% scrive «completata» (solo da aperta/sospesa,
 // e non se il form dice gia' completata/spedita: `opts.statoForm`).
 // Ritorna { lotto, completata, erroreStato } o lancia l'errore.
+// ⚠⚠ ORDINI OD: AL CONTRARIO (27 nov, Nico: "la produzione avviene una volta spediti.
+// vanno al contrario"). In Alnus prima la bolla (UC2), poi il versamento dell'OP (EP1/UP1).
+// Qui la spedizione di un OD si registra anche senza produzione: registrandola si fa
+// PRIMA il lotto dei pezzi che mancano (stessa data), poi la spedizione. Un gesto solo.
+function eOrdineOD(o) { return !!(o && /\/OD\//i.test(String(o.numero_ordine || ''))); }
 async function registraLottoProduzione(o, campi, opts) {
   opts = opts || {};
   const qtaOrd = Number(o.quantita || 0);
@@ -19623,6 +19628,34 @@ function openOperazioneModal(o, opts) {
       }
     };
 
+    // OD (27 nov): il lotto dei pezzi che la spedizione porta via senza che siano
+    // stati prodotti. Stessi controlli del form della produzione (blocco dei rientri,
+    // domanda sui codici non in reparto), stessa porta (`registraLottoProduzione`).
+    // true = lotto fatto, si puo' spedire; false = fermato o fallito (gia' detto).
+    const lottoOdPrimaDiSpedire = async (qtaLotto, dataLotto, ddtSped) => {
+      const blocco = bloccoProduzioneDaRientri(o, qtaLotto);
+      if (blocco) { toast(blocco, 'err', 10000); return false; }
+      const avviso = avvisoLottoFuoriReparto(o, qtaLotto);
+      if (!confirm('Ordine OD: spedendo si registra anche la produzione di ' + nfIT(qtaLotto) + ' pz.'
+        + (avviso ? '\n\n' + avviso : '\n\nProcedere?'))) return false;
+      let esito;
+      try {
+        esito = await registraLottoProduzione(o, { data: dataLotto, quantita: qtaLotto,
+          ddt: ddtSped ? 'DDT ' + ddtSped : null, nota: 'Prodotto alla spedizione (OD)' },
+          { statoForm: form.querySelector('[name="stato"]')?.value });
+      } catch (e) {
+        toast('Lotto non registrato, spedizione non fatta: ' + (e.message || e), 'err');
+        return false;
+      }
+      if (esito.erroreStato) toast('Lotto salvato, ma lo stato non si è aggiornato: ' + esito.erroreStato, 'err');
+      if (esito.completata) {
+        const sel = form.querySelector('[name="stato"]');
+        if (sel) sel.value = 'completata';
+      }
+      if (rifaiConsegne) rifaiConsegne();
+      return true;
+    };
+
     const renderSpedizioni = () => {
       spedBox.innerHTML = '';
 
@@ -19632,10 +19665,12 @@ function openOperazioneModal(o, opts) {
       const pronti = Math.max(0, prodotti - totSped);
       const daSpedire = Math.max(0, qtaOrd - totSped);
       const completo = qtaOrd > 0 && totSped >= qtaOrd;
+      const od = eOrdineOD(o);
 
       // KPI riga
       spedBox.append(rigaRiepilogo(totSped, qtaOrd, 'spediti',
-        completo ? '' : (pronti > 0 ? 'pronti da spedire ' + nfIT(pronti) : 'niente di pronto: prima la produzione'),
+        completo ? '' : (pronti > 0 ? 'pronti da spedire ' + nfIT(pronti)
+          : (od ? 'ordine OD: la spedizione registra anche la produzione' : 'niente di pronto: prima la produzione')),
         completo ? null : (pronti > 0 ? 'var(--blu)' : null)));
 
       const lista = spedizioniDiOperazione(o.id);
@@ -19701,8 +19736,12 @@ function openOperazioneModal(o, opts) {
               const restaOra = Number(o.quantita || 0) - totOra;
               if (q > restaOra) return toast(`Da spedire: ${restaOra} pz. Non puoi spedirne ${q}.`, 'err');
               const prontiOra = Math.max(0, quantitaConsegnata(o.id) - totOra);
-              if (q > prontiOra) return toast(`In magazzino: ${prontiOra} pz pronti. Prima registra la produzione mancante.`, 'err');
+              if (q > prontiOra && !od) return toast(`In magazzino: ${prontiOra} pz pronti. Prima registra la produzione mancante.`, 'err');
               btnConf.disabled = true; btnConf.textContent = 'Salvataggio…';
+              if (q > prontiOra && !(await lottoOdPrimaDiSpedire(q - prontiOra, s.data || toLocalISO(new Date()), s.ddt))) {
+                btnConf.disabled = false; btnConf.textContent = '✓ Conferma spedizione';
+                return;
+              }
               const { data: agg, error } = await sb.from('spedizioni')
                 .update({ quantita: q }).eq('id', s.id).select().single();
               btnConf.disabled = false; btnConf.textContent = '✓ Conferma spedizione';
@@ -19727,9 +19766,10 @@ function openOperazioneModal(o, opts) {
       // Form per aggiungere nuova spedizione (solo admin, se c'è qualcosa da spedire)
       if (isAdmin && daSpedire > 0) {
         const dataInputS = el('input', { type:'date', value: toLocalISO(new Date()) });
+        const proponi = od ? daSpedire : pronti;
         const qtaInputS = el('input', { type:'number', min:'1',
-          max: pronti > 0 ? String(pronti) : '',
-          value: pronti > 0 ? String(pronti) : '',
+          max: proponi > 0 ? String(proponi) : '',
+          value: proponi > 0 ? String(proponi) : '',
           placeholder: 'vuota = prepara DDT' });
         const ddtInputS = el('input', { type:'text', placeholder:'n. DDT (facoltativo)' });
         const destInputS = { value: '' };
@@ -19778,8 +19818,15 @@ function openOperazioneModal(o, opts) {
               return toast(`Da spedire: ${daSpedireOra} pz. Non puoi spedire ${qta} pz.`, 'err');
             }
             const prontiOra = Math.max(0, quantitaConsegnata(o.id) - totSpedOra);
-            if (qta > prontiOra) {
+            if (qta > prontiOra && !od) {
               return toast(`In magazzino: ${prontiOra} pz pronti. Prima registra la produzione mancante.`, 'err');
+            }
+            // OD: prima il lotto dei pezzi che mancano, poi la spedizione.
+            if (qta > prontiOra) {
+              btnAddS.disabled = true; btnAddS.textContent = 'Salvataggio…';
+              const ok = await lottoOdPrimaDiSpedire(qta - prontiOra, data, ddt);
+              btnAddS.disabled = false; etichettaBtn();
+              if (!ok) return;
             }
           }
 
