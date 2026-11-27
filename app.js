@@ -3965,7 +3965,15 @@ function cellaCartellaAzienda(c, celle) {
   const esplora = esploraAttivo();
   const btn = el('button', { type:'button', class:'btnsm doc-btn-riga',
     title: esplora ? 'Apri ' + piva + ' in Esplora risorse' : 'Apri la cartella ' + piva,
-    onclick: () => esplora ? apriInEsplora(piva, c) : apriDocumentiAzienda(c) }, '📁');
+    onclick: () => {
+      if (!esplora) return apriDocumentiAzienda(c);
+      // Cartella che non c'e' (lo sa gia' la lista): avviso + Documenti, da dove si crea.
+      if (btn.classList.contains('manca')) {
+        toast('La cartella ' + piva + ' non c’è ancora: si crea da qui', 'err', 5000);
+        return apriDocumentiAzienda(c);
+      }
+      apriInEsplora(piva);
+    } }, '📁');
   celle.push({ piva, btn });
   if (!esplora) return btn;
   return el('span', { style:'white-space:nowrap;' }, btn, ' ',
@@ -3982,26 +3990,17 @@ function cellaCartellaAzienda(c, celle) {
 // l'ha installato: lo dice la spunta nelle impostazioni personali (per PC).
 const ESPLORA_CHIAVE = 'cablotec.apriInEsplora';
 function esploraAttivo() { try { return localStorage.getItem(ESPLORA_CHIAVE) === '1'; } catch (_) { return false; } }
-// ⚠ Prima si guarda se la cartella c'e' (27 nov, Nico: "clicco e non succede
-// nulla" su Berton): lo script, lanciato senza finestra, non riesce a mostrare
-// il suo messaggio «cartella non trovata» e il clic sembrava morto. Se manca,
-// lo dice il gestionale e si apre la finestra Documenti, da dove si crea.
-async function apriInEsplora(piva, c) {
+// ⚠ IL CLIC DEVE CHIAMARE SUBITO IL COLLEGAMENTO (27 nov). Il browser apre un
+// programma esterno solo se la richiesta parte DENTRO il clic: con delle
+// attese prima (IndexedDB, cartella sul server) Brave la scartava in silenzio,
+// senza nemmeno chiedere «Aprire Cablotec?». Quindi niente `await` qui: se la
+// cartella manca lo sa gia' la lista (`segnaCartelleMancanti`, classe
+// `manca`), e chi chiama decide prima. Lo script sul PC, se la cartella non
+// c'e', apre la principale.
+function apriInEsplora(piva) {
   const nome = String(piva || '').replace(/[^A-Za-z0-9]/g, '');
   if (!nome) return toast('P.IVA mancante', 'err');
-  try {
-    const r = typeof cartelleSupportate === 'function' && cartelleSupportate() ? await cartellaRadice() : null;
-    if (r && await cartellaPermesso(r, false) === 'granted') {
-      try { await r.getDirectoryHandle(nome); }
-      catch (_) {
-        toast('La cartella ' + nome + ' non c’è ancora in «' + r.name + '»' + (c ? ': si crea da qui' : ''), 'err', 5000);
-        if (c) apriDocumentiAzienda(c);
-        return;
-      }
-    }
-  } catch (_) { /* senza accesso alla cartella si prova lo stesso */ }
-  const a = el('a', { href: 'cablotec-cartella:' + nome });
-  document.body.append(a); a.click(); a.remove();
+  window.location.href = 'cablotec-cartella:' + nome;
 }
 // Dopo il disegno: le righe la cui cartella non c'e' ancora si spengono (si
 // aprono lo stesso: dalla finestra un admin la crea). Solo se l'accesso alla
