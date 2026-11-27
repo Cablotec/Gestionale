@@ -9666,6 +9666,21 @@ function bloccoProduzioneDaRientri(o, qta) {
     + ', prodotti ' + nfIT(prodotti) + '. '
     + (ancora > 0 ? 'Si possono registrare ancora ' + nfIT(ancora) + ' pz.' : 'Prima registra il rientro («↩ Registra rientro» nella scheda del terzista).');
 }
+// Il testo della domanda prima del lotto (`codiciFuoriRepartoAlLotto`, domain). null se
+// tutto e' in reparto, se la commessa non scarica al lotto o se i movimenti non sono letti.
+function avvisoLottoFuoriReparto(o, qta) {
+  if (!o || !Array.isArray(state.movimenti) || !scaricaAlLotto(o)) return null;
+  const fuori = codiciFuoriRepartoAlLotto(o.materiali, qta, state.movimenti, o.id);
+  if (!fuori.length) return null;
+  const tutti = fuori.length === (o.materiali || []).filter(r => r && String(r.tipo || '').toUpperCase() !== 'MAC' && !eLavorazione(r.codice)).length
+    && fuori.every(x => !(x.neiPosti > 0));
+  const righe = fuori.slice(0, 10).map(x => '• ' + x.codice + (x.descrizione && String(x.descrizione).trim().toUpperCase() !== x.codice.toUpperCase() ? ' ' + String(x.descrizione).slice(0, 34) : '')
+    + ': ' + nfIT(x.dallaSede) + (x.neiPosti > 0 ? ' (in reparto ' + nfIT(x.neiPosti) + ' su ' + nfIT(x.serve) + ')' : ''));
+  return (tutti ? 'Nessun materiale di questa commessa è in reparto: il lotto scarica tutta la lista (' + plAlnus(fuori.length, 'codice', 'codici') + ') dalla sede.'
+      : plAlnus(fuori.length, 'codice della lista non è', 'codici della lista non sono') + ' in reparto: il lotto li scarica dalla sede.')
+    + '\n\n' + righe.join('\n') + (fuori.length > 10 ? '\n… e altri ' + (fuori.length - 10) : '')
+    + '\n\nSe qualcuno non serve più, annulla e toglilo dalla lista («✎ Modifica lista»). Registrare il lotto così?';
+}
 function rientriInsufficienti(o, prodottiDopo) {
   if (!Array.isArray(state.rientriTerzista) || !Array.isArray(state.ordiniFornitore)) return [];
   return [...new Set((state.opFornitori || []).filter(r => r.operazione_id === o.id).map(r => r.azienda_id))]
@@ -19414,6 +19429,11 @@ function openOperazioneModal(o, opts) {
           // emesso) non si produce piu' di quanto e' tornato da lui. Blocco, non conferma.
           const bloccoR = bloccoProduzioneDaRientri(o, qta);
           if (bloccoR) return toast(bloccoR, 'err', 10000);
+          // AVVISO (27 nov, Nico su 00527/0010): i codici della lista che il lotto
+          // prenderebbe dalla SEDE perche' non sono in reparto. Si chiede prima: una
+          // minuteria dallo scaffale va bene, un codice che non serve piu' si toglie dalla lista.
+          const avvisoR = avvisoLottoFuoriReparto(o, qta);
+          if (avvisoR && !confirm(avvisoR)) return;
 
           btnAdd.disabled = true; btnAdd.textContent = 'Salvataggio…';
           // Una porta sola per il lotto (anche il rientro dal terzista ci passa).

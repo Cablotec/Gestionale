@@ -518,6 +518,40 @@ function pressoTerzisti(movimenti) {
   return out;
 }
 
+// AVVISO AL LOTTO (27 nov, Nico su 00527/0010: "perche' li ha scaricati in produzione se
+// in reparto WIP erano mancanti?"). Il lotto consuma TUTTA la lista: prima dai posti della
+// commessa (reparto, terzisti), poi dalla sede, anche sotto zero. Un codice della lista mai
+// portato in reparto puo' essere una minuteria presa dallo scaffale (giusto) o un codice
+// che non serve piu' (lista da correggere PRIMA del lotto). Questa funzione dice quali:
+// per ogni riga che il lotto scarica (non MAC, non lavorazione `_K`), serve = qta_pz ×
+// pezzi, nei posti = quanto la commessa ha nei suoi posti (`pressoTerzisti`); se manca,
+// la differenza viene dalla sede. Ritorna [{ codice, descrizione, serve, neiPosti, dallaSede }].
+function codiciFuoriRepartoAlLotto(materiali, pezzi, movimenti, operazioneId) {
+  const posti = new Map();
+  pressoTerzisti(movimenti || []).forEach((voci, cod) => voci.forEach(v => {
+    if (v.operazione_id !== operazioneId) return;
+    const c = String(cod).trim().toUpperCase();
+    posti.set(c, +((posti.get(c) || 0) + v.qta).toFixed(6));
+  }));
+  const per = new Map();
+  (materiali || []).forEach(r => {
+    if (!r || String(r.tipo || '').toUpperCase() === 'MAC' || eLavorazione(r.codice)) return;
+    const c = String(r.codice || '').trim().toUpperCase();
+    if (!c) return;
+    const q = (Number(r.qta_pz) || 0) * (Number(pezzi) || 0);
+    if (!(q > 0)) return;
+    const x = per.get(c) || { codice: String(r.codice).trim(), descrizione: r.descrizione || '', serve: 0 };
+    x.serve = +(x.serve + q).toFixed(6);
+    per.set(c, x);
+  });
+  const out = [];
+  per.forEach((x, c) => {
+    const nei = posti.get(c) || 0;
+    if (x.serve - nei > 0.0005) out.push(Object.assign(x, { neiPosti: nei, dallaSede: +(x.serve - Math.max(0, nei)).toFixed(6) }));
+  });
+  return out.sort((a, b) => a.codice.localeCompare(b.codice, 'it', { numeric: true }));
+}
+
 // Quanto di un codice e' sullo scaffale in SEDE: i movimenti senza `presso_id`.
 // Ritorna Map codice -> qta (puo' essere negativa: un dato da guardare, non
 // da nascondere).
@@ -1148,5 +1182,5 @@ if (typeof module !== 'undefined' && module.exports) {
     applicaDistinteProdotti, disponibilePerNoi, eLavorazione,
     fabbisognoDaListe, materialiCommessa, arriviDaDdt, righeGiacenzaGestionale, mancaSuDomanda,
     ripartisciOrdinato, pressoTerzisti, saldoInSede, inConto, quoteFasiEsterne, ripartoFasiEsterne, assegnaPerServizio, terzistiDellaCommessa,
-    chiaveOfDaRif, chiaveOf, ordinatoApertoOf, puntoZeroMovimenti, chiaveOfDaNotaAlnus, indiceArriviOf, righeApertoOf, collaudoOf };
+    chiaveOfDaRif, chiaveOf, ordinatoApertoOf, puntoZeroMovimenti, chiaveOfDaNotaAlnus, indiceArriviOf, righeApertoOf, collaudoOf, codiciFuoriRepartoAlLotto };
 }

@@ -317,5 +317,27 @@ sez('Codici non riconosciuti nei DDT (20 nov)');
     [{ serie: 'OF', numero: 807, anno: 2026, fornitore_id: 'fab', righe: [{ codice: '242AA0DKC00000RZKE65', codice_fornitore: 'DKC RZKE65' }] }])[0].proposta.codice === '242AA0DKC00000RZKE65');
 }
 
+console.log('\nAvviso al lotto: codici della lista non in reparto (27 nov, 00527/0010)');
+{
+  const op = 'op1', rep = 'rep';
+  const mov = [
+    { tipo: 'trasferimento', codice: 'A', qta: 3, presso_id: rep, operazione_id: op },
+    { tipo: 'trasferimento', codice: 'A', qta: -3, operazione_id: op },
+    { tipo: 'trasferimento', codice: 'B', qta: 1, presso_id: rep, operazione_id: op },
+    { tipo: 'trasferimento', codice: 'C', qta: 5, presso_id: rep, operazione_id: 'altra' },
+    { tipo: 'trasferimento', codice: 'D', qta: 9, presso_id: rep, operazione_id: op, fuori_giacenza: true },
+  ];
+  const lista = [{ codice: 'A', qta_pz: 3 }, { codice: 'B', qta_pz: 2 }, { codice: 'C', qta_pz: 1 }, { codice: 'D', qta_pz: 1 },
+    { codice: 'VITI', qta_pz: 4, tipo: 'MAC' }, { codice: 'P_K', qta_pz: 1 }, { codice: 'b', qta_pz: 1 }];
+  const f = M.codiciFuoriRepartoAlLotto(lista, 1, mov, op);
+  const di = (c) => f.find(x => x.codice.toUpperCase() === c);
+  t('A tutto in reparto: niente avviso', !di('A'));
+  t('B: due righe dello stesso codice sommate (3), in reparto 1, dalla sede 2', di('B') && di('B').serve === 3 && di('B').neiPosti === 1 && di('B').dallaSede === 2);
+  t('C: in reparto per UN\'ALTRA commessa non vale', di('C') && di('C').neiPosti === 0);
+  t('D: fuori giacenza non vale', di('D') && di('D').dallaSede === 1);
+  t('MAC e lavorazioni _K non si avvisano', !di('VITI') && !di('P_K'));
+  t('2 pezzi: A serve 6, in reparto 3', M.codiciFuoriRepartoAlLotto(lista, 2, mov, op).find(x => x.codice === 'A').dallaSede === 3);
+}
+
 console.log('\n' + ok + ' ok, ' + ko + ' ko');
 process.exit(ko ? 1 : 0);
