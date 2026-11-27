@@ -3412,7 +3412,8 @@ function openClienteModal(c) {
   const inCitta = el('input', { type:'text', name:'citta', value:c.citta||'', placeholder:'es. Milano' });
   const inCap = el('input', { type:'text', name:'cap', value:c.cap||'', placeholder:'20100', maxlength:'5' });
   const inProvincia = el('input', { type:'text', name:'provincia', value:c.provincia||'', placeholder:'MI', maxlength:'2', style:'text-transform:uppercase;' });
-  const inPIva = el('input', { type:'text', name:'p_iva', value:c.p_iva||'' });
+  const inPIva = el('input', { type:'text', name:'p_iva', value:c.p_iva||'', placeholder:'es. IT01234567890' });
+  inPIva.addEventListener('blur', () => { inPIva.value = normalizzaPIva(inPIva.value) || ''; });
   // SITO WEB (9 nov, Nico): per i fornitori online (Farnell, Mouser...) dove
   // si ordina dal sito e non per mail. Il menu del materiale lo apre. Campo
   // spento finche' la colonna `aziende.sito` non esiste (stesso patto della tariffa).
@@ -3660,7 +3661,7 @@ function openClienteModal(c) {
         citta: (fd.get('citta')||'').trim() || null,
         cap: (fd.get('cap')||'').trim() || null,
         provincia: (fd.get('provincia')||'').trim().toUpperCase() || null,
-        p_iva: (fd.get('p_iva')||'').trim() || null,
+        p_iva: normalizzaPIva(fd.get('p_iva')),
         ...(sitoDisponibile ? { sito: normalizzaSito(fd.get('sito')) } : {}),
         ...(nomiAlnusDisponibili ? { nomi_alnus: [...new Set(String(fd.get('nomi_alnus') || '').split(',').map(x => x.trim().replace(/\s+/g, ' ')).filter(Boolean))] } : {}),
         note: (fd.get('note')||'').trim() || null,
@@ -4038,7 +4039,7 @@ function openClientiImportPreviewModal(rows) {
     citta: colCitta ? (r[colCitta]||'').toString().trim() || null : null,
     cap: colCap ? (r[colCap]||'').toString().trim() || null : null,
     provincia: colProvincia ? (r[colProvincia]||'').toString().trim().toUpperCase() || null : null,
-    p_iva: colPIva ? (r[colPIva]||'').toString().trim() || null : null,
+    p_iva: colPIva ? normalizzaPIva(r[colPIva]) : null,
     email: colEmail ? (r[colEmail]||'').toString().trim() || null : null,
     note: colNote ? (r[colNote]||'').toString().trim() || null : null,
   }));
@@ -10409,6 +10410,15 @@ function chiediTesto(opz) {
 
 // Il sito si salva con https:// davanti: scritto "it.farnell.com" non si
 // aprirebbe (il browser lo leggerebbe come un percorso dentro il gestionale).
+// P.IVA SEMPRE CON «IT» (27 nov, Nico: "voglio che siano tutte con IT"): la
+// cartella di rete dell'azienda si chiama come la P.IVA, identica, e sul
+// server sono IT03552340279. Undici cifre → IT davanti; spazi tolti,
+// maiuscole. Un codice fiscale (16) o una partita estera restano com'erano.
+function normalizzaPIva(v) {
+  const t = String(v == null ? '' : v).replace(/\s+/g, '').toUpperCase();
+  if (!t) return null;
+  return /^\d{11}$/.test(t) ? 'IT' + t : t;
+}
 function normalizzaSito(v) {
   const t = String(v == null ? '' : v).trim();
   if (!t) return null;
