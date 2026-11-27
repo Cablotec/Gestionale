@@ -4037,6 +4037,98 @@ function aziendeExportExcel() {
 // ═══════════════════════════════════════════════════════════
 // ARTICOLI — anagrafica codici prodotto, CRUD, import Excel
 // ═══════════════════════════════════════════════════════════
+// ⚠⚠ MAGAZZINO DEL PRODOTTO FINITO (27 nov, Nico: "insisto su prodotti, altrimenti dove
+// vedo quelli passati, uno storico per intenderci?"). Dal 27 nov il lotto carica il prodotto
+// e la spedizione lo scarica (migrazione-prodotto-in-giacenza.sql): la giacenza e' il saldo
+// dei movimenti in conto del codice. Lo STORICO invece viene da lotti e spedizioni delle
+// commesse di quel prodotto (tutti, anche prima del punto zero, quando i movimenti non c'erano).
+// Mappa codice (maiuscolo) → saldo; null = movimenti non letti.
+function giacenzeProdottiFinitiMappa() {
+  if (!Array.isArray(state.movimenti)) return null;
+  const per = new Map();
+  inConto(state.movimenti).forEach(m => {
+    const c = String(m.codice || '').trim().toUpperCase();
+    if (c) per.set(c, (per.get(c) || 0) + (Number(m.qta) || 0));
+  });
+  return per;
+}
+// Lotti e spedizioni di un prodotto, dal piu' recente: [{ data, tipo:'lotto'|'spedizione', o, qta, rif, nota }].
+function storicoProdotto(articoloId) {
+  const ops = new Map((state.operazioni || []).filter(o => o.articolo_id === articoloId).map(o => [o.id, o]));
+  const out = [];
+  (state.consegneCommessa || []).forEach(l => { const o = ops.get(l.operazione_id);
+    if (o && Number(l.quantita) > 0) out.push({ data: l.data, tipo: 'lotto', o, qta: Number(l.quantita), rif: l.ddt || '', nota: l.nota || '' }); });
+  (state.spedizioni || []).forEach(s => { const o = ops.get(s.operazione_id);
+    if (o && s.quantita != null && Number(s.quantita) > 0)
+      out.push({ data: s.data, tipo: 'spedizione', o, qta: Number(s.quantita), rif: s.ddt ? 'DDT ' + s.ddt : '', nota: [s.destinatario, s.note].filter(Boolean).join(' · ') }); });
+  return out.sort((x, y) => String(y.data || '').localeCompare(String(x.data || '')) || (x.tipo === 'spedizione' ? -1 : 1));
+}
+// La linguetta «Magazzino» della scheda prodotto.
+function pannelloMagazzinoProdotto(a) {
+  const box = el('div', {});
+  const cod = String(a.codice || '').trim().toUpperCase();
+  const etiOp = (o) => (o.numero_ordine || '—') + (o.pos ? '/' + o.pos : '');
+  const apriOp = (o) => { closeModal(); openOperazioneModal(o); };
+  // 1. La giacenza, e da cosa e' fatta.
+  if (!Array.isArray(state.movimenti)) {
+    box.append(el('div', { class: 'sub' }, 'Movimenti non letti: la giacenza non si può dire. Riprova dopo «⟳ Aggiorna» in Movimenti.'));
+  } else {
+    const righe = inConto(state.movimenti).filter(m => String(m.codice || '').trim().toUpperCase() === cod);
+    const somma = (f) => righe.filter(f).reduce((s, m) => s + (Number(m.qta) || 0), 0);
+    const tot = somma(() => true);
+    const apertura = somma(m => m.documento_tipo === 'APERTURA');
+    const prodotti = somma(m => m.documento_tipo === 'PRODUZIONE');
+    const spediti = somma(m => m.documento_tipo === 'SPEDIZIONE');
+    const altro = +(tot - apertura - prodotti - spediti).toFixed(4);
+    box.append(el('div', { style: 'display:flex;align-items:baseline;gap:10px;margin-bottom:4px;' },
+      el('span', { style: 'font-size:12px;color:var(--mut);' }, 'In magazzino'),
+      el('span', { class: 'mono', style: 'font-size:22px;font-weight:700;color:' + (tot < 0 ? 'var(--red)' : tot > 0 ? 'var(--blu)' : 'var(--mut)') + ';' }, nfIT(tot) + ' pz')));
+    box.append(el('div', { class: 'sub', style: 'margin-bottom:14px;' },
+      righe.length ? ['apertura del 23/11 ' + nfIT(apertura), 'prodotti ' + nfIT(prodotti), 'spediti ' + nfIT(-spediti)]
+        .concat(altro ? ['altri movimenti ' + (altro > 0 ? '+' : '') + nfIT(altro)] : []).join(' · ')
+        : 'Nessun movimento dal punto zero (23/11).'));
+  }
+  // 2. Pronti per commessa (prodotti − spediti).
+  const pronti = (state.operazioni || []).filter(o => o.articolo_id === a.id)
+    .map(o => ({ o, p: quantitaConsegnata(o.id) - quantitaSpedita(o.id) })).filter(x => x.p > 0);
+  box.append(el('h4', { style: 'margin:0 0 6px;' }, 'Pronti da spedire' + (pronti.length ? ' · ' + nfIT(pronti.reduce((s, x) => s + x.p, 0)) + ' pz' : '')));
+  if (!pronti.length) box.append(el('div', { class: 'sub', style: 'margin-bottom:14px;' }, 'Nessuna commessa con pezzi prodotti e non spediti.'));
+  else {
+    const t = el('table', { class: 'rt', style: 'margin-bottom:14px;' });
+    t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Commessa'), el('th', {}, 'Cliente'), el('th', { class: 'tr' }, 'Pronti'), el('th', { class: 'tr' }, 'Ordinati'))));
+    const tb = el('tbody');
+    pronti.forEach(x => tb.append(el('tr', { style: 'cursor:pointer;', title: 'Apri la commessa', onclick: () => apriOp(x.o) },
+      el('td', { class: 'mono' }, etiOp(x.o)), el('td', {}, nomeAziendaDi(x.o.cliente_id) || '—'),
+      el('td', { class: 'tr mono', style: 'color:var(--blu);font-weight:700;' }, nfIT(x.p)), el('td', { class: 'tr mono' }, nfIT(Number(x.o.quantita) || 0)))));
+    t.append(tb); box.append(t);
+  }
+  // 3. Lo storico: lotti e spedizioni di tutte le commesse del prodotto.
+  const storico = storicoProdotto(a.id);
+  const totL = storico.filter(r => r.tipo === 'lotto').reduce((s, r) => s + r.qta, 0);
+  const totS = storico.filter(r => r.tipo === 'spedizione').reduce((s, r) => s + r.qta, 0);
+  box.append(el('h4', { style: 'margin:0 0 6px;' }, 'Storico' + (storico.length ? ' · prodotti ' + nfIT(totL) + ' · spediti ' + nfIT(totS) : '')));
+  if (!storico.length) { box.append(el('div', { class: 'sub' }, 'Nessun lotto e nessuna spedizione.')); return box; }
+  let quante = 50;
+  const wrap = el('div', {});
+  const disegna = () => {
+    wrap.innerHTML = '';
+    const t = el('table', { class: 'rt' });
+    t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Data'), el('th', {}, 'Cosa'), el('th', {}, 'Commessa'), el('th', {}, 'Cliente'),
+      el('th', { class: 'tr' }, 'Pz'), el('th', {}, 'Riferimento'))));
+    const tb = el('tbody');
+    storico.slice(0, quante).forEach(r => tb.append(el('tr', { style: 'cursor:pointer;', title: 'Apri la commessa', onclick: () => apriOp(r.o) },
+      el('td', { class: 'mono' }, r.data ? fmtIT(r.data) : '—'),
+      el('td', {}, r.tipo === 'lotto' ? el('span', { class: 'badge bok' }, 'prodotto') : el('span', { class: 'badge bvio' }, 'spedito')),
+      el('td', { class: 'mono' }, etiOp(r.o)), el('td', {}, nomeAziendaDi(r.o.cliente_id) || '—'),
+      el('td', { class: 'tr mono', style: 'font-weight:700;color:' + (r.tipo === 'lotto' ? 'var(--grn)' : 'var(--txt)') + ';' }, (r.tipo === 'lotto' ? '+' : '−') + nfIT(r.qta)),
+      el('td', { style: 'font-size:11px;color:var(--mut);' }, [r.rif, r.nota].filter(Boolean).join(' · ')))));
+    t.append(tb); wrap.append(t);
+    if (storico.length > quante) wrap.append(el('button', { type: 'button', class: 'btng', style: 'margin-top:6px;',
+      onclick: () => { quante = storico.length; disegna(); } }, 'Mostra tutti (' + storico.length + ')'));
+  };
+  disegna(); box.append(wrap);
+  return box;
+}
 function renderArticoli(root) {
   const isAdmin = state.profile?.ruolo === 'admin';
   const search = (state.artSearch || '').toLowerCase();
@@ -4118,10 +4210,12 @@ function renderArticoli(root) {
     el('th', {}, 'Descrizione'),
     el('th', {}, 'Categoria'),
     el('th', { class:'tr' }, 'Min/pz'),
+    el('th', { class:'tr', title:'Giacenza del prodotto finito: carichi dei lotti meno spedizioni (dal punto zero del 23/11)' }, 'In magazzino'),
     el('th', {}, 'Note'),
     el('th', { class:'tc' }, 'Stato'),
   )));
   const tb = el('tbody');
+  const giacProd = giacenzeProdottiFinitiMappa();
   // Niente colonna Azioni: click sulla riga apre la scheda (modifica per
   // l'admin, sola lettura per gli altri). L'eliminazione vive nella scheda.
   list.forEach(a => {
@@ -4137,6 +4231,9 @@ function renderArticoli(root) {
             minutiVal + " min")
         : el('td', { class:'tr mono', style:'font-size:11px;color:var(--mut);font-style:italic;' },
             '— da definire'),
+      (() => { const g = giacProd ? giacProd.get(String(a.codice || '').trim().toUpperCase()) : null;
+        return el('td', { class:'tr mono', style:'font-size:12px;' + (g < 0 ? 'color:var(--red);font-weight:700;' : g > 0 ? 'color:var(--blu);font-weight:700;' : 'color:var(--mut);') },
+          giacProd == null ? '…' : g ? nfIT(g) : '—'); })(),
       el('td', { style:'max-width:280px;font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, a.note || ''),
       el('td', { class:'tc' }, a.attivo
         ? el('span', { class:'badge bok' }, 'attivo')
@@ -13799,6 +13896,8 @@ function openArticoloModal(a, opts) {
     { id:'prezzi',    nome:'Prezzi cliente' },
     { id:'note',      nome:'Note' },
   ];
+  // MAGAZZINO (27 nov): giacenza, pronti per commessa e storico di lotti e spedizioni.
+  if (!isNew) schede.push({ id:'magazzino', nome:'Magazzino' });
   const pannelli = {};
   const linguette = {};
   const navSchede = el('div', { class:'nav nav-sub', style:'margin:18px 0 16px;' });
@@ -13853,6 +13952,11 @@ function openArticoloModal(a, opts) {
       el('div', { class:'sub', style:'margin-top:6px;' },
         'Ultimo prezzo per cliente, dagli ordini. Click per l\'andamento; pre-compila i nuovi ordini.')));
   pannelli.note.append(el('div', { class:'field' }, inNote));
+  if (pannelli.magazzino) {
+    pannelli.magazzino.append(pannelloMagazzinoProdotto(a));
+    const g = (giacenzeProdottiFinitiMappa() || new Map()).get(String(a.codice || '').trim().toUpperCase());
+    if (g) linguette.magazzino.textContent = 'Magazzino · ' + nfIT(g);
+  }
 
   form.append(
     el('div', { style:'display:grid;grid-template-columns:minmax(200px,2fr) minmax(140px,1fr) 130px;gap:12px;' },
