@@ -9,9 +9,9 @@
 //   - RADICE: la cartella comune del server (es. \\SERVER\Clienti e fornitori),
 //     scelta UNA volta per PC/browser. Il browser non svela il percorso vero,
 //     da' solo una "maniglia" (handle) che si conserva in IndexedDB.
-//   - `aziende.cartella`: il percorso RELATIVO alla radice, con "/" (es.
-//     "Clienti/ROSSI SRL"). Relativo apposta: ogni PC puo' arrivare alla
-//     radice da una lettera d'unita' diversa, il percorso dentro e' lo stesso.
+//   - la cartella di un'azienda e' quella che dentro la radice si chiama come
+//     la sua P.IVA (app.js, `cartellaDiAzienda`): niente da salvare a database,
+//     e ogni PC puo' arrivare alla radice da una lettera d'unita' diversa.
 //
 // Niente DOM e niente Supabase qui: solo l'accesso alle cartelle. La scheda
 // (app.js, `boxDocumentiAzienda`) decide cosa mostrare.
@@ -90,14 +90,6 @@ async function cartellaElenco(dir) {
   const coll = new Intl.Collator('it', { numeric: true, sensitivity: 'base' });
   out.sort((a, b) => (a.tipo === b.tipo ? coll.compare(a.nome, b.nome) : (a.tipo === 'cartella' ? -1 : 1)));
   return out;
-}
-
-// Fa scegliere una cartella partendo dalla radice e ne restituisce il percorso
-// relativo, o null se l'utente ha scelto una cartella FUORI dalla radice.
-async function cartellaScegliDentro(radice) {
-  const h = await window.showDirectoryPicker({ startIn: radice, mode: 'readwrite' });
-  const seg = await radice.resolve(h);
-  return seg ? cartellaPercorso(seg) : null;
 }
 
 // Un nome valido per Windows (niente < > : " / \ | ? *, niente punti o spazi in fondo).
