@@ -3345,8 +3345,10 @@ function renderAziende(root) {
     el('th', {}, 'P. IVA'),
     el('th', { class:'tc' }, 'Stato'),
     el('th', { class:'tc' }, 'Azioni'),
+    el('th', { class:'tc', title:'La cartella con la P.IVA dentro la cartella principale del server' }, 'Cartella'),
   )));
   const tb = el('tbody');
+  const celleCartella = [];   // { piva, btn }: dopo il disegno si spengono quelle senza cartella
   list.forEach(c => {
     // Badge ruolo
     let ruoloBadge;
@@ -3376,11 +3378,13 @@ function renderAziende(root) {
             )
           : el('button', { class:'btnsm', onclick:()=>openClienteModal(c) }, 'Vedi')
       ),
+      el('td', { class:'tc' }, cellaCartellaAzienda(c, celleCartella)),
     ));
   });
   tbl.append(tb);
   tw.append(tbl);
   root.append(tw);
+  segnaCartelleMancanti(celleCartella);
 }
 
 function openClienteModal(c) {
@@ -3903,6 +3907,40 @@ function apriImpostazioniPersonali() {
 
   body.append(titolo('── Cartella principale del server ──'), boxCartella);
   modal.append(body);
+  modal.append(el('div', { class:'mfoot' }, el('button', { class:'btng', onclick:closeModal }, 'Chiudi')));
+  openModal(modal);
+}
+
+// COLONNA «CARTELLA» della lista Aziende (27 nov, Nico: "una colonna su ogni
+// riga di Aziende in fondo dove clicco e mi apre la cartella"). Il browser non
+// puo' aprire Esplora risorse: il clic apre la finestra «Documenti» con la
+// stessa sezione della scheda (`boxDocumentiAzienda`).
+function cellaCartellaAzienda(c, celle) {
+  const piva = cartellaDiAzienda(c);
+  if (!piva) return el('span', { class:'sub', title:'Senza P.IVA non c’è cartella' }, '—');
+  const btn = el('button', { type:'button', class:'btnsm doc-btn-riga', title:'Apri la cartella ' + piva,
+    onclick: () => apriDocumentiAzienda(c) }, '📁');
+  celle.push({ piva, btn });
+  return btn;
+}
+// Dopo il disegno: le righe la cui cartella non c'e' ancora si spengono (si
+// aprono lo stesso: dalla finestra un admin la crea). Solo se l'accesso alla
+// cartella principale e' gia' concesso: qui non si chiede niente.
+async function segnaCartelleMancanti(celle) {
+  if (!celle.length || typeof cartelleSupportate !== 'function' || !cartelleSupportate()) return;
+  const r = await cartellaRadice();
+  if (!r || await cartellaPermesso(r, false) !== 'granted') return;
+  for (const x of celle) {
+    try { await r.getDirectoryHandle(x.piva); }
+    catch (_) { x.btn.classList.add('manca'); x.btn.title = 'Cartella ' + x.piva + ' non ancora creata'; }
+  }
+}
+function apriDocumentiAzienda(c) {
+  const modal = el('div', { class:'modal', style:'max-width:760px;' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Documenti — ' + (c.nome || '')),
+    el('button', { class:'mclose', onclick:closeModal }, '✕')));
+  modal.append(el('div', { class:'mbody' }, boxDocumentiAzienda(c, state.profile?.ruolo !== 'admin')));
   modal.append(el('div', { class:'mfoot' }, el('button', { class:'btng', onclick:closeModal }, 'Chiudi')));
   openModal(modal);
 }

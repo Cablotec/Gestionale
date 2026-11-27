@@ -981,3 +981,5 @@ table.assv2-rie td.ore-tot{background:rgba(212,255,78,.06);font-weight:700;color
 .doc-riga:hover{background:var(--sur2);}
 .doc-nome{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .doc-dim,.doc-data{color:var(--mut);text-align:right;font-variant-numeric:tabular-nums;}
+.doc-btn-riga{padding:2px 8px;font-size:14px;line-height:1.2;}
+.doc-btn-riga.manca{opacity:.35;}
