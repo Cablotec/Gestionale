@@ -3940,7 +3940,7 @@ function apriImpostazioniPersonali() {
       'Apri le cartelle in Esplora risorse'),
     el('div', { class:'sub', style:'font-size:12px;' },
       'La 📁 della lista Aziende apre la cartella direttamente in Windows. Va installato una volta su questo PC '
-      + '(installa.cmd nella cartella apri-cartella, senza amministratore); al primo clic il browser chiede se aprire '
+      + '(installa.cmd nella cartella apri-cartella, chiede l’amministratore); poi si riavvia il browser e al primo clic chiede se aprire '
       + 'Cablotec: «Consenti sempre». Spunta solo dopo l’installazione: senza, il clic non fa niente.'));
   body.append(titolo('── Cartella principale del server ──'), boxCartella,
     el('div', { style:'height:14px;' }), titolo('── Esplora risorse ──'), boxEsplora);
@@ -3982,8 +3982,8 @@ function cellaCartellaAzienda(c, celle) {
 }
 // APRIRE LA CARTELLA IN ESPLORA RISORSE (27 nov, Nico: "non esiste proprio un
 // modo per aprire cartella con quel click?"). Il browser da solo non puo': su
-// ogni PC si installa una volta il collegamento `cablotec-cartella:` (file
-// fuori dal repo, Z:\SOFTWARE\MegaAPP\apri-cartella, solo utente Windows). Lo
+// ogni PC si installa una volta il collegamento `cablotec:` (file
+// fuori dal repo, Z:\SOFTWARE\MegaAPP\apri-cartella, per tutto il PC: serve l'amministratore). Lo
 // script locale accetta SOLO lettere e cifre e apre SOLO una sottocartella
 // esistente della principale: una pagina qualsiasi puo' chiamarlo, quindi al
 // gestionale si passa la P.IVA e nient'altro. Il gestionale non sa se il PC
@@ -4000,7 +4000,10 @@ function esploraAttivo() { try { return localStorage.getItem(ESPLORA_CHIAVE) ===
 function apriInEsplora(piva) {
   const nome = String(piva || '').replace(/[^A-Za-z0-9]/g, '');
   if (!nome) return toast('P.IVA mancante', 'err');
-  window.location.href = 'cablotec-cartella:' + nome;
+  // `cablotec:` registrato PER TUTTO IL PC (HKLM): Brave ignorava in silenzio
+  // i collegamenti registrati solo per l'utente (HKCU) — provato il 27 nov,
+  // anche col Blocco note. Funzionano solo quelli del computer.
+  window.location.href = 'cablotec:' + nome;
 }
 // Dopo il disegno: le righe la cui cartella non c'e' ancora si spengono (si
 // aprono lo stesso: dalla finestra un admin la crea). Solo se l'accesso alla
