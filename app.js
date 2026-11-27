@@ -629,6 +629,7 @@ async function afterLogin() {
 document.addEventListener('click', async (e) => {
   if (e.target.id === 'btn-logout') await sb.auth.signOut();
   if (e.target.id === 'btn-theme') toggleTheme();
+  if (e.target.id === 'btn-personali') apriImpostazioniPersonali();
   if (e.target.id === 'btn-kiosk') location.href = './kiosk.html';
 });
 
@@ -3754,12 +3755,6 @@ function boxDocumentiAzienda(c, readonly) {
   const fmtData = (ms) => ms ? new Date(ms).toLocaleDateString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric' }) : '';
   const piva = cartellaDiAzienda(c);
 
-  // La cartella principale si sceglie (o si cambia) per QUESTO PC: non tocca il database.
-  const scegliRadice = async () => {
-    try { radice = await cartellaRadiceScegli(); sotto = []; disegna(); }
-    catch (e) { if (e.name !== 'AbortError') toast(e.message || String(e), 'err'); }
-  };
-  const btnRadice = () => bottone('⚙ Cartella principale…', scegliRadice);
   const crea = async () => {
     try { await cartellaApri(radice, piva, true); toast('Cartella «' + piva + '» creata'); disegna(); }
     catch (e) { toast(e.message || String(e), 'err'); }
@@ -3787,8 +3782,7 @@ function boxDocumentiAzienda(c, readonly) {
     if (vecchio()) return;
     radice = r;
     if (!radice) {
-      return box.append(nota('Su questo PC non è ancora scelta la cartella principale del server (quella che contiene le cartelle con le P.IVA). Si sceglie una volta sola.'),
-        bottone('📁 Scegli la cartella principale', scegliRadice, 'btnsm doc-prima'));
+      return box.append(nota('Su questo PC non è ancora scelta la cartella principale del server: si sceglie una volta sola dalla ⚙ in alto, accanto al tuo nome.'));
     }
     const perm = await cartellaPermesso(radice, false);
     if (vecchio()) return;
@@ -3807,7 +3801,7 @@ function boxDocumentiAzienda(c, readonly) {
       box.append(nota('In «' + radice.name + '» non c\'è una cartella «' + piva + '».'),
         el('div', { class:'doc-azioni' },
           readonly ? '' : bottone('＋ Crea la cartella ' + piva, crea, 'btnsm doc-prima'),
-          bottone('↻', () => disegna()), btnRadice()));
+          bottone('↻', () => disegna())));
       return;
     }
     if (vecchio()) return;
@@ -3819,7 +3813,7 @@ function boxDocumentiAzienda(c, readonly) {
         el('a', { href:'#', onclick:(e) => { e.preventDefault(); sotto = sotto.slice(0, i + 1); disegna(); } }, s)]));
     const azioni = el('div', { class:'doc-azioni' },
       bottone('↻', () => disegna()),
-      btnRadice());
+      '');
     box.append(el('div', { class:'doc-testa' }, briciole, azioni));
 
     const lista = el('div', { class:'doc-lista' }, nota('Lettura della cartella…'));
@@ -3861,6 +3855,56 @@ function boxDocumentiAzienda(c, readonly) {
   };
   disegna();
   return box;
+}
+
+// IMPOSTAZIONI PERSONALI (27 nov, Nico: "la rotellina la metterei in alto
+// vicino al nome dell'utente loggato, con varie impostazioni personalizzate
+// legate all'utente che metteremo in futuro"). La ⚙ accanto al nome apre
+// questa finestra; ogni impostazione e' una sezione. Le prossime si aggiungono
+// qui sotto, come la cartella.
+// ⚠ La CARTELLA PRINCIPALE vale per il PC (browser), non per l'account: il
+// browser non lascia salvare l'accesso a una cartella altrove che in locale.
+function apriImpostazioniPersonali() {
+  const modal = el('div', { class:'modal', style:'max-width:620px;' });
+  modal.append(el('div', { class:'mhd' },
+    el('h2', {}, 'Impostazioni personali' + (state.profile ? ' — ' + (state.profile.nome || state.profile.email || '') : '')),
+    el('button', { class:'mclose', onclick:closeModal }, '✕')));
+  const body = el('div', { class:'mbody' });
+  const titolo = (t) => el('div', { class:'sub', style:'margin:4px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' }, t);
+
+  const boxCartella = el('div', { class:'doc-box' });
+  const disegnaCartella = async () => {
+    boxCartella.innerHTML = '';
+    const nota = (t) => el('div', { class:'sub', style:'font-size:12px;' }, t);
+    boxCartella.append(nota('La macro cartella del server dove stanno i file del gestionale: dentro, per esempio, '
+      + 'le cartelle di clienti e fornitori (ognuna col nome della P.IVA) e in futuro altri tipi di file.'));
+    if (typeof cartelleSupportate !== 'function' || !cartelleSupportate())
+      return boxCartella.append(nota('Si sceglie solo da Chrome o Edge su PC.'));
+    const r = await cartellaRadice();
+    const perm = r ? await cartellaPermesso(r, false) : null;
+    const scegli = async () => {
+      try { await cartellaRadiceScegli(); toast('Cartella principale scelta'); disegnaCartella(); }
+      catch (e) { if (e.name !== 'AbortError') toast(e.message || String(e), 'err'); }
+    };
+    boxCartella.append(el('div', { class:'doc-testa' },
+      el('div', { style:'font-size:13px;' }, r ? el('span', {}, '📁 ', el('b', {}, r.name || '(senza nome)'),
+          perm === 'granted' ? '' : el('span', { class:'sub' }, ' — accesso da riconfermare'))
+        : el('span', { class:'sub' }, 'Non ancora scelta su questo PC.')),
+      el('div', { class:'doc-azioni' },
+        r && perm !== 'granted' ? el('button', { type:'button', class:'btnsm doc-prima', onclick: async () => {
+          if (await cartellaPermesso(r, true) === 'granted') disegnaCartella();
+          else toast('Accesso negato', 'err');
+        } }, '🔓 Consenti l’accesso') : '',
+        el('button', { type:'button', class: r ? 'btnsm' : 'btnsm doc-prima', onclick: scegli },
+          r ? 'Cambia…' : '📁 Scegli la cartella principale'))));
+    boxCartella.append(nota('Vale per questo PC e questo browser: su un altro PC si sceglie di nuovo.'));
+  };
+  disegnaCartella();
+
+  body.append(titolo('── Cartella principale del server ──'), boxCartella);
+  modal.append(body);
+  modal.append(el('div', { class:'mfoot' }, el('button', { class:'btng', onclick:closeModal }, 'Chiudi')));
+  openModal(modal);
 }
 
 async function deleteCliente(c) {
