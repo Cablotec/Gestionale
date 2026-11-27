@@ -3348,7 +3348,6 @@ function renderAziende(root) {
     el('th', { class:'tc', title:'La cartella con la P.IVA dentro la cartella principale del server' }, 'Cartella'),
   )));
   const tb = el('tbody');
-  const celleCartella = [];   // { piva, btn }: dopo il disegno si spengono quelle senza cartella
   list.forEach(c => {
     // Badge ruolo
     let ruoloBadge;
@@ -3378,13 +3377,12 @@ function renderAziende(root) {
             )
           : el('button', { class:'btnsm', onclick:()=>openClienteModal(c) }, 'Vedi')
       ),
-      el('td', { class:'tc' }, cellaCartellaAzienda(c, celleCartella)),
+      el('td', { class:'tc' }, cellaCartellaAzienda(c)),
     ));
   });
   tbl.append(tb);
   tw.append(tbl);
   root.append(tw);
-  segnaCartelleMancanti(celleCartella);
 }
 
 function openClienteModal(c) {
@@ -3647,12 +3645,10 @@ function openClienteModal(c) {
   );
 
   body.append(form);
-  // DOCUMENTI (27 nov): i file della cartella di rete dell'azienda, letti dal
-  // server aziendale e mai caricati su Supabase. Solo su una scheda gia' salvata.
-  if (!isNew) body.append(
-    el('div', { class:'sub', style:'margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' },
-      '── Documenti (cartella di rete) ──'),
-    boxDocumentiAzienda(c, readonly));
+  // La cartella dell'azienda (27 nov): un bottone, la apre in Esplora risorse.
+  if (!isNew && cartellaDiAzienda(c)) body.append(el('div', { style:'margin-top:10px;' },
+    el('button', { type:'button', class:'btnsm', onclick: () => apriInEsplora(cartellaDiAzienda(c)) },
+      '📁 Apri la cartella ' + cartellaDiAzienda(c))));
   modal.append(body);
 
   const foot = el('div', { class:'mfoot' });
@@ -3757,274 +3753,71 @@ function openClienteModal(c) {
   openModal(modal);
 }
 
-// LA CARTELLA DI RETE DELL'AZIENDA (27 nov, Nico: "legare clienti e fornitori
-// a un percorso di rete [...] per avere il peso di allegati ed altro in
-// locale"). Accesso alle cartelle in core/cartelle.js; qui solo la scheda.
-//   - CARTELLA PRINCIPALE: una sola, scelta una volta per PC (sul server);
-//   - la cartella dell'azienda e' quella che dentro la principale si chiama
-//     ESATTAMENTE come la sua P.IVA (Nico: "in automatico tramite codice p.iva
-//     [...] lo stesso identico codice"). Niente collegamento a mano, niente
-//     colonna: cambia la P.IVA, cambia la cartella;
-//   - si naviga nelle sottocartelle, si apre un file con un clic, si
-//     trascinano file nuovi dentro (mai sovrascritti: "nome (2).pdf").
-// ⚠ Un file Office si apre come COPIA scaricata: dal browser non si puo'
-// lanciare Excel sul file del server. Per modificarlo si apre dalla cartella.
-function cartellaDiAzienda(c) { return cartellaNomeValido(String((c && c.p_iva) || '').replace(/\s+/g, '')); }
-function boxDocumentiAzienda(c, readonly) {
-  const box = el('div', { class:'doc-box' });
-  let sotto = [];          // sottocartelle aperte dentro quella dell'azienda
-  let radice = null;
-  let giro = 0;            // ogni disegno ha il suo numero: uno vecchio rimasto in attesa non scrive
-
-  const nota = (t, tono) => el('div', { class:'sub', style:'font-size:12px;' + (tono === 'err' ? 'color:var(--red,#c33);' : '') }, t);
-  const bottone = (t, fn, cls) => el('button', { type:'button', class: cls || 'btnsm', onclick: fn }, t);
-  const fmtByte = (n) => n == null ? '' : n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' kB'
-    : (n / 1048576).toLocaleString('it-IT', { maximumFractionDigits: 1 }) + ' MB';
-  const fmtData = (ms) => ms ? new Date(ms).toLocaleDateString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric' }) : '';
-  const piva = cartellaDiAzienda(c);
-
-  const crea = async () => {
-    try { await cartellaApri(radice, piva, true); toast('Cartella «' + piva + '» creata'); disegna(); }
-    catch (e) { toast(e.message || String(e), 'err'); }
-  };
-  const apriFile = async (voce) => {
-    // La finestra si apre SUBITO, dentro il clic: dopo un `await` il browser la bloccherebbe.
-    const anteprima = /\.(pdf|png|jpe?g|gif|webp|bmp|svg|txt|csv|xml|html?)$/i.test(voce.nome);
-    const w = anteprima ? window.open('', '_blank') : null;
-    try {
-      const f = await voce.handle.getFile();
-      const url = URL.createObjectURL(f);
-      if (w) w.location.href = url;
-      else { const a = el('a', { href:url, download:voce.nome }); document.body.append(a); a.click(); a.remove(); }
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (e) { if (w) w.close(); toast('Non riesco ad aprire ' + voce.nome + ': ' + (e.message || e), 'err'); }
-  };
-
-  const disegna = async () => {
-    const g = ++giro, vecchio = () => g !== giro;
-    box.innerHTML = '';
-    if (typeof cartelleSupportate !== 'function' || !cartelleSupportate())
-      return box.append(nota('Le cartelle di rete si vedono solo da Chrome o Edge su PC.'));
-    if (!piva) return box.append(nota('Manca la P.IVA: la cartella dell\'azienda è quella che si chiama come la sua P.IVA.'));
-    const r = await cartellaRadice();
-    if (vecchio()) return;
-    radice = r;
-    if (!radice) {
-      return box.append(nota('Su questo PC non è ancora scelta la cartella principale del server: si sceglie una volta sola dalla ⚙ in alto, accanto al tuo nome.'));
-    }
-    const perm = await cartellaPermesso(radice, false);
-    if (vecchio()) return;
-    if (perm !== 'granted') {
-      return box.append(nota('Il browser chiede di nuovo il permesso per «' + radice.name + '».'),
-        bottone('🔓 Consenti l\'accesso', async () => {
-          if (await cartellaPermesso(radice, true) === 'granted') disegna();
-          else toast('Accesso negato: senza permesso i file non si vedono', 'err');
-        }, 'btnsm doc-prima'));
-    }
-    let dir;
-    try { dir = await cartellaApri(radice, cartellaPercorso([piva, ...sotto])); }
-    catch (e) {
-      if (vecchio()) return;
-      if (sotto.length) { sotto = []; return disegna(); }   // una sottocartella sparita: si torna su
-      box.append(nota('In «' + radice.name + '» non c\'è una cartella «' + piva + '».'),
-        el('div', { class:'doc-azioni' },
-          readonly ? '' : bottone('＋ Crea la cartella ' + piva, crea, 'btnsm doc-prima'),
-          bottone('↻', () => disegna())));
-      return;
-    }
-    if (vecchio()) return;
-    // Briciole: radice › cartella azienda › sottocartelle (cliccabili per tornare su).
-    const briciole = el('div', { class:'doc-briciole' },
-      el('span', { class:'sub' }, radice.name + ' › '),
-      el('a', { href:'#', onclick:(e) => { e.preventDefault(); sotto = []; disegna(); } }, piva),
-      ...sotto.flatMap((s, i) => [el('span', { class:'sub' }, ' › '),
-        el('a', { href:'#', onclick:(e) => { e.preventDefault(); sotto = sotto.slice(0, i + 1); disegna(); } }, s)]));
-    const azioni = el('div', { class:'doc-azioni' },
-      esploraAttivo() ? bottone('📂 Apri in Esplora risorse', () => apriInEsplora(piva)) : '',
-      bottone('↻', () => disegna()));
-    box.append(el('div', { class:'doc-testa' }, briciole, azioni));
-
-    const lista = el('div', { class:'doc-lista' }, nota('Lettura della cartella…'));
-    box.append(lista);
-    let voci;
-    try { voci = await cartellaElenco(dir); }
-    catch (e) { lista.innerHTML = ''; lista.append(nota('Errore di lettura: ' + (e.message || e), 'err')); return; }
-    if (vecchio()) return;
-    lista.innerHTML = '';
-    if (sotto.length) lista.append(el('div', { class:'doc-riga', onclick:() => { sotto.pop(); disegna(); } },
-      el('span', { class:'doc-ico' }, '↩'), el('span', { class:'doc-nome' }, '..'), el('span'), el('span')));
-    if (!voci.length) lista.append(nota('Cartella vuota.'));
-    voci.forEach(v => lista.append(el('div', {
-        class:'doc-riga', title: v.tipo === 'cartella' ? 'Apri la cartella' : 'Apri ' + v.nome,
-        onclick: () => { if (v.tipo === 'cartella') { sotto.push(v.nome); disegna(); } else apriFile(v); } },
-      el('span', { class:'doc-ico' }, v.tipo === 'cartella' ? '📁' : '📄'),
-      el('span', { class:'doc-nome' }, v.nome),
-      el('span', { class:'doc-dim' }, fmtByte(v.dimensione)),
-      el('span', { class:'doc-data' }, fmtData(v.modificato)))));
-
-    if (readonly) return;
-    // Trascinare file sulla lista = copiarli nella cartella aperta.
-    lista.classList.add('doc-drop');
-    box.append(nota('Trascina qui i file per copiarli in questa cartella (un nome già presente diventa «nome (2)»).'));
-    lista.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); lista.classList.add('sopra'); } });
-    lista.addEventListener('dragleave', () => lista.classList.remove('sopra'));
-    lista.addEventListener('drop', async (e) => {
-      e.preventDefault(); lista.classList.remove('sopra');
-      const files = [...(e.dataTransfer?.files || [])];
-      if (!files.length) return;
-      let fatti = 0;
-      for (const f of files) {
-        try { await cartellaSalvaFile(dir, f); fatti++; }
-        catch (err) { toast('Non salvato ' + f.name + ': ' + (err.message || err), 'err'); }
-      }
-      if (fatti) toast(fatti === 1 ? '1 file copiato' : fatti + ' file copiati');
-      disegna();
-    });
-  };
-  disegna();
-  return box;
-}
+// LA CARTELLA DELL'AZIENDA (27 nov, Nico: "legare clienti e fornitori a un
+// percorso di rete [...] per avere il peso di allegati ed altro in locale").
+// I file stanno sul server, nella cartella principale, in una sottocartella
+// che si chiama ESATTAMENTE come la P.IVA (sempre con IT: `normalizzaPIva`).
+// Il gestionale non legge i file: la 📁 li apre in Esplora risorse col
+// collegamento `cablotec:` (sotto). Su Supabase non va niente.
+// ⚠ Fino al `.10` c'era anche la «modalita' integrata» (elenco dei file dentro
+// la scheda, trascinamento, cartella principale scelta nella ⚙, File System
+// Access API, core/cartelle.js): TOLTA il 27 nov (Nico: "possiamo togliere la
+// modalita' integrata adesso?") quando Esplora risorse ha funzionato. Se
+// servisse di nuovo e' nella storia git (commit 71445bc).
+function cartellaDiAzienda(c) { return String((c && c.p_iva) || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(); }
 
 // IMPOSTAZIONI PERSONALI (27 nov, Nico: "la rotellina la metterei in alto
 // vicino al nome dell'utente loggato, con varie impostazioni personalizzate
 // legate all'utente che metteremo in futuro"). La ⚙ accanto al nome apre
-// questa finestra; ogni impostazione e' una sezione. Le prossime si aggiungono
-// qui sotto, come la cartella.
-// ⚠ La CARTELLA PRINCIPALE vale per il PC (browser), non per l'account: il
-// browser non lascia salvare l'accesso a una cartella altrove che in locale.
+// questa finestra; ogni impostazione e' una sezione. Per ora c'e' solo come
+// si prepara il PC per aprire le cartelle.
 function apriImpostazioniPersonali() {
   const modal = el('div', { class:'modal', style:'max-width:620px;' });
   modal.append(el('div', { class:'mhd' },
     el('h2', {}, 'Impostazioni personali' + (state.profile ? ' — ' + (state.profile.nome || state.profile.email || '') : '')),
     el('button', { class:'mclose', onclick:closeModal }, '✕')));
-  const body = el('div', { class:'mbody' });
   const titolo = (t) => el('div', { class:'sub', style:'margin:4px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;font-size:11px;' }, t);
-
-  const boxCartella = el('div', { class:'doc-box' });
-  const disegnaCartella = async () => {
-    boxCartella.innerHTML = '';
-    const nota = (t) => el('div', { class:'sub', style:'font-size:12px;' }, t);
-    boxCartella.append(nota('La macro cartella del server dove stanno i file del gestionale: dentro, per esempio, '
-      + 'le cartelle di clienti e fornitori (ognuna col nome della P.IVA) e in futuro altri tipi di file.'));
-    if (typeof cartelleSupportate !== 'function' || !cartelleSupportate())
-      return boxCartella.append(nota('Si sceglie solo da Chrome o Edge su PC.'));
-    const r = await cartellaRadice();
-    const perm = r ? await cartellaPermesso(r, false) : null;
-    const scegli = async () => {
-      try { await cartellaRadiceScegli(); toast('Cartella principale scelta'); disegnaCartella(); }
-      catch (e) { if (e.name !== 'AbortError') toast(e.message || String(e), 'err'); }
-    };
-    boxCartella.append(el('div', { class:'doc-testa' },
-      el('div', { style:'font-size:13px;' }, r ? el('span', {}, '📁 ', el('b', {}, r.name || '(senza nome)'),
-          perm === 'granted' ? '' : el('span', { class:'sub' }, ' — accesso da riconfermare'))
-        : el('span', { class:'sub' }, 'Non ancora scelta su questo PC.')),
-      el('div', { class:'doc-azioni' },
-        r && perm !== 'granted' ? el('button', { type:'button', class:'btnsm doc-prima', onclick: async () => {
-          if (await cartellaPermesso(r, true) === 'granted') disegnaCartella();
-          else toast('Accesso negato', 'err');
-        } }, '🔓 Consenti l’accesso') : '',
-        el('button', { type:'button', class: r ? 'btnsm' : 'btnsm doc-prima', onclick: scegli },
-          r ? 'Cambia…' : '📁 Scegli la cartella principale'))));
-    boxCartella.append(nota('Vale per questo PC e questo browser: su un altro PC si sceglie di nuovo.'));
-  };
-  disegnaCartella();
-
-  const chkEsplora = el('input', { type:'checkbox' });
-  chkEsplora.checked = esploraAttivo();
-  chkEsplora.onchange = () => {
-    try { localStorage.setItem(ESPLORA_CHIAVE, chkEsplora.checked ? '1' : '0'); } catch (_) {}
-    if (state.currentTab === 'aziende') renderTab('aziende');
-  };
-  const boxEsplora = el('div', { class:'doc-box' },
-    el('label', { style:'display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;' }, chkEsplora,
-      'Apri le cartelle in Esplora risorse'),
-    el('div', { class:'sub', style:'font-size:12px;' },
-      'La 📁 della lista Aziende apre la cartella direttamente in Windows. Va installato una volta su questo PC '
-      + '(installa.cmd nella cartella apri-cartella, chiede l’amministratore); poi si riavvia il browser e al primo clic chiede se aprire '
-      + 'Cablotec: «Consenti sempre». Spunta solo dopo l’installazione: senza, il clic non fa niente.'));
-  body.append(titolo('── Cartella principale del server ──'), boxCartella,
-    el('div', { style:'height:14px;' }), titolo('── Esplora risorse ──'), boxEsplora);
-  modal.append(body);
+  const nota = (t) => el('div', { class:'sub', style:'font-size:12px;margin-bottom:6px;' }, t);
+  modal.append(el('div', { class:'mbody' },
+    titolo('── Cartelle delle aziende in Esplora risorse ──'),
+    nota('La 📁 della lista Aziende apre in Esplora risorse la cartella del server che si chiama come la P.IVA dell’azienda. '
+      + 'Se non esiste ancora si apre la cartella principale: creala lì, col nome della P.IVA (es. IT01234567890).'),
+    nota('Su ogni PC va preparato una volta: installa.cmd nella cartella apri-cartella (chiede l’amministratore), '
+      + 'poi chiudi e riapri il browser. Al primo clic il browser chiede se aprire Cablotec: «Consenti sempre».')));
   modal.append(el('div', { class:'mfoot' }, el('button', { class:'btng', onclick:closeModal }, 'Chiudi')));
   openModal(modal);
 }
 
-// COLONNA «CARTELLA» della lista Aziende (27 nov, Nico: "una colonna su ogni
-// riga di Aziende in fondo dove clicco e mi apre la cartella"). Il browser non
-// puo' aprire Esplora risorse: il clic apre la finestra «Documenti» con la
-// stessa sezione della scheda (`boxDocumentiAzienda`).
 // La P.IVA nella lista Aziende, con ⚠ se manca o non passa il controllo.
 function cellaPIva(v) {
   const r = controllaPIva(v);
   if (r.ok) return [v];
   return [v || '', el('span', { class:'piva-avviso', title: r.msg }, (v ? ' ' : '') + '⚠')];
 }
-function cellaCartellaAzienda(c, celle) {
+// COLONNA «CARTELLA» della lista Aziende (27 nov, Nico: "una colonna su ogni
+// riga di Aziende in fondo dove clicco e mi apre la cartella").
+function cellaCartellaAzienda(c) {
   const piva = cartellaDiAzienda(c);
   if (!piva) return el('span', { class:'sub', title:'Senza P.IVA non c’è cartella' }, '—');
-  const esplora = esploraAttivo();
-  const btn = el('button', { type:'button', class:'btnsm doc-btn-riga',
-    title: esplora ? 'Apri ' + piva + ' in Esplora risorse' : 'Apri la cartella ' + piva,
-    onclick: () => {
-      if (!esplora) return apriDocumentiAzienda(c);
-      // Cartella che non c'e' (lo sa gia' la lista): avviso + Documenti, da dove si crea.
-      if (btn.classList.contains('manca')) {
-        toast('La cartella ' + piva + ' non c’è ancora: si crea da qui', 'err', 5000);
-        return apriDocumentiAzienda(c);
-      }
-      apriInEsplora(piva);
-    } }, '📁');
-  celle.push({ piva, btn });
-  if (!esplora) return btn;
-  return el('span', { style:'white-space:nowrap;' }, btn, ' ',
-    el('button', { type:'button', class:'btnsm doc-btn-riga', title:'Documenti nel gestionale (vedi i file, trascinane di nuovi)',
-      onclick: () => apriDocumentiAzienda(c) }, '≡'));
+  return el('button', { type:'button', class:'btnsm doc-btn-riga', title:'Apri la cartella ' + piva + ' in Esplora risorse',
+    onclick: () => apriInEsplora(piva) }, '📁');
 }
+
 // APRIRE LA CARTELLA IN ESPLORA RISORSE (27 nov, Nico: "non esiste proprio un
 // modo per aprire cartella con quel click?"). Il browser da solo non puo': su
-// ogni PC si installa una volta il collegamento `cablotec:` (file
-// fuori dal repo, Z:\SOFTWARE\MegaAPP\apri-cartella, per tutto il PC: serve l'amministratore). Lo
-// script locale accetta SOLO lettere e cifre e apre SOLO una sottocartella
-// esistente della principale: una pagina qualsiasi puo' chiamarlo, quindi al
-// gestionale si passa la P.IVA e nient'altro. Il gestionale non sa se il PC
-// l'ha installato: lo dice la spunta nelle impostazioni personali (per PC).
-const ESPLORA_CHIAVE = 'cablotec.apriInEsplora';
-function esploraAttivo() { try { return localStorage.getItem(ESPLORA_CHIAVE) === '1'; } catch (_) { return false; } }
-// ⚠ IL CLIC DEVE CHIAMARE SUBITO IL COLLEGAMENTO (27 nov). Il browser apre un
-// programma esterno solo se la richiesta parte DENTRO il clic: con delle
-// attese prima (IndexedDB, cartella sul server) Brave la scartava in silenzio,
-// senza nemmeno chiedere «Aprire Cablotec?». Quindi niente `await` qui: se la
-// cartella manca lo sa gia' la lista (`segnaCartelleMancanti`, classe
-// `manca`), e chi chiama decide prima. Lo script sul PC, se la cartella non
-// c'e', apre la principale.
+// ogni PC si installa una volta il collegamento `cablotec:` (file fuori dal
+// repo, Z:\SOFTWARE\MegaAPP\apri-cartella, per tutto il PC: serve
+// l'amministratore). Lo script sul PC accetta SOLO lettere e cifre e apre SOLO
+// una sottocartella esistente della principale (se manca, la principale): una
+// pagina qualsiasi puo' chiamarlo, quindi si passa la P.IVA e nient'altro.
+// ⚠ `cablotec:` registrato PER TUTTO IL PC (HKLM): Brave ignorava in silenzio
+// i collegamenti registrati solo per l'utente (HKCU) — provato il 27 nov,
+// anche col Blocco note. E nessun `await` prima: un programma esterno si apre
+// solo da una richiesta fatta dentro il clic.
 function apriInEsplora(piva) {
   const nome = String(piva || '').replace(/[^A-Za-z0-9]/g, '');
   if (!nome) return toast('P.IVA mancante', 'err');
-  // `cablotec:` registrato PER TUTTO IL PC (HKLM): Brave ignorava in silenzio
-  // i collegamenti registrati solo per l'utente (HKCU) — provato il 27 nov,
-  // anche col Blocco note. Funzionano solo quelli del computer.
   window.location.href = 'cablotec:' + nome;
-}
-// Dopo il disegno: le righe la cui cartella non c'e' ancora si spengono (si
-// aprono lo stesso: dalla finestra un admin la crea). Solo se l'accesso alla
-// cartella principale e' gia' concesso: qui non si chiede niente.
-async function segnaCartelleMancanti(celle) {
-  if (!celle.length || typeof cartelleSupportate !== 'function' || !cartelleSupportate()) return;
-  const r = await cartellaRadice();
-  if (!r || await cartellaPermesso(r, false) !== 'granted') return;
-  for (const x of celle) {
-    try { await r.getDirectoryHandle(x.piva); }
-    catch (_) { x.btn.classList.add('manca'); x.btn.title = 'Cartella ' + x.piva + ' non ancora creata'; }
-  }
-}
-function apriDocumentiAzienda(c) {
-  const modal = el('div', { class:'modal', style:'max-width:760px;' });
-  modal.append(el('div', { class:'mhd' },
-    el('h2', {}, 'Documenti — ' + (c.nome || '')),
-    el('button', { class:'mclose', onclick:closeModal }, '✕')));
-  modal.append(el('div', { class:'mbody' }, boxDocumentiAzienda(c, state.profile?.ruolo !== 'admin')));
-  modal.append(el('div', { class:'mfoot' }, el('button', { class:'btng', onclick:closeModal }, 'Chiudi')));
-  openModal(modal);
 }
 
 async function deleteCliente(c) {
