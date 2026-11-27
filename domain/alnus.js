@@ -408,7 +408,8 @@ function controlloGiacenze(calcolata, stampata, tolleranza) {
 function tipoCollaudo(m) {
   if (m.documento_tipo === 'ALNUS') {
     const cau = String(m.documento_numero || '').split('/')[1] || '';
-    if (/^EA/.test(cau)) return 'arrivi';
+    // EP = versamento del prodotto finito (27 nov: da noi il carico del prodotto al lotto).
+    if (/^(EA|EP)/.test(cau)) return 'arrivi';
     if (/^UP/.test(cau)) return 'consumi';
     if (/^(ER|UR)/.test(cau)) return 'rettifiche';
     if (/^UC/.test(cau)) return 'uscite';
@@ -416,8 +417,10 @@ function tipoCollaudo(m) {
     return 'altri';
   }
   if (m.tipo === 'trasferimento') return 'spostamenti';
+  // Il prodotto finito (27 nov): caricato dal lotto come l'EP1, scaricato dalla spedizione come l'UC2.
+  if (m.documento_tipo === 'PRODUZIONE' && m.tipo === 'carico') return 'arrivi';
   if (m.documento_tipo === 'PRODUZIONE') return 'consumi';
-  if (m.documento_tipo === 'RESO' || m.documento_tipo === 'USCITA') return 'uscite';
+  if (m.documento_tipo === 'RESO' || m.documento_tipo === 'USCITA' || m.documento_tipo === 'SPEDIZIONE') return 'uscite';
   if (m.tipo === 'carico') return 'arrivi';
   if (m.tipo === 'rettifica') return 'rettifiche';
   return 'altri';

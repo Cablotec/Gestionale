@@ -8283,7 +8283,9 @@ function documentiRegistro() {
   if (Array.isArray(state.movimenti)) {
     const per = new Map();
     // Le righe di Alnus e d'apertura non sono documenti ricevuti (23 nov).
-    state.movimenti.filter(m => m.tipo === 'carico' && m.documento_numero && fonteMovimento(m) === 'gestionale').forEach(m => {
+    // Ne' il carico del prodotto finito fatto dal lotto (27 nov): non arriva da fuori.
+    state.movimenti.filter(m => m.tipo === 'carico' && m.documento_numero && m.documento_tipo !== 'PRODUZIONE'
+      && fonteMovimento(m) === 'gestionale').forEach(m => {
       const k = movChiaveDoc(m);
       if (!per.has(k)) per.set(k, { k, m, righe: 0, ordini: new Set() });
       const d = per.get(k); d.righe++; if (m.ordine_rif) d.ordini.add(String(m.ordine_rif));
@@ -9730,7 +9732,7 @@ async function registraLottoProduzione(o, campi, opts) {
   state.consegneCommessa = state.consegneCommessa || [];
   if (!state.consegneCommessa.find(x => x.id === nuova.id)) state.consegneCommessa.push(nuova);
   // Il database ha appena scritto gli scarichi (trigger del 14 ott): si rileggono.
-  if (scaricaAlLotto(o)) caricaMovimenti();
+  caricaMovimenti();   // dal 27 nov il lotto carica sempre anche il prodotto finito
   let completata = false, erroreStato = null;
   const statoForm = opts.statoForm || o.stato;
   if (qtaOrd > 0 && quantitaConsegnata(o.id) >= qtaOrd && (o.stato === 'aperta' || o.stato === 'sospesa')
@@ -19472,7 +19474,7 @@ function openOperazioneModal(o, opts) {
                 if (error) return toast('Errore eliminazione: '+error.message, 'err');
                 state.consegneCommessa = state.consegneCommessa.filter(x => x.id !== c.id);
                 toast('Lotto eliminato');
-                if (scaricaAlLotto(o)) caricaMovimenti();   // la rettifica del trigger
+                caricaMovimenti();   // la rettifica del trigger
                 // Rovescio dell'ultimo lotto che scrive `completata` (1 ott,
                 // Nico: "cancellando 20 pezzi prodotti non mi torna ad aperto").
                 // Si riapre SOLO se la completata era retta dai pezzi (prima
@@ -19699,6 +19701,8 @@ function openOperazioneModal(o, opts) {
                 const { error } = await sb.from('spedizioni').delete().eq('id', s.id);
                 if (error) return toast('Errore eliminazione: '+error.message, 'err');
                 state.spedizioni = state.spedizioni.filter(x => x.id !== s.id);
+                // Il database ha rimesso il prodotto in giacenza (trigger del 27 nov): si rilegge.
+                if (s.quantita != null) caricaMovimenti();
                 // Se la commessa era 'spedita' e ora non è più 100%, resync
                 const nuovoTot = quantitaSpedita(o.id);
                 if (o.stato === 'spedita' && nuovoTot < qtaOrd) {
@@ -19747,6 +19751,7 @@ function openOperazioneModal(o, opts) {
               btnConf.disabled = false; btnConf.textContent = '✓ Conferma spedizione';
               if (error) return toast('Errore: ' + error.message, 'err');
               state.spedizioni = state.spedizioni.map(x => x.id === agg.id ? agg : x);
+              caricaMovimenti();   // il prodotto e' uscito dalla giacenza (trigger del 27 nov)
               toast('Spedizione confermata: ' + q + ' pz');
               await sincronizzaSpedita(agg.data || toLocalISO(new Date()));
               renderSpedizioni();
@@ -19847,6 +19852,7 @@ function openOperazioneModal(o, opts) {
 
           // Aggiorno cache locale
           if (!state.spedizioni.find(x => x.id === nuova.id)) state.spedizioni.push(nuova);
+          if (!soloDDT) caricaMovimenti();   // il prodotto e' uscito dalla giacenza (trigger del 27 nov)
           toast(soloDDT ? 'DDT preparato · conferma la quantità quando la merce parte'
                         : 'Spedizione registrata');
 
@@ -21338,7 +21344,7 @@ async function scriviFattiPerStato(op, fatti) {
         { label: 'lotto chiusura commessa' });
       if (error) throw error;
       if (!state.consegneCommessa.find(x => x.id === data.id)) state.consegneCommessa.push(data);
-      if (scaricaAlLotto(op)) caricaMovimenti();   // gli scarichi del trigger
+      caricaMovimenti();   // gli scarichi del trigger
     } else fatti.lotto = null;
   }
   if (fatti.spedizione) {
@@ -21564,6 +21570,7 @@ function quickRegistraSpedizione(o) {
       }
       // Aggiorno cache locale (oltre al realtime)
       if (!state.spedizioni.find(x => x.id === nuovaSped.id)) state.spedizioni.push(nuovaSped);
+      caricaMovimenti();   // il prodotto e' uscito dalla giacenza (trigger del 27 nov)
 
       // 2) Sincronizzazione automatica stato commessa.
       // Se la nuova somma spedita raggiunge o supera il totale ordinato,

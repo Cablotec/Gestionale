@@ -46,8 +46,12 @@ sez('Collaudo: il gestionale contro Alnus');
   t('prodotti finiti: fuori', !di('PROD'));
   t('apertura: fuori', di('A').alnus.totale === 6);
   t('in testa i codici che non tornano', r[0].codice === 'B');
-  t('tipo da causale: EA1 arrivi, UC1 uscite, EP1 altri', A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/EA1/1' }) === 'arrivi'
-    && A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/UC1/1' }) === 'uscite' && A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/EP1/1' }) === 'altri');
+  t('tipo da causale: EA1 arrivi, UC1 uscite, EP1 arrivi (27 nov)', A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/EA1/1' }) === 'arrivi'
+    && A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/UC1/1' }) === 'uscite' && A.tipoCollaudo({ documento_tipo: 'ALNUS', documento_numero: '2026/EP1/1' }) === 'arrivi');
+  t('prodotto finito: carico del lotto arrivi, spedizione uscite, consumo del lotto consumi',
+    A.tipoCollaudo({ documento_tipo: 'PRODUZIONE', tipo: 'carico', qta: 8 }) === 'arrivi'
+    && A.tipoCollaudo({ documento_tipo: 'SPEDIZIONE', tipo: 'scarico', qta: -8 }) === 'uscite'
+    && A.tipoCollaudo({ documento_tipo: 'PRODUZIONE', tipo: 'scarico', qta: -16 }) === 'consumi');
   t('reso al cliente: uscite', A.tipoCollaudo({ documento_tipo: 'RESO', tipo: 'scarico' }) === 'uscite');
   t('DDT in uscita (vendita): uscite', A.tipoCollaudo({ documento_tipo: 'USCITA', tipo: 'scarico' }) === 'uscite');
   // Giacenza (25 nov): gestionale = righe in conto, Alnus = apertura + righe di Alnus.
