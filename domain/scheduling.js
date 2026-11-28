@@ -2756,3 +2756,50 @@ function tipoChiedeDescrizione(tipo) {
 function descrizioneTimbro(testo) {
   return String(testo || '').trim().replace(/\s+/g, ' ');
 }
+
+// ══ DDT IN USCITA DAGLI ORDINI (28 nov 2026) ══════════════════════════
+// Nico: "devo trovare un modo che dal DDT, pesco dagli ordini le quantita'
+// che spedisco e di conseguenza produce". Una bolla copre piu' commesse dello
+// stesso cliente; prima si registrava commessa per commessa (BO 898: cinque
+// volte lo stesso numero). Decisioni (domande del 28 nov):
+//   * OC: si spediscono SOLO i pronti (prodotti − spediti). Oltre, la riga si
+//     blocca: resta «prima la produzione».
+//   * OD: tutto il residuo; i pezzi non ancora prodotti li produce la
+//     spedizione stessa (lotto prima, come il riquadro Spedizione dal 27 nov).
+//   * Tutto o niente: lo fa la funzione `ddt_uscita_da_ordini` a database.
+// Queste sono le stesse regole viste dal browser, per proporre e avvisare
+// prima di chiamarla: il database le ricontrolla da se'.
+function ordineDaSpedireOD(numeroOrdine) {
+  return /\/OD\//i.test(String(numeroOrdine || ''));
+}
+// Le righe d'ordine del cliente che questo DDT puo' portare via.
+// `prodottiDi(id)` e `speditiDi(id)` danno i pezzi della commessa.
+// Una OC entra solo con dei pronti; un OD con del residuo.
+function righeOrdiniDaSpedire(operazioni, clienteId, prodottiDi, speditiDi) {
+  if (!clienteId) return [];
+  return (operazioni || [])
+    .filter(o => o && o.cliente_id === clienteId && o.stato !== 'spedita')
+    .map(o => {
+      const ordinati = Number(o.quantita) || 0;
+      const prodotti = Number(prodottiDi(o.id)) || 0;
+      const spediti = Number(speditiDi(o.id)) || 0;
+      const residuo = Math.max(0, ordinati - spediti);
+      const pronti = Math.min(residuo, Math.max(0, prodotti - spediti));
+      const od = ordineDaSpedireOD(o.numero_ordine);
+      return { op: o, od, ordinati, prodotti, spediti, residuo, pronti, max: od ? residuo : pronti };
+    })
+    .filter(r => r.max > 0)
+    .sort((a, b) => String(a.op.numero_ordine || '').localeCompare(String(b.op.numero_ordine || ''), 'it', { numeric: true })
+      || String(a.op.pos || '').localeCompare(String(b.op.pos || ''), 'it', { numeric: true }));
+}
+// Il controllo di una riga: { pezzi, lotto, errore }. Vuoto = riga non usata
+// (pezzi 0, nessun errore). `lotto` = pezzi che la spedizione produce (solo OD).
+function controllaRigaDdtOrdine(riga, testo) {
+  const s = String(testo == null ? '' : testo).trim();
+  if (s === '') return { pezzi: 0, lotto: 0, errore: '' };
+  const n = Number(s.replace(',', '.'));
+  if (!Number.isInteger(n) || n <= 0) return { pezzi: 0, lotto: 0, errore: 'pezzi interi maggiori di zero' };
+  if (n > riga.residuo) return { pezzi: n, lotto: 0, errore: 'da spedire ' + riga.residuo };
+  if (!riga.od && n > riga.pronti) return { pezzi: n, lotto: 0, errore: 'pronti ' + riga.pronti + ': prima la produzione' };
+  return { pezzi: n, lotto: riga.od ? Math.max(0, n - riga.pronti) : 0, errore: '' };
+}

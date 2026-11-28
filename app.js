@@ -8370,6 +8370,7 @@ const DOC_TIPI = {
   ddt_fs:       { verso: 'uscita',  txt: 'DDT al terzista' },
   reso:         { verso: 'uscita',  txt: 'Reso al cliente' },
   ddt_uscita:   { verso: 'uscita',  txt: 'DDT in uscita' },
+  ddt_cliente:  { verso: 'uscita',  txt: 'DDT al cliente' },
 };
 let docVerso = 'tutti', docTipo = '', docCerca = '';
 function documentiRegistro() {
@@ -8421,6 +8422,25 @@ function documentiRegistro() {
         movFiltroTipo = ''; movFiltroMitt = ''; movFiltroOrd = ''; movCerca = '';
         movFiltroDoc = d.k; movVista = 'righe'; movQuante = 400; selectTab('movimenti'); } }] }));
   }
+  // 1c. DDT al cliente (28 nov): le SPEDIZIONI delle commesse raggruppate per numero di
+  // bolla, anno e cliente. Una bolla porta piu' commesse (dal «＋ DDT in uscita» dagli
+  // ordini, o registrate una per una nel riquadro Spedizione col solo numero).
+  // Le preparate (quantita' vuota) non sono ancora uscite: non si contano.
+  if (Array.isArray(state.spedizioni)) {
+    const per = new Map();
+    state.spedizioni.filter(s => s && s.ddt && Number(s.quantita) > 0).forEach(s => {
+      const o = opDi(s.operazione_id);
+      const k = String(s.ddt).trim() + '|' + giorno(s.data).slice(0, 4) + '|' + ((o && o.cliente_id) || '');
+      if (!per.has(k)) per.set(k, { s, o, ops: [], pezzi: 0 });
+      const d = per.get(k); d.pezzi += Number(s.quantita) || 0;
+      if (o && !d.ops.includes(o)) d.ops.push(o);
+    });
+    per.forEach(d => out.push({ tipo: 'ddt_cliente', data: giorno(d.s.data), numero: 'DDT ' + String(d.s.ddt).trim(),
+      azienda: d.o ? (nomeAziendaDi(d.o.cliente_id) || '—') : '—',
+      rif: d.ops.map(o => (o.numero_ordine || '') + '/' + (o.pos || '')).join(', '),
+      contenuto: d.ops.length + (d.ops.length === 1 ? ' commessa' : ' commesse') + ' · ' + nfIT(d.pezzi) + ' pz',
+      azioni: d.ops.length === 1 ? [{ t: 'Commessa', title: 'Apri la commessa (Ciclo produttivo)', fn: () => openOperazioneModal(d.ops[0], { scheda: 'mat' }) }] : [] }));
+  } else nonLetti.push('DDT al cliente');
   // 2. DDT di rientro: il documento e' del terzista, qui c'e' la traccia.
   if (Array.isArray(state.rientriTerzista)) {
     state.rientriTerzista.forEach(r => {
@@ -9160,9 +9180,60 @@ function apriResoCliente(poi, causaleIniziale) {
   const destinatari = (state.aziende || []).filter(a => a && a.attivo !== false)
     .sort((a, b) => (!!b.is_cliente - !!a.is_cliente) || String(a.nome || '').localeCompare(String(b.nome || ''), 'it'));
   const selCli = campoCercaAzienda(destinatari, { placeholder:'Scrivi il destinatario…',
-    nota: a => a.is_cliente ? 'cliente' : a.is_fornitore ? 'fornitore' : '' });
+    nota: a => a.is_cliente ? 'cliente' : a.is_fornitore ? 'fornitore' : '',
+    onchange: () => rifaiOrdini() });
   const selCau = el('select', {}, ...CAUSALI_DDT_USCITA.map(c => el('option', { value: c }, c)));
   selCau.value = causaleIniziale && CAUSALI_DDT_USCITA.includes(causaleIniziale) ? causaleIniziale : 'Vendita';
+  selCau.addEventListener('change', () => rifaiOrdini());
+  // ── DAGLI ORDINI (28 nov, Nico: "dal DDT, pesco dagli ordini le quantita' che spedisco
+  // e di conseguenza produce"). Con causale Vendita e un cliente scelto compaiono le sue
+  // righe d'ordine spedibili (`righeOrdiniDaSpedire`, domain): OC fino ai pronti, OD fino
+  // al residuo (i pezzi non prodotti li produce la spedizione). Si registra tutto con
+  // `ddt_uscita_da_ordini`: lotti, spedizioni, stati e le eventuali righe di codici sotto,
+  // tutto o niente. Le regole sono le stesse del riquadro Spedizione della commessa.
+  const boxOrdini = el('div', { style:'margin-top:10px;' });
+  let righeOrd = [];
+  const COL_O = 'display:grid;grid-template-columns:185px minmax(160px,1fr) 64px 64px 64px 76px 160px;gap:8px;align-items:center;';
+  const rifaiOrdini = () => {
+    boxOrdini.innerHTML = ''; righeOrd = [];
+    const cli = selCli.value;
+    if (selCau.value !== 'Vendita' || !cli) { aggiorna(); return; }
+    const art = (id) => (state.articoli || []).find(a => a.id === id) || {};
+    const lista = righeOrdiniDaSpedire(state.operazioni || [], cli, quantitaConsegnata, quantitaSpedita);
+    if (!lista.length) {
+      boxOrdini.append(el('div', { class:'sub', style:'font-size:12px;' },
+        'Nessuna riga d’ordine da spedire per questo cliente: niente di pronto sugli OC e nessun OD aperto.'));
+      aggiorna(); return;
+    }
+    boxOrdini.append(
+      el('div', { style:'font-weight:700;font-size:12px;margin-bottom:4px;' }, 'Dagli ordini del cliente'),
+      el('div', { class:'sub', style:'font-size:11px;margin-bottom:6px;' },
+        'Scrivi i pezzi che partono. OC: al massimo i pronti. OD: fino al residuo, i pezzi non ancora prodotti li produce la spedizione.'),
+      el('div', { style: COL_O + 'padding-bottom:4px;border-bottom:1px solid var(--brd);' },
+        et('Ordine / pos'), et('Articolo'), et('Ordinati', 1), et('Spediti', 1), et('Pronti', 1), et('Pezzi', 1), el('span')));
+    const corpoO = el('div', { style:'max-height:34vh;overflow-y:auto;' });
+    lista.forEach(r => {
+      const a = art(r.op.articolo_id);
+      const inp = el('input', { type:'text', inputmode:'numeric', style:'text-align:right;', placeholder: String(r.max),
+        title: 'Al massimo ' + r.max + ' pz' });
+      const nota = el('span', { class:'sub', style:'font-size:11px;' });
+      const x = { r, inp, nota, esito: () => controllaRigaDdtOrdine(r, inp.value) };
+      inp.addEventListener('input', aggiorna);
+      inp.addEventListener('dblclick', () => { inp.value = String(r.max); aggiorna(); });
+      righeOrd.push(x);
+      corpoO.append(el('div', { style: COL_O + 'padding:3px 0;' },
+        el('span', { class:'mono', style:'font-size:12px;white-space:nowrap;' }, (r.op.numero_ordine || '') + '/' + (r.op.pos || ''),
+          r.od ? el('span', { class:'badge bor', style:'margin-left:6px;font-size:10px;', title:'Ordine OD: la spedizione registra anche la produzione' }, 'OD') : ''),
+        el('span', { style:'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: (a.codice || '') + ' ' + (a.descrizione || '') },
+          el('span', { class:'mono' }, a.codice || '—'), a.descrizione ? ' ' + a.descrizione : ''),
+        el('span', { class:'mono', style:'text-align:right;font-size:12px;' }, nfIT(r.ordinati)),
+        el('span', { class:'mono', style:'text-align:right;font-size:12px;' }, nfIT(r.spediti)),
+        el('span', { class:'mono', style:'text-align:right;font-size:12px;' }, nfIT(r.pronti)),
+        inp, nota));
+    });
+    boxOrdini.append(corpoO, el('div', { class:'sub', style:'font-size:11px;margin-top:4px;' }, 'Doppio clic sulla casella = il massimo.'));
+    aggiorna();
+  };
   const inNum = segnaObbligatorio(el('input', { type:'text', class:'mono', placeholder:'numero del DDT' }));
   const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
   const inNota = el('input', { type:'text', placeholder:'Es. materiale non conforme, in eccesso…' });
@@ -9202,6 +9273,14 @@ function apriResoCliente(poi, causaleIniziale) {
       else if (p && (somma.get(cod + '#' + p.k) || 0) > p.q + 1e-9) e = 'oltre il disponibile (' + nf(p.q) + ')';
       r.err.textContent = e; r.inQta.style.borderColor = e ? 'var(--red)' : '';
       if (e) err++; else n++;
+    });
+    // Le righe d'ordine (28 nov): stesso conto, la nota dice cosa succede o cosa non va.
+    righeOrd.forEach(x => {
+      const e = x.esito();
+      x.inp.style.borderColor = e.errore ? 'var(--red)' : '';
+      x.nota.style.color = e.errore ? 'var(--red)' : (e.lotto > 0 ? 'var(--or)' : '');
+      x.nota.textContent = e.errore ? e.errore : (e.lotto > 0 ? 'produce ' + e.lotto + ' pz e spedisce' : (e.pezzi ? 'spedisce' : ''));
+      if (e.errore) err++; else if (e.pezzi) n++;
     });
     msg.textContent = err ? err + (err === 1 ? ' riga da correggere' : ' righe da correggere') : n + (n === 1 ? ' riga' : ' righe');
     msg.style.color = err ? 'var(--red)' : '';
@@ -9250,6 +9329,7 @@ function apriResoCliente(poi, causaleIniziale) {
       + 'Da dove: la sede, o un posto del gestionale (reparto, terzista) per la sua commessa.'),
     el('div', { class:'frow' }, campo('Causale', selCau, 1), campo('Destinatario', selCli, 2), campo('Numero DDT *', inNum, 1), campo('Data', inData, 1)),
     campo('Nota (facoltativa)', inNota),
+    boxOrdini,
     el('div', { style: COL + 'padding-bottom:4px;border-bottom:1px solid var(--brd);margin-top:8px;' },
       et('Codice'), et('Descrizione'), et('Da dove'), et('Disponibile', 1), et('Q.tà', 1), el('span')),
     el('div', { style:'max-height:46vh;overflow-y:auto;' }, corpo),
@@ -9261,6 +9341,8 @@ function apriResoCliente(poi, causaleIniziale) {
     const payload = righe.filter(r => r.cod()).map(r => { const p = r.posto();
       return { codice: r.cod(), qta: num(r.inQta.value), descrizione: r.descr() || null, um: r.um || null,
         presso_id: p && p.presso ? p.presso : null, operazione_id: p && p.presso ? p.op : null }; });
+    const usate = righeOrd.map(x => ({ x, e: x.esito() })).filter(z => z.e.pezzi > 0 && !z.e.errore);
+    if (usate.length) return registraDagliOrdini(usate, payload);
     ok.disabled = true; ok.textContent = 'Registrazione…';
     try {
       const { error } = await sb.rpc('mov_ddt_uscita', { p_azienda: selCli.value, p_numero: inNum.value.trim(),
@@ -9283,9 +9365,65 @@ function apriResoCliente(poi, causaleIniziale) {
       toast('DDT non registrato: ' + (e.message || e), 'err', 10000);
     }
   };
+  // La bolla dagli ordini (28 nov). Prima le stesse domande del riquadro Spedizione per i
+  // lotti degli OD (blocco dei rientri, codici non in reparto), tutte in una conferma; poi
+  // `ddt_uscita_da_ordini`, che ricontrolla tutto e scrive tutto o niente.
+  const registraDagliOrdini = async (usate, codici) => {
+    const eti = (o) => (o.numero_ordine || '') + '/' + (o.pos || '');
+    const conLotto = usate.filter(z => z.e.lotto > 0);
+    for (const z of conLotto) {
+      const b = bloccoProduzioneDaRientri(z.x.r.op, z.e.lotto);
+      if (b) { toast(eti(z.x.r.op) + ': ' + b, 'err', 10000); return; }
+    }
+    const avvisi = conLotto.map(z => {
+      const a = avvisoLottoFuoriReparto(z.x.r.op, z.e.lotto);
+      return a ? eti(z.x.r.op) + ' — ' + a.split('\n\nSe qualcuno')[0] : null;
+    }).filter(Boolean);
+    const pezzi = usate.reduce((s, z) => s + z.e.pezzi, 0);
+    if (!confirm('DDT ' + inNum.value.trim() + ' a ' + nomeAziendaDi(selCli.value) + ': '
+      + usate.length + (usate.length === 1 ? ' riga d’ordine' : ' righe d’ordine') + ', ' + nfIT(pezzi) + ' pz'
+      + (codici.length ? ' e ' + codici.length + (codici.length === 1 ? ' riga di codici' : ' righe di codici') : '') + '.'
+      + (conLotto.length ? '\nGli OD registrano anche la produzione: ' + conLotto.map(z => eti(z.x.r.op) + ' ' + z.e.lotto + ' pz').join(', ') + '.' : '')
+      + (avvisi.length ? '\n\n' + avvisi.join('\n\n') : '') + '\n\nRegistrare?')) return;
+    ok.disabled = true; ok.textContent = 'Registrazione…';
+    const ids = [...new Set(usate.map(z => z.x.r.op.id))];
+    try {
+      const { data: esito, error } = await sb.rpc('ddt_uscita_da_ordini', { p_azienda: selCli.value, p_numero: inNum.value.trim(),
+        p_data: inData.value, p_righe: usate.map(z => ({ operazione_id: z.x.r.op.id, pezzi: z.e.pezzi })),
+        p_codici: codici.length ? codici : null, p_nota: inNota.value.trim() || null });
+      if (error) {
+        if (/could not find the function|PGRST202/i.test(error.message || '') || error.code === 'PGRST202')
+          throw new Error('la funzione ddt_uscita_da_ordini non c’è ancora a database (va eseguito lo SQL migrazione-ddt-da-ordini.sql)');
+        throw new Error(error.message);
+      }
+      v.chiudi();
+      toast('DDT ' + inNum.value.trim() + ' registrato: ' + ids.length + (ids.length === 1 ? ' commessa' : ' commesse') + ', ' + nfIT(pezzi) + ' pz'
+        + (esito && esito.lotti ? ' · ' + esito.lotti + (esito.lotti === 1 ? ' lotto' : ' lotti') + ' degli OD' : ''), 'ok', 8000);
+      await Promise.all([rileggiCommesseSpedite(ids), caricaMovimenti()]);
+      if (typeof poi === 'function') poi();
+    } catch (e) {
+      ok.disabled = false; ok.textContent = 'Registra DDT';
+      toast('DDT non registrato, non è stato scritto niente: ' + (e.message || e), 'err', 12000);
+    }
+  };
   v.piede.append(msg, el('button', { class:'btng', onclick: v.chiudi }, 'Annulla'), ok);
   nuovaRiga();
   setTimeout(() => selCli.focus(), 50);
+}
+// Dopo un DDT dagli ordini (28 nov): commesse, lotti e spedizioni di quelle commesse si
+// rileggono dal database, che li ha appena scritti tutti insieme.
+async function rileggiCommesseSpedite(ids) {
+  if (!ids || !ids.length) return;
+  const [ops, cons, sped] = await Promise.all([
+    sb.from('operazioni').select('*').in('id', ids),
+    sb.from('consegne_commessa').select('*').in('operazione_id', ids),
+    sb.from('spedizioni').select('*').in('operazione_id', ids)]);
+  if (!ops.error) (ops.data || []).forEach(o => {
+    const i = (state.operazioni || []).findIndex(x => x.id === o.id);
+    if (i >= 0) state.operazioni[i] = o;
+  });
+  if (!cons.error) state.consegneCommessa = (state.consegneCommessa || []).filter(c => !ids.includes(c.operazione_id)).concat(cons.data || []);
+  if (!sped.error) state.spedizioni = (state.spedizioni || []).filter(s => !ids.includes(s.operazione_id)).concat(sped.data || []);
 }
 
 function renderDocumenti(root) {
