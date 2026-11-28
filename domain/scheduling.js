@@ -2079,6 +2079,18 @@ function importOrdiniChiaveNome(nome) {
     .replace(/[^a-z0-9]/g, '');
 }
 
+// IL RIFERIMENTO DI JMA E' DIVISO IN DUE (28 nov, Nico: "il file excel con gli OD, hai visto
+// che ci sono due colonne rif. cliente e riferimento cliente? un brutto lavoro su Alnus").
+// Sugli OD di JMA «Rifer. Cliente» porta una meta' (1063316) e «Riferimento Cliente» l'altra
+// (70020749): si uniscono, «1063316 / 70020749» (forma scelta da Nico). Solo JMA e solo
+// quando sono DIVERSE: sugli OC di JMA le due colonne ripetono lo stesso numero. Per tutti gli
+// altri resta la regola di prima: «Riferimento Cliente», e se e' vuota «Rifer. Cliente».
+function importOrdiniRiferimento(rif, rif2, nomeCliente) {
+  const a = String(rif == null ? '' : rif).trim(), b = String(rif2 == null ? '' : rif2).trim();
+  if (a && b && a !== b && /^jma/.test(importOrdiniChiaveNome(nomeCliente))) return b + ' / ' + a;
+  return a || b;
+}
+
 // La fusione BOX vale per Senzani e per nessun altro: sui dati veri il
 // prefisso EL è esclusivamente suo (177 righe su 177), ma il vincolo sul
 // cliente resta esplicito perché un domani un altro cliente potrebbe usare
@@ -2275,7 +2287,7 @@ function analizzaImportOrdini(righe, ctx) {
 
     const prezzo     = Number(val(r, 'prezzo')) || 0;
     const imponibile = Number(val(r, 'imponibile')) || (prezzo * qta);
-    const rif        = valRif(r);
+    const rif        = importOrdiniRiferimento(val(r, 'rif'), val(r, 'rif2'), clienteNome);
 
     const base = {
       nRiga, numeroOrdine, pos, clienteNome, scadenza, qta, prezzo, imponibile,

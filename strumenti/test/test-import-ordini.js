@@ -123,6 +123,20 @@ sez('DUE CASELLE PER IL RIFERIMENTO: la seconda e un RIPIEGO');
     'Riferimento Cliente _1':'808164189', 'Rifer. Cliente ':'POS0040' })], CTX);
   t('piene tutte e due: vince la prima', p.nuove[0].riferimento === '808164189');
 }
+// JMA (28 nov, Nico): sugli OD il riferimento e' diviso fra le due colonne, si uniscono
+// «Rifer. Cliente / Riferimento Cliente». Sugli OC ripetono lo stesso numero: uno solo.
+{
+  const CJ = Object.assign({}, CTX, { aziende: CTX.aziende.concat([{ id:'cj', nome:'JMA Servizi e Industria S.r.l.' }]) });
+  const p = analizza([R({ 'Ragione Sociale ':'JMA Servizi e Industria S.r.l.', 'Sz Cl ':'OD',
+    'Riferimento Cliente _1':'70020749', 'Rifer. Cliente ':'1063316' })], CJ);
+  t('JMA con due meta\' diverse: «1063316 / 70020749»', p.nuove[0] && p.nuove[0].riferimento === '1063316 / 70020749');
+  const q = analizza([R({ 'Ragione Sociale ':'JMA Servizi e Industria S.r.l.',
+    'Riferimento Cliente _1':'10069342', 'Rifer. Cliente ':'10069342' })], CJ);
+  t('JMA con lo stesso numero due volte: uno solo', q.nuove[0] && q.nuove[0].riferimento === '10069342');
+  const z = analizza([R({ 'Ragione Sociale ':'JMA Servizi e Industria S.r.l.',
+    'Riferimento Cliente _1':'', 'Rifer. Cliente ':'1063316' })], CJ);
+  t('JMA con una sola meta\': resta quella', z.nuove[0] && z.nuove[0].riferimento === '1063316');
+}
 {
   // Il ripiego vale anche per la regola Senzani, che si regge sul riferimento.
   const p = analizza([R({ 'Ragione Sociale ':'SENZANI BREVETTI S.p.a.',
