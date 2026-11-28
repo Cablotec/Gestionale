@@ -9197,7 +9197,9 @@ function apriResoCliente(poi, causaleIniziale) {
   // tutto o niente. Le regole sono le stesse del riquadro Spedizione della commessa.
   const boxOrdini = el('div', { style:'margin-top:10px;' });
   let righeOrd = [];
-  const COL_O = 'display:grid;grid-template-columns:185px minmax(160px,1fr) 64px 64px 64px 76px 160px;gap:8px;align-items:center;';
+  // Colonna «Rif. cliente» e ricerca (28 nov, Nico: "mi servirebbe il campo quando compilo
+  // il DDT"): sulla bolla del cliente ci sono i SUOI riferimenti (JMA: «1063316 / 70020749»).
+  const COL_O = 'display:grid;grid-template-columns:168px minmax(0,150px) minmax(0,1fr) 54px 54px 54px 66px minmax(0,150px);gap:8px;align-items:center;';
   const rifaiOrdini = () => {
     boxOrdini.innerHTML = ''; righeOrd = [];
     const cli = selCli.value;
@@ -9213,11 +9215,13 @@ function apriResoCliente(poi, causaleIniziale) {
       el('div', { style:'font-weight:700;font-size:12px;margin-bottom:4px;' }, 'Dagli ordini del cliente'),
       el('div', { class:'sub', style:'font-size:11px;margin-bottom:6px;' },
         'Scrivi i pezzi che partono. OC: al massimo i pronti. OD: fino al residuo, i pezzi non ancora prodotti li produce la spedizione.'),
+      cercaO,
       el('div', { style: COL_O + 'padding-bottom:4px;border-bottom:1px solid var(--brd);' },
-        et('Ordine / pos'), et('Articolo'), et('Ordinati', 1), et('Spediti', 1), et('Pronti', 1), et('Pezzi', 1), el('span')));
+        et('Ordine / pos'), et('Rif. cliente'), et('Articolo'), et('Ordinati', 1), et('Spediti', 1), et('Pronti', 1), et('Pezzi', 1), el('span')));
     const corpoO = el('div', { style:'max-height:34vh;overflow-y:auto;' });
     lista.forEach(r => {
       const a = art(r.op.articolo_id);
+      const rif = String(r.op.riferimento_cliente || '');
       const inp = el('input', { type:'text', inputmode:'numeric', style:'text-align:right;', placeholder: String(r.max),
         title: 'Al massimo ' + r.max + ' pz' });
       const nota = el('span', { class:'sub', style:'font-size:11px;' });
@@ -9225,19 +9229,35 @@ function apriResoCliente(poi, causaleIniziale) {
       inp.addEventListener('input', aggiorna);
       inp.addEventListener('dblclick', () => { inp.value = String(r.max); aggiorna(); });
       righeOrd.push(x);
-      corpoO.append(el('div', { style: COL_O + 'padding:3px 0;' },
+      const riga = el('div', { style: COL_O + 'padding:3px 0;' },
         el('span', { class:'mono', style:'font-size:12px;white-space:nowrap;' }, (r.op.numero_ordine || '') + '/' + (r.op.pos || ''),
           r.od ? el('span', { class:'badge bor', style:'margin-left:6px;font-size:10px;', title:'Ordine OD: la spedizione registra anche la produzione' }, 'OD') : ''),
+        el('span', { class:'mono', style:'font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;', title: rif }, rif || '—'),
         el('span', { style:'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', title: (a.codice || '') + ' ' + (a.descrizione || '') },
           el('span', { class:'mono' }, a.codice || '—'), a.descrizione ? ' ' + a.descrizione : ''),
         el('span', { class:'mono', style:'text-align:right;font-size:12px;' }, nfIT(r.ordinati)),
         el('span', { class:'mono', style:'text-align:right;font-size:12px;' }, nfIT(r.spediti)),
         el('span', { class:'mono', style:'text-align:right;font-size:12px;' }, nfIT(r.pronti)),
-        inp, nota));
+        inp, nota);
+      // La ricerca nasconde le righe, non le toglie: i pezzi gia' scritti restano.
+      riga.dataset.cerca = [r.op.numero_ordine, r.op.pos, rif, a.codice, a.descrizione].join(' ').toLowerCase();
+      corpoO.append(riga);
     });
     boxOrdini.append(corpoO, el('div', { class:'sub', style:'font-size:11px;margin-top:4px;' }, 'Doppio clic sulla casella = il massimo.'));
+    filtraOrdini();
     aggiorna();
   };
+  const cercaO = el('input', { type:'text', class:'search', placeholder:'Cerca riferimento, ordine o articolo…',
+    style:'width:320px;margin-bottom:6px;font-size:12px;' });
+  const filtraOrdini = () => {
+    const parole = cercaO.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    boxOrdini.querySelectorAll('[data-cerca]').forEach(d => {
+      // 'grid', non '': la riga e' una griglia dichiarata nello stile in linea, e
+      // svuotare display la faceva tornare un blocco con le colonne accavallate.
+      d.style.display = parole.every(p => d.dataset.cerca.includes(p)) ? 'grid' : 'none';
+    });
+  };
+  cercaO.addEventListener('input', filtraOrdini);
   const inNum = segnaObbligatorio(el('input', { type:'text', class:'mono', placeholder:'numero del DDT' }));
   const inData = el('input', { type:'date', value: toLocalISO(new Date()) });
   const inNota = el('input', { type:'text', placeholder:'Es. materiale non conforme, in eccesso…' });
