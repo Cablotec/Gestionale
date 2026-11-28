@@ -14566,8 +14566,16 @@ async function articoliImportEsegui(nuovi, aggiornamenti) {
 }
 
 // ─── Import Excel commesse (Pianificazione) ───
+// UN IMPORT ALLA VOLTA (28 nov). Un import degli ordini scrive per minuti (commesse, poi
+// fasi e liste): il 28 nov un secondo import partito mentre il primo scriveva ancora ha
+// letto le commesse di prima e ha ricreato 200 righe OD gia' create (doppioni). Finche'
+// uno e' in corso non si apre un file nuovo ne' si conferma un'altra anteprima.
+// Vale per questa pagina: un secondo PC non lo vede.
+let importOrdiniInCorso = false;
+const MSG_IMPORT_IN_CORSO = 'Un import degli ordini è ancora in corso: aspetta il messaggio di fine («Import: …»), poi riprova.';
 async function operazioniImportExcel(file) {
   if (!file) return;
+  if (importOrdiniInCorso) { toast(MSG_IMPORT_IN_CORSO, 'err', 10000); return; }
   if (typeof XLSX === 'undefined') {
     toast('Libreria Excel non caricata, ricarica la pagina', 'err');
     return;
@@ -15197,6 +15205,13 @@ function openOperazioniImportPreviewModal(rows) {
 // aggiornamenti. Ogni passo che fallisce si ferma lì e lo dice: meglio un
 // import a metà dichiarato che uno "riuscito" con dentro righe orfane.
 async function operazioniImportEsegui(piano) {
+  if (importOrdiniInCorso) { toast(MSG_IMPORT_IN_CORSO, 'err', 10000); return; }
+  importOrdiniInCorso = true;
+  toast('Import in corso: non rilanciarlo e non chiudere la pagina finché non compare il messaggio di fine.', 'ok', 8000);
+  try { await operazioniImportEseguiOra(piano); }
+  finally { importOrdiniInCorso = false; }
+}
+async function operazioniImportEseguiOra(piano) {
   closeModal();
   let creatiCli = 0, creatiArt = 0, inseriti = 0, aggiornati = 0, errori = 0, rinominati = 0;
   const contoListe = {};

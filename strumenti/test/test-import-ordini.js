@@ -123,6 +123,19 @@ sez('DUE CASELLE PER IL RIFERIMENTO: la seconda e un RIPIEGO');
     'Riferimento Cliente _1':'808164189', 'Rifer. Cliente ':'POS0040' })], CTX);
   t('piene tutte e due: vince la prima', p.nuove[0].riferimento === '808164189');
 }
+sez('RIGHE EVASE (St. Rig 80): scartate e dichiarate (28 nov)');
+// Un'estrazione con TUTTI gli ordini ha creato 1135 commesse da fare con righe gia'
+// spedite: le evase non si importano e per gli stati valgono come chiuse.
+{
+  const p = analizza([R({ 'St. Rig ': 80, 'Riga ': '10' }), R({ 'St. Rig ': 50, 'Riga ': '20' })], CTX);
+  t('St. Rig 80: scartata', p.scartatePerMotivo['riga evasa in Alnus (St. Rig 80)'] === 1);
+  t('St. Rig 50: importata', p.nuove.length === 1 && p.nuove[0].pos === '0020');
+  const viva = { id:'x', numero_ordine:'2026/OC/00400', pos:'0010', stato:'aperta', articolo_id:'a1', cliente_id:'c1', quantita:3 };
+  const q = analizza([R({ 'St. Rig ': 80, 'Riga ': '10' })], Object.assign({}, CTX, { operazioni: [viva] }));
+  t('evasa in Alnus, aperta qui: segnalata fra gli stati discordanti', q.statiDiscordanti.viveQui.length === 1);
+  const z = analizza([R({ 'Riga ': '10' })], CTX);
+  t('senza la colonna: come prima', z.nuove.length === 1);
+}
 // JMA (28 nov, Nico): sugli OD il riferimento e' diviso fra le due colonne, si uniscono
 // «Rifer. Cliente / Riferimento Cliente». Sugli OC ripetono lo stesso numero: uno solo.
 {

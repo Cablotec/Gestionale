@@ -2018,6 +2018,8 @@ const IMPORT_ORDINI_COLONNE = {
   rif2:       ['rifer. cliente'],
   prezzo:     ['prezzo netto riga', 'prezzo'],
   imponibile: ['impon. totale riga', 'imponibile'],
+  // Stato della riga nell'ERP: 50 aperta, 80 evasa (28 nov). Facoltativa.
+  stRig:      ['st. rig', 'stato riga'],
 };
 
 // Senza queste il file non è un'estrazione ordini e non si va avanti.
@@ -2255,6 +2257,12 @@ function analizzaImportOrdini(righe, ctx) {
     const nRiga = i + 2;                     // +2: la riga 1 sono le intestazioni
     const sz = (val(r, 'sz') || 'OC').toUpperCase();
     if (sz !== 'OC' && sz !== 'OD') return scarta(nRiga, 'sezionale ' + sz + ' (si importano solo OC e OD)');
+    // RIGHE EVASE (28 nov): l'import legge il file come «le righe ancora aperte» (assente =
+    // chiusa per Alnus). Un'estrazione con TUTTI gli ordini il 28 nov ha creato 1135
+    // commesse da fare con righe gia' spedite in Alnus. «St. Rig» 80 = evasa (50 = aperta):
+    // si scarta e si dichiara, e NON conta come vista, cosi' per gli stati discordanti
+    // vale come chiusa — che e' quello che dice Alnus. Senza la colonna, come prima.
+    if (val(r, 'stRig') === '80') return scarta(nRiga, 'riga evasa in Alnus (St. Rig 80)');
 
     const ord = val(r, 'ord');
     if (!ord) return scarta(nRiga, 'numero ordine mancante');
