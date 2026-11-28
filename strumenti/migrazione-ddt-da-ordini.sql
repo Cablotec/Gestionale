@@ -17,10 +17,17 @@
 --     `mov_ddt_uscita`, causale Vendita, nella stessa transazione;
 --   * TUTTO O NIENTE (deciso da Nico): al primo errore non resta scritto nulla.
 -- Solo admin. Lo stesso numero di DDT nello stesso anno non entra due volte.
+-- CAUSALE (28 nov, Nico: "invece di vendita, metti Reso da C/L"): Vendita o Reso da C/L
+-- (merce lavorata sul materiale del cliente che torna al cliente: gli OD di JMA, in Alnus
+-- UC2). Si salva sulla spedizione (colonna nuova `spedizioni.causale`) e vale anche per le
+-- righe di codici. Le spedizioni di prima restano senza causale.
 -- Rilanciabile.
 
+alter table public.spedizioni add column if not exists causale text;
+drop function if exists public.ddt_uscita_da_ordini(uuid, text, date, jsonb, jsonb, text);
+
 create or replace function public.ddt_uscita_da_ordini(p_azienda uuid, p_numero text, p_data date,
-  p_righe jsonb, p_codici jsonb default null, p_nota text default null)
+  p_righe jsonb, p_codici jsonb default null, p_nota text default null, p_causale text default 'Vendita')
 returns jsonb
 language plpgsql
 security definer
@@ -29,6 +36,7 @@ as $$
 declare
   v_num    text := trim(coalesce(p_numero, ''));
   v_nota   text := nullif(trim(coalesce(p_nota, '')), '');
+  v_cau    text := coalesce(nullif(trim(coalesce(p_causale, '')), ''), 'Vendita');
   v_nome   text;
   v_uid    uuid := auth.uid();
   r        jsonb;
@@ -102,8 +110,8 @@ begin
       n_lotti := n_lotti + 1;
       v_prod := v_prod + v_lotto;
     end if;
-    insert into spedizioni (operazione_id, data, quantita, ddt, destinatario, note, creato_da)
-    values (o.id, p_data, v_pezzi, v_num, null, v_nota, v_uid);
+    insert into spedizioni (operazione_id, data, quantita, ddt, destinatario, note, creato_da, causale)
+    values (o.id, p_data, v_pezzi, v_num, null, v_nota, v_uid, v_cau);
     v_sped := v_sped + v_pezzi;
     if v_sped >= coalesce(o.quantita, 0) and coalesce(o.quantita, 0) > 0 then
       update operazioni set stato = 'spedita', consegnato_il = coalesce(consegnato_il, p_data) where id = o.id;
@@ -113,12 +121,12 @@ begin
   end loop;
 
   if p_codici is not null and jsonb_typeof(p_codici) = 'array' and jsonb_array_length(p_codici) > 0 then
-    n_cod := mov_ddt_uscita(p_azienda, v_num, p_data, 'Vendita', p_codici, v_nota);
+    n_cod := mov_ddt_uscita(p_azienda, v_num, p_data, v_cau, p_codici, v_nota);
   end if;
 
   return jsonb_build_object('righe', i, 'lotti', n_lotti, 'codici', n_cod);
 end $$;
-revoke all on function public.ddt_uscita_da_ordini(uuid, text, date, jsonb, jsonb, text) from public, anon;
-grant execute on function public.ddt_uscita_da_ordini(uuid, text, date, jsonb, jsonb, text) to authenticated;
+revoke all on function public.ddt_uscita_da_ordini(uuid, text, date, jsonb, jsonb, text, text) from public, anon;
+grant execute on function public.ddt_uscita_da_ordini(uuid, text, date, jsonb, jsonb, text, text) to authenticated;
 
 select 'DDT DAGLI ORDINI PRONTO' as esito;

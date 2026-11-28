@@ -8437,7 +8437,7 @@ function documentiRegistro() {
     });
     per.forEach(d => out.push({ tipo: 'ddt_cliente', data: giorno(d.s.data), numero: 'DDT ' + String(d.s.ddt).trim(),
       azienda: d.o ? (nomeAziendaDi(d.o.cliente_id) || '—') : '—',
-      rif: d.ops.map(o => (o.numero_ordine || '') + '/' + (o.pos || '')).join(', '),
+      rif: (d.s.causale ? d.s.causale + ' · ' : '') + d.ops.map(o => (o.numero_ordine || '') + '/' + (o.pos || '')).join(', '),
       contenuto: d.ops.length + (d.ops.length === 1 ? ' commessa' : ' commesse') + ' · ' + nfIT(d.pezzi) + ' pz',
       azioni: d.ops.length === 1 ? [{ t: 'Commessa', title: 'Apri la commessa (Ciclo produttivo)', fn: () => openOperazioneModal(d.ops[0], { scheda: 'mat' }) }] : [] }));
   } else nonLetti.push('DDT al cliente');
@@ -9168,7 +9168,11 @@ function riquadroDaPreparare(ridisegna) {
 // del gestionale verso un'azienda con una CAUSALE (`CAUSALI_DDT_USCITA`: una nuova si
 // aggiunge li', senza SQL). Scrive SOLO `mov_ddt_uscita` (strumenti/migrazione-ddt-uscita.sql):
 // RESO per la causale Reso (come i resi di prima), USCITA per le altre, `causale` salvata.
-const CAUSALI_DDT_USCITA = ['Vendita', 'Reso', 'Conto visione', 'Riparazione', 'Sostituzione in garanzia', 'Omaggio', 'Campionatura'];
+const CAUSALI_DDT_USCITA = ['Vendita', 'Reso da C/L', 'Reso', 'Conto visione', 'Riparazione', 'Sostituzione in garanzia', 'Omaggio', 'Campionatura'];
+// Le causali con cui il DDT porta via righe d'ordine (28 nov). «Reso da C/L» (Nico): la merce
+// lavorata sul materiale del cliente che torna al cliente (gli OD di JMA; in Alnus UC2, la
+// vendita e' UC1). La causale si salva sulla spedizione (`spedizioni.causale`).
+const CAUSALI_DDT_DA_ORDINI = ['Vendita', 'Reso da C/L'];
 function apriDdtUscita(poi, causaleIniziale) { return apriResoCliente(poi, causaleIniziale); }
 function apriResoCliente(poi, causaleIniziale) {
   if (!Array.isArray(state.movimenti)) return toast('Movimenti non letti: premi ⟳ Aggiorna e riprova.', 'err');
@@ -9197,7 +9201,7 @@ function apriResoCliente(poi, causaleIniziale) {
   const rifaiOrdini = () => {
     boxOrdini.innerHTML = ''; righeOrd = [];
     const cli = selCli.value;
-    if (selCau.value !== 'Vendita' || !cli) { aggiorna(); return; }
+    if (!CAUSALI_DDT_DA_ORDINI.includes(selCau.value) || !cli) { aggiorna(); return; }
     const art = (id) => (state.articoli || []).find(a => a.id === id) || {};
     const lista = righeOrdiniDaSpedire(state.operazioni || [], cli, quantitaConsegnata, quantitaSpedita);
     if (!lista.length) {
@@ -9380,7 +9384,7 @@ function apriResoCliente(poi, causaleIniziale) {
       return a ? eti(z.x.r.op) + ' — ' + a.split('\n\nSe qualcuno')[0] : null;
     }).filter(Boolean);
     const pezzi = usate.reduce((s, z) => s + z.e.pezzi, 0);
-    if (!confirm('DDT ' + inNum.value.trim() + ' a ' + nomeAziendaDi(selCli.value) + ': '
+    if (!confirm('DDT ' + inNum.value.trim() + ' (' + selCau.value + ') a ' + nomeAziendaDi(selCli.value) + ': '
       + usate.length + (usate.length === 1 ? ' riga d’ordine' : ' righe d’ordine') + ', ' + nfIT(pezzi) + ' pz'
       + (codici.length ? ' e ' + codici.length + (codici.length === 1 ? ' riga di codici' : ' righe di codici') : '') + '.'
       + (conLotto.length ? '\nGli OD registrano anche la produzione: ' + conLotto.map(z => eti(z.x.r.op) + ' ' + z.e.lotto + ' pz').join(', ') + '.' : '')
@@ -9390,14 +9394,14 @@ function apriResoCliente(poi, causaleIniziale) {
     try {
       const { data: esito, error } = await sb.rpc('ddt_uscita_da_ordini', { p_azienda: selCli.value, p_numero: inNum.value.trim(),
         p_data: inData.value, p_righe: usate.map(z => ({ operazione_id: z.x.r.op.id, pezzi: z.e.pezzi })),
-        p_codici: codici.length ? codici : null, p_nota: inNota.value.trim() || null });
+        p_codici: codici.length ? codici : null, p_nota: inNota.value.trim() || null, p_causale: selCau.value });
       if (error) {
         if (/could not find the function|PGRST202/i.test(error.message || '') || error.code === 'PGRST202')
           throw new Error('la funzione ddt_uscita_da_ordini non c’è ancora a database (va eseguito lo SQL migrazione-ddt-da-ordini.sql)');
         throw new Error(error.message);
       }
       v.chiudi();
-      toast('DDT ' + inNum.value.trim() + ' registrato: ' + ids.length + (ids.length === 1 ? ' commessa' : ' commesse') + ', ' + nfIT(pezzi) + ' pz'
+      toast('DDT ' + inNum.value.trim() + ' registrato (' + selCau.value + '): ' + ids.length + (ids.length === 1 ? ' commessa' : ' commesse') + ', ' + nfIT(pezzi) + ' pz'
         + (esito && esito.lotti ? ' · ' + esito.lotti + (esito.lotti === 1 ? ' lotto' : ' lotti') + ' degli OD' : ''), 'ok', 8000);
       await Promise.all([rileggiCommesseSpedite(ids), caricaMovimenti()]);
       if (typeof poi === 'function') poi();
