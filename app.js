@@ -9225,7 +9225,15 @@ function apriResoCliente(poi, causaleIniziale) {
       const inp = el('input', { type:'text', inputmode:'numeric', style:'text-align:right;', placeholder: String(r.max),
         title: 'Al massimo ' + r.max + ' pz' });
       const nota = el('span', { class:'sub', style:'font-size:11px;' });
-      const x = { r, inp, nota, esito: () => controllaRigaDdtOrdine(r, inp.value) };
+      // MATRICOLE (28 nov, Nico: "elenco matricole che solitamente copio in colonna da excel
+      // per ogni riga"): casella chiusa dietro un bottone, si incolla la colonna di Excel.
+      const taMat = el('textarea', { rows: 4, placeholder:'Incolla qui la colonna di matricole da Excel (una per riga)',
+        style:'width:100%;box-sizing:border-box;font-family:var(--mono, monospace);font-size:12px;' });
+      const boxMat = el('div', { style:'grid-column:1/-1;display:none;padding:2px 0 6px;' }, taMat);
+      const btnMat = el('button', { type:'button', class:'btnsm', style:'padding:0 6px;font-size:11px;align-self:flex-start;',
+        onclick: () => { const ap = boxMat.style.display === 'none'; boxMat.style.display = ap ? 'block' : 'none'; if (ap) taMat.focus(); } }, '＋ matricole');
+      taMat.addEventListener('input', aggiorna);
+      const x = { r, inp, nota, btnMat, matr: () => matricoleDaTesto(taMat.value), esito: () => controllaRigaDdtOrdine(r, inp.value) };
       inp.addEventListener('input', aggiorna);
       inp.addEventListener('dblclick', () => { inp.value = String(r.max); aggiorna(); });
       righeOrd.push(x);
@@ -9238,7 +9246,7 @@ function apriResoCliente(poi, causaleIniziale) {
         el('span', { class:'mono', style:'text-align:right;font-size:12px;' }, nfIT(r.ordinati)),
         el('span', { class:'mono', style:'text-align:right;font-size:12px;' }, nfIT(r.spediti)),
         el('span', { class:'mono', style:'text-align:right;font-size:12px;' }, nfIT(r.pronti)),
-        inp, nota);
+        inp, el('div', { style:'display:flex;flex-direction:column;gap:2px;min-width:0;' }, nota, btnMat), boxMat);
       // La ricerca nasconde le righe, non le toglie: i pezzi gia' scritti restano.
       riga.dataset.cerca = [r.op.numero_ordine, r.op.pos, rif, a.codice, a.descrizione].join(' ').toLowerCase();
       corpoO.append(riga);
@@ -9304,6 +9312,12 @@ function apriResoCliente(poi, causaleIniziale) {
       x.inp.style.borderColor = e.errore ? 'var(--red)' : '';
       x.nota.style.color = e.errore ? 'var(--red)' : (e.lotto > 0 ? 'var(--or)' : '');
       x.nota.textContent = e.errore ? e.errore : (e.lotto > 0 ? 'produce ' + e.lotto + ' pz e spedisce' : (e.pezzi ? 'spedisce' : ''));
+      // Matricole: il conto sul bottone; diverse dai pezzi = avviso, non blocco.
+      const nm = x.matr().length;
+      x.btnMat.textContent = nm ? '✎ ' + nm + (nm === 1 ? ' matricola' : ' matricole') : '＋ matricole';
+      if (nm && !e.errore && e.pezzi && nm !== e.pezzi) {
+        x.nota.textContent += ' · ' + nm + ' matricole su ' + e.pezzi + ' pz'; x.nota.style.color = 'var(--or)';
+      }
       if (e.errore) err++; else if (e.pezzi) n++;
     });
     msg.textContent = err ? err + (err === 1 ? ' riga da correggere' : ' righe da correggere') : n + (n === 1 ? ' riga' : ' righe');
@@ -9413,7 +9427,7 @@ function apriResoCliente(poi, causaleIniziale) {
     const ids = [...new Set(usate.map(z => z.x.r.op.id))];
     try {
       const { data: esito, error } = await sb.rpc('ddt_uscita_da_ordini', { p_azienda: selCli.value, p_numero: inNum.value.trim(),
-        p_data: inData.value, p_righe: usate.map(z => ({ operazione_id: z.x.r.op.id, pezzi: z.e.pezzi })),
+        p_data: inData.value, p_righe: usate.map(z => ({ operazione_id: z.x.r.op.id, pezzi: z.e.pezzi, matricole: z.x.matr() })),
         p_codici: codici.length ? codici : null, p_nota: inNota.value.trim() || null, p_causale: selCau.value });
       if (error) {
         if (/could not find the function|PGRST202/i.test(error.message || '') || error.code === 'PGRST202')
@@ -19972,7 +19986,9 @@ function openOperazioneModal(o, opts) {
           const row = rigaElenco(s.data,
             el('span', { class:'mono', style:'font-weight:700;text-align:right;' + (prep ? 'color:var(--ylw);' : '') },
               prep ? 'preparata' : nfIT(s.quantita) + ' pz'),
-            [s.ddt ? 'DDT ' + s.ddt : '', s.destinatario, s.note].filter(Boolean).join(' · '),
+            // Causale e matricole (28 nov): l'elenco delle matricole al passaggio del mouse.
+            [s.ddt ? 'DDT ' + s.ddt : '', s.causale, Array.isArray(s.matricole) && s.matricole.length ? s.matricole.length + ' matricole' : '',
+              s.destinatario, s.note].filter(Boolean).join(' · '),
             isAdmin ? el('button', { type:'button', class:'btnsm', style:'padding:0 6px;font-size:11px;',
               title:'Elimina questa spedizione',
               onclick: async () => {
@@ -20002,7 +20018,8 @@ function openOperazioneModal(o, opts) {
                 renderSpedizioni();
               },
             }, '✕') : null,
-            scaduta ? 'Preparata il ' + fmtIT(s.data) + ' e mai confermata.' : '');
+            scaduta ? 'Preparata il ' + fmtIT(s.data) + ' e mai confermata.'
+              : (Array.isArray(s.matricole) && s.matricole.length ? 'Matricole:\n' + s.matricole.join('\n') : ''));
           listWrap.append(row);
 
           // CONFERMA: la merce parte, si scrive quanta. Da qui in poi la riga

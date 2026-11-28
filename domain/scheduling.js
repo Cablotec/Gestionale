@@ -2823,3 +2823,15 @@ function controllaRigaDdtOrdine(riga, testo) {
   if (!riga.od && n > riga.pronti) return { pezzi: n, lotto: 0, errore: 'pronti ' + riga.pronti + ': prima la produzione' };
   return { pezzi: n, lotto: riga.od ? Math.max(0, n - riga.pronti) : 0, errore: '' };
 }
+// MATRICOLE della riga (28 nov, Nico: "in jma avrei necessita' di inserire elenco matricole
+// che solitamente copio in colonna da excel per ogni riga"; DDT di Alnus BO 898: una
+// matricola per pezzo sotto la riga). Si incolla una colonna di Excel: a capo, tab, punto e
+// virgola o virgola separano; spazi tolti, vuote e doppioni scartati (ordine tenuto).
+function matricoleDaTesto(testo) {
+  const visti = new Set(), out = [];
+  String(testo == null ? '' : testo).split(/[\r\n\t;,]+/).forEach(x => {
+    const m = x.trim();
+    if (m && !visti.has(m)) { visti.add(m); out.push(m); }
+  });
+  return out;
+}

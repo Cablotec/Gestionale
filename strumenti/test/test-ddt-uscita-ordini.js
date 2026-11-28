@@ -52,5 +52,13 @@ console.log('\nOD dal numero');
 t('/OD/ riconosciuto', od('2026/OD/00072') && od('2026/od/1'));
 t('OC non e\' OD', !od('2026/OC/00072') && !od(null));
 
+console.log('\nmatricole incollate da Excel');
+const mt = sandbox.matricoleDaTesto;
+t('colonna di Excel (a capo Windows)', mt('1062686022\r\n1062686023\r\n').join() === '1062686022,1062686023');
+t('spazi e righe vuote tolti', mt('  1063145001 \n\n\n').join() === '1063145001');
+t('tab e punto e virgola separano', mt('A1\tA2;A3').length === 3);
+t('doppioni scartati, ordine tenuto', mt('B\nA\nB').join() === 'B,A');
+t('vuoto = nessuna', mt('').length === 0 && mt(null).length === 0);
+
 console.log('\n' + ok + ' ok, ' + ko + ' KO');
 process.exit(ko ? 1 : 0);

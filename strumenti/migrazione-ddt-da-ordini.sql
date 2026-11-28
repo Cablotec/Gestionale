@@ -24,6 +24,9 @@
 -- Rilanciabile.
 
 alter table public.spedizioni add column if not exists causale text;
+-- MATRICOLE (28 nov, Nico: "in jma avrei necessita' di inserire elenco matricole che solitamente
+-- copio in colonna da excel per ogni riga"): una per pezzo, come sotto le righe del DDT di Alnus.
+alter table public.spedizioni add column if not exists matricole text[];
 drop function if exists public.ddt_uscita_da_ordini(uuid, text, date, jsonb, jsonb, text);
 
 create or replace function public.ddt_uscita_da_ordini(p_azienda uuid, p_numero text, p_data date,
@@ -52,6 +55,7 @@ declare
   v_lotto  numeric;
   v_eti    text;
   v_gia    text;
+  v_matr   text[];
 begin
   if not exists (select 1 from profili where id = v_uid and ruolo = 'admin') then
     raise exception 'Solo un amministratore puo'' registrare un DDT in uscita';
@@ -110,8 +114,12 @@ begin
       n_lotti := n_lotti + 1;
       v_prod := v_prod + v_lotto;
     end if;
-    insert into spedizioni (operazione_id, data, quantita, ddt, destinatario, note, creato_da, causale)
-    values (o.id, p_data, v_pezzi, v_num, null, v_nota, v_uid, v_cau);
+    select array_agg(m order by n) into v_matr
+      from jsonb_array_elements_text(case when jsonb_typeof(r->'matricole') = 'array' then r->'matricole' else '[]'::jsonb end)
+           with ordinality as t(m, n)
+     where trim(m) <> '';
+    insert into spedizioni (operazione_id, data, quantita, ddt, destinatario, note, creato_da, causale, matricole)
+    values (o.id, p_data, v_pezzi, v_num, null, v_nota, v_uid, v_cau, v_matr);
     v_sped := v_sped + v_pezzi;
     if v_sped >= coalesce(o.quantita, 0) and coalesce(o.quantita, 0) > 0 then
       update operazioni set stato = 'spedita', consegnato_il = coalesce(consegnato_il, p_data) where id = o.id;
